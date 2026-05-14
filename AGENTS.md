@@ -76,3 +76,16 @@ For multi-step or tool-heavy work, give short progress updates after meaningful 
 ## Updating this file
 
 Keep this file concise and repo-specific. Update it when commands, package layout, safety constraints, or validation expectations change. Put specialized subdirectory rules in a nested `AGENTS.md` only when that subtree has materially different commands or constraints.
+
+## Cursor Cloud specific instructions
+
+This is a pure TypeScript/ESM library with no build step, no Docker, no databases, and no external services required for automated validation. The VM update script runs `npm install`; after that, the environment is ready.
+
+**Validation commands** (see "Setup and commands" above for the full list):
+- `npm test` — runs all 110 Vitest tests (all mocked, no API key needed).
+- `npm run typecheck` — runs `tsc --noEmit`.
+- There is no lint or format script at this time.
+
+**Live smoke tests** (`pi -e . --model cursor/composer-2`, `pi --list-models cursor`) require a `CURSOR_API_KEY` and the `pi` CLI. These are optional and should only be run when explicitly needed. Do not treat their absence as a setup failure.
+
+**Dev watch mode**: `npm run test:watch` starts Vitest in watch mode for interactive development.

@@ -194,16 +194,18 @@ describe("formatCursorToolTranscript", () => {
 			result: { details: { cursorToolName: "edit" } },
 			isError: false,
 		});
-		expect(editDisplay.result.content[0].text).toContain("edit src/index.ts");
-		expect(editDisplay.result.content[0].text).toContain("+1 -1");
+		expect(editDisplay.result.content[0].text).toBe("");
+		expect(editDisplay.result.details).toMatchObject({
+			cursorToolName: "edit",
+			diffString: "--- a/src/index.ts\n+++ b/src/index.ts",
+			diff: "--- a/src/index.ts\n+++ b/src/index.ts",
+		});
 		expect(writeDisplay).toMatchObject({
 			toolName: "cursor_write",
 			args: { path: "new.txt" },
-			result: { details: { cursorToolName: "write" } },
+			result: { content: [{ type: "text", text: "" }], details: { cursorToolName: "write" } },
 			isError: false,
 		});
-		expect(writeDisplay.result.content[0].text).toContain("write new.txt");
-		expect(writeDisplay.result.content[0].text).toContain("Created 1 lines");
 	});
 
 	it("uses pi-native read truncation limits for replay tool results", () => {

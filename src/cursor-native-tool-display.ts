@@ -4,6 +4,7 @@ import {
 	createGrepToolDefinition,
 	createLsToolDefinition,
 	createReadToolDefinition,
+	renderDiff,
 	type ExtensionAPI,
 	type ExtensionContext,
 	type ToolDefinition,
@@ -196,9 +197,8 @@ function renderReplayCallTitle(
 	args: Record<string, unknown> | undefined,
 	details: CursorReplayToolDetails | undefined,
 	theme: CursorReplayRenderTheme,
-	isPartial: boolean,
+	_partial: boolean,
 ): Text {
-	if (!isPartial) return new Text("", 0, 0);
 	const label = getCursorToolLabel(args, displayName);
 	let text = theme.fg("toolTitle", theme.bold(`${label} `));
 	const mcpName = details?.mcpToolName ?? (typeof args?.toolName === "string" ? args.toolName : undefined);
@@ -239,23 +239,18 @@ function renderCursorReplayResult(
 	if (isError) return new Text(theme.fg("error", text.split("\n")[0] || "Cursor replay failed"), 0, 0);
 
 	if (details?.cursorToolName === "edit") {
-		const summary = formatCursorEditSummary(details);
-		let rendered = `${theme.fg("toolTitle", theme.bold(`${classifyCursorEditOperation(details)} `))}${theme.fg("accent", getCursorReplayPath(undefined, details))} ${theme.fg("success", summary)}`;
-		if (details.diffString) rendered += options.expanded ? `\n${formatCursorReplayDiff(details.diffString, theme, 40)}` : theme.fg("muted", " (expand for diff)");
-		return new Text(rendered, 0, 0);
+		if (isError) return new Text(theme.fg("error", text.split("\n")[0] || "Edit replay failed"), 0, 0);
+		if (!options.expanded) return new Text("", 0, 0);
+		if (details.diffString) {
+			return new Text(renderDiff(details.diffString, { filePath: details.path }), 0, 0);
+		}
+		return new Text(theme.fg("success", formatCursorEditSummary(details)), 0, 0);
 	}
 
 	if (details?.cursorToolName === "write") {
-		const parts = [
-			details.linesCreated !== undefined ? `${details.linesCreated} line${details.linesCreated === 1 ? "" : "s"}` : undefined,
-			details.fileSize !== undefined ? `${details.fileSize} bytes` : undefined,
-		].filter(Boolean);
-		const summary = parts.length > 0 ? parts.join(", ") : "written";
-		return new Text(
-			`${theme.fg("toolTitle", theme.bold("write "))}${theme.fg("accent", getCursorReplayPath(undefined, details))} ${theme.fg("success", summary)}`,
-			0,
-			0,
-		);
+		if (isError) return new Text(theme.fg("error", text.split("\n")[0] || "Write replay failed"), 0, 0);
+		// Match built-in pi write: success leaves the result body empty.
+		return new Text("", 0, 0);
 	}
 
 	if (details?.cursorToolName === "delete") {

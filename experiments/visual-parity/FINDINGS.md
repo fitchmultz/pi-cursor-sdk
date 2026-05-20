@@ -1,5 +1,7 @@
 # Visual parity experiment: `zai/glm-5.1` vs `cursor/composer-2.5`
 
+See **[OUTCOMES.md](./OUTCOMES.md)** for desired vs verified outcomes (not screenshot captions alone).
+
 ## Prompts (identical)
 
 1. Read `package.json` and reply with only the `name` field.

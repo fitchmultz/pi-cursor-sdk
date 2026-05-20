@@ -646,11 +646,13 @@ describe("streamCursor", () => {
 		expect(cursorEditTool).toBeDefined();
 		const toolResult = await cursorEditTool!.execute(toolCall.id, toolCall.arguments, undefined, undefined, {});
 		expect(toolResult).toMatchObject({
-			content: [{ type: "text", text: expect.stringContaining("edit src/index.ts") }],
-			details: { cursorToolName: "edit" },
+			content: [{ type: "text", text: "" }],
+			details: {
+				cursorToolName: "edit",
+				diffString: "--- a/src/index.ts\n+++ b/src/index.ts",
+			},
 			terminate: false,
 		});
-		expect(toolResult.content[0].text).toContain("+1 -1");
 
 		await expect(cursorEditTool!.execute("not-recorded", { path: "src/index.ts" }, undefined, undefined, {})).rejects.toThrow(
 			"This replay-only tool does not execute operations directly",

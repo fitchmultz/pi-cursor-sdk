@@ -152,6 +152,8 @@ export interface CursorReplayToolDetails {
 	linesCreated?: number;
 	fileSize?: number;
 	diffString?: string;
+	/** Unified diff text for pi `renderDiff` (mirrors built-in edit tool `details.diff`). */
+	diff?: string;
 }
 
 function withCursorToolLabel(args: Record<string, unknown>, normalizedName: string): Record<string, unknown> {
@@ -708,15 +710,18 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 
 	if (name === "edit") {
 		const value = asRecord(result.value);
+		const diffString = getString(value, "diffString");
+		const path = typeof args.path === "string" ? formatDisplayPath(args.path, options.cwd) : undefined;
 		return {
 			toolName: "cursor_edit",
 			args: normalizeEditWriteDisplayArgs(args, options),
-			result: textToolResult(formatEdit(args, result, options), {
+			result: textToolResult(result.status === "error" ? formatError(result.error) : "", {
 				cursorToolName: "edit",
-				path: typeof args.path === "string" ? formatDisplayPath(args.path, options.cwd) : undefined,
+				path,
 				linesAdded: getNumber(value, "linesAdded"),
 				linesRemoved: getNumber(value, "linesRemoved"),
-				diffString: getString(value, "diffString"),
+				diffString,
+				diff: diffString,
 			}),
 			isError: result.status === "error",
 		};
@@ -727,7 +732,7 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 		return {
 			toolName: "cursor_write",
 			args: normalizeEditWriteDisplayArgs(args, options),
-			result: textToolResult(formatWrite(args, result, options), {
+			result: textToolResult(result.status === "error" ? formatWrite(args, result, options) : "", {
 				cursorToolName: "write",
 				path: typeof args.path === "string" ? formatDisplayPath(args.path, options.cwd) : undefined,
 				linesCreated: getNumber(value, "linesCreated"),

@@ -201,6 +201,19 @@ describe("formatCursorToolTranscript", () => {
 		expect(writeDisplay.result.content[0].text).toContain("Created 1 lines");
 	});
 
+	it("uses pi-native read truncation limits for replay tool results", () => {
+		const content = Array.from({ length: 2500 }, (_, index) => `line ${index}`).join("\n");
+		const display = buildCursorPiToolDisplay({
+			name: "read",
+			args: { path: "big.txt" },
+			result: { status: "success", value: { content, totalLines: 2500 } },
+		});
+
+		expect(display.result.content[0].text).toContain("line 0");
+		expect(display.result.content[0].text).toContain("Use offset=");
+		expect(display.result.content[0].text).not.toContain("more lines truncated");
+	});
+
 	it("builds native pi display data for Cursor read and shell calls", () => {
 		const readDisplay = buildCursorPiToolDisplay({
 			name: "read",

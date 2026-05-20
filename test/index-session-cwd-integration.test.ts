@@ -130,6 +130,7 @@ describe("extension session cwd integration", () => {
 		vi.clearAllMocks();
 		delete process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY;
 		delete process.env.PI_CURSOR_REGISTER_NATIVE_TOOLS;
+		delete process.env.PI_CURSOR_SETTING_SOURCES;
 		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
 		cursorSessionCwdTestUtils.reset();
 		mockedAgentCreate.mockResolvedValue(createMockAgent());

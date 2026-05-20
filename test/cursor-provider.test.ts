@@ -101,7 +101,7 @@ async function registerNativeToolDisplayForTest(registeredTools: RegisteredTool[
 		}),
 		getAllTools: vi.fn(() => {
 			const toolsByName = new Map<string, ToolInfo>();
-			for (const name of ["read", "bash", "grep", "ls", "edit", "write"]) {
+			for (const name of ["read", "bash", "grep", "find", "ls", "edit", "write"]) {
 				const tool = createBuiltinToolInfo(name);
 				toolsByName.set(tool.name, tool);
 			}

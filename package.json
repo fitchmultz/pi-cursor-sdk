@@ -26,6 +26,8 @@
 		"scripts/refresh-cursor-model-snapshots.mjs",
 		"README.md",
 		"docs/cursor-model-ux-spec.md",
+		"docs/cursor-native-tool-replay.md",
+		"docs/cursor-native-tool-visual-audit.md",
 		"LICENSE",
 		"CHANGELOG.md"
 	],

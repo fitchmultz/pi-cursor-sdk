@@ -208,8 +208,7 @@ Actual Cursor runs still need a key from `/login`, `CURSOR_API_KEY`, or `--api-k
 ## Limits
 
 - **Local Cursor SDK agents only.** This extension does not use Cursor cloud agents.
-- **Cursor-side tool use is not re-executed by pi.** Cursor still uses its own internal SDK tools. The extension records completed Cursor tool activity and, in interactive TTY sessions, replays supported `read`, `bash`, `grep`, `ls`, `edit`, and `write` activity through pi's native tool-call path with recorded results (for example green `read`, `grep`, `$ ...`, and Cursor edit/write cards) without forcing Cursor to call pi tools or rerun commands. Cursor `glob` activity is replayed through native `bash` cards with synthesized command labels. Cursor edit/write activity uses replay-only `cursor_edit` and `cursor_write` tool cards because Cursor's file-editing schema is not the same as pi's built-in `edit`/`write` schemas; those replay tools only display recorded Cursor results and never mutate files directly. If a Cursor read completion reports no content, the extension may include a bounded local file preview for safe in-workspace paths; that preview is explicitly labeled as a local preview captured at transcript time, not guaranteed Cursor-observed content. Native replay wrappers are registered only for tool names not already owned by another extension; skipped tools fall back to the scrubbed Cursor activity transcript. As Cursor SDK tool completions arrive, the extension mirrors native Codex ordering by ending a tool-use turn, letting pi render the recorded tool results immediately, then continuing with live post-tool Cursor thinking/text, any later Cursor tool batches, or Cursor's final answer as the next assistant turn. Non-interactive/session consumers still get bounded scrubbed transcript data so `pi -p` keeps printing normal assistant text.
-- **Pi tool schemas are not passed through to Cursor.** This extension is a Cursor provider, not a bridge that forwards pi's tool system into Cursor.
+- **Cursor native tool replay is display-only.** Cursor still uses its own internal SDK tools; pi does not re-run Cursor-side commands or pass pi tool schemas through to Cursor. See [Cursor native tool replay](docs/cursor-native-tool-replay.md) for supported replay cards, ordering, conflict handling, and opt-out flags.
 - **One fresh Cursor agent is created per provider call.** Cursor agent state is not reused between pi provider calls.
 - **Cursor setting sources are opt-in.** The extension does not pass `local.settingSources` by default because the Cursor SDK can print settings/skills loading output directly to the terminal during startup. To load configured Cursor MCP servers, plugin tools, project/user settings, and related Cursor-native capabilities, start pi with `PI_CURSOR_SETTING_SOURCES=all`. To narrow loading, set a comma-separated list such as `PI_CURSOR_SETTING_SOURCES=project,user,plugins`.
 - **Max Mode is not a manual pi variant.** Cursor's SDK may enable Max Mode automatically for models that require it. This extension only advertises exact context-window variants that the SDK catalog exposes and otherwise uses conservative SDK-derived default/non-Max context windows.
@@ -267,13 +266,7 @@ Cursor SDK local agents load MCP servers from Cursor setting sources and inline 
 
 ### Cursor native tool cards conflict with another extension
 
-Cursor native replay is a UI enhancement for interactive TTY sessions. If another extension already owns `read`, `bash`, `grep`, `ls`, `cursor_edit`, or `cursor_write`, this extension skips only the conflicting native replay wrapper and uses the scrubbed Cursor activity transcript for that tool instead. To disable Cursor native replay registration entirely, start pi with:
-
-```bash
-PI_CURSOR_NATIVE_TOOL_DISPLAY=0 pi --model cursor/composer-2.5
-```
-
-`PI_CURSOR_REGISTER_NATIVE_TOOLS=0` is also accepted as a registration-only opt-out.
+Cursor native replay is a UI enhancement for interactive TTY sessions. See [Cursor native tool replay](docs/cursor-native-tool-replay.md) for conflict behavior and opt-out flags.
 
 ## Development
 

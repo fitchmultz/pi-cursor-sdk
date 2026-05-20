@@ -4,10 +4,11 @@
 
 ### Added
 
-- Replay Cursor SDK `grep` activity through native pi `grep` cards and `glob` activity through native pi `bash` cards with synthesized command labels, so search activity matches built-in tool UX in interactive TTY sessions.
+- Replay Cursor SDK `grep` activity through native pi `grep` cards and `glob` activity through native pi `find` cards, so search activity matches built-in tool UX in interactive TTY sessions.
 
 ### Fixed
 
+- Replay recorded Cursor tool errors, including nonzero shell exits and timeout-backgrounded shell commands, as native pi tool errors instead of successful green cards.
 - Format zero-match Cursor grep results as `(no matches)` instead of raw `{ "totalMatches": 0 }` JSON in native replay and transcript output.
 - Strip trailing colons from Cursor grep file-list replay output.
 - Make native Cursor read replay closer to pi's built-in read cards by displaying session-relative paths and 20-line continuation hints.

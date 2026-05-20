@@ -227,6 +227,36 @@ describe("formatCursorToolTranscript", () => {
 		});
 	});
 
+	it("marks native pi display data for nonzero Cursor shell exits as errors", () => {
+		const shellDisplay = buildCursorPiToolDisplay({
+			name: "shell",
+			args: { command: "printf error >&2; exit 7", timeout: 30000 },
+			result: { status: "success", value: { stdout: "", stderr: "error\n", exitCode: 7 } },
+		});
+
+		expect(shellDisplay).toMatchObject({
+			toolName: "bash",
+			args: { command: "printf error >&2; exit 7", timeout: 30 },
+			result: { content: [{ type: "text", text: "error\n\nCommand exited with code 7" }] },
+			isError: true,
+		});
+	});
+
+	it("marks Cursor shell commands backgrounded by timeout as native pi errors", () => {
+		const shellDisplay = buildCursorPiToolDisplay({
+			name: "shell",
+			args: { command: "sleep 2", timeout: 1000 },
+			result: { status: "success", value: { stdout: "", stderr: "", exitCode: 0, executionTime: 1113 } },
+		});
+
+		expect(shellDisplay).toMatchObject({
+			toolName: "bash",
+			args: { command: "sleep 2", timeout: 1 },
+			result: { content: [{ type: "text", text: "Command backgrounded after 1 second timeout" }] },
+			isError: true,
+		});
+	});
+
 	it("normalizes native Cursor read display paths and uses pi-like continuation text", () => {
 		const cwd = "/repo";
 		const content = Array.from({ length: 25 }, (_, index) => `line ${index + 1}`).join("\n");
@@ -245,7 +275,7 @@ describe("formatCursorToolTranscript", () => {
 		);
 	});
 
-	it("builds native pi grep display data for Cursor grep calls and bash display data for Cursor glob calls", () => {
+	it("builds native pi grep display data for Cursor grep calls and find display data for Cursor glob calls", () => {
 		const grepDisplay = buildCursorPiToolDisplay({
 			type: "grep",
 			args: { pattern: "getActiveTools|sem_reindex", path: "src" },
@@ -271,10 +301,30 @@ describe("formatCursorToolTranscript", () => {
 			args: { pattern: "missing", path: "src" },
 			result: { status: "success", value: { totalMatches: 0 } },
 		});
+		const emptyWorkspaceGrepDisplay = buildCursorPiToolDisplay({
+			type: "grep",
+			args: { pattern: "missing", path: "src" },
+			result: {
+				status: "success",
+				value: {
+					workspaceResults: {
+						"/repo": {
+							type: "content",
+							output: { matches: [], totalMatches: 0 },
+						},
+					},
+				},
+			},
+		});
 		const emptyGlobDisplay = buildCursorPiToolDisplay({
 			type: "glob",
 			args: { globPattern: "**/*.missing", targetDirectory: "src" },
 			result: { status: "success", value: { files: [], totalMatches: 0 } },
+		});
+		const emptyCursorGlobDisplay = buildCursorPiToolDisplay({
+			type: "glob",
+			args: { globPattern: "**/*.missing", targetDirectory: "src" },
+			result: { status: "success", value: { files: [], totalFiles: 0, clientTruncated: false, ripgrepTruncated: false } },
 		});
 
 		expect(grepDisplay).toMatchObject({
@@ -284,13 +334,15 @@ describe("formatCursorToolTranscript", () => {
 			isError: false,
 		});
 		expect(globDisplay).toMatchObject({
-			toolName: "bash",
-			args: { command: "glob **/*.ts in src" },
+			toolName: "find",
+			args: { pattern: "**/*.ts", path: "src" },
 			result: { content: [{ type: "text", text: "src/index.ts\nsrc/context.ts" }] },
 			isError: false,
 		});
 		expect(emptyGrepDisplay.result.content[0].text).toBe("(no matches)");
-		expect(emptyGlobDisplay.result.content[0].text).toBe("(no files)");
+		expect(emptyWorkspaceGrepDisplay.result.content[0].text).toBe("(no matches)");
+		expect(emptyGlobDisplay.result.content[0].text).toBe("No files found matching pattern");
+		expect(emptyCursorGlobDisplay.result.content[0].text).toBe("No files found matching pattern");
 	});
 
 	it("labels native read display local previews when Cursor read content is unavailable", () => {

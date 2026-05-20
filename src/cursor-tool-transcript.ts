@@ -281,16 +281,20 @@ function formatNativeReadDisplayContent(args: Record<string, unknown>, result: N
 	return `${visible}\n\n[${Math.max(totalLines - maxLines, 0)} more lines in file. Use offset=${maxLines + 1} to continue.]`;
 }
 
-function getShellOutput(result: NormalizedResult): { text: string; exitCode: number | undefined } {
+function getShellOutput(result: NormalizedResult, args: Record<string, unknown> = {}): { text: string; exitCode: number | undefined; timedOut: boolean } {
 	const value = asRecord(result.value);
 	const stdout = getString(value, "stdout") ?? "";
 	const stderr = getString(value, "stderr") ?? "";
 	const exitCode = getNumber(value, "exitCode");
+	const timeoutMs = getNumber(args, "timeout");
+	const executionTimeMs = getNumber(value, "executionTime");
+	const timedOut = timeoutMs !== undefined && executionTimeMs !== undefined && executionTimeMs >= timeoutMs;
 	const outputParts: string[] = [];
 	if (stdout) outputParts.push(stdout.trimEnd());
 	if (stderr) outputParts.push(stderr.trimEnd());
 	if (exitCode !== undefined && exitCode !== 0) outputParts.push(`Command exited with code ${exitCode}`);
-	return { text: outputParts.filter(Boolean).join("\n\n") || "(no output)", exitCode };
+	if (timedOut) outputParts.push(`Command backgrounded after ${(timeoutMs / 1000).toFixed(0)} second timeout`);
+	return { text: outputParts.filter(Boolean).join("\n\n") || "(no output)", exitCode, timedOut };
 }
 
 function buildShellDisplayArgs(args: Record<string, unknown>): Record<string, unknown> {
@@ -309,7 +313,7 @@ function formatShell(args: Record<string, unknown>, result: NormalizedResult, op
 
 	const value = asRecord(result.value);
 	const executionTime = getNumber(value, "executionTime");
-	const outputParts = [getShellOutput(result).text];
+	const outputParts = [getShellOutput(result, args).text];
 	if (executionTime !== undefined) outputParts.push(`Took ${(executionTime / 1000).toFixed(1)}s`);
 	return joinSections(`$ ${command || "shell"}`, limitText(outputParts.filter(Boolean).join("\n\n"), options));
 }
@@ -363,12 +367,14 @@ function collectSearchResults(value: unknown): string[] {
 	if (outputs.length === 0) outputs.push(value);
 
 	const lines: string[] = [];
+	let sawExplicitNoMatches = false;
 	for (const outputValue of outputs) {
 		const outputRecord = asRecord(outputValue);
 		const type = getString(outputRecord, "type");
 		const output = getRecord(outputRecord, "output");
 		if (type === "content") {
 			const matches = getArray(output, "matches") ?? [];
+			if (matches.length === 0 && getNumber(output, "totalMatches") === 0) sawExplicitNoMatches = true;
 			for (const match of matches) {
 				const matchRecord = asRecord(match);
 				const file = getString(matchRecord, "file") ?? "";
@@ -378,9 +384,11 @@ function collectSearchResults(value: unknown): string[] {
 			}
 		} else if (type === "files") {
 			const files = getArray(output, "files") ?? [];
+			if (files.length === 0 && getNumber(output, "totalMatches") === 0) sawExplicitNoMatches = true;
 			lines.push(...files.filter((entry): entry is string => typeof entry === "string").map(formatSearchFile));
 		} else if (type === "count") {
 			const counts = getArray(output, "counts") ?? [];
+			if (counts.length === 0 && getNumber(output, "totalMatches") === 0) sawExplicitNoMatches = true;
 			for (const count of counts) {
 				const countRecord = asRecord(count);
 				lines.push(`${getString(countRecord, "file") ?? ""}: ${getNumber(countRecord, "count") ?? 0}`.trim());
@@ -388,7 +396,10 @@ function collectSearchResults(value: unknown): string[] {
 		} else {
 			const totalMatches = getNumber(outputRecord, "totalMatches");
 			if (totalMatches !== undefined) {
-				if (totalMatches === 0) continue;
+				if (totalMatches === 0) {
+					sawExplicitNoMatches = true;
+					continue;
+				}
 				lines.push(formatSearchCount(totalMatches));
 				continue;
 			}
@@ -400,6 +411,7 @@ function collectSearchResults(value: unknown): string[] {
 	if (lines.length === 0 && topLevelTotalMatches !== undefined) {
 		return topLevelTotalMatches === 0 ? ["(no matches)"] : [formatSearchCount(topLevelTotalMatches)];
 	}
+	if (lines.length === 0 && sawExplicitNoMatches) return ["(no matches)"];
 	return lines.filter(Boolean);
 }
 
@@ -427,10 +439,28 @@ function buildGrepDisplayArgs(args: Record<string, unknown>, options: Transcript
 	return Object.keys(displayArgs).length > 0 ? displayArgs : args;
 }
 
+function getGlobPattern(args: Record<string, unknown>): string {
+	return typeof args.globPattern === "string" ? args.globPattern : typeof args.pattern === "string" ? args.pattern : "*";
+}
+
+function getGlobTargetDirectory(args: Record<string, unknown>, options: TranscriptOptions): string | undefined {
+	const rawPath = typeof args.targetDirectory === "string" ? args.targetDirectory : typeof args.path === "string" ? args.path : undefined;
+	return rawPath ? formatDisplayPath(rawPath, options.cwd) : undefined;
+}
+
 function synthesizeGlobBashCommand(args: Record<string, unknown>, options: TranscriptOptions): string {
-	const pattern = typeof args.globPattern === "string" ? args.globPattern : "*";
-	const targetDirectory = typeof args.targetDirectory === "string" ? formatDisplayPath(args.targetDirectory, options.cwd) : undefined;
+	const pattern = getGlobPattern(args);
+	const targetDirectory = getGlobTargetDirectory(args, options);
 	return targetDirectory ? `glob ${pattern} in ${targetDirectory}` : `glob ${pattern}`;
+}
+
+function buildFindDisplayArgs(args: Record<string, unknown>, options: TranscriptOptions): Record<string, unknown> {
+	const displayArgs: Record<string, unknown> = { pattern: getGlobPattern(args) };
+	const targetDirectory = getGlobTargetDirectory(args, options);
+	const limit = getNumber(args, "limit") ?? getNumber(args, "headLimit");
+	if (targetDirectory !== undefined) displayArgs.path = targetDirectory;
+	if (limit !== undefined) displayArgs.limit = limit;
+	return displayArgs;
 }
 
 function getGrepBody(result: NormalizedResult, options: TranscriptOptions): string {
@@ -445,7 +475,8 @@ function getGlobBody(result: NormalizedResult, options: TranscriptOptions): stri
 	const files = getArray(value, "files")?.filter((entry): entry is string => typeof entry === "string") ?? [];
 	if (files.length === 0) {
 		const totalMatches = getNumber(value, "totalMatches");
-		if (totalMatches === 0) return "(no files)";
+		const totalFiles = getNumber(value, "totalFiles");
+		if (totalMatches === 0 || totalFiles === 0) return "No files found matching pattern";
 		return stringifyUnknown(result.value);
 	}
 	const limited = limitItems(files, options);
@@ -608,8 +639,8 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 	}
 
 	if (name === "shell") {
-		const shellOutput = getShellOutput(result);
-		const isError = result.status === "error" || (shellOutput.exitCode !== undefined && shellOutput.exitCode !== 0);
+		const shellOutput = getShellOutput(result, args);
+		const isError = result.status === "error" || shellOutput.timedOut || (shellOutput.exitCode !== undefined && shellOutput.exitCode !== 0);
 		return {
 			toolName: "bash",
 			args: buildShellDisplayArgs(args),
@@ -631,8 +662,8 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 	if (name === "glob") {
 		const isError = result.status === "error";
 		return {
-			toolName: "bash",
-			args: { command: synthesizeGlobBashCommand(args, options) },
+			toolName: "find",
+			args: buildFindDisplayArgs(args, options),
 			result: textToolResult(isError ? formatError(result.error) : getGlobBody(result, options)),
 			isError,
 		};

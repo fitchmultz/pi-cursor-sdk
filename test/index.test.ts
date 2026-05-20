@@ -63,7 +63,7 @@ function createMockPi(existingTools?: ToolInfo[]) {
 	const tools: RegisteredTool[] = [];
 	const handlers = new Map<string, TestEventHandler[]>();
 	let activeToolNames = ["read", "bash", "edit", "write"];
-	const initialTools = existingTools ?? ["read", "bash", "grep", "ls", "edit", "write"].map(createBuiltinToolInfo);
+	const initialTools = existingTools ?? ["read", "bash", "grep", "find", "ls", "edit", "write"].map(createBuiltinToolInfo);
 	return {
 		registerProvider: vi.fn((name: string, config: ProviderConfig) => {
 			registered.push({ name, config });
@@ -150,9 +150,9 @@ describe("extension factory", () => {
 			"cursor-refresh-models",
 			expect.objectContaining({ description: expect.stringContaining("Refresh the live Cursor model catalog") }),
 		);
-		expect(pi.registerTool).toHaveBeenCalledTimes(6);
-		expect(pi._tools.map((tool) => tool.name)).toEqual(["read", "bash", "grep", "ls", "cursor_edit", "cursor_write"]);
-		expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "edit", "write", "grep", "ls", "cursor_edit", "cursor_write"]);
+		expect(pi.registerTool).toHaveBeenCalledTimes(7);
+		expect(pi._tools.map((tool) => tool.name)).toEqual(["read", "bash", "grep", "find", "ls", "cursor_edit", "cursor_write"]);
+		expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "edit", "write", "grep", "find", "ls", "cursor_edit", "cursor_write"]);
 		expect(pi.on).toHaveBeenCalledWith("session_start", expect.any(Function));
 		expect(pi.on).toHaveBeenCalledWith("model_select", expect.any(Function));
 		expect(mockedDiscover).toHaveBeenCalledOnce();
@@ -370,7 +370,7 @@ describe("extension factory", () => {
 			const readTool = pi._tools.find((tool) => tool.name === "read");
 			const result = await readTool.execute("ordinary-read", { path: "session-file.txt" }, undefined, undefined, {});
 
-			expect(pi.registerTool).toHaveBeenCalledTimes(6);
+			expect(pi.registerTool).toHaveBeenCalledTimes(7);
 			expect(result.content).toEqual([{ type: "text", text: "from second cwd\n" }]);
 		} finally {
 			rmSync(firstDir, { recursive: true, force: true });
@@ -401,6 +401,27 @@ describe("extension factory", () => {
 			details: undefined,
 			terminate: true,
 		});
+	});
+
+	it("registered native Cursor tool wrappers replay recorded Cursor errors as tool errors", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		mockedDiscover.mockResolvedValueOnce([]);
+		const pi = createMockPi();
+		await extensionFactory(pi as unknown as ExtensionAPI);
+		await runSessionStartHandlers(pi);
+
+		recordCursorNativeToolDisplay({
+			id: "cursor-tool-error",
+			toolName: "bash",
+			args: { command: "exit 7" },
+			result: { content: [{ type: "text", text: "Command exited with code 7" }] },
+			isError: true,
+		});
+
+		const bashTool = pi._tools.find((tool) => tool.name === "bash");
+		await expect(bashTool.execute("cursor-tool-error", { command: "exit 7" }, undefined, undefined, {})).rejects.toThrow(
+			"Command exited with code 7",
+		);
 	});
 
 	it("does not register native Cursor tool wrappers when native display is disabled", async () => {
@@ -443,15 +464,17 @@ describe("extension factory", () => {
 			},
 			createBuiltinToolInfo("bash"),
 			createBuiltinToolInfo("grep"),
+			createBuiltinToolInfo("find"),
 			createBuiltinToolInfo("ls"),
 		]);
 		await extensionFactory(pi as unknown as ExtensionAPI);
 		await runSessionStartHandlers(pi);
 
-		expect(pi._tools.map((tool) => tool.name)).toEqual(["bash", "grep", "ls", "cursor_edit", "cursor_write"]);
+		expect(pi._tools.map((tool) => tool.name)).toEqual(["bash", "grep", "find", "ls", "cursor_edit", "cursor_write"]);
 		expect(canRenderCursorToolNatively("read")).toBe(false);
 		expect(canRenderCursorToolNatively("bash")).toBe(true);
 		expect(canRenderCursorToolNatively("grep")).toBe(true);
+		expect(canRenderCursorToolNatively("find")).toBe(true);
 		expect(canRenderCursorToolNatively("cursor_edit")).toBe(true);
 		expect(canRenderCursorToolNatively("ls")).toBe(true);
 	});

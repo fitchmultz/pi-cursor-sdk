@@ -12,7 +12,7 @@
 |------|------------------|--------------------------------|
 | Read tool result in session | Full file body in `toolResult` | Truncated to ~12 lines (`... N more lines truncated`) |
 | Pre-tool thinking in tool-use turn | `thinking` block before `toolCall` when model emits it | Often missing; thinking went to activity trace only |
-| Edit/write card titles | `edit` / `write` | `Cursor edit` / `Cursor write` |
+| Edit/write card titles | `edit` / `write` | `Cursor edit` / `Cursor write` (see `pr-assets/before/screenshots/capture-write-tool-1.png`, `capture-edit-tool-1.png`) |
 
 ## Fixes applied in extension
 

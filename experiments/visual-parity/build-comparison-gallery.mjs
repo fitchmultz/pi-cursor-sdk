@@ -26,8 +26,8 @@ const rows = [
 	["bash", ["capture-p3", "after-p3"]],
 	["grep", ["capture-p4", "after-p4"]],
 	["find", ["capture-p5", "after-p5"]],
-	["write", ["composer-write", "glm-write"]],
-	["edit", ["composer-edit", "glm-edit"]],
+	["write", ["capture-write", "composer-write"]],
+	["edit", ["capture-edit", "composer-edit"]],
 ]
 	.map(([label, [beforeKey, afterKey]]) => {
 		const before = pick(beforeDir, [beforeKey]);

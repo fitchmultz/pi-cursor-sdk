@@ -92,7 +92,9 @@ AFTER_WT=/Users/mitchfultz/Projects/AI/pi-cursor-sdk
 TARGET=/Users/mitchfultz/Projects/AI/pi-semantic-code-intelligence
 
 rm -rf "$BASE"
-git worktree add --detach "$BEFORE_WT" HEAD
+git fetch origin main
+BASE_COMMIT=$(git merge-base origin/main HEAD)
+git worktree add --detach "$BEFORE_WT" "$BASE_COMMIT"
 
 # Optional speedup when the before worktree has no install of its own.
 ln -s "$AFTER_WT/node_modules" "$BEFORE_WT/node_modules"

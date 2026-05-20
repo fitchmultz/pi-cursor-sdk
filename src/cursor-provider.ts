@@ -741,10 +741,6 @@ export function streamCursor(
 				}
 
 				if (useNativeToolReplay && canRenderCursorToolNatively(display.toolName) && liveRun) {
-					if (!nativeToolReplayStarted && textDeltas.length > 0) {
-						for (const text of textDeltas) queueCursorNativeEvent(liveRun, { type: "text-delta", text });
-						textDeltas.length = 0;
-					}
 					nativeToolReplayStarted = true;
 					const id = `${nativeReplayId}-tool-${++nativeToolDisplayCounter}`;
 					queueCursorNativeEvent(liveRun, {
@@ -767,19 +763,19 @@ export function streamCursor(
 
 				if (update.type === "text-delta") {
 					textDeltas.push(update.text);
-					if (liveRun && nativeToolReplayStarted) {
+					if (liveRun) {
 						queueCursorNativeEvent(liveRun, { type: "text-delta", text: update.text });
 					} else if (!useNativeToolReplay) {
 						appendLiveTextDelta(update.text);
 					}
 				} else if (update.type === "thinking-delta") {
-					if (liveRun && nativeToolReplayStarted) {
+					if (liveRun) {
 						queueCursorNativeEvent(liveRun, { type: "thinking-delta", text: update.text });
 					} else {
 						appendTraceDelta(update.text);
 					}
 				} else if (update.type === "thinking-completed") {
-					if (liveRun && nativeToolReplayStarted) {
+					if (liveRun) {
 						queueCursorNativeEvent(liveRun, { type: "thinking-completed" });
 					} else {
 						closeTraceBlock();
@@ -796,7 +792,7 @@ export function streamCursor(
 					});
 				} else if (update.type === "summary") {
 					const summary = `Cursor summary: ${truncateSingleLine(update.summary)}\n`;
-					if (liveRun && nativeToolReplayStarted) {
+					if (liveRun) {
 						queueCursorNativeEvent(liveRun, { type: "thinking-delta", text: summary });
 					} else {
 						appendTraceDelta(summary);

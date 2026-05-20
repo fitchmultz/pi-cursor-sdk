@@ -1,5 +1,11 @@
 import { closeSync, openSync, readSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
+import {
+	DEFAULT_MAX_BYTES,
+	DEFAULT_MAX_LINES,
+	formatSize,
+	truncateHead,
+} from "@earendil-works/pi-coding-agent";
 
 const DEFAULT_MAX_TRANSCRIPT_CHARS = 24000;
 const DEFAULT_MAX_TRANSCRIPT_LINES = 800;
@@ -238,6 +244,21 @@ function getReadContent(args: Record<string, unknown>, result: NormalizedResult,
 	if (!rawPath) return stringifyUnknown(result.value);
 	const localPreview = readFilePreview(rawPath, readOptions);
 	return localPreview ? `${LOCAL_READ_PREVIEW_NOTICE}\n${localPreview}` : stringifyUnknown(result.value);
+}
+
+function formatNativeReadToolResultText(content: string, totalLines?: number): string {
+	if (!content) return content;
+	const truncation = truncateHead(content, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
+	if (truncation.firstLineExceedsLimit) {
+		return `[First line exceeds ${formatSize(DEFAULT_MAX_BYTES)} limit]`;
+	}
+	if (!truncation.truncated) return truncation.content;
+	const endLine = truncation.outputLines;
+	const total = totalLines ?? content.split("\n").length;
+	if (truncation.truncatedBy === "lines") {
+		return `${truncation.content}\n\n[Showing lines 1-${endLine} of ${total}. Use offset=${endLine + 1} to continue.]`;
+	}
+	return `${truncation.content}\n\n[Showing lines 1-${endLine} of ${total} (${formatSize(DEFAULT_MAX_BYTES)} limit). Use offset=${endLine + 1} to continue.]`;
 }
 
 function formatRead(args: Record<string, unknown>, result: NormalizedResult, options: TranscriptOptions): string {
@@ -511,15 +532,11 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 		const isError = result.status === "error";
 		const value = asRecord(result.value);
 		const totalLines = getNumber(value, "totalLines");
-		const readOptions = {
-			...options,
-			maxChars: options.maxChars ?? DEFAULT_READ_TRANSCRIPT_CHARS,
-			maxLines: options.maxLines ?? DEFAULT_READ_TRANSCRIPT_LINES,
-		};
+		const readBody = isError ? formatError(result.error) : formatNativeReadToolResultText(getReadContent(args, result, options), totalLines);
 		return {
 			toolName: "read",
 			args,
-			result: textToolResult(isError ? formatError(result.error) : limitText(getReadContent(args, result, options), readOptions, totalLines)),
+			result: textToolResult(readBody),
 			isError,
 		};
 	}

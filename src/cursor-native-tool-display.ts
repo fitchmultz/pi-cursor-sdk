@@ -146,8 +146,8 @@ function renderCursorReplayCall(
 	isPartial: boolean,
 ): Text {
 	if (!isPartial) return new Text("", 0, 0);
-	const cursorToolName = toolName === "cursor_edit" ? "edit" : "write";
-	let text = theme.fg("toolTitle", theme.bold(`Cursor ${cursorToolName} `));
+	const nativeToolName = toolName === "cursor_edit" ? "edit" : "write";
+	let text = theme.fg("toolTitle", theme.bold(`${nativeToolName} `));
 	text += theme.fg("accent", getCursorReplayPath(args, undefined));
 	return new Text(text, 0, 0);
 }
@@ -193,7 +193,7 @@ function renderCursorReplayResult(
 
 	if (details?.cursorToolName === "edit") {
 		const summary = formatCursorEditSummary(details);
-		let rendered = `${theme.fg("toolTitle", theme.bold(`Cursor ${classifyCursorEditOperation(details)}`))} ${theme.fg("accent", getCursorReplayPath(undefined, details))} ${theme.fg("success", summary)}`;
+		let rendered = `${theme.fg("toolTitle", theme.bold(`${classifyCursorEditOperation(details)} `))}${theme.fg("accent", getCursorReplayPath(undefined, details))} ${theme.fg("success", summary)}`;
 		if (details.diffString) rendered += options.expanded ? `\n${formatCursorReplayDiff(details.diffString, theme, 40)}` : theme.fg("muted", " (expand for diff)");
 		return new Text(rendered, 0, 0);
 	}
@@ -205,7 +205,7 @@ function renderCursorReplayResult(
 		].filter(Boolean);
 		const summary = parts.length > 0 ? parts.join(", ") : "written";
 		return new Text(
-			`${theme.fg("toolTitle", theme.bold("Cursor write"))} ${theme.fg("accent", getCursorReplayPath(undefined, details))} ${theme.fg("success", summary)}`,
+			`${theme.fg("toolTitle", theme.bold("write "))}${theme.fg("accent", getCursorReplayPath(undefined, details))} ${theme.fg("success", summary)}`,
 			0,
 			0,
 		);

@@ -432,6 +432,75 @@ describe("streamCursor", () => {
 		expect(trace.match(/# pi-cursor-sdk/g)).toHaveLength(1);
 	});
 
+	it("includes pre-tool thinking in the native tool-use turn", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		const registeredTools: RegisteredTool[] = [];
+		await registerNativeToolDisplayForTest(registeredTools);
+
+		let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
+		const runWait = vi.fn(
+			() =>
+				new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
+					resolveRun = resolve;
+				}),
+		);
+		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: (a: unknown) => void }) => {
+			opts.onDelta({ update: { type: "thinking-delta", text: "Let me read package.json." } });
+			opts.onDelta({ update: { type: "thinking-completed" } });
+			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "read", args: { path: "package.json" } }, callId: "c1" } });
+			opts.onDelta({
+				update: {
+					type: "tool-call-completed",
+					toolCall: {
+						name: "read",
+						result: { status: "success", value: { content: "{}" } },
+					},
+					callId: "c1",
+				},
+			});
+			return {
+				id: "run-1",
+				agentId: "agent-1",
+				status: "running",
+				wait: runWait,
+				cancel: vi.fn(),
+				supports: () => true,
+				unsupportedReason: () => undefined,
+			};
+		});
+		mockedCreate.mockResolvedValue({
+			agentId: "agent-1",
+			send: mockSend,
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+
+		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		const done = events.find((e: any) => e.type === "done") as any;
+
+		expect(done.reason).toBe("toolUse");
+		expect(done.message.content.map((block: any) => block.type)).toEqual(["thinking", "toolCall"]);
+		expect(done.message.content[0].thinking).toBe("Let me read package.json.");
+
+		resolveRun({ id: "run-1", status: "finished", result: "done" });
+		const toolCall = done.message.content.find((block: any) => block.type === "toolCall");
+		const readTool = registeredTools.find((tool) => tool.name === "read");
+		await readTool.execute(toolCall.id, toolCall.arguments, undefined, undefined, {});
+		const replayContext = makeContext();
+		replayContext.messages = [
+			...replayContext.messages,
+			done.message,
+			{
+				role: "toolResult",
+				toolCallId: toolCall.id,
+				toolName: "read",
+				content: [{ type: "text", text: "{}" }],
+				isError: false,
+				timestamp: 2,
+			},
+		];
+		await collectEvents(streamCursor(makeModel(), replayContext, { apiKey: "test-key" }));
+	});
+
 	it("replays native Cursor tools as a toolUse turn before final text", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		const registeredTools: RegisteredTool[] = [];

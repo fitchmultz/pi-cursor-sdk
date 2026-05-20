@@ -28,4 +28,28 @@ bash run-suite.sh
 node analyze-sessions.mjs   # update session paths after each run
 ```
 
-TTY captures remain minimal when piping into `pi` (final answers only). Use exported HTML sessions under `captures/*.html` for side-by-side tool card review.
+## Visual verification (2026-05-20)
+
+Inspected **tool-card screenshots** (`screenshots/*-tool-*.png` from session HTML export) and **live pi TUI pane captures** (`tui-captures/*.txt` via tmux).
+
+| Prompt | GLM TUI | Composer TUI | Parity |
+|--------|---------|--------------|--------|
+| Read `package.json` | Green `read` card, pi truncation + expand hint | Same card shape; `read package.json` (relative path) | Yes |
+| List `src/` | Green `$ ls src/` + `Took 0.0s` | Green `$ ls -1 src` + `Took 0.0s` (no SDK timeout line) | Yes |
+| Bash echo | Green `$ echo …` | Same | Yes |
+
+Remaining intentional differences:
+
+- GLM may show a **thinking** line before tools when the model emits reasoning; Composer often skips it when the SDK sends no `thinking-delta`.
+- **Command text** inside `$ …` cards can differ (`ls src/` vs `ls -1 src`) because Cursor chooses the shell command; display layer now normalizes workspace paths and drops SDK `timeout` from replay args.
+- Footer **`cursor fast`** status is Cursor-only extension state.
+
+Regenerate artifacts:
+
+```bash
+cd experiments/visual-parity
+bash run-suite.sh
+node capture-html-tool-cards.mjs
+bash capture-live-tui.sh "zai/glm-5.1" "<prompt>" glm-label
+bash capture-live-tui.sh "cursor/composer-2.5" "<prompt>" composer-label
+```

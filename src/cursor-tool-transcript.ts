@@ -173,6 +173,40 @@ function formatDisplayPath(path: string, cwd = process.cwd()): string {
 	return relativePath;
 }
 
+function normalizeBashCommandForDisplay(command: string, cwd = process.cwd()): string {
+	const absCwd = resolve(cwd);
+	const cwdPrefix = absCwd.endsWith("/") ? absCwd : `${absCwd}/`;
+	let normalized = command;
+	if (normalized.includes(cwdPrefix)) {
+		normalized = normalized.split(cwdPrefix).join("");
+	}
+	if (normalized.includes(absCwd)) {
+		normalized = normalized.replaceAll(absCwd, ".");
+	}
+	return normalized.replace(/\s+/g, " ").trim();
+}
+
+function normalizeReadDisplayArgs(args: Record<string, unknown>, options: TranscriptOptions = {}): Record<string, unknown> {
+	const path = args.path;
+	if (typeof path !== "string") return args;
+	return { ...args, path: formatDisplayPath(path, options.cwd) };
+}
+
+function normalizeLsDisplayArgs(args: Record<string, unknown>, options: TranscriptOptions = {}): Record<string, unknown> {
+	const path = args.path ?? args.target_directory;
+	if (typeof path !== "string") return args;
+	const displayPath = formatDisplayPath(path, options.cwd);
+	if (args.path !== undefined) return { ...args, path: displayPath };
+	return { ...args, target_directory: displayPath };
+}
+
+function normalizeBashDisplayArgs(args: Record<string, unknown>, options: TranscriptOptions = {}): Record<string, unknown> {
+	const { timeout: _timeout, ...rest } = args;
+	const command = rest.command;
+	if (typeof command !== "string") return rest;
+	return { ...rest, command: normalizeBashCommandForDisplay(command, options.cwd) };
+}
+
 function resolveFilePath(path: string, cwd = process.cwd()): string {
 	return isAbsolute(path) ? path : resolve(cwd, path);
 }
@@ -535,7 +569,7 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 		const readBody = isError ? formatError(result.error) : formatNativeReadToolResultText(getReadContent(args, result, options), totalLines);
 		return {
 			toolName: "read",
-			args,
+			args: normalizeReadDisplayArgs(args, options),
 			result: textToolResult(readBody),
 			isError,
 		};
@@ -546,7 +580,7 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 		const isError = result.status === "error" || (shellOutput.exitCode !== undefined && shellOutput.exitCode !== 0);
 		return {
 			toolName: "bash",
-			args,
+			args: normalizeBashDisplayArgs(args, options),
 			result: textToolResult(result.status === "error" ? formatError(result.error) : limitText(shellOutput.text, options)),
 			isError,
 		};
@@ -555,7 +589,7 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 	if (name === "ls") {
 		return {
 			toolName: "ls",
-			args,
+			args: normalizeLsDisplayArgs(args, options),
 			result: textToolResult(result.status === "error" ? formatError(result.error) : getLsBody(result, options).trim()),
 			isError: result.status === "error",
 		};

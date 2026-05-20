@@ -214,6 +214,20 @@ describe("formatCursorToolTranscript", () => {
 		expect(display.result.content[0].text).not.toContain("more lines truncated");
 	});
 
+	it("normalizes bash replay args to pi-like relative commands without SDK timeout metadata", () => {
+		const display = buildCursorPiToolDisplay(
+			{
+				name: "shell",
+				args: { command: "ls /workspace/src", timeout: 30 },
+				result: { status: "success", value: { stdout: "a.ts\n", stderr: "", exitCode: 0 } },
+			},
+			{ cwd: "/workspace" },
+		);
+
+		expect(display.toolName).toBe("bash");
+		expect(display.args).toEqual({ command: "ls src" });
+	});
+
 	it("builds native pi display data for Cursor read and shell calls", () => {
 		const readDisplay = buildCursorPiToolDisplay({
 			name: "read",

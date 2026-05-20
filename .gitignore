@@ -9,5 +9,11 @@ recording/
 demo-script.md
 docs/public-demo-script.md
 
+# Debug Mode local/runtime logs (do not commit)
+.debug/
+
+# Cursor native replay smoke-test artifacts (do not commit)
+.pi-tool-demo/
+
 # CueLoop local/runtime state (do not commit)
 .cueloop/

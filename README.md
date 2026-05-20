@@ -165,7 +165,7 @@ For Claude models with both `thinking` and `effort`, pi thinking `off` sends `th
 
 In `pi --list-models`, `thinking=no` means pi cannot control the model's thinking level with `--thinking`, a final `:medium` model suffix, or shift+tab. It does not mean the Cursor model cannot think.
 
-Some Cursor SDK models do not expose a `reasoning`, `effort`, or `thinking` parameter for the extension to set. Cursor thinking is still enabled/supported by the model, and Cursor may still emit thinking deltas. The extension does not disable Cursor's default reasoning behavior.
+Some Cursor SDK models do not expose a `reasoning`, `effort`, or `thinking` parameter for the extension to set. Cursor thinking is still enabled/supported by the model, and Cursor may still emit thinking deltas. The extension surfaces those deltas through pi's native thinking rendering when the SDK emits them.
 
 ## Fast mode
 
@@ -208,9 +208,9 @@ Actual Cursor runs still need a key from `/login`, `CURSOR_API_KEY`, or `--api-k
 ## Limits
 
 - **Local Cursor SDK agents only.** This extension does not use Cursor cloud agents.
-- **Cursor native tool replay is display-only.** Cursor still uses its own internal SDK tools; pi does not re-run Cursor-side commands or pass pi tool schemas through to Cursor. See [Cursor native tool replay](docs/cursor-native-tool-replay.md) for supported replay cards, ordering, conflict handling, and opt-out flags.
+- **Cursor native tool replay is display-only.** Cursor still uses its own internal SDK tools; pi does not re-run Cursor-side commands or pass pi tool schemas through to Cursor. Cursor models therefore use Cursor SDK's local-agent tool surface plus configured Cursor settings, plugins, and MCP servers, not the full pi-native tool surface available to built-in providers. Workflow tools such as Cursor `SwitchMode` are not pi workflow controls. See [Cursor native tool replay](docs/cursor-native-tool-replay.md) for supported replay cards, ordering, conflict handling, and opt-out flags.
 - **One fresh Cursor agent is created per provider call.** Cursor agent state is not reused between pi provider calls.
-- **Cursor setting sources are opt-in.** The extension does not pass `local.settingSources` by default because the Cursor SDK can print settings/skills loading output directly to the terminal during startup. To load configured Cursor MCP servers, plugin tools, project/user settings, and related Cursor-native capabilities, start pi with `PI_CURSOR_SETTING_SOURCES=all`. To narrow loading, set a comma-separated list such as `PI_CURSOR_SETTING_SOURCES=project,user,plugins`.
+- **Cursor setting sources default to all.** The extension passes `local.settingSources: ["all"]` by default so configured Cursor MCP servers, plugin tools, project/user settings, and related Cursor-native capabilities are available like they are in Cursor. To narrow loading, set a comma-separated list such as `PI_CURSOR_SETTING_SOURCES=project,user,plugins`. To disable ambient setting sources, set `PI_CURSOR_SETTING_SOURCES=none`. Direct Cursor SDK startup logs are suppressed so setting/skill loading messages do not pollute the TUI.
 - **Max Mode is not a manual pi variant.** Cursor's SDK may enable Max Mode automatically for models that require it. This extension only advertises exact context-window variants that the SDK catalog exposes and otherwise uses conservative SDK-derived default/non-Max context windows.
 - **Output token limits are conservative.** Cursor SDK model metadata does not currently expose output token limits directly.
 - **Token usage is approximate in pi.** Cursor SDK usage events include internal agent/tool/cache work, so the extension reports an approximate replayable pi prompt/output size for context display and compaction decisions.
@@ -250,7 +250,7 @@ pi install npm:pi-cursor-sdk
 
 ### `pi --list-models` shows `thinking=no`
 
-That does not mean the model cannot think. It means the Cursor SDK does not expose a pi-controllable thinking parameter for that model. The model may still think internally and may still emit thinking deltas.
+That does not mean the model cannot think. It means the Cursor SDK does not expose a pi-controllable thinking parameter for that model. The model may still think internally and may still emit thinking deltas that pi renders natively.
 
 ### I do not see `cursor fast` in the footer
 
@@ -258,11 +258,11 @@ Fast mode is currently off. The footer only shows `cursor fast` when fast mode i
 
 ### My Cursor app settings or rules do not seem to apply
 
-Cursor setting sources are not loaded by default because the Cursor SDK can print settings/skills loading output directly to the terminal. Start pi with `PI_CURSOR_SETTING_SOURCES=all`, or choose a narrower list such as `PI_CURSOR_SETTING_SOURCES=project,user,plugins`.
+Cursor setting sources are loaded with `PI_CURSOR_SETTING_SOURCES=all` by default. To narrow loading, set `PI_CURSOR_SETTING_SOURCES=project,user,plugins` or another comma-separated list. If you explicitly disabled sources with `PI_CURSOR_SETTING_SOURCES=none`, remove that override.
 
 ### Cursor does not call my web search MCP/tool
 
-Cursor SDK local agents load MCP servers from Cursor setting sources and inline SDK config. This extension leaves Cursor setting sources off by default to avoid startup log noise, so a web search tool needs to be configured in Cursor and settings sources need to be enabled with `PI_CURSOR_SETTING_SOURCES=all` or a narrower list.
+Cursor SDK local agents load MCP servers from Cursor setting sources and inline SDK config. This extension enables all Cursor setting sources by default, so a missing web search tool usually means it is not configured in Cursor or the run was started with a narrowing/disable override such as `PI_CURSOR_SETTING_SOURCES=none`.
 
 ### Cursor native tool cards conflict with another extension
 

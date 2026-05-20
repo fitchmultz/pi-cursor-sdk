@@ -166,7 +166,7 @@ describe("extension session cwd integration", () => {
 
 			expect(mockedAgentCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
-					local: { cwd: sessionDir },
+					local: { cwd: sessionDir, settingSources: ["all"] },
 				}),
 			);
 		} finally {

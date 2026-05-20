@@ -77,6 +77,7 @@ interface CursorNativeLiveRun {
 	promptInputTokensReported: boolean;
 	pendingEvents: CursorNativeQueuedEvent[];
 	textDeltas: string[];
+	emittedText: string;
 	recordedToolDisplayIds: string[];
 	finalText?: string;
 	done: boolean;
@@ -135,7 +136,7 @@ function resolveCursorApiKey(apiKey?: string): string | undefined {
 
 function resolveCursorSettingSources(): SettingSource[] | undefined {
 	const raw = process.env[CURSOR_SETTING_SOURCES_ENV]?.trim();
-	if (!raw) return undefined;
+	if (!raw) return ["all"];
 	const normalized = raw.toLowerCase();
 	if (["0", "false", "off", "none", "omit", "disabled"].includes(normalized)) return undefined;
 	if (["1", "true", "on", "all"].includes(normalized)) return ["all"];
@@ -152,6 +153,70 @@ function sanitizeError(error: unknown, apiKey?: string): string {
 	if (isGenericErrorMessage(scrubbed)) return GENERIC_CURSOR_SDK_ERROR_MESSAGE;
 	if (isLikelyAuthError(scrubbed)) return AUTH_CURSOR_SDK_ERROR_MESSAGE;
 	return scrubbed || GENERIC_CURSOR_SDK_ERROR_MESSAGE;
+}
+
+const CURSOR_SDK_STARTUP_NOISE_PATTERNS = [
+	"managed_skills.",
+	"CursorPluginsAgentSkillsService load completed",
+	"LocalCursorRulesService load completed",
+	"AgentSkillsCursorRulesService load completed",
+];
+
+function isCursorSdkStartupNoise(text: string): boolean {
+	return CURSOR_SDK_STARTUP_NOISE_PATTERNS.some((pattern) => text.includes(pattern));
+}
+
+function createFilteredProcessWrite<TWrite extends typeof process.stdout.write>(write: TWrite, stream: NodeJS.WriteStream): TWrite {
+	return ((
+		chunk: string | Uint8Array,
+		encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+		callback?: (error?: Error | null) => void,
+	): boolean => {
+		const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+		if (isCursorSdkStartupNoise(text)) {
+			const done = typeof encodingOrCallback === "function" ? encodingOrCallback : callback;
+			done?.();
+			return true;
+		}
+		return write.call(stream, chunk as string, encodingOrCallback as BufferEncoding, callback);
+	}) as TWrite;
+}
+
+function createFilteredConsoleMethod<TMethod extends typeof console.log>(method: TMethod): TMethod {
+	return ((...args: Parameters<TMethod>): void => {
+		const text = args.map((arg) => (typeof arg === "string" ? arg : String(arg))).join(" ");
+		if (isCursorSdkStartupNoise(text)) return;
+		method(...args);
+	}) as TMethod;
+}
+
+function installCursorSdkOutputFilter(): () => void {
+	const stdoutWrite = process.stdout.write;
+	const stderrWrite = process.stderr.write;
+	const consoleLog = console.log;
+	const consoleInfo = console.info;
+	const consoleWarn = console.warn;
+	const consoleError = console.error;
+	const consoleDebug = console.debug;
+	process.stdout.write = createFilteredProcessWrite(stdoutWrite, process.stdout);
+	process.stderr.write = createFilteredProcessWrite(stderrWrite, process.stderr) as typeof process.stderr.write;
+	console.log = createFilteredConsoleMethod(consoleLog);
+	console.info = createFilteredConsoleMethod(consoleInfo);
+	console.warn = createFilteredConsoleMethod(consoleWarn);
+	console.error = createFilteredConsoleMethod(consoleError);
+	console.debug = createFilteredConsoleMethod(consoleDebug);
+	let restored = false;
+	return () => {
+		if (restored) return;
+		restored = true;
+		process.stdout.write = stdoutWrite;
+		process.stderr.write = stderrWrite;
+		console.log = consoleLog;
+		console.info = consoleInfo;
+		console.warn = consoleWarn;
+		console.error = consoleError;
+		console.debug = consoleDebug;
+	};
 }
 
 function getObjectField(value: unknown, field: string): unknown {
@@ -397,12 +462,14 @@ function emitCursorNativeTextDelta(turn: CursorNativeTurnState, delta: string): 
 function emitCursorNativeQueuedEvent(
 	turn: CursorNativeTurnState,
 	event: Exclude<CursorNativeQueuedEvent, { type: "tool" }>,
+	run?: CursorNativeLiveRun,
 ): void {
 	if (event.type === "thinking-delta") {
 		emitCursorNativeThinkingDelta(turn, event.text);
 	} else if (event.type === "thinking-completed") {
 		closeCursorNativeThinkingBlock(turn);
 	} else if (event.type === "text-delta") {
+		if (run) run.emittedText += event.text;
 		emitCursorNativeTextDelta(turn, event.text);
 	}
 }
@@ -414,6 +481,14 @@ function collectCursorNativeToolBatch(run: CursorNativeLiveRun): CursorNativeToo
 		if (event?.type === "tool") tools.push(event.tool);
 	}
 	return tools;
+}
+
+function trimAlreadyEmittedCursorText(text: string, emittedText: string): string {
+	if (!text || !emittedText) return text;
+	if (text === emittedText) return "";
+	if (text.startsWith(emittedText)) return text.slice(emittedText.length);
+	if (text.trim() === emittedText.trim()) return "";
+	return text;
 }
 
 function takeCursorNativePromptInputTokens(run: CursorNativeLiveRun): number {
@@ -492,7 +567,7 @@ async function emitCursorNativeRunNextTurn(
 				return;
 			}
 			run.pendingEvents.shift();
-			emitCursorNativeQueuedEvent(turn, event);
+			emitCursorNativeQueuedEvent(turn, event, run);
 		}
 
 		if (run.cancelled) {
@@ -558,6 +633,7 @@ export function streamCursor(
 		let resolvedApiKey: string | undefined;
 		let abortSignal: AbortSignal | undefined;
 		let abortListener: (() => void) | undefined;
+		let restoreCursorSdkOutputFilter: (() => void) | undefined;
 
 		try {
 			const throwIfAborted = (): void => {
@@ -583,6 +659,7 @@ export function streamCursor(
 			const selection = buildCursorModelSelection(model.id, options?.reasoning ?? "off", fastEnabled);
 			const settingSources = resolveCursorSettingSources();
 
+			restoreCursorSdkOutputFilter = installCursorSdkOutputFilter();
 			agent = await Agent.create({
 				apiKey,
 				model: selection,
@@ -613,6 +690,7 @@ export function streamCursor(
 						promptInputTokensReported: false,
 						pendingEvents: [],
 						textDeltas,
+						emittedText: "",
 						recordedToolDisplayIds: [],
 						done: false,
 						cancelled: false,
@@ -685,6 +763,16 @@ export function streamCursor(
 				closeTraceBlock();
 			};
 
+			const emitCursorToolTrace = (text: string): void => {
+				const traceText = text.endsWith("\n") ? text : `${text}\n`;
+				if (liveRun && nativeToolReplayStarted) {
+					queueCursorNativeEvent(liveRun, { type: "thinking-delta", text: traceText });
+					queueCursorNativeEvent(liveRun, { type: "thinking-completed" });
+					return;
+				}
+				appendTraceBlock(traceText);
+			};
+
 			const closeTraceBlock = (): void => {
 				if (thinkingContentIndex < 0) return;
 				const block = partial.content[thinkingContentIndex];
@@ -721,6 +809,52 @@ export function streamCursor(
 				}
 			};
 
+			const getStartedToolCallFingerprint = (toolCall: unknown): string => {
+				return getToolFingerprint({ toolName: getCursorToolName(toolCall), args: getObjectField(toolCall, "args") });
+			};
+
+			const removeStartedToolCallForStep = (toolCall: unknown, stepId: unknown): string | undefined => {
+				if (typeof stepId === "string" && startedToolCalls.delete(stepId)) return stepId;
+				const fingerprint = getStartedToolCallFingerprint(toolCall);
+				for (const [callId, startedToolCall] of startedToolCalls) {
+					if (getStartedToolCallFingerprint(startedToolCall) !== fingerprint) continue;
+					startedToolCalls.delete(callId);
+					return callId;
+				}
+				return undefined;
+			};
+
+			const handleIncompleteStartedToolCalls = (): void => {
+				if (startedToolCalls.size === 0) return;
+				for (const toolCall of startedToolCalls.values()) {
+					const incompleteToolCall = {
+						...(toolCall && typeof toolCall === "object" && !Array.isArray(toolCall) ? (toolCall as Record<string, unknown>) : {}),
+						name: getCursorToolName(toolCall),
+						result: {
+							status: "error",
+							error: "Cursor SDK emitted tool-call-started but no tool-call-completed event.",
+						},
+					};
+					const display = buildCursorPiToolDisplay(incompleteToolCall, { cwd });
+					if (useNativeToolReplay && liveRun && canRenderCursorToolNatively(display.toolName)) {
+						nativeToolReplayStarted = true;
+						const id = `${nativeReplayId}-tool-${++nativeToolDisplayCounter}`;
+						queueCursorNativeEvent(liveRun, {
+							type: "tool",
+							tool: {
+								...display,
+								id,
+								args: scrubDisplayValue(display.args, resolvedApiKey) as Record<string, unknown>,
+								result: scrubDisplayValue(display.result, resolvedApiKey) as typeof display.result,
+							},
+						});
+					} else {
+						emitCursorToolTrace(`Cursor tool started without a completion event: ${formatCursorToolName(toolCall)}`);
+					}
+				}
+				startedToolCalls.clear();
+			};
+
 			const handleCompletedToolCall = (
 				toolCall: unknown,
 				options: { identity?: string; source?: "started" | "fallback" } = {},
@@ -741,7 +875,10 @@ export function streamCursor(
 					completedFallbackToolFingerprints.add(fingerprint);
 				}
 
-				if (useNativeToolReplay && canRenderCursorToolNatively(display.toolName) && liveRun) {
+				const nativeRenderable = canRenderCursorToolNatively(display.toolName);
+				const route = useNativeToolReplay && nativeRenderable && liveRun ? "native_replay" : "trace";
+
+				if (route === "native_replay" && liveRun) {
 					if (!nativeToolReplayStarted && textDeltas.length > 0) {
 						for (const text of textDeltas) queueCursorNativeEvent(liveRun, { type: "text-delta", text });
 						textDeltas.length = 0;
@@ -760,7 +897,7 @@ export function streamCursor(
 					return;
 				}
 
-				appendTraceBlock(transcript || `Cursor tool: ${formatCursorToolName(toolCall)} completed`);
+				emitCursorToolTrace(transcript || `Cursor tool: ${formatCursorToolName(toolCall)} completed`);
 			};
 
 			const onDelta = (args: { update: InteractionUpdate }): void => {
@@ -810,14 +947,18 @@ export function streamCursor(
 			};
 
 			const onStep = (args: { step: unknown }): void => {
+				const stepType = getObjectField(args.step, "type");
 				const step = getObjectField(args.step, "message") ? args.step : undefined;
-				if (getObjectField(args.step, "type") !== "toolCall") return;
-				const toolCall = getObjectField(step, "message");
+				const rawStepToolCall = getObjectField(step, "message");
+				if (stepType !== "toolCall") return;
+				const toolCall = rawStepToolCall;
 				const stepId = getObjectField(args.step, "id") ?? getObjectField(toolCall, "id") ?? getObjectField(toolCall, "callId");
 				if (toolCall) {
 					handleCompletedToolCall(toolCall, {
 						identity: typeof stepId === "string" ? `cursor-tool:${stepId}` : undefined,
 					});
+					const matchedStartedCallId = removeStartedToolCallForStep(toolCall, stepId);
+					if (matchedStartedCallId) completedToolIdentities.add(`cursor-tool:${matchedStartedCallId}`);
 				}
 			};
 
@@ -846,10 +987,12 @@ export function streamCursor(
 					.wait()
 					.then(async (result) => {
 						if (liveRun.disposed) return;
+						handleIncompleteStartedToolCalls();
 						await cacheSdkContextWindow(liveRun.agent.agentId, model.id);
 						if (liveRun.disposed) return;
 						liveRun.cancelled = result.status === "cancelled";
-						liveRun.finalText = hasUsableText(result.result) ? result.result : liveRun.textDeltas.join("");
+						const finalText = hasUsableText(result.result) ? result.result : liveRun.textDeltas.join("");
+						liveRun.finalText = trimAlreadyEmittedCursorText(finalText, liveRun.emittedText);
 						liveRun.done = true;
 						notifyCursorNativeRun(liveRun);
 						scheduleCursorNativeRunIdleDispose(liveRun);
@@ -875,6 +1018,7 @@ export function streamCursor(
 			}
 
 			const result = await run.wait();
+			handleIncompleteStartedToolCalls();
 			await cacheSdkContextWindow(agent.agentId, model.id);
 
 			// Close any open thinking/activity trace, then use the final run result only when
@@ -899,6 +1043,7 @@ export function streamCursor(
 				stream.push({ type: "error", reason: "error", error: partial });
 			}
 		} finally {
+			restoreCursorSdkOutputFilter?.();
 			if (activeNativeRun?.disposed) agent = null;
 
 			if (abortSignal && abortListener) {

@@ -62,6 +62,24 @@ function formatToolCall(toolCall: ToolCall): string {
 	return `Tool call (${toolCall.name}, call ${toolCall.id}): ${args}`;
 }
 
+function sanitizeSystemPromptForCursor(systemPrompt: string): string {
+	let sanitized = systemPrompt;
+	sanitized = sanitized.replace(
+		/Available tools:\n[\s\S]*?\n\nIn addition to the tools above, you may have access to other custom tools depending on the project\.\n\n/g,
+		"Pi tool catalog omitted: Cursor can call only Cursor SDK tools exposed in this run.\n\n",
+	);
+	sanitized = sanitized.replace(
+		/Guidelines:\n[\s\S]*?\n\nPi documentation /g,
+		"Guidelines:\n- Be concise in your responses.\n- Show file paths clearly when working with files.\n\nPi documentation ",
+	);
+	sanitized = sanitized.replace(
+		/\n\nThe following skills provide specialized instructions for specific tasks\.[\s\S]*?<\/available_skills>/g,
+		"",
+	);
+	sanitized = sanitized.replace(/\n+Semantic code intelligence priority:[\s\S]*$/g, "");
+	return sanitized.trim();
+}
+
 function formatMessage(msg: Message): string | undefined {
 	switch (msg.role) {
 		case "user": {
@@ -152,15 +170,16 @@ export function buildCursorPrompt(context: Context, options: CursorPromptOptions
 	const sectionsBeforeMessages: string[] = [
 		[
 			"Cursor SDK tool boundary:",
-			"Only tools exposed by the Cursor SDK in this run are callable. The pi system prompt and transcript are context only; they do not grant access to pi tools or tool names mentioned there.",
-			"If the user asks you to search, fetch, browse, or research the web, use an actual Cursor SDK web/search/browser/MCP tool call. If no such Cursor SDK tool is available, say that web search is not configured for this Cursor SDK run.",
-			"Do not plan to use or claim to have used pi-only tools such as WebSearch or WebFetch unless the Cursor SDK actually exposes and executes that tool in this run.",
-			"Image payload boundary: only images attached to the latest user message are available as image bytes. Earlier images appear only as [image omitted from transcript] placeholders; ask the user to reattach or describe a prior image if the latest request depends on it.",
+			"You can call only tools actually exposed by Cursor SDK in this run. Pi tool names, replay tool names, and transcript tool names are context only, not callable capabilities.",
+			"If asked to list or exercise available tools, list and exercise Cursor SDK tools only; do not claim access to pi-side tools from the system prompt unless Cursor exposes an equivalent tool that runs.",
+			"Web: use Cursor web/search/browser/MCP or say web search is not configured; do not claim WebSearch/WebFetch unless Cursor executes them.",
+			"Replay: pi may display recorded Cursor tool activity as pi-style cards, but replay is display-only and not a capability to invoke.",
+			"Images: only latest user images are sent; ask to reattach or describe prior images.",
 		].join("\n"),
 	];
 
 	if (context.systemPrompt) {
-		sectionsBeforeMessages.push(`System instructions from pi:\n${context.systemPrompt}`);
+		sectionsBeforeMessages.push(`System instructions from pi:\n${sanitizeSystemPromptForCursor(context.systemPrompt)}`);
 	}
 
 	const messageSections = context.messages
@@ -171,8 +190,8 @@ export function buildCursorPrompt(context: Context, options: CursorPromptOptions
 		.filter((section): section is { index: number; text: string } => section !== undefined);
 	const sectionsAfterMessages = [
 		[
-			"Answer the latest user request above using your capabilities. Do not assume access to pi tools.",
-			"If the user asks for web research, do not claim to have searched the web unless a Cursor SDK web/search/browser/MCP tool was actually used.",
+			"Answer the latest user request above using Cursor SDK capabilities only. Do not list, promise, or call pi-only tools from the system prompt as if they were available.",
+			"If web research is requested, do not claim it unless a Cursor web/search/browser/MCP tool ran.",
 		].join("\n"),
 	];
 	const images = extractLatestImages(context.messages);
@@ -188,6 +207,8 @@ export function buildCursorPrompt(context: Context, options: CursorPromptOptions
 		getLatestUserMessageIndex(context.messages),
 		budgetOptions,
 	);
+	const text = parts.join(SECTION_SEPARATOR);
 
-	return { text: parts.join(SECTION_SEPARATOR), images };
+
+	return { text, images };
 }

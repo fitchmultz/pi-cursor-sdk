@@ -201,6 +201,162 @@ describe("formatCursorToolTranscript", () => {
 		expect(writeDisplay.result.content[0].text).toContain("Created 1 lines");
 	});
 
+	it("builds replay-only native pi display data for Cursor workflow and utility tools", () => {
+		const lintsDisplay = buildCursorPiToolDisplay(
+			{
+				name: "readLints",
+				args: { path: "/repo/src/index.ts" },
+				result: {
+					status: "success",
+					value: { fileDiagnostics: [{ path: "/repo/src/index.ts", diagnostics: [] }], totalDiagnostics: 0 },
+				},
+			},
+			{ cwd: "/repo" },
+		);
+		const todosDisplay = buildCursorPiToolDisplay({
+			name: "updateTodos",
+			args: {},
+			result: {
+				status: "success",
+				value: {
+					todos: [
+						{ content: "Run Read/Grep/Glob", status: "completed" },
+						{ content: "Run Task/MCP", status: "pending" },
+					],
+					totalCount: 2,
+				},
+			},
+		});
+		const taskDisplay = buildCursorPiToolDisplay({
+			name: "task",
+			args: { description: "Quick ls demo subagent" },
+			result: {
+				status: "success",
+				value: { result: { success: { command: "ls src | head -5", stdout: "context.ts\ncursor-provider.ts\n" } } },
+			},
+		});
+		const mcpDisplay = buildCursorPiToolDisplay({
+			name: "mcp",
+			args: { toolName: "git" },
+			result: {
+				status: "success",
+				value: { content: [{ text: { text: "## Git Status ✅\n13 modified" } }], isError: false },
+			},
+		});
+		const deleteDisplay = buildCursorPiToolDisplay(
+			{
+				name: "delete",
+				args: { path: "/repo/.debug/delete-me.txt" },
+				result: { status: "success", value: { fileSize: 9 } },
+			},
+			{ cwd: "/repo" },
+		);
+
+		expect(lintsDisplay).toMatchObject({
+			toolName: "cursor_read_lints",
+			args: { paths: ["src/index.ts"], diagnosticCount: 0 },
+			result: { details: { cursorToolName: "readLints", title: "Cursor readLints", summary: "0 diagnostics in src/index.ts" } },
+			isError: false,
+		});
+		expect(lintsDisplay.result.content[0].text).toContain("No diagnostics in src/index.ts");
+		expect(todosDisplay).toMatchObject({
+			toolName: "cursor_update_todos",
+			args: { totalCount: 2 },
+			result: {
+				details: {
+					cursorToolName: "updateTodos",
+					title: "Cursor todos",
+					summary: "1/2 completed, 1 pending",
+				},
+			},
+			isError: false,
+		});
+		expect(todosDisplay.result.content[0].text).toContain("✓ Run Read/Grep/Glob (completed)");
+		expect(taskDisplay).toMatchObject({
+			toolName: "cursor_task",
+			args: { description: "Quick ls demo subagent" },
+			result: { details: { cursorToolName: "task", title: "Cursor task", summary: "Quick ls demo subagent: $ ls src | head -5" } },
+			isError: false,
+		});
+		expect(taskDisplay.result.content[0].text).toContain("context.ts");
+		expect(mcpDisplay).toMatchObject({
+			toolName: "cursor_mcp",
+			args: { toolName: "git" },
+			result: { details: { cursorToolName: "mcp", title: "Cursor MCP", summary: "git" } },
+			isError: false,
+		});
+		expect(mcpDisplay.result.content[0].text).toContain("## Git Status ✅");
+		expect(mcpDisplay.result.content[0].text).not.toContain('"content"');
+		expect(deleteDisplay).toMatchObject({
+			toolName: "cursor_delete",
+			args: { path: ".debug/delete-me.txt" },
+			result: { details: { cursorToolName: "delete", title: "Cursor delete", path: ".debug/delete-me.txt" } },
+			isError: false,
+		});
+		expect(deleteDisplay.result.content[0].text).toContain("Deleted 9 bytes");
+	});
+
+	it("shows Cursor generateImage output paths without dumping image data", () => {
+		const display = buildCursorPiToolDisplay(
+			{
+				name: "generateImage",
+				args: { description: "Small badge", filePath: "assets/badge.png" },
+				result: {
+					status: "success",
+					value: { filePath: "/Users/example/.cursor/projects/repo/assets/badge.png", imageData: "base64-image-data" },
+				},
+			},
+			{ cwd: "/repo" },
+		);
+
+		expect(display).toMatchObject({
+			toolName: "cursor_generate_image",
+			args: { prompt: "Small badge" },
+			result: {
+				details: {
+					cursorToolName: "generateImage",
+					title: "Cursor generateImage",
+					summary: "saved /Users/example/.cursor/projects/repo/assets/badge.png",
+					imagePath: "/Users/example/.cursor/projects/repo/assets/badge.png",
+					imageDisplayPath: "/Users/example/.cursor/projects/repo/assets/badge.png",
+					imageMimeType: "image/png",
+				},
+			},
+			isError: false,
+		});
+		expect(display.result.content[0].text).toContain("Saved image: /Users/example/.cursor/projects/repo/assets/badge.png");
+		expect(display.result.content[0].text).not.toContain("base64-image-data");
+	});
+
+	it("normalizes replay-only Cursor edit and write paths for pi display", () => {
+		const editDisplay = buildCursorPiToolDisplay(
+			{
+				name: "edit",
+				args: { path: "/repo/src/index.ts" },
+				result: {
+					status: "success",
+					value: { linesAdded: 1, linesRemoved: 1, diffString: "--- a//repo/src/index.ts\n+++ b//repo/src/index.ts" },
+				},
+			},
+			{ cwd: "/repo" },
+		);
+		const writeDisplay = buildCursorPiToolDisplay(
+			{
+				name: "write",
+				args: { path: "/repo/new.txt" },
+				result: { status: "success", value: { linesCreated: 1, fileSize: 6 } },
+			},
+			{ cwd: "/repo" },
+		);
+
+		expect(editDisplay.args).toEqual({ path: "src/index.ts" });
+		expect(writeDisplay.args).toEqual({ path: "new.txt" });
+		expect(editDisplay.result.content[0].text).toContain("edit src/index.ts");
+		expect(editDisplay.result.content[0].text).toContain("--- a/src/index.ts\n+++ b/src/index.ts");
+		expect(editDisplay.result.content[0].text).not.toContain("/repo");
+		expect(editDisplay.result.details).toMatchObject({ path: "src/index.ts", diffString: "--- a/src/index.ts\n+++ b/src/index.ts" });
+	});
+
 	it("builds native pi display data for Cursor read and shell calls", () => {
 		const readDisplay = buildCursorPiToolDisplay({
 			name: "read",
@@ -316,6 +472,21 @@ describe("formatCursorToolTranscript", () => {
 				},
 			},
 		});
+		const fileOnlyContentGrepDisplay = buildCursorPiToolDisplay({
+			type: "grep",
+			args: { pattern: "version", path: "." },
+			result: {
+				status: "success",
+				value: {
+					workspaceResults: {
+						"/repo": {
+							type: "content",
+							output: { matches: [{ file: "./package.json:", line: "" }], totalMatches: 1 },
+						},
+					},
+				},
+			},
+		});
 		const emptyGlobDisplay = buildCursorPiToolDisplay({
 			type: "glob",
 			args: { globPattern: "**/*.missing", targetDirectory: "src" },
@@ -341,6 +512,7 @@ describe("formatCursorToolTranscript", () => {
 		});
 		expect(emptyGrepDisplay.result.content[0].text).toBe("(no matches)");
 		expect(emptyWorkspaceGrepDisplay.result.content[0].text).toBe("(no matches)");
+		expect(fileOnlyContentGrepDisplay.result.content[0].text).toBe("./package.json");
 		expect(emptyGlobDisplay.result.content[0].text).toBe("No files found matching pattern");
 		expect(emptyCursorGlobDisplay.result.content[0].text).toBe("No files found matching pattern");
 	});

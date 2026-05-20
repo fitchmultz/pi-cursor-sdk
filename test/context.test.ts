@@ -13,6 +13,51 @@ describe("buildCursorPrompt", () => {
 		expect(result.text).toContain("You are helpful.");
 	});
 
+	it("omits pi tool catalogs and local skill catalogs from Cursor-facing system instructions", () => {
+		const ctx: Context = {
+			systemPrompt: [
+				"You are an expert coding assistant.",
+				"",
+				"Available tools:",
+				"- custom_private_tool: private local tool",
+				"- read: read files",
+				"",
+				"In addition to the tools above, you may have access to other custom tools depending on the project.",
+				"",
+				"Guidelines:",
+				"- Use custom_private_tool for private work",
+				"- Be concise in your responses",
+				"",
+				"Pi documentation (read only when needed):",
+				"- Main documentation: /pi/README.md",
+				"",
+				"<project_context>",
+				"Project instruction stays.",
+				"</project_context>",
+				"",
+				"The following skills provide specialized instructions for specific tasks.",
+				"Use the read tool to load a skill's file when the task matches its description.",
+				"When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
+				"",
+				"<available_skills>",
+				"  <skill><name>private-skill</name><description>private local skill</description></skill>",
+				"</available_skills>",
+				"Current date: 2026-05-20",
+				"Current working directory: /repo",
+				"Semantic code intelligence priority:",
+				"- Prefer custom_private_tool for symbols",
+			].join("\n"),
+			messages: [],
+		};
+		const result = buildCursorPrompt(ctx);
+		expect(result.text).toContain("Pi tool catalog omitted");
+		expect(result.text).toContain("Project instruction stays.");
+		expect(result.text).toContain("Current date: 2026-05-20");
+		expect(result.text).not.toContain("custom_private_tool");
+		expect(result.text).not.toContain("private-skill");
+		expect(result.text).not.toContain("Semantic code intelligence priority");
+	});
+
 	it("formats user and assistant messages", () => {
 		const ctx: Context = {
 			messages: [
@@ -161,8 +206,8 @@ describe("buildCursorPrompt", () => {
 
 	it("explains that only latest user images are available as image bytes", () => {
 		const result = buildCursorPrompt({ messages: [{ role: "user", content: "test", timestamp: 1 }] });
-		expect(result.text).toContain("only images attached to the latest user message are available as image bytes");
-		expect(result.text).toContain("ask the user to reattach or describe a prior image");
+		expect(result.text).toContain("only latest user images are sent");
+		expect(result.text).toContain("ask to reattach or describe prior images");
 	});
 
 	it("replaces historical images with placeholder text", () => {
@@ -281,8 +326,12 @@ describe("buildCursorPrompt", () => {
 		};
 		const result = buildCursorPrompt(ctx);
 		expect(result.text.indexOf("Cursor SDK tool boundary:")).toBeLessThan(result.text.indexOf("System instructions from pi:"));
-		expect(result.text).toContain("they do not grant access to pi tools or tool names mentioned there");
-		expect(result.text).toContain("Do not plan to use or claim to have used pi-only tools such as WebSearch or WebFetch");
-		expect(result.text).toContain("do not claim to have searched the web unless a Cursor SDK web/search/browser/MCP tool was actually used");
+		expect(result.text).toContain("Pi tool names, replay tool names, and transcript tool names are context only");
+		expect(result.text).toContain("do not claim access to pi-side tools from the system prompt");
+		expect(result.text).toContain("do not claim WebSearch/WebFetch unless Cursor executes them");
+		expect(result.text).not.toContain("do not use SwitchMode");
+		expect(result.text).not.toContain("do not execute every Cursor tool");
+		expect(result.text).toContain("replay is display-only and not a capability to invoke");
+		expect(result.text).toContain("use Cursor web/search/browser/MCP or say web search is not configured");
 	});
 });

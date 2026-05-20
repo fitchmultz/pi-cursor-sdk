@@ -66,7 +66,7 @@ Use a short written plan before multi-file behavior changes, SDK integration cha
 
 - NEVER store Cursor API keys in repo files, `~/.pi/agent/cursor-sdk.json`, tests, logs, snapshots, or docs examples.
 - Scrub Cursor SDK errors and output that may contain API keys, bearer tokens, cookies, sessions, or auth headers.
-- Do not enable ambient Cursor settings/rules loading unless the SDK no longer writes terminal logs that corrupt pi's TUI and the docs/spec are updated.
+- Ambient Cursor settings/rules loading is enabled by default through `PI_CURSOR_SETTING_SOURCES=all`; keep SDK startup log filtering intact so settings/skills output does not corrupt pi's TUI.
 - Live `pi`/Cursor smoke tests may call external services and require `CURSOR_API_KEY`; run them only when needed and report if skipped.
 
 ## Progress updates and handoff

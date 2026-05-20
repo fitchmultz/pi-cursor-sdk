@@ -169,6 +169,27 @@ function formatDisplayPath(path: string, cwd = process.cwd()): string {
 	return relativePath;
 }
 
+function formatDiffPath(path: string, cwd = process.cwd()): string {
+	if (path === "/dev/null") return path;
+	return formatDisplayPath(path, cwd);
+}
+
+function formatDiffHeaderLine(line: string, options: TranscriptOptions): string {
+	const match = /^(---|\+\+\+)\s+((?:[ab]\/)?)(.+)$/.exec(line);
+	if (!match) return line;
+	const [, marker, prefix, rawPath] = match;
+	if (!prefix && rawPath !== "/dev/null") return line;
+	const displayPath = formatDiffPath(rawPath, options.cwd);
+	return `${marker} ${prefix}${displayPath}`;
+}
+
+function formatDiffString(diff: string | undefined, options: TranscriptOptions): string | undefined {
+	return diff
+		?.split("\n")
+		.map((line) => formatDiffHeaderLine(line, options))
+		.join("\n");
+}
+
 function resolveFilePath(path: string, cwd = process.cwd()): string {
 	return isAbsolute(path) ? path : resolve(cwd, path);
 }
@@ -258,6 +279,11 @@ function formatRead(args: Record<string, unknown>, result: NormalizedResult, opt
 }
 
 function buildReadDisplayArgs(args: Record<string, unknown>, options: TranscriptOptions): Record<string, unknown> {
+	const rawPath = typeof args.path === "string" ? args.path : undefined;
+	return rawPath ? { ...args, path: formatDisplayPath(rawPath, options.cwd) } : args;
+}
+
+function buildPathDisplayArgs(args: Record<string, unknown>, options: TranscriptOptions): Record<string, unknown> {
 	const rawPath = typeof args.path === "string" ? args.path : undefined;
 	return rawPath ? { ...args, path: formatDisplayPath(rawPath, options.cwd) } : args;
 }
@@ -377,10 +403,15 @@ function collectSearchResults(value: unknown): string[] {
 			if (matches.length === 0 && getNumber(output, "totalMatches") === 0) sawExplicitNoMatches = true;
 			for (const match of matches) {
 				const matchRecord = asRecord(match);
-				const file = getString(matchRecord, "file") ?? "";
+				const file = formatSearchFile(getString(matchRecord, "file") ?? "");
 				const lineNumber = getNumber(matchRecord, "lineNumber");
 				const line = getString(matchRecord, "line") ?? "";
-				lines.push(`${file}${lineNumber !== undefined ? `:${lineNumber}` : ""}: ${line}`.trim());
+				if (lineNumber === undefined && !line.trim()) {
+					if (file) lines.push(file);
+					continue;
+				}
+				const location = `${file}${lineNumber !== undefined ? `:${lineNumber}` : ""}`;
+				lines.push(line ? `${location}: ${line}` : location);
 			}
 		} else if (type === "files") {
 			const files = getArray(output, "files") ?? [];
@@ -511,7 +542,7 @@ function formatEdit(args: Record<string, unknown>, result: NormalizedResult, opt
 	if (result.status === "error") return joinSections(`edit ${path}`, formatError(result.error));
 
 	const value = asRecord(result.value);
-	const diff = getString(value, "diffString");
+	const diff = formatDiffString(getString(value, "diffString"), options);
 	const linesAdded = getNumber(value, "linesAdded");
 	const linesRemoved = getNumber(value, "linesRemoved");
 	const stats = [
@@ -530,13 +561,19 @@ function formatDelete(args: Record<string, unknown>, result: NormalizedResult, o
 	return joinSections(`delete ${path}`, fileSize !== undefined ? `Deleted ${fileSize} bytes` : stringifyUnknown(result.value));
 }
 
-function formatReadLints(args: Record<string, unknown>, result: NormalizedResult, options: TranscriptOptions): string {
-	const paths = Array.isArray(args.paths)
-		? args.paths.filter((entry): entry is string => typeof entry === "string").map((entry) => formatDisplayPath(entry, options.cwd))
-		: [];
-	const header = `readLints${paths.length > 0 ? ` ${paths.join(" ")}` : ""}`;
-	if (result.status === "error") return joinSections(header, formatError(result.error));
+function getReadLintPaths(args: Record<string, unknown>, result: NormalizedResult, options: TranscriptOptions): string[] {
+	const explicitPaths = Array.isArray(args.paths)
+		? args.paths.filter((entry): entry is string => typeof entry === "string")
+		: typeof args.path === "string"
+			? [args.path]
+			: [];
+	const resultPaths = (getArray(asRecord(result.value), "fileDiagnostics") ?? [])
+		.map((file) => getString(asRecord(file), "path"))
+		.filter((entry): entry is string => Boolean(entry));
+	return [...new Set([...explicitPaths, ...resultPaths].map((entry) => formatDisplayPath(entry, options.cwd)))];
+}
 
+function getReadLintDiagnostics(result: NormalizedResult, options: TranscriptOptions): string[] {
 	const value = asRecord(result.value);
 	const files = getArray(value, "fileDiagnostics") ?? [];
 	const lines: string[] = [];
@@ -553,7 +590,147 @@ function formatReadLints(args: Record<string, unknown>, result: NormalizedResult
 			lines.push(`${path}: ${severity}${source ? ` ${source}` : ""}: ${message}`);
 		}
 	}
+	return lines;
+}
+
+function formatReadLints(args: Record<string, unknown>, result: NormalizedResult, options: TranscriptOptions): string {
+	const paths = getReadLintPaths(args, result, options);
+	const header = `readLints${paths.length > 0 ? ` ${paths.join(" ")}` : ""}`;
+	if (result.status === "error") return joinSections(header, formatError(result.error));
+
+	const lines = getReadLintDiagnostics(result, options);
+	if (lines.length === 0 && paths.length > 0) return joinSections(header, `No diagnostics in ${paths.join(", ")}`);
 	return joinSections(header, limitText(lines.join("\n") || stringifyUnknown(result.value), options));
+}
+
+function getTodoItems(args: Record<string, unknown>, result: NormalizedResult): Array<{ content: string; status?: string }> {
+	const value = asRecord(result.value);
+	const rawTodos = getArray(value, "todos") ?? getArray(args, "todos") ?? [];
+	const todos: Array<{ content: string; status?: string }> = [];
+	for (const todo of rawTodos) {
+		const record = asRecord(todo);
+		const content = getString(record, "content");
+		if (!content) continue;
+		const status = getString(record, "status");
+		todos.push(status ? { content, status } : { content });
+	}
+	return todos;
+}
+
+function getTodoTotalCount(args: Record<string, unknown>, result: NormalizedResult, todos: Array<{ content: string; status?: string }>): number {
+	return getNumber(asRecord(result.value), "totalCount") ?? getNumber(args, "totalCount") ?? todos.length;
+}
+
+function summarizeTodos(args: Record<string, unknown>, result: NormalizedResult): string {
+	const todos = getTodoItems(args, result);
+	const total = getTodoTotalCount(args, result, todos);
+	const completed = todos.filter((todo) => todo.status === "completed").length;
+	const inProgress = todos.filter((todo) => todo.status === "inProgress").length;
+	const pending = todos.filter((todo) => todo.status === "pending").length;
+	const parts = [`${completed}/${total} completed`];
+	if (inProgress > 0) parts.push(`${inProgress} in progress`);
+	if (pending > 0) parts.push(`${pending} pending`);
+	return parts.join(", ");
+}
+
+function formatTodoStatus(status: string | undefined): string {
+	if (status === "completed") return "✓";
+	if (status === "inProgress") return "…";
+	if (status === "pending") return "○";
+	return "•";
+}
+
+function formatTodos(args: Record<string, unknown>, result: NormalizedResult, options: TranscriptOptions, header: string): string {
+	if (result.status === "error") return joinSections(header, formatError(result.error));
+	const todos = getTodoItems(args, result);
+	if (todos.length === 0) return joinSections(header, limitText(stringifyUnknown(result.value), options));
+	const lines = todos.map((todo) => `${formatTodoStatus(todo.status)} ${todo.content}${todo.status ? ` (${todo.status})` : ""}`);
+	return joinSections(header, limitText(lines.join("\n"), options));
+}
+
+function getTaskDescription(args: Record<string, unknown>, result: NormalizedResult): string {
+	return getString(args, "description") ?? getString(asRecord(result.value), "description") ?? "task";
+}
+
+function getNestedRecord(record: Record<string, unknown> | undefined, ...keys: string[]): Record<string, unknown> | undefined {
+	let current = record;
+	for (const key of keys) {
+		current = getRecord(current, key);
+		if (!current) return undefined;
+	}
+	return current;
+}
+
+function collectTaskText(result: NormalizedResult): string {
+	const value = asRecord(result.value);
+	const success = getNestedRecord(value, "result", "success");
+	const command = getString(success, "command");
+	const stdout = getString(success, "stdout");
+	const interleavedOutput = getString(success, "interleavedOutput");
+	const assistantMessages = (getArray(value, "conversationSteps") ?? [])
+		.map((step) => getString(getRecord(asRecord(step), "assistantMessage"), "text"))
+		.filter((entry): entry is string => Boolean(entry));
+	const parts = [command ? `$ ${command}` : undefined, stdout || interleavedOutput, ...assistantMessages].filter((part): part is string => Boolean(part));
+	return parts.join("\n");
+}
+
+function formatTask(args: Record<string, unknown>, result: NormalizedResult, options: TranscriptOptions): string {
+	const description = getTaskDescription(args, result);
+	if (result.status === "error") return joinSections(`task ${description}`, formatError(result.error));
+	const taskText = collectTaskText(result);
+	return joinSections(`task ${description}`, limitText(taskText || stringifyUnknown(result.value), options));
+}
+
+function summarizeTask(description: string, taskText: string): string {
+	const firstLine = firstNonEmptyLine(taskText);
+	if (!firstLine) return truncateArg(description);
+	if (description === "task" || description === firstLine) return truncateArg(firstLine);
+	return truncateArg(`${description}: ${firstLine}`, 160);
+}
+
+function getGenerateImageValue(result: NormalizedResult): Record<string, unknown> | undefined {
+	return asRecord(result.value);
+}
+
+function getGenerateImagePath(args: Record<string, unknown>, result: NormalizedResult): string | undefined {
+	const value = getGenerateImageValue(result);
+	return getString(value, "filePath") ?? getString(args, "filePath") ?? getString(args, "path");
+}
+
+function getGenerateImageDisplayPath(args: Record<string, unknown>, result: NormalizedResult, options: TranscriptOptions): string | undefined {
+	const path = getGenerateImagePath(args, result);
+	return path ? formatDisplayPath(path, options.cwd) : undefined;
+}
+
+function inferImageMimeType(path: string | undefined): string | undefined {
+	const lower = path?.toLowerCase();
+	if (!lower) return undefined;
+	if (lower.endsWith(".png")) return "image/png";
+	if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+	if (lower.endsWith(".gif")) return "image/gif";
+	if (lower.endsWith(".webp")) return "image/webp";
+	return undefined;
+}
+
+function formatGenerateImage(args: Record<string, unknown>, result: NormalizedResult, options: TranscriptOptions): string {
+	const prompt = getString(args, "prompt") ?? getString(args, "description") ?? "image";
+	if (result.status === "error") return joinSections(`generateImage ${prompt}`, formatError(result.error));
+	const value = getGenerateImageValue(result);
+	const displayPath = getGenerateImageDisplayPath(args, result, options);
+	const hasImageData = typeof value?.imageData === "string" && value.imageData.length > 0;
+	const lines = [displayPath ? `Saved image: ${displayPath}` : undefined, hasImageData ? "Image data returned by Cursor SDK." : undefined].filter(
+		(line): line is string => Boolean(line),
+	);
+	if (lines.length > 0) return joinSections(`generateImage ${prompt}`, lines.join("\n"));
+	return joinSections(`generateImage ${prompt}`, limitText(stringifyUnknown(result.value), options));
+}
+
+function getMcpContentText(entry: unknown): string | undefined {
+	const record = asRecord(entry);
+	const directText = getString(record, "text");
+	if (directText) return directText;
+	const nestedText = getRecord(record, "text");
+	return getString(nestedText, "text");
 }
 
 function formatMcp(args: Record<string, unknown>, result: NormalizedResult, options: TranscriptOptions): string {
@@ -564,7 +741,7 @@ function formatMcp(args: Record<string, unknown>, result: NormalizedResult, opti
 	const isError = getBoolean(value, "isError");
 	const content = getArray(value, "content") ?? [];
 	const text = content
-		.map((entry) => getString(asRecord(entry), "text"))
+		.map((entry) => getMcpContentText(entry))
 		.filter((entry): entry is string => Boolean(entry))
 		.join("\n");
 	const body = `${isError ? "[tool error]\n" : ""}${text || stringifyUnknown(result.value)}`;
@@ -602,6 +779,14 @@ export function formatCursorToolTranscript(toolCall: unknown, options: Transcrip
 			return formatDelete(args, result, options);
 		case "readLints":
 			return formatReadLints(args, result, options);
+		case "updateTodos":
+			return formatTodos(args, result, options, "updateTodos");
+		case "createPlan":
+			return formatTodos(args, result, options, "createPlan");
+		case "task":
+			return formatTask(args, result, options);
+		case "generateImage":
+			return formatGenerateImage(args, result, options);
 		case "mcp":
 			return formatMcp(args, result, options);
 		default:
@@ -621,6 +806,35 @@ function buildGenericPiToolDisplay(name: string, args: Record<string, unknown>, 
 		result: textToolResult(isError ? formatError(result.error) : limitText(stringifyUnknown(result.value), options)),
 		isError,
 	};
+}
+
+function firstNonEmptyLine(text: string): string | undefined {
+	return text.split("\n").find((line) => line.trim())?.trim();
+}
+
+function buildReplaySummaryDisplay(
+	toolName: string,
+	args: Record<string, unknown>,
+	result: NormalizedResult,
+	contentText: string,
+	details: Record<string, unknown>,
+): CursorPiToolDisplay {
+	const isError = result.status === "error";
+	const summary = isError ? formatError(result.error) : firstNonEmptyLine(contentText);
+	return {
+		toolName,
+		args,
+		result: textToolResult(contentText, {
+			...details,
+			summary: details.summary ?? summary,
+			expandedText: details.expandedText ?? contentText,
+		}),
+		isError,
+	};
+}
+
+function truncateArg(value: string, maxLength = 120): string {
+	return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
 }
 
 export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptOptions = {}): CursorPiToolDisplay {
@@ -651,10 +865,11 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 
 	if (name === "grep") {
 		const isError = result.status === "error";
+		const outputText = isError ? formatError(result.error) : getGrepBody(result, options);
 		return {
 			toolName: "grep",
 			args: buildGrepDisplayArgs(args, options),
-			result: textToolResult(isError ? formatError(result.error) : getGrepBody(result, options)),
+			result: textToolResult(outputText),
 			isError,
 		};
 	}
@@ -680,15 +895,20 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 
 	if (name === "edit") {
 		const value = asRecord(result.value);
+		const rawDiff = getString(value, "diffString");
+		const normalizedDiff = formatDiffString(rawDiff, options);
+		const displayArgs = buildPathDisplayArgs(args, options);
+		const displayPath = typeof args.path === "string" ? formatDisplayPath(args.path, options.cwd) : undefined;
+		const contentText = formatEdit(args, result, options);
 		return {
 			toolName: "cursor_edit",
-			args,
-			result: textToolResult(formatEdit(args, result, options), {
+			args: displayArgs,
+			result: textToolResult(contentText, {
 				cursorToolName: "edit",
-				path: typeof args.path === "string" ? formatDisplayPath(args.path, options.cwd) : undefined,
+				path: displayPath,
 				linesAdded: getNumber(value, "linesAdded"),
 				linesRemoved: getNumber(value, "linesRemoved"),
-				diffString: getString(value, "diffString"),
+				diffString: normalizedDiff,
 			}),
 			isError: result.status === "error",
 		};
@@ -696,17 +916,145 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 
 	if (name === "write") {
 		const value = asRecord(result.value);
+		const displayArgs = buildPathDisplayArgs(args, options);
+		const displayPath = typeof args.path === "string" ? formatDisplayPath(args.path, options.cwd) : undefined;
+		const contentText = formatWrite(args, result, options).trimEnd();
 		return {
 			toolName: "cursor_write",
-			args,
-			result: textToolResult(formatWrite(args, result, options), {
+			args: displayArgs,
+			result: textToolResult(contentText, {
 				cursorToolName: "write",
-				path: typeof args.path === "string" ? formatDisplayPath(args.path, options.cwd) : undefined,
+				path: displayPath,
 				linesCreated: getNumber(value, "linesCreated"),
 				fileSize: getNumber(value, "fileSize"),
+				expandedText: contentText,
 			}),
 			isError: result.status === "error",
 		};
+	}
+
+	if (name === "delete") {
+		const value = asRecord(result.value);
+		const displayPath = typeof args.path === "string" ? formatDisplayPath(args.path, options.cwd) : undefined;
+		const contentText = formatDelete(args, result, options).trimEnd();
+		return buildReplaySummaryDisplay(
+			"cursor_delete",
+			displayPath ? { path: displayPath } : {},
+			result,
+			contentText,
+			{
+				cursorToolName: "delete",
+				title: "Cursor delete",
+				path: displayPath,
+				summary: result.status === "error" ? undefined : displayPath ? `deleted ${displayPath}` : "deleted file",
+				fileSize: getNumber(value, "fileSize"),
+			},
+		);
+	}
+
+	if (name === "readLints") {
+		const paths = getReadLintPaths(args, result, options);
+		const diagnosticCount = getReadLintDiagnostics(result, options).length;
+		const contentText = formatReadLints(args, result, options).trimEnd();
+		return buildReplaySummaryDisplay(
+			"cursor_read_lints",
+			{ paths, diagnosticCount },
+			result,
+			contentText,
+			{
+				cursorToolName: "readLints",
+				title: "Cursor readLints",
+				summary: result.status === "error" ? undefined : `${diagnosticCount} diagnostic${diagnosticCount === 1 ? "" : "s"}${paths.length > 0 ? ` in ${paths.join(", ")}` : ""}`,
+			},
+		);
+	}
+
+	if (name === "updateTodos") {
+		const todos = getTodoItems(args, result);
+		const totalCount = getTodoTotalCount(args, result, todos);
+		const contentText = formatTodos(args, result, options, "updateTodos").trimEnd();
+		return buildReplaySummaryDisplay(
+			"cursor_update_todos",
+			{ totalCount },
+			result,
+			contentText,
+			{
+				cursorToolName: "updateTodos",
+				title: "Cursor todos",
+				summary: result.status === "error" ? undefined : summarizeTodos(args, result),
+			},
+		);
+	}
+
+	if (name === "createPlan") {
+		const todos = getTodoItems(args, result);
+		const totalCount = getTodoTotalCount(args, result, todos);
+		const contentText = formatTodos(args, result, options, "createPlan").trimEnd();
+		return buildReplaySummaryDisplay(
+			"cursor_create_plan",
+			{ totalCount },
+			result,
+			contentText,
+			{
+				cursorToolName: "createPlan",
+				title: "Cursor plan",
+				summary: result.status === "error" ? undefined : summarizeTodos(args, result),
+			},
+		);
+	}
+
+	if (name === "task") {
+		const description = getTaskDescription(args, result);
+		const contentText = formatTask(args, result, options).trimEnd();
+		const taskText = collectTaskText(result);
+		return buildReplaySummaryDisplay(
+			"cursor_task",
+			{ description: truncateArg(description) },
+			result,
+			contentText,
+			{
+				cursorToolName: "task",
+				title: "Cursor task",
+				summary: result.status === "error" ? undefined : summarizeTask(description, taskText),
+			},
+		);
+	}
+
+	if (name === "generateImage") {
+		const prompt = getString(args, "prompt") ?? getString(args, "description") ?? "image";
+		const contentText = formatGenerateImage(args, result, options).trimEnd();
+		const imagePath = getGenerateImagePath(args, result);
+		const imageDisplayPath = getGenerateImageDisplayPath(args, result, options);
+		return buildReplaySummaryDisplay(
+			"cursor_generate_image",
+			{ prompt: truncateArg(prompt) },
+			result,
+			contentText,
+			{
+				cursorToolName: "generateImage",
+				title: "Cursor generateImage",
+				summary: result.status === "error" ? undefined : imageDisplayPath ? `saved ${imageDisplayPath}` : "image generated",
+				imagePath,
+				imageDisplayPath,
+				imageMimeType: inferImageMimeType(imagePath),
+			},
+		);
+	}
+
+	if (name === "mcp") {
+		const toolName = getString(args, "toolName") ?? "mcp";
+		const contentText = formatMcp(args, result, options).trimEnd();
+		return buildReplaySummaryDisplay(
+			"cursor_mcp",
+			{ toolName: truncateArg(toolName) },
+			result,
+			contentText,
+			{
+				cursorToolName: "mcp",
+				title: "Cursor MCP",
+				summary: result.status === "error" ? undefined : firstNonEmptyLine(contentText) ?? "MCP result captured",
+			},
+		);
 	}
 
 	return buildGenericPiToolDisplay(name, args, result, options);

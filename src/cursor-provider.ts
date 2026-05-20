@@ -925,4 +925,9 @@ export const __testUtils = {
 	resetCursorNativeReplayIdleDisposeMs: () => {
 		cursorNativeReplayIdleDisposeMs = DEFAULT_CURSOR_NATIVE_REPLAY_IDLE_DISPOSE_MS;
 	},
+	async resetPendingCursorNativeRuns(): Promise<void> {
+		for (const run of pendingCursorNativeRuns.values()) {
+			await disposeCursorNativeRun(run);
+		}
+	},
 };

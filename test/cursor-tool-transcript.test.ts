@@ -2,7 +2,12 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildCursorPiToolDisplay, formatCursorToolTranscript, mergeCursorToolCalls } from "../src/cursor-tool-transcript.js";
+import {
+	buildCursorPiToolDisplay,
+	formatCursorToolTranscript,
+	mergeCursorToolCalls,
+	resolveCursorReplayPiToolName,
+} from "../src/cursor-tool-transcript.js";
 
 describe("formatCursorToolTranscript", () => {
 	it("formats Cursor read results as a pi-like read transcript", () => {
@@ -316,6 +321,64 @@ describe("formatCursorToolTranscript", () => {
 
 		expect(transcript).toContain("$ pwd");
 		expect(transcript).toContain("/tmp");
+	});
+
+	it("maps delete, readLints, mcp, and unknown tools to native replay tool names", () => {
+		expect(resolveCursorReplayPiToolName("delete")).toBe("cursor_delete");
+		expect(resolveCursorReplayPiToolName("readLints")).toBe("cursor_read_lints");
+		expect(resolveCursorReplayPiToolName("mcp")).toBe("cursor_mcp");
+		expect(resolveCursorReplayPiToolName("Task")).toBe("cursor_tool");
+	});
+
+	it("builds native pi display data for Cursor delete, readLints, mcp, and unknown tools", () => {
+		const deleteDisplay = buildCursorPiToolDisplay(
+			{
+				name: "delete",
+				args: { path: "/workspace/tmp.txt" },
+				result: { status: "success", value: { fileSize: 12 } },
+			},
+			{ cwd: "/workspace" },
+		);
+		const readLintsDisplay = buildCursorPiToolDisplay(
+			{
+			name: "readLints",
+			args: { paths: ["/workspace/src/index.ts"] },
+			result: {
+				status: "success",
+				value: {
+					fileDiagnostics: [
+						{
+							path: "src/index.ts",
+							diagnostics: [{ severity: "error", message: "Expected semicolon", source: "ts" }],
+						},
+					],
+				},
+			},
+		},
+			{ cwd: "/workspace" },
+		);
+		const mcpDisplay = buildCursorPiToolDisplay({
+			name: "mcp",
+			args: { toolName: "ListMcpResources", server: "github" },
+			result: {
+				status: "success",
+				value: { isError: false, content: [{ type: "text", text: "resource-a\nresource-b" }] },
+			},
+		});
+		const unknownDisplay = buildCursorPiToolDisplay({
+			name: "WebFetch",
+			args: { url: "https://example.com" },
+			result: { status: "success", value: { title: "Example" } },
+		});
+
+		expect(deleteDisplay.toolName).toBe("cursor_delete");
+		expect(deleteDisplay.args.path).toBe("tmp.txt");
+		expect(readLintsDisplay.toolName).toBe("cursor_read_lints");
+		expect(readLintsDisplay.result.content[0].text).toContain("src/index.ts: error ts: Expected semicolon");
+		expect(mcpDisplay.toolName).toBe("cursor_mcp");
+		expect(mcpDisplay.result.content[0].text).toContain("resource-a");
+		expect(unknownDisplay.toolName).toBe("cursor_tool");
+		expect(unknownDisplay.args.__cursorToolLabel).toBe("WebFetch");
 	});
 
 	it("bounds large Cursor read output", () => {

@@ -267,7 +267,7 @@ Cursor SDK local agents load MCP servers from Cursor setting sources and inline 
 
 ### Cursor native tool cards conflict with another extension
 
-Cursor native replay is a UI enhancement for interactive TTY sessions. If another extension already owns `read`, `bash`, `ls`, `cursor_edit`, or `cursor_write`, this extension skips only the conflicting native replay wrapper and uses the scrubbed Cursor activity transcript for that tool instead. To disable Cursor native replay registration entirely, start pi with:
+Cursor native replay is a UI enhancement for interactive TTY sessions. If another extension already owns a replay tool name (`read`, `bash`, `ls`, `grep`, `find`, `cursor_edit`, `cursor_write`, `cursor_delete`, `cursor_read_lints`, `cursor_mcp`, or `cursor_tool`), this extension skips only the conflicting native replay wrapper and uses the scrubbed Cursor activity transcript for that tool instead. To disable Cursor native replay registration entirely, start pi with:
 
 ```bash
 PI_CURSOR_NATIVE_TOOL_DISPLAY=0 pi --model cursor/composer-2.5

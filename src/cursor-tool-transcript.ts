@@ -98,10 +98,64 @@ function normalizeToolName(name: string): string {
 		case "search":
 			return "grep";
 		case "file_search":
+		case "glob_file_search":
 			return "glob";
+		case "codebase_search":
+		case "semantic_search":
+		case "ripgrep":
+			return "grep";
+		case "web_search":
+		case "run_terminal_command":
+			return "shell";
+		case "apply_patch":
+		case "search_replace":
+			return "edit";
 		default:
 			return normalized || "unknown";
 	}
+}
+
+/** Pi tool name used for native replay registration and TUI cards. */
+export function resolveCursorReplayPiToolName(normalizedName: string): string {
+	switch (normalizedName) {
+		case "read":
+			return "read";
+		case "shell":
+			return "bash";
+		case "ls":
+			return "ls";
+		case "grep":
+			return "grep";
+		case "glob":
+			return "find";
+		case "edit":
+			return "cursor_edit";
+		case "write":
+			return "cursor_write";
+		case "delete":
+			return "cursor_delete";
+		case "readLints":
+			return "cursor_read_lints";
+		case "mcp":
+			return "cursor_mcp";
+		default:
+			return "cursor_tool";
+	}
+}
+
+export interface CursorReplayToolDetails {
+	cursorToolName: string;
+	path?: string;
+	mcpToolName?: string;
+	linesAdded?: number;
+	linesRemoved?: number;
+	linesCreated?: number;
+	fileSize?: number;
+	diffString?: string;
+}
+
+function withCursorToolLabel(args: Record<string, unknown>, normalizedName: string): Record<string, unknown> {
+	return { ...args, __cursorToolLabel: normalizedName };
 }
 
 function normalizeResult(result: unknown): NormalizedResult {
@@ -571,13 +625,19 @@ function textToolResult(text: string, details?: unknown): PiToolDisplayResult {
 	return { content: [{ type: "text", text }], details };
 }
 
-function buildGenericPiToolDisplay(name: string, args: Record<string, unknown>, result: NormalizedResult, options: TranscriptOptions): CursorPiToolDisplay {
-	const isError = result.status === "error";
+function buildTranscriptReplayPiToolDisplay(
+	normalizedName: string,
+	args: Record<string, unknown>,
+	result: NormalizedResult,
+	options: TranscriptOptions,
+	body: string,
+	details: CursorReplayToolDetails,
+): CursorPiToolDisplay {
 	return {
-		toolName: name,
-		args,
-		result: textToolResult(isError ? formatError(result.error) : limitText(stringifyUnknown(result.value), options)),
-		isError,
+		toolName: resolveCursorReplayPiToolName(normalizedName),
+		args: withCursorToolLabel(args, normalizedName),
+		result: textToolResult(body, details),
+		isError: result.status === "error",
 	};
 }
 
@@ -677,7 +737,89 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 		};
 	}
 
-	return buildGenericPiToolDisplay(name, args, result, options);
+	if (name === "delete") {
+		const displayArgs = normalizeEditWriteDisplayArgs(args, options);
+		const path = typeof displayArgs.path === "string" ? displayArgs.path : undefined;
+		const value = asRecord(result.value);
+		const fileSize = getNumber(value, "fileSize");
+		const body =
+			result.status === "error"
+				? formatError(result.error)
+				: fileSize !== undefined
+					? `Deleted ${fileSize} bytes`
+					: stringifyUnknown(result.value);
+		return buildTranscriptReplayPiToolDisplay(name, displayArgs, result, options, body, {
+			cursorToolName: "delete",
+			path,
+			fileSize,
+		});
+	}
+
+	if (name === "readLints") {
+		const paths = Array.isArray(args.paths)
+			? args.paths.filter((entry): entry is string => typeof entry === "string").map((entry) => formatDisplayPath(entry, options.cwd))
+			: [];
+		const value = asRecord(result.value);
+		const files = getArray(value, "fileDiagnostics") ?? [];
+		let diagnosticCount = 0;
+		for (const file of files) {
+			const fileRecord = asRecord(file);
+			diagnosticCount += getArray(fileRecord, "diagnostics")?.length ?? 0;
+		}
+		const body =
+			result.status === "error"
+				? formatError(result.error)
+				: limitText(
+						files
+							.flatMap((file) => {
+								const fileRecord = asRecord(file);
+								const pathValue = getString(fileRecord, "path");
+								const pathLabel = pathValue ? formatDisplayPath(pathValue, options.cwd) : "unknown";
+								const diagnostics = getArray(fileRecord, "diagnostics") ?? [];
+								return diagnostics.map((diagnostic) => {
+									const diagnosticRecord = asRecord(diagnostic);
+									const severity = getString(diagnosticRecord, "severity") ?? "diagnostic";
+									const message = getString(diagnosticRecord, "message") ?? "";
+									const source = getString(diagnosticRecord, "source");
+									return `${pathLabel}: ${severity}${source ? ` ${source}` : ""}: ${message}`;
+								});
+							})
+							.join("\n") || stringifyUnknown(result.value),
+						options,
+					);
+		return buildTranscriptReplayPiToolDisplay(name, args, result, options, body, {
+			cursorToolName: "readLints",
+			path: paths.join(" "),
+		});
+	}
+
+	if (name === "mcp") {
+		const mcpToolName = typeof args.toolName === "string" ? args.toolName : "mcp";
+		const value = asRecord(result.value);
+		const isError = getBoolean(value, "isError");
+		const content = getArray(value, "content") ?? [];
+		const text = content
+			.map((entry) => getString(asRecord(entry), "text"))
+			.filter((entry): entry is string => Boolean(entry))
+			.join("\n");
+		const body =
+			result.status === "error"
+				? formatError(result.error)
+				: limitText(`${isError ? "[tool error]\n" : ""}${text || stringifyUnknown(result.value)}`, options);
+		return buildTranscriptReplayPiToolDisplay(name, args, result, options, body, {
+			cursorToolName: "mcp",
+			mcpToolName,
+		});
+	}
+
+	const body =
+		result.status === "error"
+			? formatError(result.error)
+			: limitText(
+					`${Object.keys(args).length > 0 ? `${stringifyUnknown(args)}\n\n` : ""}${stringifyUnknown(result.value)}`.trim(),
+					options,
+				);
+	return buildTranscriptReplayPiToolDisplay(name, args, result, options, body, { cursorToolName: name });
 }
 
 export function mergeCursorToolCalls(startedToolCall: unknown, completedToolCall: unknown): unknown {

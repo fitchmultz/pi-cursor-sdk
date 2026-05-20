@@ -193,11 +193,12 @@ const cursorModelItems: ModelListItem[] = [
 ];
 
 describe("streamCursor", () => {
-	beforeEach(() => {
+	beforeEach(async () => {
 		vi.clearAllMocks();
 		delete process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY;
 		delete process.env.PI_CURSOR_REGISTER_NATIVE_TOOLS;
 		delete process.env.PI_CURSOR_SETTING_SOURCES;
+		await cursorProviderTestUtils.resetPendingCursorNativeRuns();
 		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
 		cursorProviderTestUtils.resetCursorNativeReplayIdleDisposeMs();
 		nativeToolDisplayTestUtils.reset();
@@ -652,7 +653,7 @@ describe("streamCursor", () => {
 		expect(toolResult.content[0].text).toContain("+1 -1");
 
 		await expect(cursorEditTool!.execute("not-recorded", { path: "src/index.ts" }, undefined, undefined, {})).rejects.toThrow(
-			"replay-only tool does not execute file mutations",
+			"This replay-only tool does not execute operations directly",
 		);
 
 		resolveRun({ id: "run-1", status: "finished", result: "Done." });

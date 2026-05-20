@@ -16,7 +16,8 @@ export TERM="${TERM:-xterm-256color}"
 export COLUMNS="${COLUMNS:-120}"
 export LINES="${LINES:-40}"
 
-cd /workspace
+REPO_DIR="${PI_REPO_DIR:-/workspace}"
+cd "${REPO_DIR}"
 CAPTURE_FILE="${CAPTURE_DIR}/${LABEL}.txt"
 SESSION_FILE=""
 

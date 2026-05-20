@@ -1,5 +1,7 @@
 import {
 	createBashToolDefinition,
+	createFindToolDefinition,
+	createGrepToolDefinition,
 	createLsToolDefinition,
 	createReadToolDefinition,
 	type ExtensionAPI,
@@ -10,7 +12,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type, type TSchema } from "typebox";
 import type { CursorPiToolDisplay } from "./cursor-tool-transcript.js";
 
-const NATIVE_CURSOR_TOOL_NAMES = ["read", "bash", "ls", "cursor_edit", "cursor_write"] as const;
+const NATIVE_CURSOR_TOOL_NAMES = ["read", "bash", "ls", "grep", "find", "cursor_edit", "cursor_write"] as const;
 type NativeCursorToolName = (typeof NATIVE_CURSOR_TOOL_NAMES)[number];
 const NATIVE_CURSOR_TOOL_DISPLAY_ENV = "PI_CURSOR_NATIVE_TOOL_DISPLAY";
 // Registration-only kill switch for users who want transcript fallback without shadowing read/bash/ls.
@@ -242,6 +244,8 @@ function createNativeCursorToolDefinition(toolName: NativeCursorToolName, cwd: s
 	if (toolName === "read") return createReadToolDefinition(cwd) as ToolDefinition<TSchema, unknown, unknown>;
 	if (toolName === "bash") return createBashToolDefinition(cwd) as ToolDefinition<TSchema, unknown, unknown>;
 	if (toolName === "ls") return createLsToolDefinition(cwd) as ToolDefinition<TSchema, unknown, unknown>;
+	if (toolName === "grep") return createGrepToolDefinition(cwd) as ToolDefinition<TSchema, unknown, unknown>;
+	if (toolName === "find") return createFindToolDefinition(cwd) as ToolDefinition<TSchema, unknown, unknown>;
 	return createCursorReplayOnlyToolDefinition(toolName) as ToolDefinition<TSchema, unknown, unknown>;
 }
 

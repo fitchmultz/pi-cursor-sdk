@@ -11,3 +11,4 @@ docs/public-demo-script.md
 
 # CueLoop local/runtime state (do not commit)
 .cueloop/
+.worktrees/

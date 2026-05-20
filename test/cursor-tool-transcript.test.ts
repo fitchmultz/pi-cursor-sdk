@@ -214,6 +214,27 @@ describe("formatCursorToolTranscript", () => {
 		expect(display.result.content[0].text).not.toContain("more lines truncated");
 	});
 
+	it("builds native pi display data for Cursor grep and glob calls", () => {
+		const grepDisplay = buildCursorPiToolDisplay({
+			name: "grep",
+			args: { pattern: "pi-cursor-sdk", path: "/workspace/src" },
+			result: {
+				status: "success",
+				value: { workspaceResults: { src: { type: "content", output: { matches: [{ file: "src/index.ts", lineNumber: 1, line: "export" }] } } } },
+			},
+		});
+		const globDisplay = buildCursorPiToolDisplay({
+			name: "glob",
+			args: { globPattern: "*.ts", targetDirectory: "/workspace/src" },
+			result: { status: "success", value: { files: ["src/index.ts", "src/context.ts"] } },
+		});
+
+		expect(grepDisplay.toolName).toBe("grep");
+		expect(grepDisplay.args).toEqual({ pattern: "pi-cursor-sdk", path: "src" });
+		expect(globDisplay.toolName).toBe("find");
+		expect(globDisplay.args).toEqual({ pattern: "*.ts", path: "src" });
+	});
+
 	it("normalizes bash replay args to pi-like relative commands without SDK timeout metadata", () => {
 		const display = buildCursorPiToolDisplay(
 			{

@@ -207,6 +207,30 @@ function normalizeBashDisplayArgs(args: Record<string, unknown>, options: Transc
 	return { ...rest, command: normalizeBashCommandForDisplay(command, options.cwd) };
 }
 
+function normalizeGrepDisplayArgs(args: Record<string, unknown>, options: TranscriptOptions = {}): Record<string, unknown> {
+	const normalized = { ...args };
+	if (typeof normalized.path === "string") normalized.path = formatDisplayPath(normalized.path, options.cwd);
+	return normalized;
+}
+
+function mapGlobArgsToFindArgs(args: Record<string, unknown>, options: TranscriptOptions = {}): Record<string, unknown> {
+	const pattern =
+		typeof args.globPattern === "string" ? args.globPattern : typeof args.pattern === "string" ? args.pattern : "*";
+	const searchPath =
+		typeof args.targetDirectory === "string"
+			? formatDisplayPath(args.targetDirectory, options.cwd)
+			: typeof args.path === "string"
+				? formatDisplayPath(args.path, options.cwd)
+				: ".";
+	return { pattern, path: searchPath, limit: args.limit };
+}
+
+function normalizeEditWriteDisplayArgs(args: Record<string, unknown>, options: TranscriptOptions = {}): Record<string, unknown> {
+	const path = args.path;
+	if (typeof path !== "string") return args;
+	return { ...args, path: formatDisplayPath(path, options.cwd) };
+}
+
 function resolveFilePath(path: string, cwd = process.cwd()): string {
 	return isAbsolute(path) ? path : resolve(cwd, path);
 }
@@ -595,11 +619,38 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 		};
 	}
 
+	if (name === "grep") {
+		return {
+			toolName: "grep",
+			args: normalizeGrepDisplayArgs(args, options),
+			result: textToolResult(
+				result.status === "error" ? formatError(result.error) : limitText(collectSearchResults(result.value).join("\n") || stringifyUnknown(result.value), options),
+			),
+			isError: result.status === "error",
+		};
+	}
+
+	if (name === "glob") {
+		const value = asRecord(result.value);
+		const files = getArray(value, "files")?.filter((entry): entry is string => typeof entry === "string") ?? [];
+		const limited = limitItems(files, options);
+		const body =
+			limited.omitted > 0
+				? `${limited.items.join("\n")}\n... (${limited.omitted} more files truncated)`
+				: limited.items.join("\n");
+		return {
+			toolName: "find",
+			args: mapGlobArgsToFindArgs(args, options),
+			result: textToolResult(result.status === "error" ? formatError(result.error) : limitText(body || stringifyUnknown(result.value), options)),
+			isError: result.status === "error",
+		};
+	}
+
 	if (name === "edit") {
 		const value = asRecord(result.value);
 		return {
 			toolName: "cursor_edit",
-			args,
+			args: normalizeEditWriteDisplayArgs(args, options),
 			result: textToolResult(formatEdit(args, result, options), {
 				cursorToolName: "edit",
 				path: typeof args.path === "string" ? formatDisplayPath(args.path, options.cwd) : undefined,
@@ -615,7 +666,7 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 		const value = asRecord(result.value);
 		return {
 			toolName: "cursor_write",
-			args,
+			args: normalizeEditWriteDisplayArgs(args, options),
 			result: textToolResult(formatWrite(args, result, options), {
 				cursorToolName: "write",
 				path: typeof args.path === "string" ? formatDisplayPath(args.path, options.cwd) : undefined,

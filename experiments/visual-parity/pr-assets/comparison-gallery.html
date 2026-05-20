@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Cursor composer TUI parity — before / after</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #18181e; color: #e5e5e7; padding: 24px; max-width: 1400px; margin: 0 auto; }
+    h1 { font-size: 1.35rem; }
+    h2 { font-size: 1rem; color: #8abeb7; margin-top: 2rem; }
+    .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+    figure { margin: 0; flex: 1; min-width: 300px; }
+    figcaption { font-size: 0.85rem; color: #808080; margin-bottom: 8px; }
+    img { width: 100%; border: 1px solid #505050; border-radius: 4px; }
+    video { width: 100%; max-width: 960px; border: 1px solid #505050; border-radius: 4px; }
+    code { color: #8abeb7; }
+  </style>
+</head>
+<body>
+  <h1>cursor/composer-2.5 native tool cards — before vs after</h1>
+  <p>Captured from pi session HTML export (same renderer as the interactive TUI). <strong>Before</strong> = <code>main</code> extension code. <strong>After</strong> = this PR.</p>
+  <section><h2>read</h2><div class="row"><figure><figcaption>Before (main)</figcaption><img src="before/screenshots/capture-p1-tool-1.png" alt="before read" /></figure><figure><figcaption>After (parity branch)</figcaption><img src="after/screenshots/after-p1-tool-1.png" alt="after read" /></figure></div></section>
+<section><h2>ls</h2><div class="row"><figure><figcaption>Before (main)</figcaption><img src="before/screenshots/capture-p2-tool-1.png" alt="before ls" /></figure><figure><figcaption>After (parity branch)</figcaption><img src="after/screenshots/after-p2-tool-1.png" alt="after ls" /></figure></div></section>
+<section><h2>bash</h2><div class="row"><figure><figcaption>Before (main)</figcaption><img src="before/screenshots/capture-p3-tool-1.png" alt="before bash" /></figure><figure><figcaption>After (parity branch)</figcaption><img src="after/screenshots/after-p3-tool-1.png" alt="after bash" /></figure></div></section>
+<section><h2>grep</h2><div class="row"><figure><figcaption>Before (main)</figcaption><img src="before/screenshots/capture-p4-full.png" alt="before grep" /></figure><figure><figcaption>After (parity branch)</figcaption><img src="after/screenshots/after-p4-tool-1.png" alt="after grep" /></figure></div></section>
+<section><h2>find</h2><div class="row"><figure><figcaption>Before (main)</figcaption><img src="before/screenshots/capture-p5-tool-1.png" alt="before find" /></figure><figure><figcaption>After (parity branch)</figcaption><img src="after/screenshots/after-p5-tool-1.png" alt="after find" /></figure></div></section>
+<section><h2>write</h2><div class="row"><figure><figcaption>Before (main)</figcaption><img src="before/screenshots/capture-p1-tool-1.png" alt="before write" /></figure><figure><figcaption>After (parity branch)</figcaption><img src="after/screenshots/after-p1-tool-1.png" alt="after write" /></figure></div></section>
+<section><h2>edit</h2><div class="row"><figure><figcaption>Before (main)</figcaption><img src="before/screenshots/capture-p1-tool-1.png" alt="before edit" /></figure><figure><figcaption>After (parity branch)</figcaption><img src="after/screenshots/after-p1-tool-1.png" alt="after edit" /></figure></div></section>
+  <section>
+    <h2>Demo video</h2>
+    <video controls src="demo.mp4"></video>
+  </section>
+</body>
+</html>

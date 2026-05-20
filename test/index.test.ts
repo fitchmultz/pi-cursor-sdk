@@ -142,8 +142,8 @@ describe("extension factory", () => {
 			"cursor-refresh-models",
 			expect.objectContaining({ description: expect.stringContaining("Refresh the live Cursor model catalog") }),
 		);
-		expect(pi.registerTool).toHaveBeenCalledTimes(5);
-		expect(pi._tools.map((tool) => tool.name)).toEqual(["read", "bash", "ls", "cursor_edit", "cursor_write"]);
+		expect(pi.registerTool).toHaveBeenCalledTimes(7);
+		expect(pi._tools.map((tool) => tool.name)).toEqual(["read", "bash", "ls", "grep", "find", "cursor_edit", "cursor_write"]);
 		expect(pi.on).toHaveBeenCalledWith("session_start", expect.any(Function));
 		expect(pi.on).toHaveBeenCalledWith("model_select", expect.any(Function));
 		expect(mockedDiscover).toHaveBeenCalledOnce();
@@ -347,7 +347,7 @@ describe("extension factory", () => {
 			const readTool = pi._tools.find((tool) => tool.name === "read");
 			const result = await readTool.execute("ordinary-read", { path: "session-file.txt" }, undefined, undefined, {});
 
-			expect(pi.registerTool).toHaveBeenCalledTimes(5);
+			expect(pi.registerTool).toHaveBeenCalledTimes(7);
 			expect(result.content).toEqual([{ type: "text", text: "from second cwd\n" }]);
 		} finally {
 			rmSync(firstDir, { recursive: true, force: true });
@@ -424,7 +424,7 @@ describe("extension factory", () => {
 		await extensionFactory(pi as unknown as ExtensionAPI);
 		await runSessionStartHandlers(pi);
 
-		expect(pi._tools.map((tool) => tool.name)).toEqual(["bash", "ls", "cursor_edit", "cursor_write"]);
+		expect(pi._tools.map((tool) => tool.name)).toEqual(["bash", "ls", "grep", "find", "cursor_edit", "cursor_write"]);
 		expect(canRenderCursorToolNatively("read")).toBe(false);
 		expect(canRenderCursorToolNatively("bash")).toBe(true);
 		expect(canRenderCursorToolNatively("cursor_edit")).toBe(true);

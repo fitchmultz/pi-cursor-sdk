@@ -23,7 +23,8 @@ import {
 	canRenderCursorToolNatively,
 	recordCursorNativeToolDisplay,
 } from "../src/cursor-native-tool-display.js";
-import { __testUtils as cursorPiToolBridgeTestUtils } from "../src/cursor-pi-tool-bridge.js";
+import { __testUtils as cursorPiToolBridgeTestUtils, buildCursorPiToolBridgeSnapshot } from "../src/cursor-pi-tool-bridge.js";
+import { CURSOR_ASK_QUESTION_TOOL_NAME } from "../src/cursor-question-tool.js";
 import { __testUtils as cursorSessionCwdTestUtils } from "../src/cursor-session-cwd.js";
 
 const mockedDiscover = vi.mocked(discoverModels);
@@ -32,7 +33,7 @@ const mockedStreamCursor = vi.mocked(streamCursor);
 type DiscoverOptions = Parameters<typeof discoverModels>[0];
 type RegisteredTool = ToolDefinition<TSchema, unknown, unknown>;
 type TestExtensionContext = Pick<ExtensionContext, "cwd" | "hasUI" | "model"> & {
-	ui: Pick<ExtensionContext["ui"], "notify" | "setStatus">;
+	ui: Pick<ExtensionContext["ui"], "notify" | "setStatus" | "select" | "input">;
 	sessionManager: Pick<ExtensionContext["sessionManager"], "getBranch">;
 };
 type TestEventHandler = (event: unknown, ctx: TestExtensionContext) => Promise<void> | void;
@@ -52,7 +53,7 @@ function createTestExtensionContext(ctxOverrides: Partial<TestExtensionContext> 
 		cwd: process.cwd(),
 		hasUI: true,
 		model: { provider: "cursor", api: "cursor-sdk", id: "composer-2.5" } as ExtensionContext["model"],
-		ui: { notify, setStatus: vi.fn() },
+		ui: { notify, setStatus: vi.fn(), select: vi.fn(), input: vi.fn() },
 		sessionManager: { getBranch: vi.fn(() => []) },
 		...ctxOverrides,
 	};
@@ -171,8 +172,9 @@ describe("extension factory", () => {
 			"cursor-refresh-models",
 			expect.objectContaining({ description: expect.stringContaining("Refresh the live Cursor model catalog") }),
 		);
-		expect(pi.registerTool).toHaveBeenCalledTimes(17);
+		expect(pi.registerTool).toHaveBeenCalledTimes(18);
 		expect(pi._tools.map((tool) => tool.name)).toEqual([
+			CURSOR_ASK_QUESTION_TOOL_NAME,
 			"read",
 			"bash",
 			"edit",
@@ -200,6 +202,7 @@ describe("extension factory", () => {
 			"find",
 			"ls",
 			"cursor",
+			CURSOR_ASK_QUESTION_TOOL_NAME,
 		]);
 		expect(pi.on).toHaveBeenCalledWith("session_start", expect.any(Function));
 		expect(pi.on).toHaveBeenCalledWith("model_select", expect.any(Function));
@@ -223,6 +226,7 @@ describe("extension factory", () => {
 		await runSessionStartHandlers(pi);
 
 		expect(pi._activeToolNames()).toContain("cursor");
+		expect(pi._activeToolNames()).toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
 		expect(pi._activeToolNames()).not.toContain("cursor_edit");
 
 		await runModelSelectHandlers(
@@ -232,15 +236,52 @@ describe("extension factory", () => {
 		expect(pi._activeToolNames()).not.toContain("cursor_edit");
 		expect(pi._activeToolNames()).not.toContain("cursor_generate_image");
 		expect(pi._activeToolNames()).not.toContain("cursor");
+		expect(pi._activeToolNames()).not.toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
 		expect(pi._activeToolNames()).toContain("read");
 
 		await runModelSelectHandlers(pi, { provider: "cursor", api: "cursor-sdk", id: "composer-2.5" } as ExtensionContext["model"]);
 		expect(pi._activeToolNames()).toContain("cursor");
+		expect(pi._activeToolNames()).toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
 		expect(pi._activeToolNames()).not.toContain("cursor_edit");
 		expect(pi._activeToolNames()).not.toContain("cursor_generate_image");
 	});
 
-	it("registers Cursor pi tool bridge state without mutating active tools", async () => {
+	it("asks Cursor questions through pi UI selection", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
+		mockedDiscover.mockResolvedValueOnce([]);
+		const pi = createMockPi();
+		await extensionFactory(pi as unknown as ExtensionAPI);
+		await runSessionStartHandlers(pi);
+
+		const select = vi.fn().mockResolvedValue("Web app");
+		const input = vi.fn();
+		const tool = pi._tools.find((candidate) => candidate.name === CURSOR_ASK_QUESTION_TOOL_NAME);
+		const result = await tool!.execute(
+			"question-1",
+			{
+				question: "What kind of calculator should Cursor plan?",
+				options: [
+					{ label: "Web app", value: "web" },
+					{ label: "CLI", value: "cli" },
+				],
+				allowCustom: false,
+			},
+			undefined,
+			undefined,
+			createTestExtensionContext({ ui: { notify: vi.fn(), setStatus: vi.fn(), select, input } }) as never,
+		);
+
+		expect(select).toHaveBeenCalledWith("What kind of calculator should Cursor plan?", ["Web app", "CLI"]);
+		expect(input).not.toHaveBeenCalled();
+		expect(result.content).toEqual([{ type: "text", text: "User answered: Web app" }]);
+		expect(result.details).toMatchObject({
+			uiAvailable: true,
+			cancelled: false,
+			answers: [{ id: "question_1", answer: "Web app", value: "web", cancelled: false }],
+		});
+	});
+
+	it("registers Cursor pi tool bridge state and activates the Cursor question tool", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
 		mockedDiscover.mockResolvedValueOnce([]);
 		const pi = createMockPi();
@@ -250,7 +291,11 @@ describe("extension factory", () => {
 
 		expect(cursorPiToolBridgeTestUtils.getRegisteredBridgeForTests()?.isEnabled()).toBe(true);
 		expect(pi.on).toHaveBeenCalledWith("session_shutdown", expect.any(Function));
-		expect(pi.setActiveTools).not.toHaveBeenCalled();
+		expect(pi._activeToolNames()).toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
+
+		const snapshot = buildCursorPiToolBridgeSnapshot(pi as Pick<ExtensionAPI, "getActiveTools" | "getAllTools">);
+		expect(snapshot.piToolNameToMcpToolName.get(CURSOR_ASK_QUESTION_TOOL_NAME)).toBe("pi__cursor_ask_question");
+		expect(snapshot.tools.find((tool) => tool.piToolName === CURSOR_ASK_QUESTION_TOOL_NAME)?.description).toContain("Ask the user");
 	});
 
 	it("honors PI_CURSOR_PI_TOOL_BRIDGE=0 at the extension registration path", async () => {
@@ -430,7 +475,7 @@ describe("extension factory", () => {
 
 		await extensionFactory(pi as unknown as ExtensionAPI);
 
-		expect(pi.registerTool).not.toHaveBeenCalled();
+		expect(pi._tools.map((tool) => tool.name)).toEqual([CURSOR_ASK_QUESTION_TOOL_NAME]);
 		expect(canRenderCursorToolNatively("grep")).toBe(false);
 	});
 
@@ -469,7 +514,7 @@ describe("extension factory", () => {
 			const readTool = pi._tools.find((tool) => tool.name === "read");
 			const result = await readTool.execute("ordinary-read", { path: "session-file.txt" }, undefined, undefined, {});
 
-			expect(pi.registerTool).toHaveBeenCalledTimes(17);
+			expect(pi.registerTool).toHaveBeenCalledTimes(18);
 			expect(result.content).toEqual([{ type: "text", text: "from second cwd\n" }]);
 		} finally {
 			rmSync(firstDir, { recursive: true, force: true });
@@ -828,7 +873,7 @@ describe("extension factory", () => {
 		await extensionFactory(pi as unknown as ExtensionAPI);
 		await runSessionStartHandlers(pi);
 
-		expect(pi.registerTool).not.toHaveBeenCalled();
+		expect(pi._tools.map((tool) => tool.name)).toEqual([CURSOR_ASK_QUESTION_TOOL_NAME]);
 		expect(canRenderCursorToolNatively("read")).toBe(false);
 	});
 
@@ -840,7 +885,7 @@ describe("extension factory", () => {
 		await extensionFactory(pi as unknown as ExtensionAPI);
 		await runSessionStartHandlers(pi);
 
-		expect(pi.registerTool).not.toHaveBeenCalled();
+		expect(pi._tools.map((tool) => tool.name)).toEqual([CURSOR_ASK_QUESTION_TOOL_NAME]);
 		expect(canRenderCursorToolNatively("read")).toBe(false);
 	});
 
@@ -868,6 +913,7 @@ describe("extension factory", () => {
 		await runSessionStartHandlers(pi);
 
 		expect(pi._tools.map((tool) => tool.name)).toEqual([
+			CURSOR_ASK_QUESTION_TOOL_NAME,
 			"bash",
 			"edit",
 			"write",

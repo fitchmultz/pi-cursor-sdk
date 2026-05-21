@@ -173,6 +173,7 @@ export function buildCursorPrompt(context: Context, options: CursorPromptOptions
 			"Cursor SDK tool boundary:",
 			"You can call only tools actually exposed by Cursor SDK in this run. Pi tool names, replay tool names, and transcript tool names are context only, not callable capabilities.",
 			"If asked to list or exercise available tools, list and exercise Cursor SDK tools only; do not claim access to pi-side tools from the system prompt unless Cursor exposes an equivalent tool that runs.",
+			"Use pi__cursor_ask_question for material choices if exposed.",
 			"Web: use Cursor web/search/browser/MCP or say web search is not configured; do not claim WebSearch/WebFetch unless Cursor executes them.",
 			"Replay: pi may display recorded Cursor tool activity as pi-style cards, but replay is display-only and not a capability to invoke.",
 			"Images: only latest user images are sent; ask to reattach or describe prior images.",

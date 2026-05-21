@@ -542,6 +542,32 @@ describe("extension factory", () => {
 		}
 	});
 
+	it("renders neutral cursor partial calls from activity metadata", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		mockedDiscover.mockResolvedValueOnce([]);
+		const pi = createMockPi();
+		await extensionFactory(pi as unknown as ExtensionAPI);
+		await runSessionStartHandlers(pi);
+		const theme = { fg: (_style: string, text: string) => text, bold: (text: string) => text } as never;
+		const cursorTool = pi._tools.find((tool) => tool.name === "cursor");
+
+		const rendered = [
+			cursorTool.renderCall?.({ activityTitle: "Cursor plan", activitySummary: "2 items", totalCount: 2 }, theme, { isPartial: true } as never)?.render(120).join("\n"),
+			cursorTool.renderCall?.({ activityTitle: "Cursor todos", activitySummary: "1/2 completed, 1 pending", totalCount: 2 }, theme, { isPartial: true } as never)?.render(120).join("\n"),
+			cursorTool.renderCall?.({ activityTitle: "Cursor MCP", activitySummary: "external_search", toolName: "external_search" }, theme, { isPartial: true } as never)?.render(120).join("\n"),
+		]
+			.filter((entry): entry is string => Boolean(entry))
+			.join("\n");
+
+		expect(rendered).toContain("Cursor plan 2 items");
+		expect(rendered).toContain("Cursor todos 1/2 completed, 1 pending");
+		expect(rendered).toContain("Cursor MCP external_search");
+		expect(rendered).not.toContain("Cursor activity");
+		expect(rendered).not.toContain("cursor_create_plan");
+		expect(rendered).not.toContain("cursor_update_todos");
+		expect(rendered).not.toContain("cursor_mcp");
+	});
+
 	it("renders legacy Cursor replay-only tool labels without raw synthetic names", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		mockedDiscover.mockResolvedValueOnce([]);

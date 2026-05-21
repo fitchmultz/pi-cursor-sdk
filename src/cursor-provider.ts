@@ -20,7 +20,7 @@ import { getCursorSessionCwd } from "./cursor-session-cwd.js";
 import { getEffectiveFastForModelId } from "./cursor-state.js";
 import { buildCursorModelSelection } from "./model-discovery.js";
 import { getCheckpointContextWindow, saveCachedContextWindow } from "./context-window-cache.js";
-import { buildCursorPiToolDisplay, formatCursorToolTranscript, mergeCursorToolCalls } from "./cursor-tool-transcript.js";
+import { buildCursorPiToolDisplay, formatCursorToolTranscript, getCursorCreatePlanText, mergeCursorToolCalls } from "./cursor-tool-transcript.js";
 import {
 	canRenderCursorToolNatively,
 	isCursorNativeToolDisplayRuntimeEnabled,
@@ -237,6 +237,7 @@ function getCursorToolName(toolCall: unknown): string {
 	const data = toolCall as Record<string, unknown>;
 	if (typeof data.name === "string") return data.name;
 	if (typeof data.type === "string") return data.type;
+	if (typeof data.toolName === "string") return data.toolName;
 	return "unknown";
 }
 
@@ -287,6 +288,63 @@ function formatCursorToolName(toolCall: unknown): string {
 
 function hasUsableText(value: string | undefined): value is string {
 	return typeof value === "string" && value.trim().length > 0;
+}
+
+interface CursorShellOutputDelta {
+	stream: "stdout" | "stderr";
+	data: string;
+}
+
+interface CursorShellOutputDeltas {
+	stdout: string[];
+	stderr: string[];
+}
+
+function isCursorShellToolCall(toolCall: unknown): boolean {
+	const normalizedName = getCursorToolName(toolCall).replace(/\s+/g, " ").trim().toLowerCase();
+	return normalizedName === "shell" || normalizedName === "run_terminal_cmd" || normalizedName === "terminal" || normalizedName === "bash";
+}
+
+function getCursorShellOutputDelta(update: InteractionUpdate): CursorShellOutputDelta | undefined {
+	if (update.type !== "shell-output-delta") return undefined;
+	const event = getObjectField(update, "event");
+	const eventCase = getObjectField(event, "case");
+	if (eventCase !== "stdout" && eventCase !== "stderr") return undefined;
+	const value = getObjectField(event, "value");
+	const data = getObjectField(value, "data");
+	if (typeof data !== "string" || data.length === 0) return undefined;
+	return { stream: eventCase, data };
+}
+
+function mergeShellOutputDeltasIntoCursorToolCall(toolCall: unknown, deltas: CursorShellOutputDeltas | undefined): unknown {
+	if (!deltas) return toolCall;
+	const stdout = deltas.stdout.join("");
+	const stderr = deltas.stderr.join("");
+	if (!hasUsableText(stdout) && !hasUsableText(stderr)) return toolCall;
+
+	const toolRecord = toolCall && typeof toolCall === "object" && !Array.isArray(toolCall) ? (toolCall as Record<string, unknown>) : undefined;
+	const result = getObjectField(toolRecord, "result");
+	const resultRecord = result && typeof result === "object" && !Array.isArray(result) ? (result as Record<string, unknown>) : undefined;
+	if (!toolRecord || !resultRecord || resultRecord.status !== "success") return toolCall;
+
+	const value = getObjectField(resultRecord, "value");
+	const valueRecord = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+	const completedStdout = getObjectField(valueRecord, "stdout");
+	const completedStderr = getObjectField(valueRecord, "stderr");
+	if (hasUsableText(typeof completedStdout === "string" ? completedStdout : undefined)) return toolCall;
+	if (hasUsableText(typeof completedStderr === "string" ? completedStderr : undefined)) return toolCall;
+
+	return {
+		...toolRecord,
+		result: {
+			...resultRecord,
+			value: {
+				...(valueRecord ?? {}),
+				stdout,
+				stderr,
+			},
+		},
+	};
 }
 
 function scrubDisplayValue(value: unknown, apiKey?: string): unknown {
@@ -511,8 +569,25 @@ function trimAlreadyEmittedCursorText(text: string, emittedText: string): string
 	if (!text || !emittedText) return text;
 	if (text === emittedText) return "";
 	if (text.startsWith(emittedText)) return text.slice(emittedText.length);
+	if (emittedText.endsWith(text)) return "";
 	if (text.trim() === emittedText.trim()) return "";
+	if (emittedText.trim().endsWith(text.trim())) return "";
 	return text;
+}
+
+function selectCursorFinalText(
+	resultText: unknown,
+	textDeltas: readonly string[],
+	emittedText: string,
+	fallbackText?: string,
+): string {
+	const candidates = [typeof resultText === "string" ? resultText : undefined, fallbackText, textDeltas.join("")];
+	for (const candidate of candidates) {
+		if (!hasUsableText(candidate)) continue;
+		const trimmedCandidate = trimAlreadyEmittedCursorText(candidate, emittedText);
+		if (hasUsableText(trimmedCandidate)) return trimmedCandidate;
+	}
+	return "";
 }
 
 function takeCursorNativePromptInputTokens(run: CursorLiveRun): number {
@@ -650,8 +725,9 @@ async function emitCursorNativeRunNextTurn(
 		}
 		if (run.done) {
 			let outputText = closeCursorNativeTurnBlocks(turn);
-			if (!outputText) {
-				outputText += await emitTextDeltas(stream, partial, splitTextIntoReplayDeltas(run.finalText ?? run.textDeltas.join("")));
+			const finalText = trimAlreadyEmittedCursorText(run.finalText ?? run.textDeltas.join(""), run.emittedText);
+			if (finalText) {
+				outputText += await emitTextDeltas(stream, partial, splitTextIntoReplayDeltas(finalText));
 			}
 			setApproximateUsage(partial, takeCursorNativePromptInputTokens(run), outputText);
 			partial.stopReason = "stop";
@@ -797,7 +873,11 @@ export function streamCursor(
 				}
 			}
 			const startedToolCalls = new Map<string, unknown>();
+			const activeShellCallIds = new Set<string>();
+			const ambiguousShellOutputCallIds = new Set<string>();
+			const shellOutputDeltasByCallId = new Map<string, CursorShellOutputDeltas>();
 			const completedToolIdentities = new Set<string>();
+			let cursorPlanTextCandidate: string | undefined;
 			const completedStartedToolFingerprints = new Set<string>();
 			const completedFallbackToolFingerprints = new Set<string>();
 
@@ -907,53 +987,64 @@ export function streamCursor(
 				return getToolFingerprint({ toolName: getCursorToolName(toolCall), args: getObjectField(toolCall, "args") });
 			};
 
+			const clearStartedToolCall = (callId: string): void => {
+				startedToolCalls.delete(callId);
+				activeShellCallIds.delete(callId);
+				ambiguousShellOutputCallIds.delete(callId);
+			};
+
+			const takeShellOutputDeltas = (callId: string): CursorShellOutputDeltas | undefined => {
+				const deltas = shellOutputDeltasByCallId.get(callId);
+				shellOutputDeltasByCallId.delete(callId);
+				return deltas;
+			};
+
+			const appendShellOutputDelta = (delta: CursorShellOutputDelta): void => {
+				if (activeShellCallIds.size !== 1) {
+					for (const activeCallId of activeShellCallIds) {
+						ambiguousShellOutputCallIds.add(activeCallId);
+						shellOutputDeltasByCallId.delete(activeCallId);
+					}
+					return;
+				}
+				const [callId] = activeShellCallIds;
+				if (!callId || ambiguousShellOutputCallIds.has(callId)) return;
+				let deltas = shellOutputDeltasByCallId.get(callId);
+				if (!deltas) {
+					deltas = { stdout: [], stderr: [] };
+					shellOutputDeltasByCallId.set(callId, deltas);
+				}
+				deltas[delta.stream].push(delta.data);
+			};
+
 			const removeStartedToolCallForStep = (toolCall: unknown, stepId: unknown): string | undefined => {
-				if (typeof stepId === "string" && startedToolCalls.delete(stepId)) return stepId;
+				if (typeof stepId === "string" && startedToolCalls.has(stepId)) {
+					clearStartedToolCall(stepId);
+					return stepId;
+				}
 				const fingerprint = getStartedToolCallFingerprint(toolCall);
 				for (const [callId, startedToolCall] of startedToolCalls) {
 					if (getStartedToolCallFingerprint(startedToolCall) !== fingerprint) continue;
-					startedToolCalls.delete(callId);
+					clearStartedToolCall(callId);
 					return callId;
 				}
 				return undefined;
 			};
 
-			const handleIncompleteStartedToolCalls = (): void => {
-				if (startedToolCalls.size === 0) return;
-				for (const toolCall of startedToolCalls.values()) {
-					if (liveRun?.bridgeRun?.isBridgeMcpToolCall(toolCall)) continue;
-					const incompleteToolCall = {
-						...(toolCall && typeof toolCall === "object" && !Array.isArray(toolCall) ? (toolCall as Record<string, unknown>) : {}),
-						name: getCursorToolName(toolCall),
-						result: {
-							status: "error",
-							error: "Cursor SDK emitted tool-call-started but no tool-call-completed event.",
-						},
-					};
-					const display = buildCursorPiToolDisplay(incompleteToolCall, { cwd });
-					if (useNativeToolReplay && liveRun && canRenderCursorToolNatively(display.toolName)) {
-						nativeToolReplayStarted = true;
-						const id = `${nativeReplayId}-tool-${++nativeToolDisplayCounter}`;
-						queueCursorNativeEvent(liveRun, {
-							type: "tool",
-							tool: {
-								...display,
-								id,
-								args: scrubDisplayValue(display.args, resolvedApiKey) as Record<string, unknown>,
-								result: scrubDisplayValue(display.result, resolvedApiKey) as typeof display.result,
-							},
-						});
-					} else {
-						emitCursorToolTrace(`Cursor tool started without a completion event: ${formatCursorToolName(toolCall)}`);
-					}
-				}
+			const discardIncompleteStartedToolCalls = (): void => {
 				startedToolCalls.clear();
+				activeShellCallIds.clear();
+				ambiguousShellOutputCallIds.clear();
+				shellOutputDeltasByCallId.clear();
 			};
 
 			const handleCompletedToolCall = (
 				toolCall: unknown,
 				options: { identity?: string; source?: "started" | "fallback" } = {},
 			): void => {
+				const planText = getCursorCreatePlanText(toolCall);
+				if (planText) cursorPlanTextCandidate = scrubSensitiveText(planText, resolvedApiKey);
+
 				if (liveRun?.bridgeRun?.isBridgeMcpToolCall(toolCall)) {
 					if (options.identity) completedToolIdentities.add(options.identity);
 					return;
@@ -1020,15 +1111,20 @@ export function streamCursor(
 				} else if (update.type === "tool-call-started") {
 					if (!liveRun?.bridgeRun?.isBridgeMcpToolCall(update.toolCall)) {
 						startedToolCalls.set(update.callId, update.toolCall);
+						if (isCursorShellToolCall(update.toolCall)) activeShellCallIds.add(update.callId);
 					}
 				} else if (update.type === "tool-call-completed") {
 					const mergedToolCall = mergeCursorToolCalls(startedToolCalls.get(update.callId), update.toolCall);
-					startedToolCalls.delete(update.callId);
+					clearStartedToolCall(update.callId);
+					const toolCallWithShellOutput = mergeShellOutputDeltasIntoCursorToolCall(mergedToolCall, takeShellOutputDeltas(update.callId));
 					const identity = typeof update.callId === "string" ? `cursor-tool:${update.callId}` : undefined;
-					handleCompletedToolCall(mergedToolCall, {
+					handleCompletedToolCall(toolCallWithShellOutput, {
 						identity,
 						source: identity ? "started" : "fallback",
 					});
+				} else if (update.type === "shell-output-delta") {
+					const delta = getCursorShellOutputDelta(update);
+					if (delta) appendShellOutputDelta(delta);
 				} else if (update.type === "summary") {
 					const summary = `Cursor summary: ${truncateSingleLine(update.summary)}\n`;
 					if (liveRun) {
@@ -1040,7 +1136,7 @@ export function streamCursor(
 				// Cursor turn-ended usage is intentionally not copied into pi usage: the SDK reports
 				// cumulative internal agent/tool/cache tokens, not the replayable pi prompt context.
 				// partial-tool-call, summary-started, summary-completed, turn-ended,
-				// shell-output-delta, token-delta, step-* are intentionally not surfaced.
+				// token-delta, step-* are intentionally not surfaced.
 			};
 
 			const onStep = (args: { step: unknown }): void => {
@@ -1051,16 +1147,20 @@ export function streamCursor(
 				const toolCall = rawStepToolCall;
 				const stepId = getObjectField(args.step, "id") ?? getObjectField(toolCall, "id") ?? getObjectField(toolCall, "callId");
 				if (toolCall) {
+					const matchedStartedCallId = removeStartedToolCallForStep(toolCall, stepId);
+					const toolCallWithShellOutput = mergeShellOutputDeltasIntoCursorToolCall(
+						toolCall,
+						matchedStartedCallId ? takeShellOutputDeltas(matchedStartedCallId) : undefined,
+					);
 					if (liveRun?.bridgeRun?.isBridgeMcpToolCall(toolCall)) {
-						const matchedStartedCallId = removeStartedToolCallForStep(toolCall, stepId);
 						if (matchedStartedCallId) completedToolIdentities.add(`cursor-tool:${matchedStartedCallId}`);
 						return;
 					}
-					handleCompletedToolCall(toolCall, {
-						identity: typeof stepId === "string" ? `cursor-tool:${stepId}` : undefined,
+					const identityId = typeof stepId === "string" ? stepId : matchedStartedCallId;
+					handleCompletedToolCall(toolCallWithShellOutput, {
+						identity: identityId ? `cursor-tool:${identityId}` : undefined,
 					});
-					const matchedStartedCallId = removeStartedToolCallForStep(toolCall, stepId);
-					if (matchedStartedCallId) completedToolIdentities.add(`cursor-tool:${matchedStartedCallId}`);
+					if (matchedStartedCallId && matchedStartedCallId !== stepId) completedToolIdentities.add(`cursor-tool:${matchedStartedCallId}`);
 				}
 			};
 
@@ -1090,12 +1190,11 @@ export function streamCursor(
 					.wait()
 					.then(async (result) => {
 						if (liveRun.disposed) return;
-						handleIncompleteStartedToolCalls();
+						discardIncompleteStartedToolCalls();
 						await cacheSdkContextWindow(liveRun.agent.agentId, model.id);
 						if (liveRun.disposed) return;
 						liveRun.cancelled = result.status === "cancelled";
-						const finalText = hasUsableText(result.result) ? result.result : liveRun.textDeltas.join("");
-						liveRun.finalText = trimAlreadyEmittedCursorText(finalText, liveRun.emittedText);
+						liveRun.finalText = selectCursorFinalText(result.result, liveRun.textDeltas, liveRun.emittedText, cursorPlanTextCandidate);
 						liveRun.done = true;
 						notifyCursorNativeRun(liveRun);
 						scheduleCursorNativeRunIdleDispose(liveRun);
@@ -1121,7 +1220,7 @@ export function streamCursor(
 			}
 
 			const result = await run.wait();
-			handleIncompleteStartedToolCalls();
+			discardIncompleteStartedToolCalls();
 			await cacheSdkContextWindow(agent.agentId, model.id);
 
 			// Close any open thinking/activity trace, then use the final run result only when
@@ -1132,7 +1231,8 @@ export function streamCursor(
 				partial.stopReason = "aborted";
 				stream.push({ type: "error", reason: "aborted", error: partial });
 			} else {
-				const finalText = flushText(textDeltas.length === 0 && hasUsableText(result.result) ? [result.result] : []);
+				const finalCursorText = selectCursorFinalText(result.result, textDeltas, textDeltas.join(""), cursorPlanTextCandidate);
+				const finalText = flushText(hasUsableText(finalCursorText) ? [finalCursorText] : []);
 				setApproximateUsage(partial, promptInputTokens, finalText);
 				stream.push({ type: "done", reason: "stop", message: partial });
 			}

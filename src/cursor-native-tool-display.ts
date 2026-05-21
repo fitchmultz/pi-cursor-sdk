@@ -341,7 +341,17 @@ function formatCursorReplayFilePreview(
 	return visible.join("\n");
 }
 
+function getCursorReplayActivityTitle(toolName: CursorReplayToolName, args: Record<string, unknown> | undefined): string {
+	if (toolName === CURSOR_REPLAY_ACTIVITY_TOOL_NAME && typeof args?.activityTitle === "string" && args.activityTitle.trim()) {
+		return args.activityTitle.trim();
+	}
+	return getCursorReplayToolLabel(toolName);
+}
+
 function getCursorReplayCallSummary(toolName: CursorReplayToolName, args: Record<string, unknown> | undefined): string | undefined {
+	const activitySummary = typeof args?.activitySummary === "string" && args.activitySummary.trim() ? args.activitySummary.trim() : undefined;
+	if (toolName === CURSOR_REPLAY_ACTIVITY_TOOL_NAME && activitySummary) return activitySummary;
+
 	const path = typeof args?.path === "string" ? args.path : undefined;
 	const description = typeof args?.description === "string" ? args.description : undefined;
 	const prompt = typeof args?.prompt === "string" ? args.prompt : undefined;
@@ -375,7 +385,7 @@ function renderCursorReplayCall(
 	isPartial: boolean,
 ): Text {
 	if (!isPartial) return new Text("", 0, 0);
-	let text = theme.fg("toolTitle", theme.bold(`${getCursorReplayToolLabel(toolName)} `));
+	let text = theme.fg("toolTitle", theme.bold(`${getCursorReplayActivityTitle(toolName, args)} `));
 	const summary = getCursorReplayCallSummary(toolName, args);
 	if (summary) text += theme.fg("accent", summary);
 	return new Text(text.trimEnd(), 0, 0);

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CURSOR_REPLAY_ACTIVITY_TOOL_NAME, isExcludedFromCursorBridgeExposure } from "../src/cursor-tool-names.js";
-import { buildCursorPiToolDisplay, formatCursorToolTranscript, mergeCursorToolCalls } from "../src/cursor-tool-transcript.js";
+import { buildCursorPiToolDisplay, formatCursorToolTranscript, getCursorCreatePlanText, mergeCursorToolCalls } from "../src/cursor-tool-transcript.js";
 
 describe("formatCursorToolTranscript", () => {
 	it("defines shared bridge exclusions for neutral and legacy Cursor replay activity names", () => {
@@ -25,6 +25,27 @@ describe("formatCursorToolTranscript", () => {
 		});
 
 		expect(transcript).toBe("read README.md\n\n# pi-cursor-sdk\n\nA pi provider extension\n");
+	});
+
+	it("formats Cursor createPlan args as visible plan text", () => {
+		const plan = "Plan:\n1. Build a calculator UI.\n2. Add arithmetic operations.";
+		const toolCall = {
+			name: "createPlan",
+			args: { plan },
+			result: { status: "success", value: {} },
+		};
+
+		expect(getCursorCreatePlanText(toolCall)).toBe(plan);
+		expect(formatCursorToolTranscript(toolCall)).toBe(`createPlan\n\n${plan}\n`);
+
+		const display = buildCursorPiToolDisplay(toolCall);
+		expect(display).toMatchObject({
+			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
+			args: { totalCount: 0, activityTitle: "Cursor plan", activitySummary: "Plan:" },
+			result: { details: { cursorToolName: "createPlan", title: "Cursor plan", summary: "Plan:" } },
+			isError: false,
+		});
+		expect(display.result.content[0].text).toContain("Build a calculator UI");
 	});
 
 	it("labels empty Cursor read result local file previews", () => {
@@ -222,7 +243,7 @@ describe("formatCursorToolTranscript", () => {
 
 		expect(editDisplay).toMatchObject({
 			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-			args: { path: ".tool-demo-temp.txt" },
+			args: { path: ".tool-demo-temp.txt", activityTitle: "Cursor edit", activitySummary: ".tool-demo-temp.txt" },
 			result: { details: { cursorToolName: "edit", title: "Cursor edit", summary: ".tool-demo-temp.txt", diff: "--- a/.tool-demo-temp.txt\n+++ b/.tool-demo-temp.txt" } },
 			isError: false,
 		});
@@ -255,13 +276,13 @@ describe("formatCursorToolTranscript", () => {
 		});
 		expect(notebookDisplay).toMatchObject({
 			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-			args: { path: "notebooks/demo.ipynb", cellId: "cell-1" },
+			args: { path: "notebooks/demo.ipynb", cellId: "cell-1", activityTitle: "Cursor edit", activitySummary: "notebooks/demo.ipynb" },
 			result: { details: { cursorToolName: "edit", title: "Cursor edit", diff: "--- a/notebooks/demo.ipynb\n+++ b/notebooks/demo.ipynb" } },
 			isError: false,
 		});
 		expect(genericNotebookEditDisplay).toMatchObject({
 			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-			args: { path: "notebooks/demo.ipynb", oldText: "before", newText: "after" },
+			args: { path: "notebooks/demo.ipynb", oldText: "before", newText: "after", activityTitle: "Cursor edit", activitySummary: "notebooks/demo.ipynb" },
 			result: { details: { cursorToolName: "edit", title: "Cursor edit", diff: "--- a/notebooks/demo.ipynb\n+++ b/notebooks/demo.ipynb" } },
 			isError: false,
 		});
@@ -296,6 +317,20 @@ describe("formatCursorToolTranscript", () => {
 				},
 			},
 		});
+		const planDisplay = buildCursorPiToolDisplay({
+			name: "createPlan",
+			args: {},
+			result: {
+				status: "success",
+				value: {
+					todos: [
+						{ content: "Draft plan", status: "completed" },
+						{ content: "Review plan", status: "pending" },
+					],
+					totalCount: 2,
+				},
+			},
+		});
 		const taskDisplay = buildCursorPiToolDisplay({
 			name: "task",
 			args: { description: "Quick ls demo subagent" },
@@ -323,14 +358,14 @@ describe("formatCursorToolTranscript", () => {
 
 		expect(lintsDisplay).toMatchObject({
 			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-			args: { paths: ["src/index.ts"], diagnosticCount: 0 },
+			args: { paths: ["src/index.ts"], diagnosticCount: 0, activityTitle: "Cursor diagnostics", activitySummary: "0 diagnostics in src/index.ts" },
 			result: { details: { cursorToolName: "readLints", title: "Cursor diagnostics", summary: "0 diagnostics in src/index.ts" } },
 			isError: false,
 		});
 		expect(lintsDisplay.result.content[0].text).toContain("No diagnostics in src/index.ts");
 		expect(todosDisplay).toMatchObject({
 			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-			args: { totalCount: 2 },
+			args: { totalCount: 2, activityTitle: "Cursor todos", activitySummary: "1/2 completed, 1 pending" },
 			result: {
 				details: {
 					cursorToolName: "updateTodos",
@@ -340,17 +375,29 @@ describe("formatCursorToolTranscript", () => {
 			},
 			isError: false,
 		});
+		expect(planDisplay).toMatchObject({
+			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
+			args: { totalCount: 2, activityTitle: "Cursor plan", activitySummary: "1/2 completed, 1 pending" },
+			result: {
+				details: {
+					cursorToolName: "createPlan",
+					title: "Cursor plan",
+					summary: "1/2 completed, 1 pending",
+				},
+			},
+			isError: false,
+		});
 		expect(todosDisplay.result.content[0].text).toContain("✓ Run Read/Grep/Glob (completed)");
 		expect(taskDisplay).toMatchObject({
 			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-			args: { description: "Quick ls demo subagent" },
+			args: { description: "Quick ls demo subagent", activityTitle: "Cursor task", activitySummary: "Quick ls demo subagent: $ ls src | head -5" },
 			result: { details: { cursorToolName: "task", title: "Cursor task", summary: "Quick ls demo subagent: $ ls src | head -5" } },
 			isError: false,
 		});
 		expect(taskDisplay.result.content[0].text).toContain("context.ts");
 		expect(mcpDisplay).toMatchObject({
 			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-			args: { toolName: "git" },
+			args: { toolName: "git", activityTitle: "Cursor MCP", activitySummary: "git" },
 			result: { details: { cursorToolName: "mcp", title: "Cursor MCP", summary: "git" } },
 			isError: false,
 		});
@@ -358,7 +405,7 @@ describe("formatCursorToolTranscript", () => {
 		expect(mcpDisplay.result.content[0].text).not.toContain('"content"');
 		expect(deleteDisplay).toMatchObject({
 			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-			args: { path: ".debug/delete-me.txt" },
+			args: { path: ".debug/delete-me.txt", activityTitle: "Cursor delete", activitySummary: ".debug/delete-me.txt" },
 			result: { details: { cursorToolName: "delete", title: "Cursor delete", path: ".debug/delete-me.txt" } },
 			isError: false,
 		});
@@ -380,7 +427,7 @@ describe("formatCursorToolTranscript", () => {
 
 		expect(display).toMatchObject({
 			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-			args: { prompt: "Small badge" },
+			args: { prompt: "Small badge", activityTitle: "Cursor image generation", activitySummary: "/Users/example/.cursor/projects/repo/assets/badge.png" },
 			result: {
 				details: {
 					cursorToolName: "generateImage",
@@ -429,7 +476,7 @@ describe("formatCursorToolTranscript", () => {
 			{ cwd: "/repo" },
 		);
 
-		expect(editDisplay.args).toEqual({ path: "src/index.ts" });
+		expect(editDisplay.args).toEqual({ path: "src/index.ts", activityTitle: "Cursor edit", activitySummary: "src/index.ts" });
 		expect(nativeEditDisplay.args).toEqual({ path: "src/index.ts", edits: [{ oldText: "old", newText: "new" }] });
 		expect(writeDisplay.args).toEqual({ path: "new.txt" });
 		expect(editDisplay.toolName).toBe(CURSOR_REPLAY_ACTIVITY_TOOL_NAME);

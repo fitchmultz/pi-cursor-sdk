@@ -15,7 +15,7 @@ import {
 import { isExcludedFromCursorBridgeExposure } from "./cursor-tool-names.js";
 
 const CURSOR_PI_TOOL_BRIDGE_ENV = "PI_CURSOR_PI_TOOL_BRIDGE";
-const CURSOR_PI_TOOL_BRIDGE_BUILTINS_ENV = "PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS";
+const CURSOR_PI_TOOL_BRIDGE_BUILTINS_ENV = "PI_CURSOR_EXPOSE_BUILTIN_TOOLS";
 const LOOPBACK_HOST = "127.0.0.1";
 const MCP_SERVER_NAME = "pi_tools";
 const MCP_ENDPOINT_ROOT = "/cursor-pi-tool-bridge";

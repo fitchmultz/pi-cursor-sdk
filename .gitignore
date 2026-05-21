@@ -13,6 +13,10 @@ docs/public-demo-script.md
 # Debug Mode local/runtime logs (do not commit)
 .debug/
 
+# Cursor local/runtime logs and prompt exports (do not commit)
+.cursor/debug-*.log
+prompt-exports/
+
 # Cursor native replay smoke-test artifacts (do not commit)
 .pi-tool-demo/
 

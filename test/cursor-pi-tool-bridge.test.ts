@@ -62,7 +62,7 @@ async function connectClient(url: string) {
 describe("cursor pi tool bridge flags and snapshots", () => {
 	afterEach(async () => {
 		delete process.env.PI_CURSOR_PI_TOOL_BRIDGE;
-		delete process.env.PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS;
+		delete process.env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS;
 		await __testUtils.resetRegisteredBridgeForTests();
 	});
 
@@ -76,11 +76,11 @@ describe("cursor pi tool bridge flags and snapshots", () => {
 		expect(resolveCursorPiToolBridgeEnabled({ PI_CURSOR_PI_TOOL_BRIDGE: "true" })).toBe(true);
 
 		expect(resolveCursorPiToolBridgeBuiltinsEnabled({})).toBe(false);
-		expect(resolveCursorPiToolBridgeBuiltinsEnabled({ PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS: "0" })).toBe(false);
-		expect(resolveCursorPiToolBridgeBuiltinsEnabled({ PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS: "off" })).toBe(false);
-		expect(resolveCursorPiToolBridgeBuiltinsEnabled({ PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS: "unexpected" })).toBe(false);
-		expect(resolveCursorPiToolBridgeBuiltinsEnabled({ PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS: "1" })).toBe(true);
-		expect(resolveCursorPiToolBridgeBuiltinsEnabled({ PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS: "true" })).toBe(true);
+		expect(resolveCursorPiToolBridgeBuiltinsEnabled({ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "0" })).toBe(false);
+		expect(resolveCursorPiToolBridgeBuiltinsEnabled({ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "off" })).toBe(false);
+		expect(resolveCursorPiToolBridgeBuiltinsEnabled({ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "unexpected" })).toBe(false);
+		expect(resolveCursorPiToolBridgeBuiltinsEnabled({ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" })).toBe(true);
+		expect(resolveCursorPiToolBridgeBuiltinsEnabled({ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "true" })).toBe(true);
 	});
 
 	it("maps only active pi tools, includes dynamic tools, and excludes internal Cursor replay names", () => {
@@ -167,7 +167,7 @@ describe("cursor pi tool bridge flags and snapshots", () => {
 describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 	afterEach(async () => {
 		delete process.env.PI_CURSOR_PI_TOOL_BRIDGE;
-		delete process.env.PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS;
+		delete process.env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS;
 		await __testUtils.resetRegisteredBridgeForTests();
 	});
 
@@ -196,7 +196,7 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 	it("binds a tokenized per-run MCP endpoint only on 127.0.0.1 and cleans it up", async () => {
 		const registry = __testUtils.createRegistry(
 			createMockPi({ active: ["read"], tools: [createToolInfo("read", "Read files")] }) as Pick<ExtensionAPI, "getActiveTools" | "getAllTools">,
-			{ PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS: "1" },
+			{ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" },
 		);
 		const run = await registry.createRun();
 
@@ -226,7 +226,7 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 	it("queues MCP calls, maps them back to real pi tool names, and resolves from pi tool results", async () => {
 		const registry = __testUtils.createRegistry(
 			createMockPi({ active: ["read"], tools: [createToolInfo("read", "Read files", Type.Object({ path: Type.String() }))] }) as Pick<ExtensionAPI, "getActiveTools" | "getAllTools">,
-			{ PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS: "1" },
+			{ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" },
 		);
 		const run = await registry.createRun();
 		const { client, transport } = await connectClient(run.mcpServers!.pi_tools.url);
@@ -276,7 +276,7 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 				if (event === "session_shutdown") sessionShutdownHandlers.push(handler);
 			}),
 		};
-		process.env.PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS = "1";
+		process.env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS = "1";
 		const bridge = registerCursorPiToolBridge(pi as unknown as ExtensionAPI);
 		const run = await bridge.createRun();
 		const { client, transport } = await connectClient(run.mcpServers!.pi_tools.url);
@@ -299,7 +299,7 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 	it("rejects pending MCP waits on abort/dispose", async () => {
 		const registry = __testUtils.createRegistry(
 			createMockPi({ active: ["read"], tools: [createToolInfo("read")] }) as Pick<ExtensionAPI, "getActiveTools" | "getAllTools">,
-			{ PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS: "1" },
+			{ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" },
 		);
 		const run = await registry.createRun();
 		const { client, transport } = await connectClient(run.mcpServers!.pi_tools.url);

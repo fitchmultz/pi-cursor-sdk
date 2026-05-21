@@ -239,7 +239,7 @@ describe("streamCursor", () => {
 		delete process.env.PI_CURSOR_REGISTER_NATIVE_TOOLS;
 		delete process.env.PI_CURSOR_SETTING_SOURCES;
 		delete process.env.PI_CURSOR_PI_TOOL_BRIDGE;
-		delete process.env.PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS;
+		delete process.env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS;
 		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
 		cursorProviderTestUtils.resetCursorNativeReplayIdleDisposeMs();
 		cursorSessionCwdTestUtils.reset();
@@ -2921,7 +2921,7 @@ describe("streamCursor", () => {
 
 		await cursorPiToolBridgeTestUtils.resetRegisteredBridgeForTests();
 		vi.clearAllMocks();
-		process.env.PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS = "1";
+		process.env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS = "1";
 		registerBridgeForProviderTest({
 			active: ["read", "bash"],
 			tools: [
@@ -2965,7 +2965,7 @@ describe("streamCursor", () => {
 
 		await cursorPiToolBridgeTestUtils.resetRegisteredBridgeForTests();
 		delete process.env.PI_CURSOR_PI_TOOL_BRIDGE;
-		delete process.env.PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS;
+		delete process.env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS;
 		vi.clearAllMocks();
 		registerBridgeForProviderTest({
 			active: ["cursor", "cursor_edit"],
@@ -2983,7 +2983,7 @@ describe("streamCursor", () => {
 
 	it("emits bridge MCP requests as real pi tool calls and resumes the same Cursor run after tool results", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
-		process.env.PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS = "1";
+		process.env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS = "1";
 		const registeredTools: RegisteredTool[] = [];
 		await registerNativeToolDisplayForTest(registeredTools);
 		registerBridgeForProviderTest({
@@ -3153,7 +3153,7 @@ describe("streamCursor", () => {
 	});
 
 	it("rejects pending bridge MCP waits and clears live runs on idle disposal", async () => {
-		process.env.PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS = "1";
+		process.env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS = "1";
 		cursorProviderTestUtils.setCursorNativeReplayIdleDisposeMs(1);
 		registerBridgeForProviderTest({
 			active: ["read"],

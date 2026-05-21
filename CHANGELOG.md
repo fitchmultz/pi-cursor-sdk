@@ -4,7 +4,15 @@
 
 ### Added
 
+- Add the default-on local pi MCP tool bridge, which exposes bridgeable active pi tools to local Cursor agents while executing calls through pi's normal tool path.
+- Add `cursor_ask_question` through the bridge so Cursor can ask users through pi UI as `pi__cursor_ask_question`.
+- Add `PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1` for opting in to overlapping built-in pi tools that are hidden from the Cursor bridge by default.
+- Add Cursor SDK MCP tool-call timeout overrides via `PI_CURSOR_MCP_TOOL_TIMEOUT_SECONDS` and `PI_CURSOR_MCP_TOOL_TIMEOUT_MS` for long-running local MCP tools, including bridged pi tools.
 - Replay Cursor SDK `grep` activity through native pi `grep` cards and `glob` activity through native pi `find` cards, so search activity matches built-in tool UX in interactive TTY sessions.
+
+### Changed
+
+- Load Cursor setting sources with `PI_CURSOR_SETTING_SOURCES=all` by default while filtering direct Cursor SDK startup logs so settings, rules, plugins, and configured Cursor MCP servers are available without corrupting pi's TUI.
 
 ### Fixed
 

@@ -6,12 +6,16 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 
 ## Repository map
 
-- `src/index.ts` registers the pi extension, provider, fallback warnings, and Cursor fast controls.
+- `src/index.ts` registers the pi extension, provider, fallback warnings, Cursor fast controls, native replay wrappers, question tool, and pi tool bridge hooks.
 - `src/model-discovery.ts` discovers Cursor models, builds pi model metadata, stores per-model metadata, and defines fallback models.
-- `src/cursor-provider.ts` streams through local `@cursor/sdk` agents and sanitizes Cursor SDK errors.
+- `src/cursor-provider.ts` streams through local `@cursor/sdk` agents, injects local MCP bridge config, resumes live bridge runs, and sanitizes Cursor SDK errors.
+- `src/cursor-pi-tool-bridge.ts` exposes active pi tools to local Cursor agents through a per-run loopback MCP bridge.
+- `src/cursor-question-tool.ts` owns the bridge-exposed `cursor_ask_question` pi UI tool.
+- `src/cursor-native-tool-display.ts`, `src/cursor-tool-transcript.ts`, and `src/cursor-tool-names.ts` handle display-only Cursor native tool replay and transcript labels.
+- `src/cursor-mcp-timeout-override.ts` owns Cursor SDK MCP call timeout overrides for long-running local MCP tools.
 - `src/cursor-state.ts` owns `/cursor-fast`, `--cursor-fast`, `--cursor-no-fast`, session state, and global fast defaults.
 - `src/context.ts`, `src/context-window-cache.ts`, and `src/bundled-context-windows.ts` handle prompt conversion and context-window caches.
-- `test/**/*.test.ts` contains Vitest coverage for provider registration, discovery, state, context, and streaming behavior.
+- `test/**/*.test.ts` contains Vitest coverage for provider registration, discovery, state, context, bridge, replay, and streaming behavior.
 - `docs/cursor-model-ux-spec.md` is the maintainer design source of truth for Cursor model UX. Keep it aligned with behavior changes.
 
 ## Operating rules
@@ -28,6 +32,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - Install dependencies: `npm install`
 - Run tests: `npm test`
 - Typecheck: `npm run typecheck`
+- Package-readiness check: `npm pack --dry-run`
 - Watch tests while developing: `npm run test:watch`
 - Local development run, requires a Cursor key: `CURSOR_API_KEY="your-key" pi -e . --model cursor/composer-2.5`
 - List Cursor models, requires pi and usually a Cursor key: `pi --list-models cursor`
@@ -49,6 +54,7 @@ Done means:
 
 - The intended behavior or documentation change is complete.
 - `npm test` and `npm run typecheck` pass, unless the change is docs-only and the user asked for minimal validation.
+- `npm pack --dry-run` passes when package metadata, publishable docs, dependencies, or ignored artifacts change.
 - Related README/docs/tests are updated when behavior, commands, user-visible model IDs, flags, or troubleshooting change.
 - No secrets, local API keys, or noisy local state are added.
 

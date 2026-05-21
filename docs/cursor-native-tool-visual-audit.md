@@ -72,8 +72,8 @@ Example invocation shape:
 ```bash
 node /tmp/pi-visual-harness/run-pi-visual.mjs \
   --label after-shell-nonzero \
-  --ext /Users/mitchfultz/Projects/AI/pi-cursor-sdk \
-  --cwd /Users/mitchfultz/Projects/AI/pi-semantic-code-intelligence \
+  --ext /path/to/pi-cursor-sdk \
+  --cwd /path/to/test-workspace \
   --prompt "Run \`printf 'cursor-shell-stderr\\n' >&2; exit 7\` using only the shell/terminal tool. Do not use read, grep, glob, find, ls, edit, or write. Print the command result exactly, then stop." \
   --wait-ms 30000 \
   --out-dir /tmp/pi-visual-harness/review-current
@@ -88,8 +88,8 @@ Use a clean worktree for the baseline and the active worktree for the candidate 
 ```bash
 BASE=/tmp/pi-cursor-visual-review
 BEFORE_WT=$BASE/before-main
-AFTER_WT=/Users/mitchfultz/Projects/AI/pi-cursor-sdk
-TARGET=/Users/mitchfultz/Projects/AI/pi-semantic-code-intelligence
+AFTER_WT=/path/to/pi-cursor-sdk
+TARGET=/path/to/test-workspace
 
 rm -rf "$BASE"
 git fetch origin main
@@ -134,7 +134,7 @@ For each visual claim, inspect the JSONL path written by the runner. Confirm at 
 
 For local pi MCP bridge claims, also confirm:
 
-- Bridged calls appear as the real pi tool name (for example `read`), not the MCP bridge name (for example `pi__read`).
+- Bridged calls appear as the real pi tool name (for example `sem_reindex`), not the MCP bridge name (for example `pi__sem_reindex`; or `read`/`pi__read` when overlapping built-ins are explicitly exposed).
 - The JSONL has no second Cursor MCP replay card for the same bridged call.
 - Non-bridge Cursor MCP activity, if present, still renders as neutral Cursor activity instead of being suppressed.
 

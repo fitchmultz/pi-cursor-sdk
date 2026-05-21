@@ -1,7 +1,9 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 // Mock @cursor/sdk before importing the module under test
 vi.mock("@cursor/sdk", () => {
@@ -34,6 +36,7 @@ vi.mock("@cursor/sdk", () => {
 import { Agent, createAgentPlatform } from "@cursor/sdk";
 import { __testUtils as cursorSessionCwdTestUtils } from "../src/cursor-session-cwd.js";
 import { streamCursor, __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
+import { registerCursorPiToolBridge, __testUtils as cursorPiToolBridgeTestUtils } from "../src/cursor-pi-tool-bridge.js";
 import { __testUtils as modelDiscoveryTestUtils } from "../src/model-discovery.js";
 import { __testUtils as contextWindowCacheTestUtils } from "../src/context-window-cache.js";
 import { __testUtils as nativeToolDisplayTestUtils, registerCursorNativeToolDisplay } from "../src/cursor-native-tool-display.js";
@@ -50,13 +53,43 @@ type RegisteredTool = ToolDefinition<TSchema, unknown, unknown>;
 type TestExtensionContext = Pick<ExtensionContext, "cwd" | "hasUI"> & { ui: Pick<ExtensionContext["ui"], "notify"> };
 type TestEventHandler = (event: unknown, ctx: TestExtensionContext) => Promise<void> | void;
 
-function createBuiltinToolInfo(name: string): ToolInfo {
+function createBuiltinToolInfo(name: string, parameters: TSchema = Type.Object({}), description = ""): ToolInfo {
 	return {
 		name,
-		description: "",
-		parameters: Type.Object({}),
+		description,
+		parameters,
 		sourceInfo: { source: "builtin", path: `<builtin:${name}>`, scope: "temporary", origin: "top-level" },
 	};
+}
+
+function createBridgeToolInfo(name: string, parameters: TSchema = Type.Object({}), description = `${name} tool`): ToolInfo {
+	return {
+		name,
+		description,
+		parameters,
+		sourceInfo: { source: "test", path: `test:${name}`, scope: "temporary", origin: "top-level" },
+	};
+}
+
+function registerBridgeForProviderTest(options: { active: string[]; tools: ToolInfo[] }) {
+	const sessionShutdownHandlers: Array<(event: { reason: string }) => Promise<void> | void> = [];
+	const pi = {
+		getActiveTools: vi.fn(() => [...options.active]),
+		getAllTools: vi.fn(() => [...options.tools]),
+		setActiveTools: vi.fn(),
+		on: vi.fn((event: string, handler: (event: { reason: string }) => Promise<void> | void) => {
+			if (event === "session_shutdown") sessionShutdownHandlers.push(handler);
+		}),
+	};
+	registerCursorPiToolBridge(pi as unknown as ExtensionAPI);
+	return { pi, sessionShutdownHandlers };
+}
+
+async function connectMcpClient(url: string) {
+	const client = new Client({ name: "pi-cursor-sdk-provider-test", version: "1.0.0" });
+	const transport = new StreamableHTTPClientTransport(new URL(url));
+	await client.connect(transport);
+	return { client, transport };
 }
 
 function makeModel(id = "test-model"): Model<"cursor-sdk"> {
@@ -199,11 +232,14 @@ const cursorModelItems: ModelListItem[] = [
 ];
 
 describe("streamCursor", () => {
-	beforeEach(() => {
+	beforeEach(async () => {
+		await cursorPiToolBridgeTestUtils.resetRegisteredBridgeForTests();
 		vi.clearAllMocks();
 		delete process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY;
 		delete process.env.PI_CURSOR_REGISTER_NATIVE_TOOLS;
 		delete process.env.PI_CURSOR_SETTING_SOURCES;
+		delete process.env.PI_CURSOR_PI_TOOL_BRIDGE;
+		delete process.env.PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS;
 		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
 		cursorProviderTestUtils.resetCursorNativeReplayIdleDisposeMs();
 		cursorSessionCwdTestUtils.reset();
@@ -634,10 +670,10 @@ describe("streamCursor", () => {
 		const replayEvents = await replayEventsPromise;
 		const replayDone = replayEvents.find((e: any) => e.type === "done") as any;
 		const mcpToolCall = replayDone.message.content.find((block: any) => block.type === "toolCall");
-		const mcpTool = registeredTools.find((tool) => tool.name === "cursor_mcp");
+		const mcpTool = registeredTools.find((tool) => tool.name === "cursor");
 
 		expect(replayDone.reason).toBe("toolUse");
-		expect(mcpToolCall.name).toBe("cursor_mcp");
+		expect(mcpToolCall.name).toBe("cursor");
 		await expect(mcpTool!.execute(mcpToolCall.id, mcpToolCall.arguments, undefined, undefined, {})).rejects.toThrow(
 			"Cursor SDK emitted tool-call-started but no tool-call-completed event",
 		);
@@ -649,7 +685,7 @@ describe("streamCursor", () => {
 			{
 				role: "toolResult",
 				toolCallId: mcpToolCall.id,
-				toolName: "cursor_mcp",
+				toolName: "cursor",
 				content: [{ type: "text", text: "Cursor SDK emitted tool-call-started but no tool-call-completed event" }],
 				isError: true,
 				timestamp: 3,
@@ -750,90 +786,300 @@ describe("streamCursor", () => {
 		await collectEvents(streamCursor(makeModel(), replayContext, { apiKey: "test-key" }));
 	});
 
-	it("replays Cursor edit activity through a replay-only native tool", async () => {
+	it("replays path-only Cursor edit activity through neutral recorded cursor output without pi edit validation", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		const registeredTools: RegisteredTool[] = [];
 		await registerNativeToolDisplayForTest(registeredTools);
+		const dir = mkdtempSync(join(tmpdir(), "cursor-edit-replay-"));
+		const targetPath = join(dir, ".tool-demo-temp.txt");
+		writeFileSync(targetPath, "old\n");
 
-		let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
-		const runWait = vi.fn(
-			() =>
-				new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
-					resolveRun = resolve;
-				}),
-		);
-		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: (a: unknown) => void }) => {
-			opts.onDelta({ update: { type: "tool-call-started", toolCall: { type: "edit", args: { path: "src/index.ts" } }, callId: "c1" } });
-			opts.onDelta({
-				update: {
-					type: "tool-call-completed",
-					toolCall: {
-						type: "edit",
-						args: { path: "src/index.ts" },
-						result: {
-							status: "success",
-							value: { linesAdded: 1, linesRemoved: 1, diffString: "--- a/src/index.ts\n+++ b/src/index.ts" },
+		try {
+			let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
+			const runWait = vi.fn(
+				() =>
+					new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
+						resolveRun = resolve;
+					}),
+			);
+			const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: (a: unknown) => void }) => {
+				opts.onDelta({ update: { type: "tool-call-started", toolCall: { type: "edit", args: { path: targetPath } }, callId: "c1" } });
+				opts.onDelta({
+					update: {
+						type: "tool-call-completed",
+						toolCall: {
+							type: "edit",
+							args: { path: targetPath },
+							result: {
+								status: "success",
+								value: { linesAdded: 1, linesRemoved: 1, diffString: `--- a/${targetPath}\n+++ b/${targetPath}` },
+							},
 						},
+						callId: "c1",
 					},
-					callId: "c1",
-				},
+				});
+				return {
+					id: "run-1",
+					agentId: "agent-1",
+					status: "running",
+					wait: runWait,
+					cancel: vi.fn(),
+					supports: () => true,
+					unsupportedReason: () => undefined,
+				};
 			});
-			return {
-				id: "run-1",
+			mockedCreate.mockResolvedValue({
 				agentId: "agent-1",
-				status: "running",
-				wait: runWait,
-				cancel: vi.fn(),
-				supports: () => true,
-				unsupportedReason: () => undefined,
-			};
-		});
-		mockedCreate.mockResolvedValue({
-			agentId: "agent-1",
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
+				send: mockSend,
+				[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+			});
 
-		const firstEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
-		const firstDone = firstEvents.find((e: any) => e.type === "done") as any;
-		const toolCall = firstDone.message.content.find((block: any) => block.type === "toolCall");
+			const firstEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+			const firstDone = firstEvents.find((e: any) => e.type === "done") as any;
+			const toolCall = firstDone.message.content.find((block: any) => block.type === "toolCall");
 
-		expect(toolCall.name).toBe("cursor_edit");
-		expect(toolCall.arguments).toEqual({ path: "src/index.ts" });
-		const cursorEditTool = registeredTools.find((tool) => tool.name === "cursor_edit");
-		expect(cursorEditTool).toBeDefined();
-		const toolResult = await cursorEditTool!.execute(toolCall.id, toolCall.arguments, undefined, undefined, {});
-		expect(toolResult).toMatchObject({
-			content: [{ type: "text", text: expect.stringContaining("edit src/index.ts") }],
-			details: { cursorToolName: "edit" },
-			terminate: false,
-		});
-		expect(toolResult.content[0].text).toContain("+1 -1");
+			expect(toolCall.name).toBe("cursor");
+			expect(toolCall.arguments).toEqual({ path: targetPath });
+			expect(toolCall.arguments).not.toHaveProperty("edits");
+			const cursorTool = registeredTools.find((tool) => tool.name === "cursor");
+			expect(cursorTool).toBeDefined();
+			const toolResult = await cursorTool!.execute(toolCall.id, toolCall.arguments, undefined, undefined, {});
+			expect(toolResult).toMatchObject({
+				content: [{ type: "text", text: expect.stringContaining(`edit ${targetPath}`) }],
+				details: { cursorToolName: "edit", title: "Cursor edit", summary: targetPath, diff: `--- a/${targetPath}\n+++ b/${targetPath}` },
+				terminate: false,
+			});
+			expect(toolResult.content[0].text).not.toContain("Validation failed for tool \"edit\"");
+			expect(readFileSync(targetPath, "utf-8")).toBe("old\n");
 
-		await expect(cursorEditTool!.execute("not-recorded", { path: "src/index.ts" }, undefined, undefined, {})).rejects.toThrow(
-			"replay-only tool does not execute file mutations",
-		);
+			const editTool = registeredTools.find((tool) => tool.name === "edit");
+			expect(editTool).toBeDefined();
+			await expect(
+				editTool!.execute(
+					"cursor-replay-1-1-tool-999",
+					{ path: targetPath, edits: [{ oldText: "old\n", newText: "mutated\n" }] },
+					undefined,
+					undefined,
+					{},
+				),
+			).rejects.toThrow("replay-only call does not execute file mutations");
+			expect(readFileSync(targetPath, "utf-8")).toBe("old\n");
 
-		resolveRun({ id: "run-1", status: "finished", result: "Done." });
+			resolveRun({ id: "run-1", status: "finished", result: "Done." });
 
-		const replayContext = makeContext();
-		replayContext.messages = [
-			...replayContext.messages,
-			firstDone.message,
-			{
-				role: "toolResult",
-				toolCallId: toolCall.id,
-				toolName: "cursor_edit",
-				content: toolResult.content,
-				details: toolResult.details,
-				isError: false,
-				timestamp: 2,
-			},
-		];
-		const replayEvents = await collectEvents(streamCursor(makeModel(), replayContext, { apiKey: "test-key" }));
-		const replayText = replayEvents.filter((e: any) => e.type === "text_delta").map((e: any) => e.delta).join("");
-		expect(replayText).toBe("Done.");
-		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
+			const replayContext = makeContext();
+			replayContext.messages = [
+				...replayContext.messages,
+				firstDone.message,
+				{
+					role: "toolResult",
+					toolCallId: toolCall.id,
+					toolName: "cursor",
+					content: toolResult.content,
+					details: toolResult.details,
+					isError: false,
+					timestamp: 2,
+				},
+			];
+			const replayEvents = await collectEvents(streamCursor(makeModel(), replayContext, { apiKey: "test-key" }));
+			const replayText = replayEvents.filter((e: any) => e.type === "text_delta").map((e: any) => e.delta).join("");
+			expect(replayText).toBe("Done.");
+			expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("replays Cursor StrReplace through schema-valid recorded edit output without mutating files", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		const registeredTools: RegisteredTool[] = [];
+		await registerNativeToolDisplayForTest(registeredTools);
+		const dir = mkdtempSync(join(tmpdir(), "cursor-strreplace-replay-"));
+		const targetPath = join(dir, "recorded-edit.txt");
+		writeFileSync(targetPath, "old\n");
+
+		try {
+			let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
+			const runWait = vi.fn(
+				() =>
+					new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
+						resolveRun = resolve;
+					}),
+			);
+			const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: (a: unknown) => void }) => {
+				opts.onDelta({
+					update: {
+						type: "tool-call-started",
+						toolCall: { type: "StrReplace", args: { path: targetPath, old_string: "old\n", new_string: "new\n" } },
+						callId: "c1",
+					},
+				});
+				opts.onDelta({
+					update: {
+						type: "tool-call-completed",
+						toolCall: {
+							type: "StrReplace",
+							args: { path: targetPath, old_string: "old\n", new_string: "new\n" },
+							result: {
+								status: "success",
+								value: { linesAdded: 1, linesRemoved: 1, diffString: `--- a/${targetPath}\n+++ b/${targetPath}\n@@ -1 +1 @@\n-old\n+new` },
+							},
+						},
+						callId: "c1",
+					},
+				});
+				return {
+					id: "run-1",
+					agentId: "agent-1",
+					status: "running",
+					wait: runWait,
+					cancel: vi.fn(),
+					supports: () => true,
+					unsupportedReason: () => undefined,
+				};
+			});
+			mockedCreate.mockResolvedValue({
+				agentId: "agent-1",
+				send: mockSend,
+				[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+			});
+
+			const firstEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+			const firstDone = firstEvents.find((e: any) => e.type === "done") as any;
+			const toolCall = firstDone.message.content.find((block: any) => block.type === "toolCall");
+
+			expect(toolCall.name).toBe("edit");
+			expect(toolCall.arguments).toEqual({ path: targetPath, edits: [{ oldText: "old\n", newText: "new\n" }] });
+			const editTool = registeredTools.find((tool) => tool.name === "edit");
+			expect(editTool).toBeDefined();
+			const toolResult = await editTool!.execute(toolCall.id, toolCall.arguments, undefined, undefined, {});
+			expect(toolResult).toMatchObject({
+				content: [{ type: "text", text: expect.stringContaining(`edit ${targetPath}`) }],
+				details: { cursorToolName: "edit", diff: expect.stringContaining("-old") },
+				terminate: false,
+			});
+			expect(readFileSync(targetPath, "utf-8")).toBe("old\n");
+
+			resolveRun({ id: "run-1", status: "finished", result: "Done." });
+
+			const replayContext = makeContext();
+			replayContext.messages = [
+				...replayContext.messages,
+				firstDone.message,
+				{
+					role: "toolResult",
+					toolCallId: toolCall.id,
+					toolName: "edit",
+					content: toolResult.content,
+					details: toolResult.details,
+					isError: false,
+					timestamp: 2,
+				},
+			];
+			const replayEvents = await collectEvents(streamCursor(makeModel(), replayContext, { apiKey: "test-key" }));
+			const replayText = replayEvents.filter((e: any) => e.type === "text_delta").map((e: any) => e.delta).join("");
+			expect(replayText).toBe("Done.");
+			expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("replays Cursor write activity through native-looking recorded write output without mutating files", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		const registeredTools: RegisteredTool[] = [];
+		await registerNativeToolDisplayForTest(registeredTools);
+		const dir = mkdtempSync(join(tmpdir(), "cursor-write-replay-"));
+		const targetPath = join(dir, "recorded-write.txt");
+		writeFileSync(targetPath, "old\n");
+
+		try {
+			let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
+			const runWait = vi.fn(
+				() =>
+					new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
+						resolveRun = resolve;
+					}),
+			);
+			const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: (a: unknown) => void }) => {
+				opts.onDelta({
+					update: { type: "tool-call-started", toolCall: { type: "write", args: { path: targetPath, content: "new\n" } }, callId: "c1" },
+				});
+				opts.onDelta({
+					update: {
+						type: "tool-call-completed",
+						toolCall: {
+							type: "write",
+							args: { path: targetPath, content: "new\n" },
+							result: {
+								status: "success",
+								value: { linesCreated: 1, fileSize: 4, fileContentAfterWrite: "new\n" },
+							},
+						},
+						callId: "c1",
+					},
+				});
+				return {
+					id: "run-1",
+					agentId: "agent-1",
+					status: "running",
+					wait: runWait,
+					cancel: vi.fn(),
+					supports: () => true,
+					unsupportedReason: () => undefined,
+				};
+			});
+			mockedCreate.mockResolvedValue({
+				agentId: "agent-1",
+				send: mockSend,
+				[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+			});
+
+			const firstEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+			const firstDone = firstEvents.find((e: any) => e.type === "done") as any;
+			const toolCall = firstDone.message.content.find((block: any) => block.type === "toolCall");
+
+			expect(toolCall.name).toBe("write");
+			expect(toolCall.name).not.toContain("cursor");
+			expect(toolCall.arguments).toEqual({ path: targetPath, content: "new\n" });
+			const writeTool = registeredTools.find((tool) => tool.name === "write");
+			expect(writeTool).toBeDefined();
+			const toolResult = await writeTool!.execute(toolCall.id, toolCall.arguments, undefined, undefined, {});
+			expect(toolResult).toMatchObject({
+				content: [{ type: "text", text: expect.stringContaining(`write ${targetPath}`) }],
+				details: { cursorToolName: "write", fileContentAfterWrite: "new\n" },
+				terminate: false,
+			});
+			expect(readFileSync(targetPath, "utf-8")).toBe("old\n");
+
+			await expect(
+				writeTool!.execute("cursor-replay-1-1-tool-998", { path: targetPath, content: "mutated\n" }, undefined, undefined, {}),
+			).rejects.toThrow("replay-only call does not execute file mutations");
+			expect(readFileSync(targetPath, "utf-8")).toBe("old\n");
+
+			resolveRun({ id: "run-1", status: "finished", result: "Done." });
+
+			const replayContext = makeContext();
+			replayContext.messages = [
+				...replayContext.messages,
+				firstDone.message,
+				{
+					role: "toolResult",
+					toolCallId: toolCall.id,
+					toolName: "write",
+					content: toolResult.content,
+					details: toolResult.details,
+					isError: false,
+					timestamp: 2,
+				},
+			];
+			const replayEvents = await collectEvents(streamCursor(makeModel(), replayContext, { apiKey: "test-key" }));
+			const replayText = replayEvents.filter((e: any) => e.type === "text_delta").map((e: any) => e.delta).join("");
+			expect(replayText).toBe("Done.");
+			expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("disposes abandoned native replay runs after the idle timeout", async () => {
@@ -2040,6 +2286,343 @@ describe("streamCursor", () => {
 				process.env.PI_CODING_AGENT_DIR = originalAgentDir;
 			}
 			rmSync(tmpAgentDir, { recursive: true, force: true });
+		}
+	});
+
+	it("passes bridge MCP servers into Agent.create when active pi tools are exposed", async () => {
+		registerBridgeForProviderTest({
+			active: ["sem_reindex"],
+			tools: [createBridgeToolInfo("sem_reindex", Type.Object({ target: Type.String() }), "Reindex semantic cache")],
+		});
+		const mockSend = vi.fn().mockResolvedValue({
+			id: "run-1",
+			agentId: "agent-1",
+			status: "finished",
+			wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished", result: "ok" }),
+			cancel: vi.fn(),
+			supports: () => true,
+			unsupportedReason: () => undefined,
+		});
+		mockedCreate.mockResolvedValue({
+			agentId: "agent-1",
+			send: mockSend,
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+
+		await collectEvents(streamCursor(makeModel("composer-2"), makeContext(), { apiKey: "test-key" }));
+
+		const createOptions = mockedCreate.mock.calls[0]?.[0] as any;
+		expect(createOptions.local).toEqual({ cwd: process.cwd(), settingSources: ["all"] });
+		expect(createOptions.mcpServers?.pi_tools?.type).toBe("http");
+		const url = new URL(createOptions.mcpServers.pi_tools.url);
+		expect(url.hostname).toBe("127.0.0.1");
+		expect(url.pathname).toContain("/cursor-pi-tool-bridge/");
+	});
+
+
+	it("omits overlapping pi built-ins from Agent.create by default and exposes them with explicit opt-in", async () => {
+		registerBridgeForProviderTest({
+			active: ["read", "bash"],
+			tools: [
+				createBuiltinToolInfo("read", Type.Object({ path: Type.String() }), "Read files"),
+				createBuiltinToolInfo("bash", Type.Object({ command: Type.String() }), "Run commands"),
+			],
+		});
+		const mockSend = vi.fn().mockResolvedValue({
+			id: "run-1",
+			agentId: "agent-1",
+			status: "finished",
+			wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished", result: "ok" }),
+			cancel: vi.fn(),
+			supports: () => true,
+			unsupportedReason: () => undefined,
+		});
+		mockedCreate.mockResolvedValue({
+			agentId: "agent-1",
+			send: mockSend,
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+
+		await collectEvents(streamCursor(makeModel("composer-2"), makeContext(), { apiKey: "test-key" }));
+		expect((mockedCreate.mock.calls[0]?.[0] as any).mcpServers).toBeUndefined();
+
+		await cursorPiToolBridgeTestUtils.resetRegisteredBridgeForTests();
+		vi.clearAllMocks();
+		process.env.PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS = "1";
+		registerBridgeForProviderTest({
+			active: ["read", "bash"],
+			tools: [
+				createBuiltinToolInfo("read", Type.Object({ path: Type.String() }), "Read files"),
+				createBuiltinToolInfo("bash", Type.Object({ command: Type.String() }), "Run commands"),
+			],
+		});
+		mockedCreate.mockResolvedValue({
+			agentId: "agent-2",
+			send: mockSend,
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+
+		await collectEvents(streamCursor(makeModel("composer-2"), makeContext(), { apiKey: "test-key" }));
+		expect((mockedCreate.mock.calls[0]?.[0] as any).mcpServers?.pi_tools?.type).toBe("http");
+	});
+
+	it("omits bridge MCP servers from Agent.create when disabled or when the active snapshot is empty", async () => {
+		process.env.PI_CURSOR_PI_TOOL_BRIDGE = "0";
+		registerBridgeForProviderTest({
+			active: ["read"],
+			tools: [createBridgeToolInfo("read")],
+		});
+		const mockSend = vi.fn().mockResolvedValue({
+			id: "run-1",
+			agentId: "agent-1",
+			status: "finished",
+			wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
+			cancel: vi.fn(),
+			supports: () => true,
+			unsupportedReason: () => undefined,
+		});
+		mockedCreate.mockResolvedValue({
+			agentId: "agent-1",
+			send: mockSend,
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+
+		await collectEvents(streamCursor(makeModel("composer-2"), makeContext(), { apiKey: "test-key" }));
+		expect((mockedCreate.mock.calls[0]?.[0] as any).mcpServers).toBeUndefined();
+
+		await cursorPiToolBridgeTestUtils.resetRegisteredBridgeForTests();
+		delete process.env.PI_CURSOR_PI_TOOL_BRIDGE;
+		delete process.env.PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS;
+		vi.clearAllMocks();
+		registerBridgeForProviderTest({
+			active: ["cursor", "cursor_edit"],
+			tools: [createBridgeToolInfo("cursor"), createBridgeToolInfo("cursor_edit")],
+		});
+		mockedCreate.mockResolvedValue({
+			agentId: "agent-2",
+			send: mockSend,
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+
+		await collectEvents(streamCursor(makeModel("composer-2"), makeContext(), { apiKey: "test-key" }));
+		expect((mockedCreate.mock.calls[0]?.[0] as any).mcpServers).toBeUndefined();
+	});
+
+	it("emits bridge MCP requests as real pi tool calls and resumes the same Cursor run after tool results", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		process.env.PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS = "1";
+		const registeredTools: RegisteredTool[] = [];
+		await registerNativeToolDisplayForTest(registeredTools);
+		registerBridgeForProviderTest({
+			active: ["read", "bash"],
+			tools: [
+				createBuiltinToolInfo("read", Type.Object({ path: Type.String() }), "Read files"),
+				createBuiltinToolInfo("bash", Type.Object({ command: Type.String() }), "Run commands"),
+			],
+		});
+
+		let onDelta: ((args: { update: any }) => void) | undefined;
+		let onStep: ((args: { step: any }) => void) | undefined;
+		let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
+		const runWait = vi.fn(
+			() =>
+				new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
+					resolveRun = resolve;
+				}),
+		);
+		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: (a: unknown) => void; onStep: (a: unknown) => void }) => {
+			onDelta = opts.onDelta as (args: { update: any }) => void;
+			onStep = opts.onStep as (args: { step: any }) => void;
+			return {
+				id: "run-1",
+				agentId: "agent-1",
+				status: "running",
+				wait: runWait,
+				cancel: vi.fn(),
+				supports: () => true,
+				unsupportedReason: () => undefined,
+			};
+		});
+		mockedCreate.mockResolvedValue({
+			agentId: "agent-1",
+			send: mockSend,
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+
+		const firstEventsPromise = collectEvents(streamCursor(makeModel("composer-2"), makeContext(), { apiKey: "test-key" }));
+		await vi.waitFor(() => expect(mockSend).toHaveBeenCalled());
+		const createOptions = mockedCreate.mock.calls[0]?.[0] as any;
+		const { client, transport } = await connectMcpClient(createOptions.mcpServers.pi_tools.url);
+		try {
+			const readCallPromise = client.callTool({ name: "pi__read", arguments: { path: "README.md" } });
+			const bashCallPromise = client.callTool({ name: "pi__bash", arguments: { command: "pwd" } });
+			onDelta?.({ update: { type: "tool-call-started", callId: "mcp-read", toolCall: { name: "mcp", args: { toolName: "pi__read" } } } });
+			onDelta?.({
+				update: {
+					type: "tool-call-completed",
+					callId: "mcp-read",
+					toolCall: {
+						name: "mcp",
+						args: { toolName: "pi__read" },
+						result: { status: "success", value: { content: "duplicate bridge replay should be suppressed" } },
+					},
+				},
+			});
+			onStep?.({
+				step: {
+					type: "toolCall",
+					id: "mcp-read-step",
+					message: {
+						name: "mcp",
+						args: { toolName: "pi__read" },
+						result: { status: "success", value: { content: "duplicate bridge onStep replay should be suppressed" } },
+					},
+				},
+			});
+			onDelta?.({ update: { type: "tool-call-started", callId: "mcp-bash-start-only", toolCall: { name: "mcp", args: { toolName: "pi__bash" } } } });
+
+			const firstEvents = await firstEventsPromise;
+			const firstDone = firstEvents.find((event: any) => event.type === "done") as any;
+			const toolCalls = firstDone.message.content.filter((block: any) => block.type === "toolCall");
+			const trace = firstEvents.filter((event: any) => event.type === "thinking_delta").map((event: any) => event.delta).join("");
+
+			expect(firstDone.reason).toBe("toolUse");
+			expect(toolCalls.map((toolCall: any) => toolCall.name)).toEqual(["read", "bash"]);
+			expect(toolCalls[0].id).not.toBe(toolCalls[1].id);
+			expect(toolCalls[0].id).toContain("cursor-pi-bridge-");
+			expect(toolCalls[0].arguments).toEqual({ path: "README.md" });
+			expect(toolCalls[1].arguments).toEqual({ command: "pwd" });
+			expect(trace).not.toContain("duplicate bridge replay");
+			expect(trace).not.toContain("duplicate bridge onStep");
+			expect(trace).not.toContain("Cursor tool started without a completion event");
+			expect(nativeToolDisplayTestUtils.nativeToolResultCount()).toBe(0);
+
+			const replayContext = makeContext();
+			replayContext.messages = [
+				...replayContext.messages,
+				firstDone.message,
+				{
+					role: "toolResult",
+					toolCallId: toolCalls[0].id,
+					toolName: "read",
+					content: [{ type: "text", text: "file contents" }],
+					isError: false,
+					timestamp: 2,
+				},
+				{
+					role: "toolResult",
+					toolCallId: toolCalls[1].id,
+					toolName: "bash",
+					content: [{ type: "text", text: "/repo" }],
+					isError: false,
+					timestamp: 3,
+				},
+			];
+
+			const replayEventsPromise = collectEvents(streamCursor(makeModel("composer-2"), replayContext, { apiKey: "test-key" }));
+			await expect(readCallPromise).resolves.toMatchObject({ content: [{ type: "text", text: "file contents" }] });
+			await expect(bashCallPromise).resolves.toMatchObject({ content: [{ type: "text", text: "/repo" }] });
+			resolveRun({ id: "run-1", status: "finished", result: "Bridge complete." });
+			const replayEvents = await replayEventsPromise;
+			const replayText = replayEvents.filter((event: any) => event.type === "text_delta").map((event: any) => event.delta).join("");
+			const replayDone = replayEvents.find((event: any) => event.type === "done") as any;
+
+			expect(mockedCreate).toHaveBeenCalledTimes(1);
+			expect(mockSend).toHaveBeenCalledTimes(1);
+			expect(runWait).toHaveBeenCalledTimes(1);
+			expect(replayText).toBe("Bridge complete.");
+			expect(replayDone.reason).toBe("stop");
+		} finally {
+			await client.close().catch(() => undefined);
+			await transport.close().catch(() => undefined);
+		}
+	});
+
+	it("keeps non-bridge Cursor MCP replay visible while suppressing only bridge MCP calls", async () => {
+		registerBridgeForProviderTest({
+			active: ["read"],
+			tools: [createBridgeToolInfo("read", Type.Object({ path: Type.String() }), "Read files")],
+		});
+		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: (a: unknown) => void }) => {
+			opts.onDelta({
+				update: {
+					type: "tool-call-completed",
+					callId: "external-mcp",
+					toolCall: {
+						name: "mcp",
+						args: { toolName: "external_search" },
+						result: { status: "success", value: { content: "external result" } },
+					},
+				},
+			});
+			return {
+				id: "run-1",
+				agentId: "agent-1",
+				status: "finished",
+				wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished", result: "done" }),
+				cancel: vi.fn(),
+				supports: () => true,
+				unsupportedReason: () => undefined,
+			};
+		});
+		mockedCreate.mockResolvedValue({
+			agentId: "agent-1",
+			send: mockSend,
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+
+		const events = await collectEvents(streamCursor(makeModel("composer-2"), makeContext(), { apiKey: "test-key" }));
+		const trace = events.filter((event: any) => event.type === "thinking_delta").map((event: any) => event.delta).join("");
+
+		expect(trace).toContain("external_search");
+		expect(trace).toContain("external result");
+		expect(events.some((event: any) => event.type === "toolcall_start")).toBe(false);
+	});
+
+	it("rejects pending bridge MCP waits and clears live runs on idle disposal", async () => {
+		process.env.PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS = "1";
+		cursorProviderTestUtils.setCursorNativeReplayIdleDisposeMs(1);
+		registerBridgeForProviderTest({
+			active: ["read"],
+			tools: [createBridgeToolInfo("read", Type.Object({ path: Type.String() }), "Read files")],
+		});
+		const mockDispose = vi.fn().mockResolvedValue(undefined);
+		const runWait = vi.fn(() => new Promise<{ id: string; status: "finished"; result: string }>(() => {}));
+		const mockSend = vi.fn().mockResolvedValue({
+			id: "run-1",
+			agentId: "agent-1",
+			status: "running",
+			wait: runWait,
+			cancel: vi.fn(),
+			supports: () => true,
+			unsupportedReason: () => undefined,
+		});
+		mockedCreate.mockResolvedValue({
+			agentId: "agent-1",
+			send: mockSend,
+			[Symbol.asyncDispose]: mockDispose,
+		});
+
+		const firstEventsPromise = collectEvents(streamCursor(makeModel("composer-2"), makeContext(), { apiKey: "test-key" }));
+		await vi.waitFor(() => expect(mockSend).toHaveBeenCalled());
+		const createOptions = mockedCreate.mock.calls[0]?.[0] as any;
+		const { client, transport } = await connectMcpClient(createOptions.mcpServers.pi_tools.url);
+		try {
+			const callErrorPromise = client.callTool({ name: "pi__read", arguments: { path: "README.md" } }).catch((error: unknown) => error);
+			const firstEvents = await firstEventsPromise;
+			const firstDone = firstEvents.find((event: any) => event.type === "done") as any;
+
+			expect(firstDone.reason).toBe("toolUse");
+			expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(1);
+
+			await vi.waitFor(() => expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0));
+			const error = await callErrorPromise;
+			expect(error).toBeInstanceOf(Error);
+			expect((error as Error).message).toMatch(/disposed|MCP error/i);
+			expect(mockDispose).toHaveBeenCalledTimes(1);
+		} finally {
+			await client.close().catch(() => undefined);
+			await transport.close().catch(() => undefined);
 		}
 	});
 

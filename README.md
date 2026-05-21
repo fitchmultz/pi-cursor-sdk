@@ -197,6 +197,31 @@ If you do not see `cursor fast`, fast mode is off.
 
 Images from the latest user message are forwarded to Cursor. Historical images are kept out of the transcript and appear only as `[image omitted from transcript]` placeholders, so follow-up questions about an earlier image should reattach the image or include a textual description. The extension advertises `text` and `image` input for Cursor models because Cursor's SDK accepts image messages and Cursor models are expected to support them.
 
+
+## Tools and local pi bridge
+
+Cursor runs use local Cursor SDK agents. Cursor's own local-agent tools, Cursor settings, plugins, and configured Cursor MCP servers remain available through the SDK.
+
+In addition, pi-cursor-sdk exposes the current pi session's bridgeable active tools to Cursor through a local loopback MCP bridge by default. The bridge snapshots `pi.getActiveTools()` and `pi.getAllTools()` for each Cursor run, excludes internal Cursor replay activity names, and hides overlapping built-in pi tools (`read`, `bash`, `write`, `edit`, `grep`, `find`, `ls`) by default because Cursor local agents already have native equivalents. Non-overlapping active tools and extension/custom tools present in pi's active tool registry are exposed as MCP tools with collision-safe names such as `pi__sem_reindex`, and calls map back to the real pi tool names. When Cursor calls a bridged tool, pi executes it through the normal pi tool path, so confirmations, tool hooks, renderers, session history, and abort behavior stay pi-native. The bridge does not call tool `execute()` handlers directly.
+
+Bridge controls:
+
+```bash
+# Roll back to Cursor SDK tools/settings/MCP only; do not expose active pi tools through the bridge.
+PI_CURSOR_PI_TOOL_BRIDGE=0 pi --model cursor/composer-2.5
+
+# Opt in to also expose overlapping pi tool names through the bridge.
+PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS=1 pi --model cursor/composer-2.5
+
+# Override Cursor SDK MCP tool-call timeout for long-running bridged pi tools.
+PI_CURSOR_MCP_TOOL_TIMEOUT_SECONDS=7200 pi --model cursor/composer-2.5
+PI_CURSOR_MCP_TOOL_TIMEOUT_MS=7200000 pi --model cursor/composer-2.5
+```
+
+`PI_CURSOR_PI_TOOL_BRIDGE=0` is the supported rollback flag and disables the bridge entirely. The bridge also treats `false`, `off`, `none`, `no`, and `disabled` as off; `1`, `true`, `on`, `yes`, and `enabled` as on. `PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS=1` opts in to exposing overlapping pi tool names that Cursor already has native equivalents for (`read`, `bash`, `write`, `edit`, `grep`, `find`, and `ls`). By default those names are hidden even when pi's Cursor replay wrapper has registered them as extension tools. The Cursor MCP timeout override defaults to 3600 seconds because the installed Cursor SDK has a 60-second MCP request default that is too short for some pi tools.
+
+Cursor-native tool replay is separate from the bridge. Replay only displays completed Cursor SDK tool activity as pi-native-looking cards with recorded results, using pi's normal success/error card shell for neutral Cursor activity too. It never re-runs Cursor-side commands, reapplies Cursor edits, calls MCP servers, or mutates pi state. See [Cursor native tool replay](docs/cursor-native-tool-replay.md).
+
 ## Fallback models
 
 If no key is available from `/login`, `CURSOR_API_KEY`, or `--api-key`, model discovery fails, or discovery returns no models, the extension registers a bundled fallback snapshot of the latest reviewed Cursor SDK model catalog and notifies interactive users when possible.
@@ -207,9 +232,10 @@ Actual Cursor runs still need a key from `/login`, `CURSOR_API_KEY`, or `--api-k
 
 ## Limits
 
-- **Local Cursor SDK agents only.** This extension does not use Cursor cloud agents.
-- **Cursor native tool replay is display-only.** Cursor still uses its own internal SDK tools; pi does not re-run Cursor-side commands or pass pi tool schemas through to Cursor. Cursor models therefore use Cursor SDK's local-agent tool surface plus configured Cursor settings, plugins, and MCP servers, not the full pi-native tool surface available to built-in providers. Workflow tools such as Cursor `SwitchMode` are not pi workflow controls. See [Cursor native tool replay](docs/cursor-native-tool-replay.md) for supported replay cards, ordering, conflict handling, and opt-out flags.
-- **One fresh Cursor agent is created per provider call.** Cursor agent state is not reused between pi provider calls.
+- **Local Cursor SDK agents only.** This extension does not use Cursor cloud agents. Cloud pi tool bridging is out of scope because it needs a separate auth, transport, lifetime, and remote trust design.
+- **The pi tool bridge is local and MCP-backed.** Bridgeable active pi tools are exposed to local Cursor agents through a tokenized `127.0.0.1` MCP endpoint; internal Cursor replay activity names are excluded, and overlapping built-in pi tools are hidden by default. Set `PI_CURSOR_PI_TOOL_BRIDGE=0` to disable it or `PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS=1` to expose overlapping built-ins too.
+- **Cursor native tool replay is display-only.** Replay renders recorded Cursor SDK activity and never re-runs Cursor-side commands, reapplies Cursor edits, calls MCP servers, or mutates pi state. Workflow tools such as Cursor `SwitchMode` and Cursor todo state are not pi workflow controls. See [Cursor native tool replay](docs/cursor-native-tool-replay.md) for supported replay cards, ordering, conflict handling, and opt-out flags.
+- **Cursor run state can span tool-use turns.** A new Cursor SDK agent starts for a new provider run. When Cursor calls bridged pi tools or emits replayed Cursor tool activity, the same Cursor SDK run can stay alive across pi `toolUse` turns so results resume in the original Cursor run.
 - **Cursor setting sources default to all.** The extension passes `local.settingSources: ["all"]` by default so configured Cursor MCP servers, plugin tools, project/user settings, and related Cursor-native capabilities are available like they are in Cursor. To narrow loading, set a comma-separated list such as `PI_CURSOR_SETTING_SOURCES=project,user,plugins`. To disable ambient setting sources, set `PI_CURSOR_SETTING_SOURCES=none`. Direct Cursor SDK startup logs are suppressed so setting/skill loading messages do not pollute the TUI.
 - **Max Mode is not a manual pi variant.** Cursor's SDK may enable Max Mode automatically for models that require it. This extension only advertises exact context-window variants that the SDK catalog exposes and otherwise uses conservative SDK-derived default/non-Max context windows.
 - **Output token limits are conservative.** Cursor SDK model metadata does not currently expose output token limits directly.
@@ -263,6 +289,29 @@ Cursor setting sources are loaded with `PI_CURSOR_SETTING_SOURCES=all` by defaul
 ### Cursor does not call my web search MCP/tool
 
 Cursor SDK local agents load MCP servers from Cursor setting sources and inline SDK config. This extension enables all Cursor setting sources by default, so a missing web search tool usually means it is not configured in Cursor or the run was started with a narrowing/disable override such as `PI_CURSOR_SETTING_SOURCES=none`.
+
+### Cursor does not call my pi extension tool
+
+The local pi bridge only exposes tools that are active in the current pi session and present in pi's tool registry at Cursor run start. By default, it does not expose overlapping pi tool names that Cursor already has native equivalents for (`read`, `bash`, `write`, `edit`, `grep`, `find`, and `ls`). Opt in if you intentionally want Cursor to see both the Cursor-native tool and an overlapping built-in pi tool:
+
+```bash
+PI_CURSOR_PI_TOOL_BRIDGE_BUILTINS=1 pi --model cursor/composer-2.5
+```
+
+To disable the bridge for rollback or isolation, start pi with:
+
+```bash
+PI_CURSOR_PI_TOOL_BRIDGE=0 pi --model cursor/composer-2.5
+```
+
+### A bridged pi tool times out in Cursor
+
+The extension raises Cursor SDK's MCP tool-call timeout from 60 seconds to 3600 seconds by default for Cursor SDK MCP `callTool` requests. For longer local pi tools, set one override:
+
+```bash
+PI_CURSOR_MCP_TOOL_TIMEOUT_SECONDS=7200 pi --model cursor/composer-2.5
+PI_CURSOR_MCP_TOOL_TIMEOUT_MS=7200000 pi --model cursor/composer-2.5
+```
 
 ### Cursor native tool cards conflict with another extension
 

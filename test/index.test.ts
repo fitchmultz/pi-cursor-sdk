@@ -23,6 +23,7 @@ import {
 	canRenderCursorToolNatively,
 	recordCursorNativeToolDisplay,
 } from "../src/cursor-native-tool-display.js";
+import { __testUtils as cursorPiToolBridgeTestUtils } from "../src/cursor-pi-tool-bridge.js";
 import { __testUtils as cursorSessionCwdTestUtils } from "../src/cursor-session-cwd.js";
 
 const mockedDiscover = vi.mocked(discoverModels);
@@ -125,10 +126,12 @@ function createMockPi(existingTools?: ToolInfo[]) {
 }
 
 describe("extension factory", () => {
-	beforeEach(() => {
+	beforeEach(async () => {
 		vi.clearAllMocks();
 		delete process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY;
 		delete process.env.PI_CURSOR_REGISTER_NATIVE_TOOLS;
+		delete process.env.PI_CURSOR_PI_TOOL_BRIDGE;
+		await cursorPiToolBridgeTestUtils.resetRegisteredBridgeForTests();
 		cursorSessionCwdTestUtils.reset();
 		nativeToolDisplayTestUtils.reset();
 	});
@@ -168,13 +171,16 @@ describe("extension factory", () => {
 			"cursor-refresh-models",
 			expect.objectContaining({ description: expect.stringContaining("Refresh the live Cursor model catalog") }),
 		);
-		expect(pi.registerTool).toHaveBeenCalledTimes(14);
+		expect(pi.registerTool).toHaveBeenCalledTimes(17);
 		expect(pi._tools.map((tool) => tool.name)).toEqual([
 			"read",
 			"bash",
+			"edit",
+			"write",
 			"grep",
 			"find",
 			"ls",
+			"cursor",
 			"cursor_edit",
 			"cursor_write",
 			"cursor_read_lints",
@@ -193,15 +199,7 @@ describe("extension factory", () => {
 			"grep",
 			"find",
 			"ls",
-			"cursor_edit",
-			"cursor_write",
-			"cursor_read_lints",
-			"cursor_delete",
-			"cursor_update_todos",
-			"cursor_task",
-			"cursor_create_plan",
-			"cursor_generate_image",
-			"cursor_mcp",
+			"cursor",
 		]);
 		expect(pi.on).toHaveBeenCalledWith("session_start", expect.any(Function));
 		expect(pi.on).toHaveBeenCalledWith("model_select", expect.any(Function));
@@ -217,14 +215,15 @@ describe("extension factory", () => {
 		expect(call.config.streamSimple).toBe(mockedStreamCursor);
 	});
 
-	it("keeps Cursor replay-only tools out of non-Cursor model active tools", async () => {
+	it("keeps legacy Cursor replay-only tools out of active tools", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		mockedDiscover.mockResolvedValueOnce([]);
 		const pi = createMockPi();
 		await extensionFactory(pi as unknown as ExtensionAPI);
 		await runSessionStartHandlers(pi);
 
-		expect(pi._activeToolNames()).toContain("cursor_edit");
+		expect(pi._activeToolNames()).toContain("cursor");
+		expect(pi._activeToolNames()).not.toContain("cursor_edit");
 
 		await runModelSelectHandlers(
 			pi,
@@ -232,11 +231,39 @@ describe("extension factory", () => {
 		);
 		expect(pi._activeToolNames()).not.toContain("cursor_edit");
 		expect(pi._activeToolNames()).not.toContain("cursor_generate_image");
+		expect(pi._activeToolNames()).not.toContain("cursor");
 		expect(pi._activeToolNames()).toContain("read");
 
 		await runModelSelectHandlers(pi, { provider: "cursor", api: "cursor-sdk", id: "composer-2.5" } as ExtensionContext["model"]);
-		expect(pi._activeToolNames()).toContain("cursor_edit");
-		expect(pi._activeToolNames()).toContain("cursor_generate_image");
+		expect(pi._activeToolNames()).toContain("cursor");
+		expect(pi._activeToolNames()).not.toContain("cursor_edit");
+		expect(pi._activeToolNames()).not.toContain("cursor_generate_image");
+	});
+
+	it("registers Cursor pi tool bridge state without mutating active tools", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
+		mockedDiscover.mockResolvedValueOnce([]);
+		const pi = createMockPi();
+
+		await extensionFactory(pi as unknown as ExtensionAPI);
+		await runSessionStartHandlers(pi);
+
+		expect(cursorPiToolBridgeTestUtils.getRegisteredBridgeForTests()?.isEnabled()).toBe(true);
+		expect(pi.on).toHaveBeenCalledWith("session_shutdown", expect.any(Function));
+		expect(pi.setActiveTools).not.toHaveBeenCalled();
+	});
+
+	it("honors PI_CURSOR_PI_TOOL_BRIDGE=0 at the extension registration path", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
+		process.env.PI_CURSOR_PI_TOOL_BRIDGE = "0";
+		mockedDiscover.mockResolvedValueOnce([]);
+		const pi = createMockPi();
+
+		await extensionFactory(pi as unknown as ExtensionAPI);
+		await runSessionStartHandlers(pi);
+
+		expect(cursorPiToolBridgeTestUtils.getRegisteredBridgeForTests()?.isEnabled()).toBe(false);
+		expect(pi.setActiveTools).not.toHaveBeenCalled();
 	});
 
 	it("registers provider even with fallback models", async () => {
@@ -442,7 +469,7 @@ describe("extension factory", () => {
 			const readTool = pi._tools.find((tool) => tool.name === "read");
 			const result = await readTool.execute("ordinary-read", { path: "session-file.txt" }, undefined, undefined, {});
 
-			expect(pi.registerTool).toHaveBeenCalledTimes(14);
+			expect(pi.registerTool).toHaveBeenCalledTimes(17);
 			expect(result.content).toEqual([{ type: "text", text: "from second cwd\n" }]);
 		} finally {
 			rmSync(firstDir, { recursive: true, force: true });
@@ -515,13 +542,129 @@ describe("extension factory", () => {
 		}
 	});
 
-	it("renders Cursor replay-only results with collapsed previews instead of summary-only cards", async () => {
+	it("renders legacy Cursor replay-only tool labels without raw synthetic names", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		mockedDiscover.mockResolvedValueOnce([]);
 		const pi = createMockPi();
 		await extensionFactory(pi as unknown as ExtensionAPI);
 		await runSessionStartHandlers(pi);
 		const theme = { fg: (_style: string, text: string) => text, bold: (text: string) => text } as never;
+		const options = { expanded: false, isPartial: false } as never;
+		const context = { isError: false, showImages: false } as never;
+
+		const editTool = pi._tools.find((tool) => tool.name === "cursor_edit");
+		const writeTool = pi._tools.find((tool) => tool.name === "cursor_write");
+		const mcpTool = pi._tools.find((tool) => tool.name === "cursor_mcp");
+
+		// Cursor replay-only tools should use pi's default tool shell so they get
+		// the same green/red status card background as native tools.
+		expect(mcpTool.renderShell).toBeUndefined();
+
+		const rendered = [
+			editTool.renderCall?.({ path: "src/index.ts" }, theme, { isPartial: true } as never)?.render(120).join("\n"),
+			writeTool.renderResult?.(
+				{
+					content: [{ type: "text", text: "write new.txt\n\nCreated 1 lines" }],
+					details: { cursorToolName: "write", path: "new.txt", linesCreated: 1, fileSize: 6, expandedText: "Created 1 lines" },
+				},
+				options,
+				theme,
+				context,
+			)?.render(120).join("\n"),
+			mcpTool.renderResult?.(
+				{
+					content: [{ type: "text", text: "mcp git\n\nstatus" }],
+					details: { cursorToolName: "mcp", title: "Cursor MCP activity", summary: "git", expandedText: "status" },
+				},
+				options,
+				theme,
+				context,
+			)?.render(120).join("\n"),
+		]
+			.filter((entry): entry is string => Boolean(entry))
+			.join("\n");
+
+		expect(rendered).toContain("edit src/index.ts");
+		expect(rendered).toContain("write new.txt");
+		expect(rendered).not.toContain("Cursor edit");
+		expect(rendered).not.toContain("Cursor write");
+		expect(rendered).toContain("Cursor MCP activity git");
+		expect(rendered).not.toContain("cursor_edit");
+		expect(rendered).not.toContain("cursor_write");
+		expect(rendered).not.toContain("cursor_mcp");
+	});
+
+	it("renders native edit and write replay wrappers without synthetic card names", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		mockedDiscover.mockResolvedValueOnce([]);
+		const pi = createMockPi();
+		await extensionFactory(pi as unknown as ExtensionAPI);
+		await runSessionStartHandlers(pi);
+		const theme = {
+			fg: (style: string, text: string) =>
+				["toolDiffAdded", "toolDiffRemoved", "toolDiffContext", "toolOutput"].includes(style) ? `<${style}>${text}</${style}>` : text,
+			bold: (text: string) => text,
+		} as never;
+		const options = { expanded: false, isPartial: false } as never;
+		const replayContext = { isError: false, showImages: false, toolCallId: "cursor-replay-1-1-tool-1" } as never;
+
+		const editTool = pi._tools.find((tool) => tool.name === "edit");
+		const writeTool = pi._tools.find((tool) => tool.name === "write");
+		const rendered = [
+			editTool.renderCall?.({ path: "src/index.ts" }, theme, { isPartial: true, toolCallId: "cursor-replay-1-1-tool-1" } as never)?.render(120).join("\n"),
+			editTool.renderResult?.(
+				{
+					content: [{ type: "text", text: "edit src/index.ts\n\n+1 -1" }],
+					details: {
+						cursorToolName: "edit",
+						path: "src/index.ts",
+						linesAdded: 1,
+						linesRemoved: 1,
+						diff: "--- a/src/index.ts\n+++ b/src/index.ts\n@@ -1 +1 @@\n-old line\n+new line",
+					},
+				},
+				options,
+				theme,
+				replayContext,
+			)?.render(120).join("\n"),
+			writeTool.renderCall?.({ path: "new.txt", content: "hello\n" }, theme, { isPartial: true, toolCallId: "cursor-replay-1-1-tool-2" } as never)?.render(120).join("\n"),
+			writeTool.renderResult?.(
+				{
+					content: [{ type: "text", text: "write new.txt\n\nCreated 3 lines\n\n# Title\n\nBody" }],
+					details: { cursorToolName: "write", path: "new.txt", linesCreated: 3, fileSize: 13, fileContentAfterWrite: "# Title\n\nBody\n" },
+				},
+				options,
+				theme,
+				replayContext,
+			)?.render(120).join("\n"),
+		]
+			.filter((entry): entry is string => Boolean(entry))
+			.join("\n");
+
+		expect(rendered).toContain("edit src/index.ts");
+		expect(rendered).toContain("write new.txt");
+		expect(rendered).toContain("write new.txt (1 line)");
+		expect(rendered).not.toContain("write new.txt (2 lines)");
+		expect(rendered).toContain("<toolDiffRemoved>-1 old line</toolDiffRemoved>");
+		expect(rendered).toContain("<toolDiffAdded>+1 new line</toolDiffAdded>");
+		expect(rendered).toContain("<toolOutput># Title</toolOutput>");
+		expect(rendered).toContain("<toolOutput>Body</toolOutput>");
+		expect(rendered).not.toContain("Cursor edit");
+		expect(rendered).not.toContain("Cursor write");
+		expect(rendered).not.toContain("cursor_");
+	});
+
+	it("renders Cursor replay-only results with collapsed previews instead of summary-only cards", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		mockedDiscover.mockResolvedValueOnce([]);
+		const pi = createMockPi();
+		await extensionFactory(pi as unknown as ExtensionAPI);
+		await runSessionStartHandlers(pi);
+		const theme = {
+			fg: (style: string, text: string) =>
+				["toolDiffAdded", "toolDiffRemoved", "toolDiffContext"].includes(style) ? `<${style}>${text}</${style}>` : text,
+			bold: (text: string) => text,
+		} as never;
 		const options = { expanded: false, isPartial: false } as never;
 		const context = { isError: false, showImages: false } as never;
 
@@ -576,9 +719,10 @@ describe("extension factory", () => {
 			theme,
 			context,
 		)?.render(120).join("\n") ?? "";
-		expect(editRendered).toContain("Cursor updated src/index.ts added 1 line, removed 1 line");
-		expect(editRendered).toContain("-1 old line");
-		expect(editRendered).toContain("+1 new line");
+		expect(editRendered).toContain("edit src/index.ts added 1 line, removed 1 line");
+		expect(editRendered).not.toContain("Cursor updated");
+		expect(editRendered).toContain("<toolDiffRemoved>-1 old line</toolDiffRemoved>");
+		expect(editRendered).toContain("<toolDiffAdded>+1 new line</toolDiffAdded>");
 		expect(editRendered).not.toContain("--- a/src/index.ts");
 		expect(editRendered).not.toContain("@@");
 		expect(editRendered).not.toContain("expand for diff");
@@ -598,11 +742,36 @@ describe("extension factory", () => {
 			theme,
 			context,
 		)?.render(120).join("\n") ?? "";
-		expect(createRendered).toContain("Cursor created new.txt created 2 lines");
-		expect(createRendered).toContain("+1 first line");
-		expect(createRendered).toContain("+2 second line");
+		expect(createRendered).toContain("edit new.txt created 2 lines");
+		expect(createRendered).not.toContain("Cursor created");
+		expect(createRendered).toContain("<toolDiffAdded>+1 first line</toolDiffAdded>");
+		expect(createRendered).toContain("<toolDiffAdded>+2 second line</toolDiffAdded>");
 		expect(createRendered).not.toContain("/dev/null");
 		expect(createRendered).not.toContain("@@");
+
+		const neutralPathOnlyEditTool = pi._tools.find((tool) => tool.name === "cursor");
+		const neutralPathOnlyEditRendered = neutralPathOnlyEditTool.renderResult?.(
+			{
+				content: [{ type: "text", text: "edit .tool-demo/ux-demo.ts\n\n+1 -1" }],
+				details: {
+					cursorToolName: "edit",
+					title: "Cursor edit",
+					summary: ".tool-demo/ux-demo.ts",
+					path: ".tool-demo/ux-demo.ts",
+					linesAdded: 1,
+					linesRemoved: 1,
+					diffString: "--- a/.tool-demo/ux-demo.ts\n+++ b/.tool-demo/ux-demo.ts\n@@ -1 +1 @@\n-export const value = 1;\n+export const value = 2;",
+					expandedText: "edit .tool-demo/ux-demo.ts\n\n+1 -1\n\n--- a/.tool-demo/ux-demo.ts\n+++ b/.tool-demo/ux-demo.ts\n@@ -1 +1 @@\n-export const value = 1;\n+export const value = 2;",
+				},
+			},
+			options,
+			theme,
+			context,
+		)?.render(120).join("\n") ?? "";
+		expect(neutralPathOnlyEditRendered).toContain("Cursor edit .tool-demo/ux-demo.ts added 1 line, removed 1 line");
+		expect(neutralPathOnlyEditRendered).toContain("<toolDiffRemoved>-1 export const value = 1;</toolDiffRemoved>");
+		expect(neutralPathOnlyEditRendered).toContain("<toolDiffAdded>+1 export const value = 2;</toolDiffAdded>");
+		expect(neutralPathOnlyEditRendered).not.toContain("@@");
 	});
 
 	it("registered native Cursor tool wrappers replay recorded Cursor errors as tool errors", async () => {
@@ -674,9 +843,12 @@ describe("extension factory", () => {
 
 		expect(pi._tools.map((tool) => tool.name)).toEqual([
 			"bash",
+			"edit",
+			"write",
 			"grep",
 			"find",
 			"ls",
+			"cursor",
 			"cursor_edit",
 			"cursor_write",
 			"cursor_read_lints",
@@ -689,8 +861,11 @@ describe("extension factory", () => {
 		]);
 		expect(canRenderCursorToolNatively("read")).toBe(false);
 		expect(canRenderCursorToolNatively("bash")).toBe(true);
+		expect(canRenderCursorToolNatively("edit")).toBe(true);
+		expect(canRenderCursorToolNatively("write")).toBe(true);
 		expect(canRenderCursorToolNatively("grep")).toBe(true);
 		expect(canRenderCursorToolNatively("find")).toBe(true);
+		expect(canRenderCursorToolNatively("cursor")).toBe(true);
 		expect(canRenderCursorToolNatively("cursor_edit")).toBe(true);
 		expect(canRenderCursorToolNatively("ls")).toBe(true);
 	});

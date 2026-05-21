@@ -1,5 +1,6 @@
 import { closeSync, openSync, readSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
+import { CURSOR_REPLAY_ACTIVITY_TOOL_NAME, getCursorReplayDisplayLabel } from "./cursor-tool-names.js";
 
 const DEFAULT_MAX_TRANSCRIPT_CHARS = 24000;
 const DEFAULT_MAX_TRANSCRIPT_LINES = 800;
@@ -80,7 +81,8 @@ function getToolResult(toolCall: unknown): unknown {
 
 function normalizeToolName(name: string): string {
 	const normalized = name.replace(/\s+/g, " ").trim();
-	switch (normalized) {
+	const normalizedKey = normalized.toLowerCase();
+	switch (normalizedKey) {
 		case "read_file":
 			return "read";
 		case "list_dir":
@@ -95,6 +97,19 @@ function normalizeToolName(name: string): string {
 			return "grep";
 		case "file_search":
 			return "glob";
+		case "write_file":
+		case "writefile":
+			return "write";
+		case "strreplace":
+		case "str_replace":
+		case "str-replace":
+		case "edit_file":
+		case "editfile":
+		case "edit_notebook":
+		case "editnotebook":
+		case "notebook_edit":
+		case "notebookedit":
+			return "edit";
 		default:
 			return normalized || "unknown";
 	}
@@ -285,6 +300,86 @@ function buildReadDisplayArgs(args: Record<string, unknown>, options: Transcript
 
 function buildPathDisplayArgs(args: Record<string, unknown>, options: TranscriptOptions): Record<string, unknown> {
 	const rawPath = typeof args.path === "string" ? args.path : undefined;
+	return rawPath ? { ...args, path: formatDisplayPath(rawPath, options.cwd) } : args;
+}
+
+function buildWriteDisplayArgs(args: Record<string, unknown>, options: TranscriptOptions): Record<string, unknown> {
+	const displayArgs = buildPathDisplayArgs(args, options);
+	const content = getCursorWriteArgContent(args);
+	return content === undefined ? displayArgs : { ...displayArgs, content };
+}
+
+type NativeEditReplacement = { oldText: string; newText: string };
+type NativeEditDisplayArgs = { path: string; edits: NativeEditReplacement[] };
+
+const CURSOR_EDIT_PATH_KEYS = ["path", "filePath", "file_path"] as const;
+const CURSOR_EDIT_OLD_TEXT_KEYS = ["oldText", "old_text", "oldString", "old_string", "oldStr", "old_str"] as const;
+const CURSOR_EDIT_NEW_TEXT_KEYS = ["newText", "new_text", "newString", "new_string", "newStr", "new_str"] as const;
+const CURSOR_NOTEBOOK_EDIT_ARG_KEYS = ["cellId", "cell_id", "cellIndex", "cell_index", "cellType", "cell_type", "notebookPath", "notebook_path"] as const;
+
+function getFirstStringByKeys(record: Record<string, unknown>, keys: readonly string[]): string | undefined {
+	for (const key of keys) {
+		const value = record[key];
+		if (typeof value === "string") return value;
+	}
+	return undefined;
+}
+
+function getCursorEditPathArg(args: Record<string, unknown>): string | undefined {
+	const path = getFirstStringByKeys(args, CURSOR_EDIT_PATH_KEYS);
+	return path?.trim() ? path : undefined;
+}
+
+function isCursorNotebookEditToolName(toolName: string): boolean {
+	const normalized = toolName.replace(/[\s_-]+/g, "").toLowerCase();
+	return normalized === "editnotebook" || normalized === "notebookedit";
+}
+
+function isCursorStrReplaceToolName(toolName: string): boolean {
+	const normalized = toolName.replace(/[\s_-]+/g, "").toLowerCase();
+	return normalized === "strreplace";
+}
+
+function hasAnyKey(record: Record<string, unknown>, keys: readonly string[]): boolean {
+	return keys.some((key) => record[key] !== undefined);
+}
+
+function isNotebookPath(path: string | undefined): boolean {
+	return path?.toLowerCase().endsWith(".ipynb") === true;
+}
+
+function isCursorNotebookEditActivity(rawToolName: string, args: Record<string, unknown>): boolean {
+	if (isCursorNotebookEditToolName(rawToolName)) return true;
+	if (hasAnyKey(args, CURSOR_NOTEBOOK_EDIT_ARG_KEYS)) return true;
+	return !isCursorStrReplaceToolName(rawToolName) && isNotebookPath(getCursorEditPathArg(args));
+}
+
+function asNativeEditReplacement(value: unknown): NativeEditReplacement | undefined {
+	const record = asRecord(value);
+	const oldText = record ? getFirstStringByKeys(record, CURSOR_EDIT_OLD_TEXT_KEYS) : undefined;
+	const newText = record ? getFirstStringByKeys(record, CURSOR_EDIT_NEW_TEXT_KEYS) : undefined;
+	if (typeof oldText !== "string" || oldText.length === 0 || typeof newText !== "string") return undefined;
+	return { oldText, newText };
+}
+
+function getNativeEditReplacementsFromArgs(args: Record<string, unknown>): NativeEditReplacement[] | undefined {
+	const edits = getArray(args, "edits")?.map(asNativeEditReplacement);
+	if (edits && edits.length > 0 && edits.every((edit): edit is NativeEditReplacement => edit !== undefined)) return edits;
+
+	const singleEdit = asNativeEditReplacement(args);
+	return singleEdit ? [singleEdit] : undefined;
+}
+
+function buildNativeEditDisplayArgs(rawToolName: string, args: Record<string, unknown>, options: TranscriptOptions): NativeEditDisplayArgs | undefined {
+	if (isCursorNotebookEditActivity(rawToolName, args)) return undefined;
+	const rawPath = getCursorEditPathArg(args);
+	const edits = getNativeEditReplacementsFromArgs(args);
+	if (!rawPath || !edits) return undefined;
+	return { path: formatDisplayPath(rawPath, options.cwd), edits };
+}
+
+function buildCursorEditActivityDisplayArgs(args: Record<string, unknown>, options: TranscriptOptions): Record<string, unknown> {
+	const rawPath = getCursorEditPathArg(args);
 	return rawPath ? { ...args, path: formatDisplayPath(rawPath, options.cwd) } : args;
 }
 
@@ -521,6 +616,14 @@ function formatGrep(args: Record<string, unknown>, result: NormalizedResult, opt
 	return joinSections(header, getGrepBody(result, options));
 }
 
+function getCursorWriteArgContent(args: Record<string, unknown>): string | undefined {
+	return getString(args, "content") ?? getString(args, "fileContent") ?? getString(args, "contents");
+}
+
+function getCursorWriteRecordedContent(args: Record<string, unknown>, resultValue: Record<string, unknown> | undefined): string | undefined {
+	return getCursorWriteArgContent(args) ?? getString(resultValue, "fileContentAfterWrite");
+}
+
 function formatWrite(args: Record<string, unknown>, result: NormalizedResult, options: TranscriptOptions): string {
 	const path = formatPathArg(args, options) ?? "unknown";
 	if (result.status === "error") return joinSections(`write ${path}`, formatError(result.error));
@@ -528,7 +631,7 @@ function formatWrite(args: Record<string, unknown>, result: NormalizedResult, op
 	const value = asRecord(result.value);
 	const linesCreated = getNumber(value, "linesCreated");
 	const fileSize = getNumber(value, "fileSize");
-	const fileContentAfterWrite = getString(value, "fileContentAfterWrite");
+	const fileContentAfterWrite = getCursorWriteRecordedContent(args, value);
 	const parts = [
 		linesCreated !== undefined ? `Created ${linesCreated} lines` : undefined,
 		fileSize !== undefined ? `File size: ${fileSize} bytes` : undefined,
@@ -542,7 +645,7 @@ function formatEdit(args: Record<string, unknown>, result: NormalizedResult, opt
 	if (result.status === "error") return joinSections(`edit ${path}`, formatError(result.error));
 
 	const value = asRecord(result.value);
-	const diff = formatDiffString(getString(value, "diffString"), options);
+	const diff = formatDiffString(getString(value, "diffString") ?? getString(value, "diff") ?? getString(value, "unifiedDiff"), options);
 	const linesAdded = getNumber(value, "linesAdded");
 	const linesRemoved = getNumber(value, "linesRemoved");
 	const stats = [
@@ -838,7 +941,8 @@ function truncateArg(value: string, maxLength = 120): string {
 }
 
 export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptOptions = {}): CursorPiToolDisplay {
-	const name = normalizeToolName(getToolName(toolCall));
+	const rawName = getToolName(toolCall);
+	const name = normalizeToolName(rawName);
 	const args = getToolArgs(toolCall);
 	const result = normalizeResult(getToolResult(toolCall));
 
@@ -895,38 +999,56 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 
 	if (name === "edit") {
 		const value = asRecord(result.value);
-		const rawDiff = getString(value, "diffString");
+		const rawDiff = getString(value, "diffString") ?? getString(value, "diff") ?? getString(value, "unifiedDiff");
 		const normalizedDiff = formatDiffString(rawDiff, options);
-		const displayArgs = buildPathDisplayArgs(args, options);
-		const displayPath = typeof args.path === "string" ? formatDisplayPath(args.path, options.cwd) : undefined;
-		const contentText = formatEdit(args, result, options);
-		return {
-			toolName: "cursor_edit",
-			args: displayArgs,
-			result: textToolResult(contentText, {
-				cursorToolName: "edit",
-				path: displayPath,
-				linesAdded: getNumber(value, "linesAdded"),
-				linesRemoved: getNumber(value, "linesRemoved"),
-				diffString: normalizedDiff,
-			}),
-			isError: result.status === "error",
+		const nativeEditArgs = buildNativeEditDisplayArgs(rawName, args, options);
+		const activityArgs = buildCursorEditActivityDisplayArgs(args, options);
+		const displayPath = typeof activityArgs.path === "string" ? activityArgs.path : undefined;
+		const contentText = formatEdit(activityArgs, result, options);
+		const details = {
+			cursorToolName: "edit",
+			path: displayPath,
+			linesAdded: getNumber(value, "linesAdded"),
+			linesRemoved: getNumber(value, "linesRemoved"),
+			diffString: normalizedDiff,
+			diff: normalizedDiff,
+			firstChangedLine: getNumber(value, "firstChangedLine"),
 		};
+		if (nativeEditArgs) {
+			return {
+				toolName: "edit",
+				args: nativeEditArgs,
+				result: textToolResult(contentText, details),
+				isError: result.status === "error",
+			};
+		}
+		return buildReplaySummaryDisplay(
+			CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
+			activityArgs,
+			result,
+			contentText.trimEnd(),
+			{
+				...details,
+				title: getCursorReplayDisplayLabel("cursor_edit"),
+				summary: result.status === "error" ? undefined : displayPath ?? "replayed",
+			},
+		);
 	}
 
 	if (name === "write") {
 		const value = asRecord(result.value);
-		const displayArgs = buildPathDisplayArgs(args, options);
+		const displayArgs = buildWriteDisplayArgs(args, options);
 		const displayPath = typeof args.path === "string" ? formatDisplayPath(args.path, options.cwd) : undefined;
 		const contentText = formatWrite(args, result, options).trimEnd();
 		return {
-			toolName: "cursor_write",
+			toolName: "write",
 			args: displayArgs,
 			result: textToolResult(contentText, {
 				cursorToolName: "write",
 				path: displayPath,
 				linesCreated: getNumber(value, "linesCreated"),
 				fileSize: getNumber(value, "fileSize"),
+				fileContentAfterWrite: getString(value, "fileContentAfterWrite"),
 				expandedText: contentText,
 			}),
 			isError: result.status === "error",
@@ -938,13 +1060,13 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 		const displayPath = typeof args.path === "string" ? formatDisplayPath(args.path, options.cwd) : undefined;
 		const contentText = formatDelete(args, result, options).trimEnd();
 		return buildReplaySummaryDisplay(
-			"cursor_delete",
+			CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
 			displayPath ? { path: displayPath } : {},
 			result,
 			contentText,
 			{
 				cursorToolName: "delete",
-				title: "Cursor delete",
+				title: getCursorReplayDisplayLabel("cursor_delete"),
 				path: displayPath,
 				summary: result.status === "error" ? undefined : displayPath ? `deleted ${displayPath}` : "deleted file",
 				fileSize: getNumber(value, "fileSize"),
@@ -957,13 +1079,13 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 		const diagnosticCount = getReadLintDiagnostics(result, options).length;
 		const contentText = formatReadLints(args, result, options).trimEnd();
 		return buildReplaySummaryDisplay(
-			"cursor_read_lints",
+			CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
 			{ paths, diagnosticCount },
 			result,
 			contentText,
 			{
 				cursorToolName: "readLints",
-				title: "Cursor readLints",
+				title: getCursorReplayDisplayLabel("cursor_read_lints"),
 				summary: result.status === "error" ? undefined : `${diagnosticCount} diagnostic${diagnosticCount === 1 ? "" : "s"}${paths.length > 0 ? ` in ${paths.join(", ")}` : ""}`,
 			},
 		);
@@ -974,13 +1096,13 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 		const totalCount = getTodoTotalCount(args, result, todos);
 		const contentText = formatTodos(args, result, options, "updateTodos").trimEnd();
 		return buildReplaySummaryDisplay(
-			"cursor_update_todos",
+			CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
 			{ totalCount },
 			result,
 			contentText,
 			{
 				cursorToolName: "updateTodos",
-				title: "Cursor todos",
+				title: getCursorReplayDisplayLabel("cursor_update_todos"),
 				summary: result.status === "error" ? undefined : summarizeTodos(args, result),
 			},
 		);
@@ -991,13 +1113,13 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 		const totalCount = getTodoTotalCount(args, result, todos);
 		const contentText = formatTodos(args, result, options, "createPlan").trimEnd();
 		return buildReplaySummaryDisplay(
-			"cursor_create_plan",
+			CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
 			{ totalCount },
 			result,
 			contentText,
 			{
 				cursorToolName: "createPlan",
-				title: "Cursor plan",
+				title: getCursorReplayDisplayLabel("cursor_create_plan"),
 				summary: result.status === "error" ? undefined : summarizeTodos(args, result),
 			},
 		);
@@ -1008,13 +1130,13 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 		const contentText = formatTask(args, result, options).trimEnd();
 		const taskText = collectTaskText(result);
 		return buildReplaySummaryDisplay(
-			"cursor_task",
+			CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
 			{ description: truncateArg(description) },
 			result,
 			contentText,
 			{
 				cursorToolName: "task",
-				title: "Cursor task",
+				title: getCursorReplayDisplayLabel("cursor_task"),
 				summary: result.status === "error" ? undefined : summarizeTask(description, taskText),
 			},
 		);
@@ -1026,13 +1148,13 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 		const imagePath = getGenerateImagePath(args, result);
 		const imageDisplayPath = getGenerateImageDisplayPath(args, result, options);
 		return buildReplaySummaryDisplay(
-			"cursor_generate_image",
+			CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
 			{ prompt: truncateArg(prompt) },
 			result,
 			contentText,
 			{
 				cursorToolName: "generateImage",
-				title: "Cursor generateImage",
+				title: getCursorReplayDisplayLabel("cursor_generate_image"),
 				summary: result.status === "error" ? undefined : imageDisplayPath ? `saved ${imageDisplayPath}` : "image generated",
 				imagePath,
 				imageDisplayPath,
@@ -1045,13 +1167,13 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 		const toolName = getString(args, "toolName") ?? "mcp";
 		const contentText = formatMcp(args, result, options).trimEnd();
 		return buildReplaySummaryDisplay(
-			"cursor_mcp",
+			CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
 			{ toolName: truncateArg(toolName) },
 			result,
 			contentText,
 			{
 				cursorToolName: "mcp",
-				title: "Cursor MCP",
+				title: getCursorReplayDisplayLabel("cursor_mcp"),
 				summary: result.status === "error" ? undefined : firstNonEmptyLine(contentText) ?? "MCP result captured",
 			},
 		);

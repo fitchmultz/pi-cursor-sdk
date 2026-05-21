@@ -132,6 +132,12 @@ For each visual claim, inspect the JSONL path written by the runner. Confirm at 
 - `toolResult.content[0].text` contains the recorded body expected in the card.
 - `toolResult.isError` matches the visual card state.
 
+For local pi MCP bridge claims, also confirm:
+
+- Bridged calls appear as the real pi tool name (for example `read`), not the MCP bridge name (for example `pi__read`).
+- The JSONL has no second Cursor MCP replay card for the same bridged call.
+- Non-bridge Cursor MCP activity, if present, still renders as neutral Cursor activity instead of being suppressed.
+
 Small helper pattern:
 
 ```bash

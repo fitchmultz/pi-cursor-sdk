@@ -42,7 +42,8 @@
 		"refresh:cursor-snapshots": "node scripts/refresh-cursor-model-snapshots.mjs"
 	},
 	"dependencies": {
-		"@cursor/sdk": "^1.0.13"
+		"@cursor/sdk": "^1.0.13",
+		"@modelcontextprotocol/sdk": "^1.29.0"
 	},
 	"peerDependencies": {
 		"@earendil-works/pi-ai": "*",

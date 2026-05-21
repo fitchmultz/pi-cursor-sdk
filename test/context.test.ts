@@ -146,6 +146,52 @@ describe("buildCursorPrompt", () => {
 		expect(result.text).toContain("Tool error (bash, call tc1): command failed");
 	});
 
+	it("rewrites legacy Cursor replay-only names in Cursor-facing transcript text", () => {
+		const ctx: Context = {
+			messages: [
+				{
+					role: "assistant",
+					content: [
+						{ type: "toolCall", id: "edit-call", name: "cursor_edit", arguments: { note: "cursor_write" } },
+						{ type: "toolCall", id: "mcp-call", name: "cursor_mcp", arguments: { toolName: "git" } },
+					],
+					api: "cursor-sdk",
+					provider: "cursor",
+					model: "test",
+					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+					stopReason: "toolUse",
+					timestamp: 1,
+				} satisfies AssistantMessage,
+				{
+					role: "toolResult",
+					toolCallId: "edit-call",
+					toolName: "cursor_edit",
+					content: [{ type: "text", text: "legacy cursor_edit result" }],
+					isError: false,
+					timestamp: 2,
+				} satisfies ToolResultMessage,
+				{
+					role: "toolResult",
+					toolCallId: "write-call",
+					toolName: "cursor_write",
+					content: [{ type: "text", text: "legacy cursor_mcp text" }],
+					isError: false,
+					timestamp: 3,
+				} satisfies ToolResultMessage,
+			],
+		};
+
+		const result = buildCursorPrompt(ctx);
+
+		expect(result.text).toContain("Tool call (Cursor edit, call edit-call)");
+		expect(result.text).toContain("Tool call (Cursor MCP, call mcp-call):");
+		expect(result.text).toContain("Tool result (Cursor edit, call edit-call): legacy Cursor edit result");
+		expect(result.text).toContain("Tool result (Cursor write, call write-call): legacy Cursor MCP text");
+		expect(result.text).not.toContain("cursor_edit");
+		expect(result.text).not.toContain("cursor_write");
+		expect(result.text).not.toContain("cursor_mcp");
+	});
+
 	it("formats assistant tool calls before tool results", () => {
 		const ctx: Context = {
 			messages: [

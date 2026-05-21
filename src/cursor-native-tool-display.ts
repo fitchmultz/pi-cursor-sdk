@@ -2,10 +2,14 @@ import { readFileSync, statSync } from "node:fs";
 import { basename, extname } from "node:path";
 import {
 	createBashToolDefinition,
+	createEditToolDefinition,
 	createFindToolDefinition,
 	createGrepToolDefinition,
 	createLsToolDefinition,
 	createReadToolDefinition,
+	createWriteToolDefinition,
+	getLanguageFromPath,
+	highlightCode,
 	type ExtensionAPI,
 	type ExtensionContext,
 	type ToolDefinition,
@@ -13,21 +17,19 @@ import {
 import { Image, Text, type Component } from "@earendil-works/pi-tui";
 import { Type, type TSchema } from "typebox";
 import { getCursorSessionCwd } from "./cursor-session-cwd.js";
+import {
+	CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
+	CURSOR_REPLAY_LEGACY_TOOL_NAMES,
+	getCursorReplayDisplayLabel,
+	getCursorReplaySourceToolName,
+	isCursorReplayToolName,
+	type CursorReplayToolName,
+} from "./cursor-tool-names.js";
 import type { CursorPiToolDisplay } from "./cursor-tool-transcript.js";
 
-const CURSOR_REPLAY_ONLY_TOOL_NAMES = [
-	"cursor_edit",
-	"cursor_write",
-	"cursor_read_lints",
-	"cursor_delete",
-	"cursor_update_todos",
-	"cursor_task",
-	"cursor_create_plan",
-	"cursor_generate_image",
-	"cursor_mcp",
-] as const;
-type CursorReplayOnlyToolName = (typeof CURSOR_REPLAY_ONLY_TOOL_NAMES)[number];
-const NATIVE_CURSOR_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", ...CURSOR_REPLAY_ONLY_TOOL_NAMES] as const;
+const CURSOR_MODEL_ACTIVE_REPLAY_TOOL_NAMES = [CURSOR_REPLAY_ACTIVITY_TOOL_NAME] as const;
+const CURSOR_REPLAY_TOOL_NAMES = [CURSOR_REPLAY_ACTIVITY_TOOL_NAME, ...CURSOR_REPLAY_LEGACY_TOOL_NAMES] as const;
+const NATIVE_CURSOR_TOOL_NAMES = ["read", "bash", "edit", "write", "grep", "find", "ls", ...CURSOR_REPLAY_TOOL_NAMES] as const;
 type NativeCursorToolName = (typeof NATIVE_CURSOR_TOOL_NAMES)[number];
 const NATIVE_CURSOR_TOOL_DISPLAY_ENV = "PI_CURSOR_NATIVE_TOOL_DISPLAY";
 // Registration-only kill switch for users who want transcript fallback without shadowing read/bash/ls.
@@ -60,9 +62,6 @@ function isNativeCursorToolName(toolName: string): toolName is NativeCursorToolN
 	return NATIVE_CURSOR_TOOL_NAMES.some((nativeToolName) => nativeToolName === toolName);
 }
 
-function isCursorReplayOnlyToolName(toolName: NativeCursorToolName): toolName is CursorReplayOnlyToolName {
-	return CURSOR_REPLAY_ONLY_TOOL_NAMES.some((replayToolName) => replayToolName === toolName);
-}
 
 function isCursorNativeToolRegistrationRequested(): boolean {
 	return readBooleanEnv(NATIVE_CURSOR_TOOL_REGISTRATION_ENV) !== false && isCursorNativeToolDisplayRequested();
@@ -96,6 +95,14 @@ function consumeCursorNativeToolDisplay(id: string): CursorNativeToolDisplayItem
 	return item;
 }
 
+function isCursorReplayToolCallId(toolCallId: string): boolean {
+	return toolCallId.startsWith("cursor-replay-");
+}
+
+function isCursorFileMutationToolName(toolName: string): toolName is "edit" | "write" {
+	return toolName === "edit" || toolName === "write";
+}
+
 export const __testUtils = {
 	nativeToolResultCount: () => nativeToolResults.size,
 	reset(): void {
@@ -126,7 +133,25 @@ function wrapNativeCursorTool<TParams extends TSchema, TDetails, TState>(
 					terminate: cursorDisplay.terminate ?? true,
 				};
 			}
+			if (isCursorFileMutationToolName(definition.name) && isCursorReplayToolCallId(toolCallId)) {
+				throw new Error(`No recorded Cursor ${definition.name} result was available. This replay-only call does not execute file mutations.`);
+			}
 			return getCurrentDefinition().execute(toolCallId, params, signal, onUpdate, ctx);
+		},
+		renderCall(args, theme, context) {
+			if (isCursorFileMutationToolName(definition.name) && isCursorReplayToolCallId(context.toolCallId)) {
+				return renderNativeLookingCursorFileMutationCall(definition.name, args as Record<string, unknown>, theme, context.isPartial);
+			}
+			const currentRenderCall = getCurrentDefinition().renderCall;
+			return currentRenderCall ? currentRenderCall(args, theme, context) : new Text("", 0, 0);
+		},
+		renderResult(result, options, theme, context) {
+			const details = asCursorReplayToolDetails(result.details);
+			if (isCursorFileMutationToolName(definition.name) && details?.cursorToolName === definition.name) {
+				return renderCursorReplayResult(result, options, theme, context, context.isError);
+			}
+			const currentRenderResult = getCurrentDefinition().renderResult;
+			return currentRenderResult ? currentRenderResult(result, options, theme, context) : new Text("", 0, 0);
 		},
 	};
 }
@@ -143,7 +168,10 @@ interface CursorReplayToolDetails {
 	linesRemoved?: number;
 	linesCreated?: number;
 	fileSize?: number;
+	fileContentAfterWrite?: string;
 	diffString?: string;
+	diff?: string;
+	firstChangedLine?: number;
 	expandedText?: string;
 }
 
@@ -192,31 +220,10 @@ function buildImageReplayComponent(text: string, imageData: string, mimeType: st
 	};
 }
 
-function getCursorReplaySourceToolName(toolName: CursorReplayOnlyToolName): string {
-	switch (toolName) {
-		case "cursor_edit":
-			return "edit";
-		case "cursor_write":
-			return "write";
-		case "cursor_read_lints":
-			return "readLints";
-		case "cursor_delete":
-			return "delete";
-		case "cursor_update_todos":
-			return "updateTodos";
-		case "cursor_task":
-			return "task";
-		case "cursor_create_plan":
-			return "createPlan";
-		case "cursor_generate_image":
-			return "generateImage";
-		case "cursor_mcp":
-			return "mcp";
-	}
-}
-
-function getCursorReplayToolLabel(toolName: CursorReplayOnlyToolName): string {
-	return `Cursor ${getCursorReplaySourceToolName(toolName)}`;
+function getCursorReplayToolLabel(toolName: CursorReplayToolName): string {
+	if (toolName === "cursor_edit") return "edit";
+	if (toolName === "cursor_write") return "write";
+	return getCursorReplayDisplayLabel(toolName);
 }
 
 function getCursorReplayPath(args: Record<string, unknown> | undefined, details: CursorReplayToolDetails | undefined): string {
@@ -234,11 +241,15 @@ function parseUnifiedDiffHunkHeader(line: string): { oldLine: number; newLine: n
 	return { oldLine: Number(match[1]), newLine: Number(match[2]) };
 }
 
+function replaceCursorReplayTabs(text: string): string {
+	return text.replace(/\t/g, "   ");
+}
+
 function formatCursorReplayDiffLine(prefix: string, lineNumber: number, content: string, theme: CursorReplayRenderTheme): string {
-	const rendered = `${prefix}${lineNumber} ${content}`;
-	if (prefix === "+") return theme.fg("success", rendered);
-	if (prefix === "-") return theme.fg("error", rendered);
-	return theme.fg("muted", rendered);
+	const rendered = `${prefix}${lineNumber} ${replaceCursorReplayTabs(content)}`;
+	if (prefix === "+") return theme.fg("toolDiffAdded", rendered);
+	if (prefix === "-") return theme.fg("toolDiffRemoved", rendered);
+	return theme.fg("toolDiffContext", rendered);
 }
 
 function formatCursorReplayDiff(diff: string, theme: CursorReplayRenderTheme, maxLines: number): string {
@@ -271,7 +282,7 @@ function formatCursorReplayDiff(diff: string, theme: CursorReplayRenderTheme, ma
 			oldLine += 1;
 			newLine += 1;
 		} else {
-			rendered.push(theme.fg("muted", line));
+			rendered.push(theme.fg("toolDiffContext", replaceCursorReplayTabs(line)));
 		}
 	}
 
@@ -289,8 +300,13 @@ function formatMutedBlock(text: string, theme: CursorReplayRenderTheme): string 
 	return text.split("\n").map((line) => theme.fg("muted", line)).join("\n");
 }
 
-function formatCursorReplayPreview(text: string, theme: CursorReplayRenderTheme, maxLines = CURSOR_REPLAY_COLLAPSED_PREVIEW_LINES): string | undefined {
-	const body = stripCursorReplayHeader(text).trimEnd();
+function formatCursorReplayPreview(
+	text: string,
+	theme: CursorReplayRenderTheme,
+	maxLines = CURSOR_REPLAY_COLLAPSED_PREVIEW_LINES,
+	stripHeader = true,
+): string | undefined {
+	const body = (stripHeader ? stripCursorReplayHeader(text) : text).trimEnd();
 	if (!body) return undefined;
 	const lines = body.split("\n");
 	const visible = lines.slice(0, maxLines);
@@ -298,7 +314,34 @@ function formatCursorReplayPreview(text: string, theme: CursorReplayRenderTheme,
 	return formatMutedBlock(visible.join("\n"), theme);
 }
 
-function getCursorReplayCallSummary(toolName: CursorReplayOnlyToolName, args: Record<string, unknown> | undefined): string | undefined {
+function safeHighlightCursorReplayCode(text: string, path: string | undefined): string[] | undefined {
+	const lang = path ? getLanguageFromPath(path) : undefined;
+	if (!lang) return undefined;
+	try {
+		return highlightCode(replaceCursorReplayTabs(text), lang);
+	} catch {
+		return undefined;
+	}
+}
+
+function formatCursorReplayFilePreview(
+	text: string,
+	path: string | undefined,
+	theme: CursorReplayRenderTheme,
+	maxLines = CURSOR_REPLAY_COLLAPSED_PREVIEW_LINES,
+	stripHeader = true,
+): string | undefined {
+	const body = (stripHeader ? stripCursorReplayHeader(text) : text).trimEnd();
+	if (!body) return undefined;
+	const rawLines = body.split("\n");
+	const highlightedLines = safeHighlightCursorReplayCode(body, path);
+	const renderedLines = highlightedLines ?? rawLines.map((line) => theme.fg("toolOutput", replaceCursorReplayTabs(line)));
+	const visible = renderedLines.slice(0, maxLines);
+	if (rawLines.length > maxLines) visible.push(theme.fg("muted", `... (${rawLines.length - maxLines} more lines; expand for full details)`));
+	return visible.join("\n");
+}
+
+function getCursorReplayCallSummary(toolName: CursorReplayToolName, args: Record<string, unknown> | undefined): string | undefined {
 	const path = typeof args?.path === "string" ? args.path : undefined;
 	const description = typeof args?.description === "string" ? args.description : undefined;
 	const prompt = typeof args?.prompt === "string" ? args.prompt : undefined;
@@ -318,11 +361,15 @@ function getCursorReplayCallSummary(toolName: CursorReplayOnlyToolName, args: Re
 	if (toolName === "cursor_task") return description;
 	if (toolName === "cursor_generate_image") return prompt;
 	if (toolName === "cursor_mcp") return typeof args?.toolName === "string" ? args.toolName : undefined;
+	if (toolName === CURSOR_REPLAY_ACTIVITY_TOOL_NAME) {
+		if (typeof args?.path === "string") return args.path;
+		if (typeof args?.toolName === "string") return args.toolName;
+	}
 	return undefined;
 }
 
 function renderCursorReplayCall(
-	toolName: CursorReplayOnlyToolName,
+	toolName: CursorReplayToolName,
 	args: Record<string, unknown> | undefined,
 	theme: CursorReplayRenderTheme,
 	isPartial: boolean,
@@ -334,18 +381,45 @@ function renderCursorReplayCall(
 	return new Text(text.trimEnd(), 0, 0);
 }
 
+function countDisplayLines(text: string): number {
+	const withoutFinalNewline = text.endsWith("\n") ? text.slice(0, -1) : text;
+	return withoutFinalNewline ? withoutFinalNewline.split("\n").length : 0;
+}
+
+function renderNativeLookingCursorFileMutationCall(
+	toolName: "edit" | "write",
+	args: Record<string, unknown> | undefined,
+	theme: CursorReplayRenderTheme,
+	isPartial: boolean,
+): Text {
+	if (!isPartial) return new Text("", 0, 0);
+	let text = theme.fg("toolTitle", theme.bold(`${toolName} `));
+	const path = typeof args?.path === "string" && args.path.trim() ? args.path : "unknown";
+	text += theme.fg("accent", path);
+	if (toolName === "write" && typeof args?.content === "string" && args.content.length > 0) {
+		const lineCount = countDisplayLines(args.content);
+		text += theme.fg("dim", ` (${pluralize(lineCount, "line")})`);
+	}
+	return new Text(text.trimEnd(), 0, 0);
+}
+
 function pluralize(count: number, noun: string): string {
 	return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
+function getCursorEditDiff(details: CursorReplayToolDetails): string | undefined {
+	return details.diffString ?? details.diff;
+}
+
 function hasCursorEditChanges(details: CursorReplayToolDetails): boolean {
-	return Boolean(details.diffString) || Boolean(details.linesAdded) || Boolean(details.linesRemoved);
+	return Boolean(getCursorEditDiff(details)) || Boolean(details.linesAdded) || Boolean(details.linesRemoved);
 }
 
 function classifyCursorEditOperation(details: CursorReplayToolDetails): "created" | "deleted" | "updated" | "unchanged" {
 	if (!hasCursorEditChanges(details)) return "unchanged";
-	if (details.diffString?.startsWith("--- /dev/null")) return "created";
-	if (details.diffString?.includes("\n+++ /dev/null")) return "deleted";
+	const diff = getCursorEditDiff(details);
+	if (diff?.startsWith("--- /dev/null")) return "created";
+	if (diff?.includes("\n+++ /dev/null")) return "deleted";
 	return "updated";
 }
 
@@ -413,10 +487,12 @@ function renderCursorReplayResult(
 	const text = firstContentText(result);
 	if (isError && !details?.title) return new Text(theme.fg("error", text.split("\n")[0] || "Cursor replay failed"), 0, 0);
 
-	if (details?.cursorToolName === "edit") {
+	if (details?.cursorToolName === "edit" && hasCursorEditChanges(details)) {
 		const summary = formatCursorEditSummary(details);
-		let rendered = `${theme.fg("toolTitle", theme.bold(`Cursor ${classifyCursorEditOperation(details)}`))} ${theme.fg("accent", getCursorReplayPath(undefined, details))} ${theme.fg("success", summary)}`;
-		if (details.diffString) rendered += `\n${formatCursorReplayDiff(details.diffString, theme, options.expanded ? 40 : CURSOR_REPLAY_COLLAPSED_PREVIEW_LINES)}`;
+		const title = details.title ?? "edit";
+		let rendered = `${theme.fg("toolTitle", theme.bold(title))} ${theme.fg("accent", getCursorReplayPath(undefined, details))} ${theme.fg("success", summary)}`;
+		const diff = getCursorEditDiff(details);
+		if (diff) rendered += `\n${formatCursorReplayDiff(diff, theme, options.expanded ? 40 : CURSOR_REPLAY_COLLAPSED_PREVIEW_LINES)}`;
 		return new Text(rendered, 0, 0);
 	}
 
@@ -426,8 +502,15 @@ function renderCursorReplayResult(
 			details.fileSize !== undefined ? `${details.fileSize} bytes` : undefined,
 		].filter(Boolean);
 		const summary = parts.length > 0 ? parts.join(", ") : "written";
-		let rendered = `${theme.fg("toolTitle", theme.bold("Cursor write"))} ${theme.fg("accent", getCursorReplayPath(undefined, details))} ${theme.fg("success", summary)}`;
-		const preview = formatCursorReplayPreview(details.expandedText ?? text, theme);
+		let rendered = `${theme.fg("toolTitle", theme.bold("write"))} ${theme.fg("accent", getCursorReplayPath(undefined, details))} ${theme.fg("success", summary)}`;
+		const previewSource = details.fileContentAfterWrite ?? details.expandedText ?? text;
+		const preview = formatCursorReplayFilePreview(
+			previewSource,
+			getCursorReplayPath(undefined, details),
+			theme,
+			CURSOR_REPLAY_COLLAPSED_PREVIEW_LINES,
+			details.fileContentAfterWrite === undefined,
+		);
 		if (preview) rendered += `\n${preview}`;
 		return new Text(rendered, 0, 0);
 	}
@@ -437,19 +520,18 @@ function renderCursorReplayResult(
 	return new Text(text || theme.fg("success", "Cursor tool result replayed"), 0, 0);
 }
 
-function createCursorReplayOnlyToolDefinition(toolName: CursorReplayOnlyToolName): ToolDefinition<typeof cursorReplayToolSchema, unknown> {
-	const cursorToolName = getCursorReplaySourceToolName(toolName);
-	const sideEffectDescription = toolName === "cursor_edit" || toolName === "cursor_write" ? "file mutations" : "real tool work";
+function createCursorReplayOnlyToolDefinition(toolName: CursorReplayToolName): ToolDefinition<typeof cursorReplayToolSchema, unknown> {
+	const cursorToolName = toolName === CURSOR_REPLAY_ACTIVITY_TOOL_NAME ? "activity" : getCursorReplaySourceToolName(toolName);
+	const sideEffectDescription = toolName === "cursor_edit" || toolName === "cursor_write" || toolName === CURSOR_REPLAY_ACTIVITY_TOOL_NAME ? "file mutations" : "real tool work";
 	return {
 		name: toolName,
 		label: getCursorReplayToolLabel(toolName),
 		description: `Replay display for a Cursor SDK ${cursorToolName} operation. This tool only returns recorded Cursor results and never executes ${sideEffectDescription} directly.`,
 		promptSnippet: `Render a recorded Cursor SDK ${cursorToolName} operation without executing ${sideEffectDescription}.`,
 		promptGuidelines: [
-			`Use ${toolName} only for replaying Cursor SDK ${cursorToolName} results that were already produced by Cursor; ${toolName} does not execute ${sideEffectDescription}.`,
+			`Use this tool only for replaying Cursor SDK ${cursorToolName} results that were already produced by Cursor; it does not execute ${sideEffectDescription}.`,
 		],
 		parameters: cursorReplayToolSchema,
-		renderShell: "self",
 		async execute() {
 			throw new Error(`No recorded Cursor ${cursorToolName} result was available. This replay-only tool does not execute ${sideEffectDescription}.`);
 		},
@@ -465,10 +547,12 @@ function createCursorReplayOnlyToolDefinition(toolName: CursorReplayOnlyToolName
 function createNativeCursorToolDefinition(toolName: NativeCursorToolName, cwd: string): ToolDefinition<TSchema, unknown, unknown> {
 	if (toolName === "read") return createReadToolDefinition(cwd) as ToolDefinition<TSchema, unknown, unknown>;
 	if (toolName === "bash") return createBashToolDefinition(cwd) as ToolDefinition<TSchema, unknown, unknown>;
+	if (toolName === "edit") return createEditToolDefinition(cwd) as ToolDefinition<TSchema, unknown, unknown>;
+	if (toolName === "write") return createWriteToolDefinition(cwd) as ToolDefinition<TSchema, unknown, unknown>;
 	if (toolName === "grep") return createGrepToolDefinition(cwd) as ToolDefinition<TSchema, unknown, unknown>;
 	if (toolName === "find") return createFindToolDefinition(cwd) as ToolDefinition<TSchema, unknown, unknown>;
 	if (toolName === "ls") return createLsToolDefinition(cwd) as ToolDefinition<TSchema, unknown, unknown>;
-	if (isCursorReplayOnlyToolName(toolName)) return createCursorReplayOnlyToolDefinition(toolName) as ToolDefinition<TSchema, unknown, unknown>;
+	if (isCursorReplayToolName(toolName)) return createCursorReplayOnlyToolDefinition(toolName) as ToolDefinition<TSchema, unknown, unknown>;
 	throw new Error(`Unsupported Cursor native replay tool: ${toolName}`);
 }
 
@@ -494,12 +578,13 @@ function syncRegisteredNativeCursorToolsForModel(pi: ExtensionAPI, model: Extens
 	let changed = false;
 	if (isCursorModel(model)) {
 		for (const toolName of registeredNativeToolNames) {
+			if (isCursorReplayToolName(toolName) && !CURSOR_MODEL_ACTIVE_REPLAY_TOOL_NAMES.some((activeReplayToolName) => activeReplayToolName === toolName)) continue;
 			if (activeToolNames.has(toolName)) continue;
 			activeToolNames.add(toolName);
 			changed = true;
 		}
 	} else {
-		for (const toolName of CURSOR_REPLAY_ONLY_TOOL_NAMES) {
+		for (const toolName of CURSOR_REPLAY_TOOL_NAMES) {
 			if (!activeToolNames.delete(toolName)) continue;
 			changed = true;
 		}

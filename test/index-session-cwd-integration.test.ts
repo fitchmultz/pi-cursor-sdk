@@ -48,6 +48,7 @@ import extensionFactory from "../src/index.js";
 import { discoverModels } from "../src/model-discovery.js";
 import { streamCursor, __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
 import { __testUtils as cursorSessionCwdTestUtils } from "../src/cursor-session-cwd.js";
+import { __testUtils as cursorPiToolBridgeTestUtils } from "../src/cursor-pi-tool-bridge.js";
 
 const mockedDiscover = vi.mocked(discoverModels);
 const mockedAgentCreate = vi.mocked(Agent.create);
@@ -67,6 +68,7 @@ function createMockPi() {
 		registerFlag: vi.fn(),
 		registerCommand: vi.fn(),
 		registerTool: vi.fn(),
+		getActiveTools: vi.fn(() => []),
 		getAllTools: vi.fn(() => []),
 		sendMessage: vi.fn(),
 		on: vi.fn((event: string, handler: (event: unknown, ctx: TestExtensionContext) => void) => {
@@ -126,7 +128,8 @@ async function collectEvents(stream: AssistantMessageEventStream) {
 }
 
 describe("extension session cwd integration", () => {
-	beforeEach(() => {
+	beforeEach(async () => {
+		await cursorPiToolBridgeTestUtils.resetRegisteredBridgeForTests();
 		vi.clearAllMocks();
 		delete process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY;
 		delete process.env.PI_CURSOR_REGISTER_NATIVE_TOOLS;
@@ -147,8 +150,9 @@ describe("extension session cwd integration", () => {
 		]);
 	});
 
-	afterEach(() => {
+	afterEach(async () => {
 		cursorSessionCwdTestUtils.reset();
+		await cursorPiToolBridgeTestUtils.resetRegisteredBridgeForTests();
 	});
 
 	it("passes pi session cwd from extension registration through streamSimple to Agent.create", async () => {

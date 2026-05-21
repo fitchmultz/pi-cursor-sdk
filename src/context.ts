@@ -1,5 +1,6 @@
 import type { Context, Message, ToolCall } from "@earendil-works/pi-ai";
 import type { SDKImage } from "@cursor/sdk";
+import { getCursorReplayPromptLabel, sanitizeCursorReplayNamesForPrompt } from "./cursor-tool-names.js";
 
 export interface CursorPrompt {
 	text: string;
@@ -58,8 +59,8 @@ function formatContentBlocks(content: string | { type: string; text?: string; da
 }
 
 function formatToolCall(toolCall: ToolCall): string {
-	const args = JSON.stringify(toolCall.arguments);
-	return `Tool call (${toolCall.name}, call ${toolCall.id}): ${args}`;
+	const args = sanitizeCursorReplayNamesForPrompt(JSON.stringify(toolCall.arguments) ?? "");
+	return `Tool call (${getCursorReplayPromptLabel(toolCall.name)}, call ${toolCall.id}): ${args}`;
 }
 
 function sanitizeSystemPromptForCursor(systemPrompt: string): string {
@@ -77,13 +78,13 @@ function sanitizeSystemPromptForCursor(systemPrompt: string): string {
 		"",
 	);
 	sanitized = sanitized.replace(/\n+Semantic code intelligence priority:[\s\S]*$/g, "");
-	return sanitized.trim();
+	return sanitizeCursorReplayNamesForPrompt(sanitized.trim());
 }
 
 function formatMessage(msg: Message): string | undefined {
 	switch (msg.role) {
 		case "user": {
-			const text = formatContentBlocks(msg.content);
+			const text = sanitizeCursorReplayNamesForPrompt(formatContentBlocks(msg.content));
 			return text ? `User: ${text}` : undefined;
 		}
 		case "assistant": {
@@ -91,7 +92,7 @@ function formatMessage(msg: Message): string | undefined {
 			const textParts: string[] = [];
 			for (const block of blocks) {
 				if (isTextBlock(block)) {
-					textParts.push(block.text);
+					textParts.push(sanitizeCursorReplayNamesForPrompt(block.text));
 				} else if (isToolCallBlock(block)) {
 					textParts.push(formatToolCall(block));
 				}
@@ -100,9 +101,9 @@ function formatMessage(msg: Message): string | undefined {
 			return textParts.length > 0 ? `Assistant: ${textParts.join("\n")}` : undefined;
 		}
 		case "toolResult": {
-			const text = formatContentBlocks(msg.content);
+			const text = sanitizeCursorReplayNamesForPrompt(formatContentBlocks(msg.content));
 			const label = msg.isError ? "Tool error" : "Tool result";
-			return `${label} (${msg.toolName}, call ${msg.toolCallId}): ${text}`;
+			return `${label} (${getCursorReplayPromptLabel(msg.toolName)}, call ${msg.toolCallId}): ${text}`;
 		}
 	}
 }

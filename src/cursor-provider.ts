@@ -9,7 +9,13 @@ import {
 } from "@earendil-works/pi-ai";
 import { Agent, createAgentPlatform } from "@cursor/sdk";
 import type { InteractionUpdate, SDKAgent, SettingSource } from "@cursor/sdk";
+import { installCursorMcpToolTimeoutOverride } from "./cursor-mcp-timeout-override.js";
 import { buildCursorPrompt, type CursorPrompt } from "./context.js";
+import {
+	getRegisteredCursorPiToolBridge,
+	type CursorPiBridgeToolRequest,
+	type CursorPiToolBridgeRun,
+} from "./cursor-pi-tool-bridge.js";
 import { getCursorSessionCwd } from "./cursor-session-cwd.js";
 import { getEffectiveFastForModelId } from "./cursor-state.js";
 import { buildCursorModelSelection } from "./model-discovery.js";
@@ -64,18 +70,20 @@ const DEFAULT_CURSOR_NATIVE_REPLAY_IDLE_DISPOSE_MS = 5 * 60 * 1000;
 const CURSOR_NATIVE_REPLAY_TOOL_ID_PATTERN = /^(cursor-replay-\d+-\d+)-tool-\d+$/;
 const CURSOR_SETTING_SOURCES_ENV = "PI_CURSOR_SETTING_SOURCES";
 
-type CursorNativeQueuedEvent =
+type CursorLiveQueuedEvent =
 	| { type: "thinking-delta"; text: string }
 	| { type: "thinking-completed" }
 	| { type: "text-delta"; text: string }
-	| { type: "tool"; tool: CursorNativeToolDisplayItem };
+	| { type: "tool"; tool: CursorNativeToolDisplayItem }
+	| { type: "bridge-tool"; request: CursorPiBridgeToolRequest };
 
-interface CursorNativeLiveRun {
+interface CursorLiveRun {
 	id: string;
 	agent: SDKAgent;
+	bridgeRun?: CursorPiToolBridgeRun;
 	promptInputTokens: number;
 	promptInputTokensReported: boolean;
-	pendingEvents: CursorNativeQueuedEvent[];
+	pendingEvents: CursorLiveQueuedEvent[];
 	textDeltas: string[];
 	emittedText: string;
 	recordedToolDisplayIds: string[];
@@ -88,7 +96,7 @@ interface CursorNativeLiveRun {
 	waiters: Set<() => void>;
 }
 
-interface CursorNativeTurnState {
+interface CursorLiveTurnState {
 	stream: AssistantMessageEventStream;
 	partial: AssistantMessage;
 	thinkingContentIndex: number;
@@ -97,7 +105,7 @@ interface CursorNativeTurnState {
 
 let cursorNativeReplayCounter = 0;
 let cursorNativeReplayIdleDisposeMs = DEFAULT_CURSOR_NATIVE_REPLAY_IDLE_DISPOSE_MS;
-const pendingCursorNativeRuns = new Map<string, CursorNativeLiveRun>();
+const pendingCursorLiveRuns = new Map<string, CursorLiveRun>();
 
 function escapeRegExp(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -299,12 +307,18 @@ function getCursorNativeReplayIdFromToolCallId(toolCallId: string): string | und
 	return CURSOR_NATIVE_REPLAY_TOOL_ID_PATTERN.exec(toolCallId)?.[1];
 }
 
-function getPendingCursorNativeReplayId(context: Context): string | undefined {
+function getPendingCursorLiveRun(context: Context): CursorLiveRun | undefined {
 	for (let index = context.messages.length - 1; index >= 0; index -= 1) {
 		const message = context.messages[index];
 		if (message.role !== "toolResult") break;
 		const replayId = getCursorNativeReplayIdFromToolCallId(message.toolCallId);
-		if (replayId && pendingCursorNativeRuns.has(replayId)) return replayId;
+		if (replayId) {
+			const replayRun = pendingCursorLiveRuns.get(replayId);
+			if (replayRun) return replayRun;
+		}
+		for (const run of pendingCursorLiveRuns.values()) {
+			if (run.bridgeRun?.hasPendingPiToolCallId(message.toolCallId)) return run;
+		}
 	}
 	return undefined;
 }
@@ -344,23 +358,23 @@ async function emitTextDeltas(
 	return block.text;
 }
 
-function notifyCursorNativeRun(run: CursorNativeLiveRun): void {
+function notifyCursorNativeRun(run: CursorLiveRun): void {
 	for (const waiter of run.waiters) waiter();
 	run.waiters.clear();
 }
 
-function queueCursorNativeEvent(run: CursorNativeLiveRun, event: CursorNativeQueuedEvent): void {
+function queueCursorNativeEvent(run: CursorLiveRun, event: CursorLiveQueuedEvent): void {
 	run.pendingEvents.push(event);
 	notifyCursorNativeRun(run);
 }
 
-function clearCursorNativeRunIdleDispose(run: CursorNativeLiveRun): void {
+function clearCursorNativeRunIdleDispose(run: CursorLiveRun): void {
 	if (!run.idleDisposeTimer) return;
 	clearTimeout(run.idleDisposeTimer);
 	run.idleDisposeTimer = undefined;
 }
 
-function scheduleCursorNativeRunIdleDispose(run: CursorNativeLiveRun): void {
+function scheduleCursorNativeRunIdleDispose(run: CursorLiveRun): void {
 	if (run.disposed) return;
 	clearCursorNativeRunIdleDispose(run);
 	run.idleDisposeTimer = setTimeout(() => {
@@ -369,11 +383,11 @@ function scheduleCursorNativeRunIdleDispose(run: CursorNativeLiveRun): void {
 	run.idleDisposeTimer.unref?.();
 }
 
-function isCursorNativeRunReady(run: CursorNativeLiveRun): boolean {
+function isCursorNativeRunReady(run: CursorLiveRun): boolean {
 	return run.pendingEvents.length > 0 || run.done || run.cancelled || run.errorMessage !== undefined;
 }
 
-async function waitForCursorNativeRunProgress(run: CursorNativeLiveRun, signal?: AbortSignal): Promise<void> {
+async function waitForCursorNativeRunProgress(run: CursorLiveRun, signal?: AbortSignal): Promise<void> {
 	if (isCursorNativeRunReady(run)) return;
 	await new Promise<void>((resolve, reject) => {
 		let waiter: (() => void) | undefined;
@@ -394,12 +408,13 @@ async function waitForCursorNativeRunProgress(run: CursorNativeLiveRun, signal?:
 	});
 }
 
-async function settleCursorNativeToolBatch(run: CursorNativeLiveRun): Promise<void> {
-	if (run.pendingEvents[0]?.type !== "tool") return;
+async function settleCursorLiveToolBatch(run: CursorLiveRun): Promise<void> {
+	const eventType = run.pendingEvents[0]?.type;
+	if (eventType !== "tool" && eventType !== "bridge-tool") return;
 	await new Promise((resolve) => setTimeout(resolve, 75));
 }
 
-function closeCursorNativeThinkingBlock(turn: CursorNativeTurnState): void {
+function closeCursorNativeThinkingBlock(turn: CursorLiveTurnState): void {
 	if (turn.thinkingContentIndex < 0) return;
 	const block = turn.partial.content[turn.thinkingContentIndex];
 	if (block.type === "thinking") {
@@ -413,7 +428,7 @@ function closeCursorNativeThinkingBlock(turn: CursorNativeTurnState): void {
 	turn.thinkingContentIndex = -1;
 }
 
-function closeCursorNativeTextBlock(turn: CursorNativeTurnState): string {
+function closeCursorNativeTextBlock(turn: CursorLiveTurnState): string {
 	if (turn.textContentIndex < 0) return "";
 	const contentIndex = turn.textContentIndex;
 	const block = turn.partial.content[contentIndex];
@@ -428,12 +443,12 @@ function closeCursorNativeTextBlock(turn: CursorNativeTurnState): string {
 	return block.text;
 }
 
-function closeCursorNativeTurnBlocks(turn: CursorNativeTurnState): string {
+function closeCursorNativeTurnBlocks(turn: CursorLiveTurnState): string {
 	closeCursorNativeThinkingBlock(turn);
 	return closeCursorNativeTextBlock(turn);
 }
 
-function emitCursorNativeThinkingDelta(turn: CursorNativeTurnState, delta: string): void {
+function emitCursorNativeThinkingDelta(turn: CursorLiveTurnState, delta: string): void {
 	closeCursorNativeTextBlock(turn);
 	if (turn.thinkingContentIndex < 0) {
 		turn.thinkingContentIndex = turn.partial.content.length;
@@ -446,7 +461,7 @@ function emitCursorNativeThinkingDelta(turn: CursorNativeTurnState, delta: strin
 	turn.stream.push({ type: "thinking_delta", contentIndex: turn.thinkingContentIndex, delta, partial: turn.partial });
 }
 
-function emitCursorNativeTextDelta(turn: CursorNativeTurnState, delta: string): void {
+function emitCursorNativeTextDelta(turn: CursorLiveTurnState, delta: string): void {
 	closeCursorNativeThinkingBlock(turn);
 	if (turn.textContentIndex < 0) {
 		turn.textContentIndex = turn.partial.content.length;
@@ -459,10 +474,10 @@ function emitCursorNativeTextDelta(turn: CursorNativeTurnState, delta: string): 
 	turn.stream.push({ type: "text_delta", contentIndex: turn.textContentIndex, delta, partial: turn.partial });
 }
 
-function emitCursorNativeQueuedEvent(
-	turn: CursorNativeTurnState,
-	event: Exclude<CursorNativeQueuedEvent, { type: "tool" }>,
-	run?: CursorNativeLiveRun,
+function emitCursorLiveQueuedEvent(
+	turn: CursorLiveTurnState,
+	event: Exclude<CursorLiveQueuedEvent, { type: "tool" } | { type: "bridge-tool" }>,
+	run?: CursorLiveRun,
 ): void {
 	if (event.type === "thinking-delta") {
 		emitCursorNativeThinkingDelta(turn, event.text);
@@ -474,13 +489,22 @@ function emitCursorNativeQueuedEvent(
 	}
 }
 
-function collectCursorNativeToolBatch(run: CursorNativeLiveRun): CursorNativeToolDisplayItem[] {
+function collectCursorNativeToolBatch(run: CursorLiveRun): CursorNativeToolDisplayItem[] {
 	const tools: CursorNativeToolDisplayItem[] = [];
 	while (run.pendingEvents[0]?.type === "tool") {
 		const event = run.pendingEvents.shift();
 		if (event?.type === "tool") tools.push(event.tool);
 	}
 	return tools;
+}
+
+function collectCursorBridgeToolBatch(run: CursorLiveRun): CursorPiBridgeToolRequest[] {
+	const requests: CursorPiBridgeToolRequest[] = [];
+	while (run.pendingEvents[0]?.type === "bridge-tool") {
+		const event = run.pendingEvents.shift();
+		if (event?.type === "bridge-tool") requests.push(event.request);
+	}
+	return requests;
 }
 
 function trimAlreadyEmittedCursorText(text: string, emittedText: string): string {
@@ -491,7 +515,7 @@ function trimAlreadyEmittedCursorText(text: string, emittedText: string): string
 	return text;
 }
 
-function takeCursorNativePromptInputTokens(run: CursorNativeLiveRun): number {
+function takeCursorNativePromptInputTokens(run: CursorLiveRun): number {
 	// Native replay can split one Cursor run into multiple pi turns; count prompt input once.
 	if (run.promptInputTokensReported) return 0;
 	run.promptInputTokensReported = true;
@@ -501,7 +525,7 @@ function takeCursorNativePromptInputTokens(run: CursorNativeLiveRun): number {
 function emitCursorNativeToolUseTurn(
 	stream: AssistantMessageEventStream,
 	partial: AssistantMessage,
-	run: CursorNativeLiveRun,
+	run: CursorLiveRun,
 	tools: CursorNativeToolDisplayItem[],
 	outputText: string,
 ): void {
@@ -528,14 +552,46 @@ function emitCursorNativeToolUseTurn(
 	scheduleCursorNativeRunIdleDispose(run);
 }
 
-async function disposeCursorNativeRun(run: CursorNativeLiveRun): Promise<void> {
+function emitCursorBridgeToolUseTurn(
+	stream: AssistantMessageEventStream,
+	partial: AssistantMessage,
+	run: CursorLiveRun,
+	requests: CursorPiBridgeToolRequest[],
+	outputText: string,
+): void {
+	for (const request of requests) {
+		const contentIndex = partial.content.length;
+		partial.content.push({
+			type: "toolCall",
+			id: request.piToolCallId,
+			name: request.piToolName,
+			arguments: request.args,
+		});
+		stream.push({ type: "toolcall_start", contentIndex, partial });
+		stream.push({ type: "toolcall_delta", contentIndex, delta: JSON.stringify(request.args), partial });
+		const block = partial.content[contentIndex];
+		if (block.type === "toolCall") stream.push({ type: "toolcall_end", contentIndex, toolCall: block, partial });
+	}
+	setApproximateUsage(partial, takeCursorNativePromptInputTokens(run), outputText);
+	partial.stopReason = "toolUse";
+	stream.push({ type: "done", reason: "toolUse", message: partial });
+	scheduleCursorNativeRunIdleDispose(run);
+}
+
+async function disposeCursorNativeRun(run: CursorLiveRun): Promise<void> {
 	if (run.disposed) return;
 	run.disposed = true;
-	pendingCursorNativeRuns.delete(run.id);
+	pendingCursorLiveRuns.delete(run.id);
 	clearCursorNativeRunIdleDispose(run);
+	run.bridgeRun?.cancel("Cursor live run disposed");
 	for (const toolDisplayId of run.recordedToolDisplayIds) deleteCursorNativeToolDisplay(toolDisplayId);
 	run.recordedToolDisplayIds = [];
 	run.waiters.clear();
+	try {
+		await run.bridgeRun?.dispose();
+	} catch {
+		// bridge disposal failure should not mask the provider result
+	}
 	try {
 		await run.agent[Symbol.asyncDispose]();
 	} catch {
@@ -546,10 +602,10 @@ async function disposeCursorNativeRun(run: CursorNativeLiveRun): Promise<void> {
 async function emitCursorNativeRunNextTurn(
 	stream: AssistantMessageEventStream,
 	partial: AssistantMessage,
-	run: CursorNativeLiveRun,
+	run: CursorLiveRun,
 	signal?: AbortSignal,
 ): Promise<void> {
-	const turn: CursorNativeTurnState = {
+	const turn: CursorLiveTurnState = {
 		stream,
 		partial,
 		thinkingContentIndex: -1,
@@ -560,14 +616,23 @@ async function emitCursorNativeRunNextTurn(
 		while (run.pendingEvents.length > 0) {
 			const event = run.pendingEvents[0];
 			if (event.type === "tool") {
-				await settleCursorNativeToolBatch(run);
+				await settleCursorLiveToolBatch(run);
+				if (signal?.aborted) throw new CursorAbortError();
 				const outputText = closeCursorNativeTurnBlocks(turn);
 				const tools = collectCursorNativeToolBatch(run);
 				emitCursorNativeToolUseTurn(stream, partial, run, tools, outputText);
 				return;
 			}
+			if (event.type === "bridge-tool") {
+				await settleCursorLiveToolBatch(run);
+				if (signal?.aborted) throw new CursorAbortError();
+				const outputText = closeCursorNativeTurnBlocks(turn);
+				const requests = collectCursorBridgeToolBatch(run);
+				emitCursorBridgeToolUseTurn(stream, partial, run, requests, outputText);
+				return;
+			}
 			run.pendingEvents.shift();
-			emitCursorNativeQueuedEvent(turn, event, run);
+			emitCursorLiveQueuedEvent(turn, event, run);
 		}
 
 		if (run.cancelled) {
@@ -599,17 +664,16 @@ async function emitCursorNativeRunNextTurn(
 	}
 }
 
-async function replayPendingCursorNativeRun(
+async function replayPendingCursorLiveRun(
 	stream: AssistantMessageEventStream,
 	partial: AssistantMessage,
 	context: Context,
 	signal?: AbortSignal,
 ): Promise<boolean> {
-	const replayId = getPendingCursorNativeReplayId(context);
-	if (!replayId) return false;
-	const run = pendingCursorNativeRuns.get(replayId);
+	const run = getPendingCursorLiveRun(context);
 	if (!run) return false;
 	clearCursorNativeRunIdleDispose(run);
+	run.bridgeRun?.resolveToolResultsFromContext(context);
 	try {
 		await emitCursorNativeRunNextTurn(stream, partial, run, signal);
 	} catch (error) {
@@ -629,7 +693,11 @@ export function streamCursor(
 	(async () => {
 		const partial = makeInitialMessage(model);
 		let agent: SDKAgent | null = null;
-		let activeNativeRun: CursorNativeLiveRun | undefined;
+		let activeLiveRun: CursorLiveRun | undefined;
+		let bridgeRun: CursorPiToolBridgeRun | undefined;
+		let bridgeRunOwnedByLiveRun = false;
+		let liveRunForBridgeQueue: CursorLiveRun | undefined;
+		const queuedBridgeRequestsBeforeLiveRun: CursorPiBridgeToolRequest[] = [];
 		let resolvedApiKey: string | undefined;
 		let abortSignal: AbortSignal | undefined;
 		let abortListener: (() => void) | undefined;
@@ -643,7 +711,7 @@ export function streamCursor(
 			stream.push({ type: "start", partial });
 			throwIfAborted();
 
-			if (await replayPendingCursorNativeRun(stream, partial, context, options?.signal)) {
+			if (await replayPendingCursorLiveRun(stream, partial, context, options?.signal)) {
 				stream.end();
 				return;
 			}
@@ -659,11 +727,30 @@ export function streamCursor(
 			const selection = buildCursorModelSelection(model.id, options?.reasoning ?? "off", fastEnabled);
 			const settingSources = resolveCursorSettingSources();
 
+			const registeredBridge = getRegisteredCursorPiToolBridge();
+			bridgeRun = registeredBridge
+				? await registeredBridge.createRun({
+						onToolRequest: (request) => {
+							if (liveRunForBridgeQueue && !liveRunForBridgeQueue.disposed) {
+								queueCursorNativeEvent(liveRunForBridgeQueue, { type: "bridge-tool", request });
+							} else {
+								queuedBridgeRequestsBeforeLiveRun.push(request);
+							}
+						},
+					})
+				: undefined;
+			if (!bridgeRun?.enabled || !bridgeRun.mcpServers) {
+				await bridgeRun?.dispose();
+				bridgeRun = undefined;
+			}
+
+			installCursorMcpToolTimeoutOverride();
 			restoreCursorSdkOutputFilter = installCursorSdkOutputFilter();
 			agent = await Agent.create({
 				apiKey,
 				model: selection,
 				local: settingSources ? { cwd, settingSources } : { cwd },
+				...(bridgeRun?.mcpServers ? { mcpServers: bridgeRun.mcpServers } : {}),
 			});
 			throwIfAborted();
 
@@ -682,10 +769,12 @@ export function streamCursor(
 			const nativeReplayId = createCursorNativeReplayId();
 			const textDeltas: string[] = [];
 			let nativeToolReplayStarted = false;
-			const liveRun: CursorNativeLiveRun | undefined = useNativeToolReplay
+			const useLiveRun = useNativeToolReplay || bridgeRun !== undefined;
+			const liveRun: CursorLiveRun | undefined = useLiveRun
 				? {
-						id: nativeReplayId,
+						id: useNativeToolReplay ? nativeReplayId : bridgeRun!.id,
 						agent,
+						bridgeRun,
 						promptInputTokens,
 						promptInputTokensReported: false,
 						pendingEvents: [],
@@ -699,8 +788,13 @@ export function streamCursor(
 					}
 				: undefined;
 			if (liveRun) {
-				pendingCursorNativeRuns.set(liveRun.id, liveRun);
-				activeNativeRun = liveRun;
+				pendingCursorLiveRuns.set(liveRun.id, liveRun);
+				activeLiveRun = liveRun;
+				liveRunForBridgeQueue = liveRun;
+				bridgeRunOwnedByLiveRun = bridgeRun !== undefined;
+				for (const request of queuedBridgeRequestsBeforeLiveRun.splice(0)) {
+					queueCursorNativeEvent(liveRun, { type: "bridge-tool", request });
+				}
 			}
 			const startedToolCalls = new Map<string, unknown>();
 			const completedToolIdentities = new Set<string>();
@@ -765,7 +859,7 @@ export function streamCursor(
 
 			const emitCursorToolTrace = (text: string): void => {
 				const traceText = text.endsWith("\n") ? text : `${text}\n`;
-				if (liveRun && nativeToolReplayStarted) {
+				if (liveRun) {
 					queueCursorNativeEvent(liveRun, { type: "thinking-delta", text: traceText });
 					queueCursorNativeEvent(liveRun, { type: "thinking-completed" });
 					return;
@@ -827,6 +921,7 @@ export function streamCursor(
 			const handleIncompleteStartedToolCalls = (): void => {
 				if (startedToolCalls.size === 0) return;
 				for (const toolCall of startedToolCalls.values()) {
+					if (liveRun?.bridgeRun?.isBridgeMcpToolCall(toolCall)) continue;
 					const incompleteToolCall = {
 						...(toolCall && typeof toolCall === "object" && !Array.isArray(toolCall) ? (toolCall as Record<string, unknown>) : {}),
 						name: getCursorToolName(toolCall),
@@ -859,6 +954,10 @@ export function streamCursor(
 				toolCall: unknown,
 				options: { identity?: string; source?: "started" | "fallback" } = {},
 			): void => {
+				if (liveRun?.bridgeRun?.isBridgeMcpToolCall(toolCall)) {
+					if (options.identity) completedToolIdentities.add(options.identity);
+					return;
+				}
 				const transcript = scrubSensitiveText(formatCursorToolTranscript(toolCall, { cwd }), resolvedApiKey);
 				const display = buildCursorPiToolDisplay(toolCall, { cwd });
 				const fingerprint = getToolFingerprint({ toolName: display.toolName, args: display.args, result: display.result });
@@ -879,10 +978,6 @@ export function streamCursor(
 				const route = useNativeToolReplay && nativeRenderable && liveRun ? "native_replay" : "trace";
 
 				if (route === "native_replay" && liveRun) {
-					if (!nativeToolReplayStarted && textDeltas.length > 0) {
-						for (const text of textDeltas) queueCursorNativeEvent(liveRun, { type: "text-delta", text });
-						textDeltas.length = 0;
-					}
 					nativeToolReplayStarted = true;
 					const id = `${nativeReplayId}-tool-${++nativeToolDisplayCounter}`;
 					queueCursorNativeEvent(liveRun, {
@@ -905,25 +1000,27 @@ export function streamCursor(
 
 				if (update.type === "text-delta") {
 					textDeltas.push(update.text);
-					if (liveRun && nativeToolReplayStarted) {
+					if (liveRun) {
 						queueCursorNativeEvent(liveRun, { type: "text-delta", text: update.text });
-					} else if (!useNativeToolReplay) {
+					} else {
 						appendLiveTextDelta(update.text);
 					}
 				} else if (update.type === "thinking-delta") {
-					if (liveRun && nativeToolReplayStarted) {
+					if (liveRun) {
 						queueCursorNativeEvent(liveRun, { type: "thinking-delta", text: update.text });
 					} else {
 						appendTraceDelta(update.text);
 					}
 				} else if (update.type === "thinking-completed") {
-					if (liveRun && nativeToolReplayStarted) {
+					if (liveRun) {
 						queueCursorNativeEvent(liveRun, { type: "thinking-completed" });
 					} else {
 						closeTraceBlock();
 					}
 				} else if (update.type === "tool-call-started") {
-					startedToolCalls.set(update.callId, update.toolCall);
+					if (!liveRun?.bridgeRun?.isBridgeMcpToolCall(update.toolCall)) {
+						startedToolCalls.set(update.callId, update.toolCall);
+					}
 				} else if (update.type === "tool-call-completed") {
 					const mergedToolCall = mergeCursorToolCalls(startedToolCalls.get(update.callId), update.toolCall);
 					startedToolCalls.delete(update.callId);
@@ -934,7 +1031,7 @@ export function streamCursor(
 					});
 				} else if (update.type === "summary") {
 					const summary = `Cursor summary: ${truncateSingleLine(update.summary)}\n`;
-					if (liveRun && nativeToolReplayStarted) {
+					if (liveRun) {
 						queueCursorNativeEvent(liveRun, { type: "thinking-delta", text: summary });
 					} else {
 						appendTraceDelta(summary);
@@ -954,6 +1051,11 @@ export function streamCursor(
 				const toolCall = rawStepToolCall;
 				const stepId = getObjectField(args.step, "id") ?? getObjectField(toolCall, "id") ?? getObjectField(toolCall, "callId");
 				if (toolCall) {
+					if (liveRun?.bridgeRun?.isBridgeMcpToolCall(toolCall)) {
+						const matchedStartedCallId = removeStartedToolCallForStep(toolCall, stepId);
+						if (matchedStartedCallId) completedToolIdentities.add(`cursor-tool:${matchedStartedCallId}`);
+						return;
+					}
 					handleCompletedToolCall(toolCall, {
 						identity: typeof stepId === "string" ? `cursor-tool:${stepId}` : undefined,
 					});
@@ -965,6 +1067,7 @@ export function streamCursor(
 			// Handle abort signal
 			let run: Awaited<ReturnType<SDKAgent["send"]>> | null = null;
 			abortListener = () => {
+				activeLiveRun?.bridgeRun?.cancel("Cursor SDK run aborted");
 				if (run) {
 					run.cancel().catch(() => {});
 				}
@@ -982,7 +1085,7 @@ export function streamCursor(
 				throw new CursorAbortError();
 			}
 
-			if (useNativeToolReplay && liveRun) {
+			if (liveRun) {
 				void run
 					.wait()
 					.then(async (result) => {
@@ -1006,7 +1109,7 @@ export function streamCursor(
 
 				try {
 					await waitForCursorNativeRunProgress(liveRun, options?.signal);
-					await settleCursorNativeToolBatch(liveRun);
+					await settleCursorLiveToolBatch(liveRun);
 					closeTraceBlock();
 					await emitCursorNativeRunNextTurn(stream, partial, liveRun, options?.signal);
 				} catch (error) {
@@ -1034,6 +1137,7 @@ export function streamCursor(
 				stream.push({ type: "done", reason: "stop", message: partial });
 			}
 		} catch (error) {
+			if (activeLiveRun && !activeLiveRun.disposed) await disposeCursorNativeRun(activeLiveRun);
 			if (error instanceof CursorAbortError) {
 				partial.stopReason = "aborted";
 				stream.push({ type: "error", reason: "aborted", error: partial });
@@ -1044,10 +1148,18 @@ export function streamCursor(
 			}
 		} finally {
 			restoreCursorSdkOutputFilter?.();
-			if (activeNativeRun?.disposed) agent = null;
+			if (activeLiveRun?.disposed) agent = null;
 
 			if (abortSignal && abortListener) {
 				abortSignal.removeEventListener("abort", abortListener);
+			}
+
+			if (bridgeRun && !bridgeRunOwnedByLiveRun) {
+				try {
+					await bridgeRun.dispose();
+				} catch {
+					// bridge disposal failure should not mask original error
+				}
 			}
 
 			if (agent) {
@@ -1068,7 +1180,7 @@ export function streamCursor(
 
 export const __testUtils = {
 	DEFAULT_CURSOR_NATIVE_REPLAY_IDLE_DISPOSE_MS,
-	pendingCursorNativeRunCount: () => pendingCursorNativeRuns.size,
+	pendingCursorNativeRunCount: () => pendingCursorLiveRuns.size,
 	setCursorNativeReplayIdleDisposeMs: (value: number) => {
 		cursorNativeReplayIdleDisposeMs = value;
 	},

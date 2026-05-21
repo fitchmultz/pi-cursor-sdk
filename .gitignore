@@ -5,6 +5,7 @@ coverage/
 .env.*
 *.tgz
 .pi/
+demos/
 recording/
 demo-script.md
 docs/public-demo-script.md

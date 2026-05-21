@@ -146,14 +146,21 @@ describe("buildCursorPrompt", () => {
 		expect(result.text).toContain("Tool error (bash, call tc1): command failed");
 	});
 
-	it("rewrites legacy Cursor replay-only names in Cursor-facing transcript text", () => {
+	it("labels legacy Cursor replay tools without rewriting literal transcript text", () => {
 		const ctx: Context = {
 			messages: [
 				{
+					role: "user",
+					content: "Please search for the literal string cursor_edit.",
+					timestamp: 0,
+				} satisfies UserMessage,
+				{
 					role: "assistant",
 					content: [
+						{ type: "text", text: "I will preserve literal cursor_delete text." },
 						{ type: "toolCall", id: "edit-call", name: "cursor_edit", arguments: { note: "cursor_write" } },
 						{ type: "toolCall", id: "mcp-call", name: "cursor_mcp", arguments: { toolName: "git" } },
+						{ type: "toolCall", id: "bash-call", name: "bash", arguments: { command: "echo cursor_mcp" } },
 					],
 					api: "cursor-sdk",
 					provider: "cursor",
@@ -183,13 +190,17 @@ describe("buildCursorPrompt", () => {
 
 		const result = buildCursorPrompt(ctx);
 
+		expect(result.text).toContain("User: Please search for the literal string cursor_edit.");
+		expect(result.text).toContain("Assistant: I will preserve literal cursor_delete text.");
 		expect(result.text).toContain("Tool call (Cursor edit, call edit-call)");
+		expect(result.text).toContain('{"note":"cursor_write"}');
 		expect(result.text).toContain("Tool call (Cursor MCP, call mcp-call):");
-		expect(result.text).toContain("Tool result (Cursor edit, call edit-call): legacy Cursor edit result");
-		expect(result.text).toContain("Tool result (Cursor write, call write-call): legacy Cursor MCP text");
-		expect(result.text).not.toContain("cursor_edit");
-		expect(result.text).not.toContain("cursor_write");
-		expect(result.text).not.toContain("cursor_mcp");
+		expect(result.text).toContain('Tool call (bash, call bash-call): {"command":"echo cursor_mcp"}');
+		expect(result.text).toContain("Tool result (Cursor edit, call edit-call): legacy cursor_edit result");
+		expect(result.text).toContain("Tool result (Cursor write, call write-call): legacy cursor_mcp text");
+		expect(result.text).not.toContain("Tool call (cursor_edit");
+		expect(result.text).not.toContain("Tool call (cursor_mcp");
+		expect(result.text).not.toContain("Tool result (cursor_write");
 	});
 
 	it("formats assistant tool calls before tool results", () => {

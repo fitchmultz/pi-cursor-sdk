@@ -65,11 +65,3 @@ export function getCursorReplayDisplayLabel(toolName: CursorReplayToolName): str
 	if (toolName === CURSOR_REPLAY_ACTIVITY_TOOL_NAME) return "Cursor activity";
 	return CURSOR_REPLAY_PROMPT_LABELS[toolName];
 }
-
-export function sanitizeCursorReplayNamesForPrompt(text: string): string {
-	let sanitized = text;
-	for (const toolName of CURSOR_REPLAY_LEGACY_TOOL_NAMES) {
-		sanitized = sanitized.replaceAll(toolName, CURSOR_REPLAY_PROMPT_LABELS[toolName]);
-	}
-	return sanitized;
-}

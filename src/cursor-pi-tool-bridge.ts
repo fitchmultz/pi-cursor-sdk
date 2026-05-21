@@ -251,18 +251,15 @@ function getStringField(record: Record<string, unknown>, fields: string[]): stri
 
 function containsKnownMcpToolName(value: unknown, knownMcpToolNames: ReadonlySet<string>, depth = 0): boolean {
 	if (depth > 4) return false;
-	if (typeof value === "string") return knownMcpToolNames.has(value);
-	if (!isRecord(value)) {
-		if (Array.isArray(value)) return value.some((entry) => containsKnownMcpToolName(entry, knownMcpToolNames, depth + 1));
-		return false;
-	}
+	if (Array.isArray(value)) return value.some((entry) => containsKnownMcpToolName(entry, knownMcpToolNames, depth + 1));
+	if (!isRecord(value)) return false;
 
 	for (const field of ["tool", "toolName", "name", "mcpToolName", "serverToolName"]) {
 		const fieldValue = value[field];
 		if (typeof fieldValue === "string" && knownMcpToolNames.has(fieldValue)) return true;
 	}
 
-	for (const nestedField of ["args", "arguments", "input", "result", "value", "details"]) {
+	for (const nestedField of ["args", "arguments", "input"]) {
 		if (containsKnownMcpToolName(value[nestedField], knownMcpToolNames, depth + 1)) return true;
 	}
 

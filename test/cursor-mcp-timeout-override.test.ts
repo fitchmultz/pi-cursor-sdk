@@ -82,7 +82,7 @@ describe("Cursor MCP timeout override", () => {
 	it("wires the override before Cursor provider Agent.create", () => {
 		const providerSource = readFileSync(join(process.cwd(), "src/cursor-provider.ts"), "utf8");
 		const installIndex = providerSource.indexOf("installCursorMcpToolTimeoutOverride();");
-		const createIndex = providerSource.indexOf("agent = await Agent.create({");
+		const createIndex = providerSource.indexOf("Agent.create({");
 
 		expect(providerSource).toContain(
 			'import { installCursorMcpToolTimeoutOverride } from "./cursor-mcp-timeout-override.js";',

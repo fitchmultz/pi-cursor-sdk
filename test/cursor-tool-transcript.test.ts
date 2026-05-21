@@ -467,7 +467,7 @@ describe("formatCursorToolTranscript", () => {
 			},
 			{ cwd: "/repo" },
 		);
-		const writeDisplay = buildCursorPiToolDisplay(
+		const pathOnlyWriteDisplay = buildCursorPiToolDisplay(
 			{
 				name: "write",
 				args: { path: "/repo/new.txt" },
@@ -475,14 +475,26 @@ describe("formatCursorToolTranscript", () => {
 			},
 			{ cwd: "/repo" },
 		);
+		const contentWriteDisplay = buildCursorPiToolDisplay(
+			{
+				name: "write",
+				args: { path: "/repo/new.txt", content: "hello\n" },
+				result: { status: "success", value: { linesCreated: 1, fileSize: 6, fileContentAfterWrite: "hello\n" } },
+			},
+			{ cwd: "/repo" },
+		);
 
 		expect(editDisplay.args).toEqual({ path: "src/index.ts", activityTitle: "Cursor edit", activitySummary: "src/index.ts" });
 		expect(nativeEditDisplay.args).toEqual({ path: "src/index.ts", edits: [{ oldText: "old", newText: "new" }] });
-		expect(writeDisplay.args).toEqual({ path: "new.txt" });
+		expect(pathOnlyWriteDisplay.args).toEqual({ path: "new.txt", activityTitle: "Cursor write", activitySummary: "new.txt" });
+		expect(contentWriteDisplay.args).toEqual({ path: "new.txt", content: "hello\n" });
 		expect(editDisplay.toolName).toBe(CURSOR_REPLAY_ACTIVITY_TOOL_NAME);
 		expect(nativeEditDisplay.toolName).toBe("edit");
-		expect(writeDisplay.toolName).toBe("write");
+		expect(pathOnlyWriteDisplay.toolName).toBe(CURSOR_REPLAY_ACTIVITY_TOOL_NAME);
+		expect(contentWriteDisplay.toolName).toBe("write");
 		expect(editDisplay.result.content[0].text).toContain("edit src/index.ts");
+		expect(pathOnlyWriteDisplay.result.content[0].text).toContain("write new.txt");
+		expect(pathOnlyWriteDisplay.result.details).toMatchObject({ cursorToolName: "write", title: "Cursor write", path: "new.txt" });
 		expect(editDisplay.result.content[0].text).toContain("--- a/src/index.ts\n+++ b/src/index.ts");
 		expect(editDisplay.result.content[0].text).not.toContain("/repo");
 		expect(editDisplay.result.details).toMatchObject({ path: "src/index.ts", diffString: "--- a/src/index.ts\n+++ b/src/index.ts", diff: "--- a/src/index.ts\n+++ b/src/index.ts" });

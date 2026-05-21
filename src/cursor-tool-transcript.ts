@@ -1075,20 +1075,36 @@ export function buildCursorPiToolDisplay(toolCall: unknown, options: TranscriptO
 
 	if (name === "write") {
 		const value = asRecord(result.value);
+		const content = getCursorWriteArgContent(args);
 		const displayArgs = buildWriteDisplayArgs(args, options);
 		const displayPath = typeof args.path === "string" ? formatDisplayPath(args.path, options.cwd) : undefined;
 		const contentText = formatWrite(args, result, options).trimEnd();
+		const details = {
+			cursorToolName: "write",
+			path: displayPath,
+			linesCreated: getNumber(value, "linesCreated"),
+			fileSize: getNumber(value, "fileSize"),
+			fileContentAfterWrite: getString(value, "fileContentAfterWrite"),
+			expandedText: contentText,
+		};
+		if (content === undefined) {
+			const activityTitle = getCursorReplayDisplayLabel("cursor_write");
+			return buildReplaySummaryDisplay(
+				CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
+				buildCursorActivityDisplayArgs(displayArgs, activityTitle, displayPath ?? "file"),
+				result,
+				contentText,
+				{
+					...details,
+					title: activityTitle,
+					summary: result.status === "error" ? undefined : displayPath ?? "wrote file",
+				},
+			);
+		}
 		return {
 			toolName: "write",
 			args: displayArgs,
-			result: textToolResult(contentText, {
-				cursorToolName: "write",
-				path: displayPath,
-				linesCreated: getNumber(value, "linesCreated"),
-				fileSize: getNumber(value, "fileSize"),
-				fileContentAfterWrite: getString(value, "fileContentAfterWrite"),
-				expandedText: contentText,
-			}),
+			result: textToolResult(contentText, details),
 			isError: result.status === "error",
 		};
 	}

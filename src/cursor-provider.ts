@@ -7,6 +7,7 @@ import {
 	type SimpleStreamOptions,
 	type AssistantMessage,
 } from "@earendil-works/pi-ai";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Agent, createAgentPlatform } from "@cursor/sdk";
 import type { InteractionUpdate, SDKAgent, SettingSource } from "@cursor/sdk";
 import { installCursorMcpToolTimeoutOverride } from "./cursor-mcp-timeout-override.js";
@@ -69,6 +70,7 @@ const CURSOR_ACTIVITY_TRACE_MAX_CHARS = 50000;
 const DEFAULT_CURSOR_NATIVE_REPLAY_IDLE_DISPOSE_MS = 5 * 60 * 1000;
 const CURSOR_NATIVE_REPLAY_TOOL_ID_PATTERN = /^(cursor-replay-\d+-\d+)-tool-\d+$/;
 const CURSOR_SETTING_SOURCES_ENV = "PI_CURSOR_SETTING_SOURCES";
+const cursorSdkOutputSuppression = new AsyncLocalStorage<boolean>();
 
 type CursorLiveQueuedEvent =
 	| { type: "thinking-delta"; text: string }
@@ -163,6 +165,14 @@ function sanitizeError(error: unknown, apiKey?: string): string {
 	return scrubbed || GENERIC_CURSOR_SDK_ERROR_MESSAGE;
 }
 
+function isCursorSdkOutputSuppressed(): boolean {
+	return cursorSdkOutputSuppression.getStore() === true;
+}
+
+function suppressCursorSdkOutput<T>(operation: () => Promise<T>): Promise<T> {
+	return cursorSdkOutputSuppression.run(true, operation);
+}
+
 const CURSOR_SDK_STARTUP_NOISE_PATTERNS = [
 	"managed_skills.",
 	"CursorPluginsAgentSkillsService load completed",
@@ -181,7 +191,7 @@ function createFilteredProcessWrite<TWrite extends typeof process.stdout.write>(
 		callback?: (error?: Error | null) => void,
 	): boolean => {
 		const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-		if (isCursorSdkStartupNoise(text)) {
+		if (isCursorSdkOutputSuppressed() || isCursorSdkStartupNoise(text)) {
 			const done = typeof encodingOrCallback === "function" ? encodingOrCallback : callback;
 			done?.();
 			return true;
@@ -193,7 +203,7 @@ function createFilteredProcessWrite<TWrite extends typeof process.stdout.write>(
 function createFilteredConsoleMethod<TMethod extends typeof console.log>(method: TMethod): TMethod {
 	return ((...args: Parameters<TMethod>): void => {
 		const text = args.map((arg) => (typeof arg === "string" ? arg : String(arg))).join(" ");
-		if (isCursorSdkStartupNoise(text)) return;
+		if (isCursorSdkOutputSuppressed() || isCursorSdkStartupNoise(text)) return;
 		method(...args);
 	}) as TMethod;
 }
@@ -446,6 +456,7 @@ function isCursorNativeRunReady(run: CursorLiveRun): boolean {
 }
 
 async function waitForCursorNativeRunProgress(run: CursorLiveRun, signal?: AbortSignal): Promise<void> {
+	if (signal?.aborted) throw new CursorAbortError();
 	if (isCursorNativeRunReady(run)) return;
 	await new Promise<void>((resolve, reject) => {
 		let waiter: (() => void) | undefined;
@@ -462,6 +473,10 @@ async function waitForCursorNativeRunProgress(run: CursorLiveRun, signal?: Abort
 			resolve();
 		};
 		run.waiters.add(waiter);
+		if (signal?.aborted) {
+			onAbort();
+			return;
+		}
 		signal?.addEventListener("abort", onAbort, { once: true });
 	});
 }
@@ -822,12 +837,14 @@ export function streamCursor(
 
 			installCursorMcpToolTimeoutOverride();
 			restoreCursorSdkOutputFilter = installCursorSdkOutputFilter();
-			agent = await Agent.create({
-				apiKey,
-				model: selection,
-				local: settingSources ? { cwd, settingSources } : { cwd },
-				...(bridgeRun?.mcpServers ? { mcpServers: bridgeRun.mcpServers } : {}),
-			});
+			agent = await suppressCursorSdkOutput(() =>
+				Agent.create({
+					apiKey,
+					model: selection,
+					local: settingSources ? { cwd, settingSources } : { cwd },
+					...(bridgeRun?.mcpServers ? { mcpServers: bridgeRun.mcpServers } : {}),
+				}),
+			);
 			throwIfAborted();
 
 			const prompt = buildCursorPrompt(context, {
@@ -873,6 +890,7 @@ export function streamCursor(
 				}
 			}
 			const startedToolCalls = new Map<string, unknown>();
+			const bridgeStartedToolCallIds = new Set<string>();
 			const activeShellCallIds = new Set<string>();
 			const ambiguousShellOutputCallIds = new Set<string>();
 			const shellOutputDeltasByCallId = new Map<string, CursorShellOutputDeltas>();
@@ -989,8 +1007,15 @@ export function streamCursor(
 
 			const clearStartedToolCall = (callId: string): void => {
 				startedToolCalls.delete(callId);
+				bridgeStartedToolCallIds.delete(callId);
 				activeShellCallIds.delete(callId);
 				ambiguousShellOutputCallIds.delete(callId);
+			};
+
+			const takeBridgeStartedToolCallId = (callId: unknown): string | undefined => {
+				if (typeof callId !== "string" || !bridgeStartedToolCallIds.has(callId)) return undefined;
+				bridgeStartedToolCallIds.delete(callId);
+				return callId;
 			};
 
 			const takeShellOutputDeltas = (callId: string): CursorShellOutputDeltas | undefined => {
@@ -1033,6 +1058,7 @@ export function streamCursor(
 
 			const discardIncompleteStartedToolCalls = (): void => {
 				startedToolCalls.clear();
+				bridgeStartedToolCallIds.clear();
 				activeShellCallIds.clear();
 				ambiguousShellOutputCallIds.clear();
 				shellOutputDeltasByCallId.clear();
@@ -1109,15 +1135,22 @@ export function streamCursor(
 						closeTraceBlock();
 					}
 				} else if (update.type === "tool-call-started") {
-					if (!liveRun?.bridgeRun?.isBridgeMcpToolCall(update.toolCall)) {
+					if (liveRun?.bridgeRun?.isBridgeMcpToolCall(update.toolCall)) {
+						if (typeof update.callId === "string") bridgeStartedToolCallIds.add(update.callId);
+					} else {
 						startedToolCalls.set(update.callId, update.toolCall);
 						if (isCursorShellToolCall(update.toolCall)) activeShellCallIds.add(update.callId);
 					}
 				} else if (update.type === "tool-call-completed") {
+					const identity = typeof update.callId === "string" ? `cursor-tool:${update.callId}` : undefined;
+					const bridgeStartedCallId = takeBridgeStartedToolCallId(update.callId);
+					if (bridgeStartedCallId) {
+						completedToolIdentities.add(`cursor-tool:${bridgeStartedCallId}`);
+						return;
+					}
 					const mergedToolCall = mergeCursorToolCalls(startedToolCalls.get(update.callId), update.toolCall);
 					clearStartedToolCall(update.callId);
 					const toolCallWithShellOutput = mergeShellOutputDeltasIntoCursorToolCall(mergedToolCall, takeShellOutputDeltas(update.callId));
-					const identity = typeof update.callId === "string" ? `cursor-tool:${update.callId}` : undefined;
 					handleCompletedToolCall(toolCallWithShellOutput, {
 						identity,
 						source: identity ? "started" : "fallback",
@@ -1147,6 +1180,11 @@ export function streamCursor(
 				const toolCall = rawStepToolCall;
 				const stepId = getObjectField(args.step, "id") ?? getObjectField(toolCall, "id") ?? getObjectField(toolCall, "callId");
 				if (toolCall) {
+					const bridgeStartedCallId = takeBridgeStartedToolCallId(stepId);
+					if (bridgeStartedCallId) {
+						completedToolIdentities.add(`cursor-tool:${bridgeStartedCallId}`);
+						return;
+					}
 					const matchedStartedCallId = removeStartedToolCallForStep(toolCall, stepId);
 					const toolCallWithShellOutput = mergeShellOutputDeltasIntoCursorToolCall(
 						toolCall,

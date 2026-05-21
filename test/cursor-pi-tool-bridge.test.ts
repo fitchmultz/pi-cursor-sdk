@@ -240,8 +240,13 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 			expect(request.cursorMcpCallId).toBeDefined();
 			expect(run.isBridgeMcpToolCall({ name: "pi__read" })).toBe(true);
 			expect(run.isBridgeMcpToolCall({ name: "mcp", args: { toolName: "pi__read" } })).toBe(true);
+			expect(run.isBridgeMcpToolCall({ name: "mcp", args: [{ toolName: "pi__read" }] })).toBe(true);
 			expect(run.isBridgeMcpToolCall({ name: "pi_tools", args: { toolName: "pi__read" } })).toBe(true);
+			expect(run.isBridgeMcpToolCall({ name: "mcp", arguments: { mcpToolName: "pi__read" } })).toBe(true);
 			expect(run.isBridgeMcpToolCall({ name: "mcp", args: { toolName: "other_tool" } })).toBe(false);
+			expect(run.isBridgeMcpToolCall({ name: "mcp", result: { toolName: "pi__read" } })).toBe(false);
+			expect(run.isBridgeMcpToolCall({ name: "mcp", value: "pi__read", details: { toolName: "pi__read" } })).toBe(false);
+			expect(run.isBridgeMcpToolCall({ name: "mcp", result: { text: "mentions pi__read here" } })).toBe(false);
 
 			const context: Context = {
 				systemPrompt: "",

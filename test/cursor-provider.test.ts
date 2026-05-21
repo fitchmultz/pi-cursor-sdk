@@ -1463,6 +1463,99 @@ describe("streamCursor", () => {
 		}
 	});
 
+	it("replays path-only Cursor write activity through neutral recorded cursor output without pi write validation", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		const registeredTools: RegisteredTool[] = [];
+		await registerNativeToolDisplayForTest(registeredTools);
+		const dir = mkdtempSync(join(tmpdir(), "cursor-write-path-only-replay-"));
+		const targetPath = join(dir, "recorded-write.txt");
+		writeFileSync(targetPath, "old\n");
+
+		try {
+			let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
+			const runWait = vi.fn(
+				() =>
+					new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
+						resolveRun = resolve;
+					}),
+			);
+			const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: (a: unknown) => void }) => {
+				opts.onDelta({
+					update: { type: "tool-call-started", toolCall: { type: "write", args: { path: targetPath } }, callId: "c1" },
+				});
+				opts.onDelta({
+					update: {
+						type: "tool-call-completed",
+						toolCall: {
+							type: "write",
+							args: { path: targetPath },
+							result: {
+								status: "success",
+								value: { linesCreated: 1, fileSize: 4 },
+							},
+						},
+						callId: "c1",
+					},
+				});
+				return {
+					id: "run-1",
+					agentId: "agent-1",
+					status: "running",
+					wait: runWait,
+					cancel: vi.fn(),
+					supports: () => true,
+					unsupportedReason: () => undefined,
+				};
+			});
+			mockedCreate.mockResolvedValue({
+				agentId: "agent-1",
+				send: mockSend,
+				[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+			});
+
+			const firstEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+			const firstDone = firstEvents.find((e: any) => e.type === "done") as any;
+			const toolCall = firstDone.message.content.find((block: any) => block.type === "toolCall");
+
+			expect(toolCall.name).toBe("cursor");
+			expect(toolCall.arguments).toMatchObject({ path: targetPath, activityTitle: "Cursor write", activitySummary: targetPath });
+			expect(toolCall.arguments).not.toHaveProperty("content");
+			const cursorTool = registeredTools.find((tool) => tool.name === "cursor");
+			expect(cursorTool).toBeDefined();
+			const toolResult = await cursorTool!.execute(toolCall.id, toolCall.arguments, undefined, undefined, {});
+			expect(toolResult).toMatchObject({
+				content: [{ type: "text", text: expect.stringContaining(`write ${targetPath}`) }],
+				details: { cursorToolName: "write", title: "Cursor write", path: targetPath },
+				terminate: false,
+			});
+			expect(toolResult.content[0].text).not.toContain("Validation failed for tool \"write\"");
+			expect(readFileSync(targetPath, "utf-8")).toBe("old\n");
+
+			resolveRun({ id: "run-1", status: "finished", result: "Done." });
+
+			const replayContext = makeContext();
+			replayContext.messages = [
+				...replayContext.messages,
+				firstDone.message,
+				{
+					role: "toolResult",
+					toolCallId: toolCall.id,
+					toolName: "cursor",
+					content: toolResult.content,
+					details: toolResult.details,
+					isError: false,
+					timestamp: 2,
+				},
+			];
+			const replayEvents = await collectEvents(streamCursor(makeModel(), replayContext, { apiKey: "test-key" }));
+			const replayText = replayEvents.filter((e: any) => e.type === "text_delta").map((e: any) => e.delta).join("");
+			expect(replayText).toBe("Done.");
+			expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("replays Cursor StrReplace through schema-valid recorded edit output without mutating files", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		const registeredTools: RegisteredTool[] = [];
@@ -1777,6 +1870,98 @@ describe("streamCursor", () => {
 		const error = replayEvents.find((e: any) => e.type === "error") as any;
 
 		expect(error.reason).toBe("aborted");
+		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
+		expect(nativeToolDisplayTestUtils.nativeToolResultCount()).toBe(0);
+		expect(mockDispose).toHaveBeenCalledTimes(1);
+
+		resolveRun({ id: "run-1", status: "finished", result: "late result" });
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
+		expect(mockDispose).toHaveBeenCalledTimes(1);
+	});
+
+	it("cleans up pending native replay runs when the replay signal is already aborted before wait listener registration", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		const registeredTools: RegisteredTool[] = [];
+		await registerNativeToolDisplayForTest(registeredTools);
+
+		const mockDispose = vi.fn().mockResolvedValue(undefined);
+		let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
+		const runWait = vi.fn(
+			() =>
+				new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
+					resolveRun = resolve;
+				}),
+		);
+		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: (a: unknown) => void }) => {
+			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "read", args: { path: "README.md" } }, callId: "c1" } });
+			opts.onDelta({
+				update: {
+					type: "tool-call-completed",
+					toolCall: {
+						name: "read",
+						result: { status: "success", value: { content: "# pi-cursor-sdk" } },
+					},
+					callId: "c1",
+				},
+			});
+			return {
+				id: "run-1",
+				agentId: "agent-1",
+				status: "running",
+				wait: runWait,
+				cancel: vi.fn(),
+				supports: () => true,
+				unsupportedReason: () => undefined,
+			};
+		});
+		mockedCreate.mockResolvedValue({
+			agentId: "agent-1",
+			send: mockSend,
+			[Symbol.asyncDispose]: mockDispose,
+		});
+
+		const firstEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		const firstDone = firstEvents.find((e: any) => e.type === "done") as any;
+		const toolCall = firstDone.message.content.find((block: any) => block.type === "toolCall");
+		const readTool = registeredTools.find((tool) => tool.name === "read");
+		const toolResult = await readTool!.execute(toolCall.id, toolCall.arguments, undefined, undefined, {});
+		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(1);
+
+		const replayContext = makeContext();
+		replayContext.messages = [
+			...replayContext.messages,
+			firstDone.message,
+			{
+				role: "toolResult",
+				toolCallId: toolCall.id,
+				toolName: "read",
+				content: toolResult.content,
+				details: toolResult.details,
+				isError: false,
+				timestamp: 2,
+			},
+		];
+
+		let abortedReads = 0;
+		const fakeSignal = {
+			get aborted() {
+				abortedReads += 1;
+				return abortedReads >= 2;
+			},
+			addEventListener: vi.fn(),
+			removeEventListener: vi.fn(),
+		} as unknown as AbortSignal;
+		const replayEvents = await Promise.race([
+			collectEvents(streamCursor(makeModel(), replayContext, { apiKey: "test-key", signal: fakeSignal })),
+			new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Timed out waiting for aborted replay")), 100)),
+		]);
+		const error = replayEvents.find((e: any) => e.type === "error") as any;
+
+		expect(error.reason).toBe("aborted");
+		expect(fakeSignal.addEventListener).not.toHaveBeenCalled();
 		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
 		expect(nativeToolDisplayTestUtils.nativeToolResultCount()).toBe(0);
 		expect(mockDispose).toHaveBeenCalledTimes(1);
@@ -3036,18 +3221,17 @@ describe("streamCursor", () => {
 					callId: "mcp-read",
 					toolCall: {
 						name: "mcp",
-						args: { toolName: "pi__read" },
 						result: { status: "success", value: { content: "duplicate bridge replay should be suppressed" } },
 					},
 				},
 			});
+			onDelta?.({ update: { type: "tool-call-started", callId: "mcp-read-step", toolCall: { name: "mcp", args: { toolName: "pi__read" } } } });
 			onStep?.({
 				step: {
 					type: "toolCall",
 					id: "mcp-read-step",
 					message: {
 						name: "mcp",
-						args: { toolName: "pi__read" },
 						result: { status: "success", value: { content: "duplicate bridge onStep replay should be suppressed" } },
 					},
 				},
@@ -3276,7 +3460,7 @@ describe("streamCursor", () => {
 		);
 	});
 
-	it("suppresses direct Cursor SDK startup writes when setting sources are enabled", async () => {
+	it("suppresses all direct Cursor SDK startup writes when setting sources are enabled", async () => {
 		process.env.PI_CURSOR_SETTING_SOURCES = "all";
 		const stdoutChunks: string[] = [];
 		const stderrChunks: string[] = [];
@@ -3299,19 +3483,30 @@ describe("streamCursor", () => {
 			process.stdout.write(`${String(message)}\n`);
 		});
 		try {
-			const mockSend = vi.fn().mockResolvedValue({
-				id: "run-1",
-				agentId: "agent-1",
-				status: "finished",
-				wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
-				cancel: vi.fn(),
-				supports: () => true,
-				unsupportedReason: () => undefined,
+			const mockSend = vi.fn().mockImplementation(async () => {
+				process.stdout.write("VISIBLE non-startup stdout\n");
+				process.stderr.write("VISIBLE non-startup stderr\n");
+				console.log("VISIBLE non-startup console");
+				process.stdout.write('18:05:57.959 INFO  managed_skills.removed ctx=syncBuiltinSkills meta={skill_id: "clone"}\n');
+				process.stderr.write('18:05:57.961 INFO  managed_skills.removed ctx=syncBuiltinSkills meta={skill_id: "cursor"}\n');
+				console.log('18:05:57.962 INFO  managed_skills.removed ctx=syncBuiltinSkills meta={skill_id: "cursor-sdk"}');
+				return {
+					id: "run-1",
+					agentId: "agent-1",
+					status: "finished",
+					wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
+					cancel: vi.fn(),
+					supports: () => true,
+					unsupportedReason: () => undefined,
+				};
 			});
 			mockedCreate.mockImplementationOnce(async () => {
 				process.stdout.write('INFO managed_skills.removed meta={skill_id:"clone"}\n');
 				process.stderr.write("INFO managed_skills.removed stderr\n");
 				console.log("INFO managed_skills.removed via console");
+				process.stdout.write("UNEXPECTED startup stdout with test-key\n");
+				process.stderr.write("UNEXPECTED startup stderr with test-key\n");
+				console.log("UNEXPECTED startup console with test-key");
 				return {
 					agentId: "agent-1",
 					send: mockSend,
@@ -3327,7 +3522,17 @@ describe("streamCursor", () => {
 
 		expect(stdoutChunks.join("")).not.toContain("managed_skills.removed");
 		expect(stderrChunks.join("")).not.toContain("managed_skills.removed");
+		expect(stdoutChunks.join("")).not.toContain("UNEXPECTED startup");
+		expect(stderrChunks.join("")).not.toContain("UNEXPECTED startup");
+		expect(stdoutChunks.join("")).not.toContain("test-key");
+		expect(stderrChunks.join("")).not.toContain("test-key");
+		expect(stdoutChunks.join("")).toContain("VISIBLE non-startup stdout");
+		expect(stdoutChunks.join("")).toContain("VISIBLE non-startup console");
+		expect(stderrChunks.join("")).toContain("VISIBLE non-startup stderr");
 		expect(consoleSpy).not.toHaveBeenCalledWith("INFO managed_skills.removed via console");
+		expect(consoleSpy).not.toHaveBeenCalledWith("UNEXPECTED startup console with test-key");
+		expect(consoleSpy).not.toHaveBeenCalledWith('18:05:57.962 INFO  managed_skills.removed ctx=syncBuiltinSkills meta={skill_id: "cursor-sdk"}');
+		expect(consoleSpy).toHaveBeenCalledWith("VISIBLE non-startup console");
 		consoleSpy.mockRestore();
 	});
 

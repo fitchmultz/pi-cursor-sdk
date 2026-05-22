@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Context, Message, ToolCall } from "@earendil-works/pi-ai";
+import { convertToLlm } from "@earendil-works/pi-coding-agent";
 import type { SDKImage } from "@cursor/sdk";
 import { getCursorPiBridgeContractText } from "./cursor-bridge-contract.js";
 import { getCursorReplayPromptLabel } from "./cursor-tool-names.js";
@@ -18,6 +19,10 @@ export interface CursorPromptOptions {
 export const CURSOR_APPROX_CHARS_PER_TOKEN = 4;
 export const CURSOR_IMAGE_TOKEN_ESTIMATE = 1200;
 const SECTION_SEPARATOR = "\n\n";
+
+function normalizePiContextMessages(messages: Context["messages"]): Message[] {
+	return convertToLlm(messages as Parameters<typeof convertToLlm>[0]);
+}
 
 function isTextBlock(block: { type: string }): block is { type: "text"; text: string } {
 	return block.type === "text";
@@ -215,6 +220,48 @@ function serializeMessageForFingerprint(message: Message, index: number): string
 	}
 }
 
+function serializeRawPiMessageForFingerprint(message: Context["messages"][number], index: number): string {
+	const role = (message as { role?: string }).role;
+	switch (role) {
+		case "branchSummary": {
+			const entry = message as { summary?: string; fromId?: string; timestamp?: number };
+			return hashCursorContextValue(
+				`branchSummary:${entry.timestamp ?? index}:${entry.fromId ?? ""}:${entry.summary ?? ""}`,
+			);
+		}
+		case "compactionSummary": {
+			const entry = message as { summary?: string; tokensBefore?: number; timestamp?: number };
+			return hashCursorContextValue(
+				`compactionSummary:${entry.timestamp ?? index}:${entry.tokensBefore ?? ""}:${entry.summary ?? ""}`,
+			);
+		}
+		case "custom": {
+			const entry = message as { customType?: string; content?: unknown; timestamp?: number };
+			return hashCursorContextValue(
+				`custom:${entry.timestamp ?? index}:${entry.customType ?? ""}:${JSON.stringify(entry.content)}`,
+			);
+		}
+		case "bashExecution": {
+			const entry = message as {
+				command?: string;
+				output?: string;
+				exitCode?: number | null;
+				cancelled?: boolean;
+				excludeFromContext?: boolean;
+				timestamp?: number;
+			};
+			if (entry.excludeFromContext) {
+				return hashCursorContextValue(`bashExecution:excluded:${entry.timestamp ?? index}`);
+			}
+			return hashCursorContextValue(
+				`bashExecution:${entry.timestamp ?? index}:${entry.command ?? ""}:${entry.output ?? ""}:${entry.exitCode ?? ""}:${entry.cancelled === true}`,
+			);
+		}
+		default:
+			return serializeMessageForFingerprint(message as Message, index);
+	}
+}
+
 function parseCursorContextFingerprint(fingerprint: string): CursorContextFingerprintPayload | undefined {
 	try {
 		const parsed = JSON.parse(fingerprint) as CursorContextFingerprintPayload;
@@ -229,7 +276,7 @@ function parseCursorContextFingerprint(fingerprint: string): CursorContextFinger
 export function computeCursorContextFingerprint(context: Context): string {
 	const payload: CursorContextFingerprintPayload = {
 		systemHash: hashCursorContextValue(context.systemPrompt ?? ""),
-		messageHashes: context.messages.map((message, index) => serializeMessageForFingerprint(message, index)),
+		messageHashes: context.messages.map((message, index) => serializeRawPiMessageForFingerprint(message, index)),
 	};
 	return JSON.stringify(payload);
 }
@@ -245,6 +292,12 @@ export function shouldBootstrapCursorSend(
 	if (!current) return true;
 	if (current.systemHash !== previous.systemHash) return true;
 	if (current.messageHashes.length < previous.messageHashes.length) return true;
+	if (current.messageHashes.length > previous.messageHashes.length) {
+		for (let index = previous.messageHashes.length; index < context.messages.length; index += 1) {
+			const role = (context.messages[index] as { role?: string }).role;
+			if (role === "branchSummary" || role === "compactionSummary") return true;
+		}
+	}
 	for (let index = 0; index < previous.messageHashes.length; index += 1) {
 		if (current.messageHashes[index] !== previous.messageHashes[index]) return true;
 	}
@@ -253,8 +306,9 @@ export function shouldBootstrapCursorSend(
 
 export function buildCursorIncrementalPrompt(context: Context, options: CursorPromptOptions = {}): CursorPrompt {
 	// Incremental sends omit the full Cursor SDK tool boundary block; the session agent retains prior bootstrap context.
-	const latestUserMessageIndex = getLatestUserMessageIndex(context.messages);
-	const latestUserMessage = latestUserMessageIndex >= 0 ? context.messages[latestUserMessageIndex] : undefined;
+	const messages = normalizePiContextMessages(context.messages);
+	const latestUserMessageIndex = getLatestUserMessageIndex(messages);
+	const latestUserMessage = latestUserMessageIndex >= 0 ? messages[latestUserMessageIndex] : undefined;
 	const latestUserText = latestUserMessage ? formatMessage(latestUserMessage) : undefined;
 	const sections = [
 		"Continue the conversation using Cursor SDK capabilities only. Do not list, promise, or call pi-only tools from earlier context as if they were available.",
@@ -263,7 +317,7 @@ export function buildCursorIncrementalPrompt(context: Context, options: CursorPr
 		sections.push(`System instructions from pi:\n${sanitizeSystemPromptForCursor(context.systemPrompt)}`);
 	}
 	if (latestUserText) sections.push(latestUserText);
-	const images = extractLatestImages(context.messages);
+	const images = extractLatestImages(messages);
 	const imageTokenReserve = images.length * (options.imageTokenEstimate ?? 0);
 	const budgetOptions =
 		options.maxInputTokens === undefined
@@ -312,7 +366,8 @@ export function buildCursorPrompt(context: Context, options: CursorPromptOptions
 		sectionsBeforeMessages.push(`System instructions from pi:\n${sanitizeSystemPromptForCursor(context.systemPrompt)}`);
 	}
 
-	const messageSections = context.messages
+	const messages = normalizePiContextMessages(context.messages);
+	const messageSections = messages
 		.map((msg, index) => {
 			const text = formatMessage(msg);
 			return text ? { index, text } : undefined;
@@ -324,7 +379,7 @@ export function buildCursorPrompt(context: Context, options: CursorPromptOptions
 			"If web research is requested, do not claim it unless a Cursor web/search/browser/MCP tool ran.",
 		].join("\n"),
 	];
-	const images = extractLatestImages(context.messages);
+	const images = extractLatestImages(messages);
 	const imageTokenReserve = images.length * (options.imageTokenEstimate ?? 0);
 	const budgetOptions =
 		options.maxInputTokens === undefined
@@ -334,7 +389,7 @@ export function buildCursorPrompt(context: Context, options: CursorPromptOptions
 		sectionsBeforeMessages,
 		messageSections,
 		sectionsAfterMessages,
-		getLatestUserMessageIndex(context.messages),
+		getLatestUserMessageIndex(messages),
 		budgetOptions,
 	);
 	const text = parts.join(SECTION_SEPARATOR);

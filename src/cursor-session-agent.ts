@@ -1,4 +1,10 @@
-import type { ExtensionHandler, SessionCompactEvent, SessionShutdownEvent, SessionTreeEvent } from "@earendil-works/pi-coding-agent";
+import type {
+	ExtensionHandler,
+	SessionBeforeTreeEvent,
+	SessionCompactEvent,
+	SessionShutdownEvent,
+	SessionTreeEvent,
+} from "@earendil-works/pi-coding-agent";
 import { createHash } from "node:crypto";
 import { Agent } from "@cursor/sdk";
 import type { ModelSelection, SDKAgent, SettingSource } from "@cursor/sdk";
@@ -74,6 +80,7 @@ interface SessionCursorAgentCreateParams {
 interface CursorSessionAgentExtensionApi {
 	on(event: "session_shutdown", handler: ExtensionHandler<SessionShutdownEvent>): void;
 	on(event: "session_compact", handler: ExtensionHandler<SessionCompactEvent>): void;
+	on(event: "session_before_tree", handler: ExtensionHandler<SessionBeforeTreeEvent>): void;
 	on(event: "session_tree", handler: ExtensionHandler<SessionTreeEvent>): void;
 	on(event: "model_select", handler: ExtensionHandler<{ model: unknown }>): void;
 }
@@ -337,8 +344,11 @@ export function registerCursorSessionAgent(_pi: CursorSessionAgentExtensionApi):
 	_pi.on("session_compact", () => {
 		invalidateSessionAgent();
 	});
-	_pi.on("session_tree", () => {
+	_pi.on("session_before_tree", () => {
 		invalidateSessionAgent();
+	});
+	_pi.on("session_tree", async () => {
+		await resetSessionCursorAgent();
 	});
 	_pi.on("model_select", () => {
 		invalidateSessionAgent();

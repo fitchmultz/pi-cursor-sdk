@@ -272,4 +272,87 @@ describe("cursor-session-agent", () => {
 		expect(sessionAgentTestUtils.sessionAgentsByScope.has("/tmp/sessions/session-a.jsonl")).toBe(false);
 		expect(mockDispose).toHaveBeenCalledTimes(1);
 	});
+
+	it("invalidates and recreates the session agent after session_tree-style invalidation", async () => {
+		const mockDispose = vi.fn().mockResolvedValue(undefined);
+		const createAgent = vi.fn().mockImplementation(async () => ({
+			agentId: `agent-${createAgent.mock.calls.length + 1}`,
+			[Symbol.asyncDispose]: mockDispose,
+		}));
+
+		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/test.jsonl");
+		const params = {
+			apiKey: "test-key",
+			cwd: "/tmp/project",
+			modelSelection: { id: "composer-2.5" },
+			createAgent,
+		};
+
+		const first = await acquireSessionCursorAgent(params);
+		sessionAgentTestUtils.invalidateSessionAgent("/tmp/sessions/test.jsonl");
+		const second = await acquireSessionCursorAgent(params);
+
+		expect(first.agent).not.toBe(second.agent);
+		expect(createAgent).toHaveBeenCalledTimes(2);
+		expect(mockDispose).toHaveBeenCalledTimes(1);
+	});
+
+	it("resets the scoped session agent when session_tree fires", async () => {
+		const mockDispose = vi.fn().mockResolvedValue(undefined);
+		const createAgent = vi.fn().mockResolvedValue({
+			agentId: "agent-1",
+			[Symbol.asyncDispose]: mockDispose,
+		});
+		const sessionTreeHandlers: Array<() => Promise<void> | void> = [];
+		const pi = {
+			on: vi.fn((event: string, handler: () => Promise<void> | void) => {
+				if (event === "session_tree") sessionTreeHandlers.push(handler);
+			}),
+		};
+
+		registerCursorSessionAgent(pi);
+		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/test.jsonl");
+		await acquireSessionCursorAgent({
+			apiKey: "test-key",
+			cwd: "/tmp/project",
+			modelSelection: { id: "composer-2.5" },
+			createAgent,
+		});
+
+		expect(sessionAgentTestUtils.sessionAgentsByScope.has("/tmp/sessions/test.jsonl")).toBe(true);
+		await sessionTreeHandlers[0]?.();
+		expect(sessionAgentTestUtils.sessionAgentsByScope.has("/tmp/sessions/test.jsonl")).toBe(false);
+		expect(mockDispose).toHaveBeenCalledTimes(1);
+	});
+
+	it("invalidates before branch summary when session_before_tree fires", async () => {
+		const mockDispose = vi.fn().mockResolvedValue(undefined);
+		const createAgent = vi.fn().mockImplementation(async () => ({
+			agentId: `agent-${createAgent.mock.calls.length + 1}`,
+			[Symbol.asyncDispose]: mockDispose,
+		}));
+		const sessionBeforeTreeHandlers: Array<() => void> = [];
+		const pi = {
+			on: vi.fn((event: string, handler: () => void) => {
+				if (event === "session_before_tree") sessionBeforeTreeHandlers.push(handler);
+			}),
+		};
+
+		registerCursorSessionAgent(pi);
+		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/test.jsonl");
+		const params = {
+			apiKey: "test-key",
+			cwd: "/tmp/project",
+			modelSelection: { id: "composer-2.5" },
+			createAgent,
+		};
+
+		const first = await acquireSessionCursorAgent(params);
+		sessionBeforeTreeHandlers[0]?.();
+		const second = await acquireSessionCursorAgent(params);
+
+		expect(first.agent).not.toBe(second.agent);
+		expect(createAgent).toHaveBeenCalledTimes(2);
+		expect(mockDispose).toHaveBeenCalledTimes(1);
+	});
 });

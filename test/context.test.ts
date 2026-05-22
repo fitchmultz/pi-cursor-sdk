@@ -555,4 +555,65 @@ describe("buildCursorSendPrompt", () => {
 		expect(incremental.text).not.toContain("Cursor SDK tool boundary:");
 		expect(incremental.text).toContain("Continue the conversation using Cursor SDK capabilities only");
 	});
+
+	it("includes branch summaries from /tree navigation in bootstrap prompts", () => {
+		const context: Context = {
+			messages: [
+				{ role: "user", content: "Hello", timestamp: 1 },
+				{
+					role: "branchSummary",
+					summary: "We explored approach A and decided against it.",
+					fromId: "entry-a",
+					timestamp: 2,
+				} as Context["messages"][number],
+				{ role: "user", content: "Continue on approach B", timestamp: 3 },
+			],
+		};
+
+		const prompt = buildCursorPrompt(context);
+
+		expect(prompt.text).toContain("summary of a branch that this conversation came back from");
+		expect(prompt.text).toContain("We explored approach A and decided against it.");
+		expect(prompt.text).toContain("User: Continue on approach B");
+	});
+
+	it("rebootstraps when /tree adds a branch summary to the active context", () => {
+		const priorContext: Context = {
+			messages: [{ role: "user", content: "Hello", timestamp: 1 }],
+		};
+		const treeContext: Context = {
+			messages: [
+				{ role: "user", content: "Hello", timestamp: 1 },
+				{
+					role: "branchSummary",
+					summary: "Abandoned branch details",
+					fromId: "entry-a",
+					timestamp: 2,
+				} as Context["messages"][number],
+			],
+		};
+		const sendState = { bootstrapped: true, contextFingerprint: computeCursorContextFingerprint(priorContext) };
+
+		expect(shouldBootstrapCursorSend(sendState, treeContext)).toBe(true);
+		expect(buildCursorSendPrompt(treeContext, {}, sendState).bootstrap).toBe(true);
+	});
+
+	it("includes compaction summaries in bootstrap prompts", () => {
+		const context: Context = {
+			messages: [
+				{
+					role: "compactionSummary",
+					summary: "Earlier work covered auth setup.",
+					tokensBefore: 12000,
+					timestamp: 1,
+				} as Context["messages"][number],
+				{ role: "user", content: "Continue", timestamp: 2 },
+			],
+		};
+
+		const prompt = buildCursorPrompt(context);
+
+		expect(prompt.text).toContain("conversation history before this point was compacted");
+		expect(prompt.text).toContain("Earlier work covered auth setup.");
+	});
 });

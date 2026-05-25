@@ -311,6 +311,8 @@ function getCursorReplayCallSummary(toolName: CursorReplayToolName, args: Record
 		if (path) return path;
 		if (typeof args?.mode === "string") return args.mode;
 	}
+	if (toolName === "cursor_web_search") return typeof args?.query === "string" ? args.query : undefined;
+	if (toolName === "cursor_web_fetch") return typeof args?.url === "string" ? args.url : undefined;
 	if (toolName === CURSOR_REPLAY_ACTIVITY_TOOL_NAME) {
 		if (path) return path;
 		if (typeof args?.toolName === "string") return args.toolName;

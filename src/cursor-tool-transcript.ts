@@ -14,6 +14,7 @@ import {
 	formatCursorToolTranscriptFromSpec,
 	type ToolDisplayContext,
 } from "./cursor-transcript-tool-specs.js";
+import { resolveTranscriptToolName } from "./cursor-web-tool-activity.js";
 
 export type { CursorPiToolDisplay } from "./cursor-transcript-utils.js";
 
@@ -29,10 +30,11 @@ export function getCursorCreatePlanText(toolCall: unknown): string | undefined {
 
 function buildToolDisplayContext(toolCall: unknown, options: TranscriptOptions): ToolDisplayContext {
 	const rawName = getToolName(toolCall);
+	const args = getToolArgs(toolCall);
 	return {
 		rawName,
-		name: normalizeToolName(rawName),
-		args: getToolArgs(toolCall),
+		name: resolveTranscriptToolName(rawName, args),
+		args,
 		result: normalizeResult(getToolResult(toolCall)),
 		options,
 	};

@@ -12,6 +12,8 @@ export const CURSOR_REPLAY_LEGACY_TOOL_NAMES = [
 	"cursor_mcp",
 	"cursor_sem_search",
 	"cursor_record_screen",
+	"cursor_web_search",
+	"cursor_web_fetch",
 ] as const;
 
 export type CursorReplayLegacyToolName = (typeof CURSOR_REPLAY_LEGACY_TOOL_NAMES)[number];
@@ -29,6 +31,8 @@ const CURSOR_REPLAY_SOURCE_TOOL_NAMES = {
 	cursor_mcp: "MCP",
 	cursor_sem_search: "semSearch",
 	cursor_record_screen: "recordScreen",
+	cursor_web_search: "web search",
+	cursor_web_fetch: "web fetch",
 } as const satisfies Record<CursorReplayLegacyToolName, string>;
 
 const CURSOR_REPLAY_PROMPT_LABELS = {
@@ -43,6 +47,8 @@ const CURSOR_REPLAY_PROMPT_LABELS = {
 	cursor_mcp: "Cursor MCP",
 	cursor_sem_search: "Cursor semantic search",
 	cursor_record_screen: "Cursor screen recording",
+	cursor_web_search: "Cursor web search",
+	cursor_web_fetch: "Cursor web fetch",
 } as const satisfies Record<CursorReplayLegacyToolName, string>;
 
 export function isCursorReplayLegacyToolName(toolName: string): toolName is CursorReplayLegacyToolName {

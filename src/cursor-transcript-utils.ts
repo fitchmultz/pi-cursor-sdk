@@ -117,6 +117,14 @@ export function normalizeToolName(name: string): string {
 		case "notebook_edit":
 		case "notebookedit":
 			return "edit";
+		case "websearch":
+		case "web_search":
+		case "web-search":
+			return "webSearch";
+		case "webfetch":
+		case "web_fetch":
+		case "web-fetch":
+			return "webFetch";
 		default:
 			return normalized || "unknown";
 	}

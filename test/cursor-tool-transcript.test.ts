@@ -13,6 +13,8 @@ describe("formatCursorToolTranscript", () => {
 		expect(isExcludedFromCursorBridgeExposure("cursor_mcp")).toBe(true);
 		expect(isExcludedFromCursorBridgeExposure("cursor_sem_search")).toBe(true);
 		expect(isExcludedFromCursorBridgeExposure("cursor_record_screen")).toBe(true);
+		expect(isExcludedFromCursorBridgeExposure("cursor_web_search")).toBe(true);
+		expect(isExcludedFromCursorBridgeExposure("cursor_web_fetch")).toBe(true);
 		expect(isExcludedFromCursorBridgeExposure("bash")).toBe(false);
 	});
 

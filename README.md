@@ -307,6 +307,14 @@ Cursor setting sources are loaded with `PI_CURSOR_SETTING_SOURCES=all` by defaul
 
 Cursor SDK local agents load MCP servers from Cursor setting sources and inline SDK config. This extension enables all Cursor setting sources by default, so a missing web search tool usually means it is not configured in Cursor or the run was started with a narrowing/disable override such as `PI_CURSOR_SETTING_SOURCES=none`.
 
+### I do not see Cursor web search or web fetch in pi's tool UI
+
+pi shows **Cursor web search** / **Cursor web fetch** activity cards when the installed `@cursor/sdk` reports completed replayable tool data (SDK `mcp` completions whose `toolName` is `WebSearch` / `web_search` / `WebFetch` / similar, or host tool names that normalize to those). This is separate from SDK `semSearch`, which is semantic **codebase** search.
+
+Many runs never expose web activity as replayable SDK tool completions. The model may still answer from internal Cursor web tooling or only mention search in assistant text/thinking. In that case pi cannot render a tool card because there is no completed SDK tool-call payload to replay. Capture a run with `npm run debug:sdk-events` when investigating; if `on-delta.jsonl` has no `tool-call-completed` entries for web tools, the limitation is on the Cursor SDK surface, not pi replay registration.
+
+**Web fetch:** the installed SDK conversation schema has no dedicated `webFetch` ToolType (unlike `mcp` or `semSearch`). Fetch activity is only visible when Cursor reports it through `mcp` or another replayable host tool name.
+
 ### Cursor does not call my pi extension tool
 
 The local pi bridge only exposes tools that are active in the current pi session and present in pi's tool registry at Cursor run start. By default, it does not expose overlapping pi tool names that Cursor already has native equivalents for (`read`, `bash`, `write`, `edit`, `grep`, `find`, and `ls`). Opt in if you intentionally want Cursor to see both the Cursor-native tool and an overlapping built-in pi tool:

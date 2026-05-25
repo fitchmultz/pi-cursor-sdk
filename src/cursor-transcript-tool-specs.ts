@@ -33,7 +33,8 @@ import {
 	formatGrep,
 	formatLs,
 	formatMcp,
-	summarizeMcp,
+	formatWebFetch,
+	formatWebSearch,
 	formatPlan,
 	formatRecordScreen,
 	formatSemSearch,
@@ -58,12 +59,14 @@ import {
 	getTodoTotalCount,
 	inferImageMimeType,
 	summarizePlan,
+	summarizeMcp,
 	summarizeRecordScreen,
 	summarizeSemSearch,
 	summarizeTask,
 	summarizeTodos,
 	usesLocalReadPreview,
 } from "./cursor-transcript-tool-formatters.js";
+import { extractWebFetchTarget, extractWebSearchQuery } from "./cursor-web-tool-activity.js";
 
 export interface ToolDisplayContext {
 	rawName: string;
@@ -470,6 +473,36 @@ const TOOL_DISPLAY_SPECS: Record<string, ToolDisplaySpec> = {
 					result.status === "error"
 						? undefined
 						: summarizeRecordScreen(args, result, options) ?? firstNonEmptyLine(contentText) ?? "screen recording updated",
+			}),
+		},
+	},
+	webSearch: {
+		formatTranscript: ({ args, result, options }) => formatWebSearch(args, result, options),
+		buildPiToolDisplay: (context) => buildActivityReplayDisplay("webSearch", TOOL_DISPLAY_SPECS.webSearch, context),
+		activityReplay: {
+			labelKey: "cursor_web_search",
+			buildActivityArgs: ({ args }) => {
+				const query = extractWebSearchQuery(args);
+				return query ? { query: truncateArg(query) } : {};
+			},
+			buildActivitySummary: ({ args }) => truncateArg(extractWebSearchQuery(args) ?? "web search"),
+			buildDetails: ({ result }, contentText) => ({
+				summary: result.status === "error" ? undefined : firstNonEmptyLine(contentText) ?? "web search result captured",
+			}),
+		},
+	},
+	webFetch: {
+		formatTranscript: ({ args, result, options }) => formatWebFetch(args, result, options),
+		buildPiToolDisplay: (context) => buildActivityReplayDisplay("webFetch", TOOL_DISPLAY_SPECS.webFetch, context),
+		activityReplay: {
+			labelKey: "cursor_web_fetch",
+			buildActivityArgs: ({ args }) => {
+				const target = extractWebFetchTarget(args);
+				return target ? { url: truncateArg(target) } : {};
+			},
+			buildActivitySummary: ({ args }) => truncateArg(extractWebFetchTarget(args) ?? "web fetch"),
+			buildDetails: ({ result }, contentText) => ({
+				summary: result.status === "error" ? undefined : firstNonEmptyLine(contentText) ?? "web fetch result captured",
 			}),
 		},
 	},

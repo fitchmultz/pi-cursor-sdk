@@ -190,7 +190,7 @@ describe("extension factory", () => {
 			"cursor-refresh-models",
 			expect.objectContaining({ description: expect.stringContaining("Refresh the live Cursor model catalog") }),
 		);
-		expect(pi.registerTool).toHaveBeenCalledTimes(20);
+		expect(pi.registerTool).toHaveBeenCalledTimes(22);
 		expect(pi._tools.map((tool) => tool.name)).toEqual([
 			CURSOR_ASK_QUESTION_TOOL_NAME,
 			"read",
@@ -212,6 +212,8 @@ describe("extension factory", () => {
 			"cursor_mcp",
 			"cursor_sem_search",
 			"cursor_record_screen",
+			"cursor_web_search",
+			"cursor_web_fetch",
 		]);
 		expect(pi.setActiveTools).toHaveBeenCalledWith([
 			"read",
@@ -570,7 +572,7 @@ describe("extension factory", () => {
 			const readTool = pi._tools.find((tool) => tool.name === "read");
 			const result = await readTool.execute("ordinary-read", { path: "session-file.txt" }, undefined, undefined, {});
 
-			expect(pi.registerTool).toHaveBeenCalledTimes(20);
+			expect(pi.registerTool).toHaveBeenCalledTimes(22);
 			expect(result.content).toEqual([{ type: "text", text: "from second cwd\n" }]);
 		} finally {
 			rmSync(firstDir, { recursive: true, force: true });
@@ -1044,6 +1046,8 @@ describe("extension factory", () => {
 			"cursor_mcp",
 			"cursor_sem_search",
 			"cursor_record_screen",
+			"cursor_web_search",
+			"cursor_web_fetch",
 		]);
 		expect(canRenderCursorToolNatively("read")).toBe(false);
 		expect(canRenderCursorToolNatively("bash")).toBe(true);

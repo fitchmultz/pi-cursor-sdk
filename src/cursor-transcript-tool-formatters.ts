@@ -1,5 +1,6 @@
 import { resolveCursorEditDiff } from "./cursor-edit-diff.js";
 import { scrubSensitiveText } from "./cursor-sensitive-text.js";
+import { extractWebFetchTarget, extractWebSearchQuery } from "./cursor-web-tool-activity.js";
 import { getFirstStringByKeys } from "./cursor-record-utils.js";
 import {
 	asRecord,
@@ -753,6 +754,39 @@ export function summarizeMcp(args: Record<string, unknown>, result: NormalizedRe
 	const toolName = truncateArg(getString(args, "toolName") ?? "mcp");
 	const preview = getMcpResultPreview(result);
 	return preview && preview !== toolName ? `${toolName} · ${preview}` : toolName;
+}
+
+function formatWebToolBody(
+	toolLabel: string,
+	args: Record<string, unknown>,
+	result: NormalizedResult,
+	options: TranscriptOptions,
+	summaryArg: string | undefined,
+): string {
+	if (result.status === "error") return joinSections(toolLabel, formatError(result.error));
+	const summary = summaryArg ? `${summaryArg}\n\n` : "";
+	const value = asRecord(result.value);
+	const isError = getBoolean(value, "isError");
+	const content = getArray(value, "content") ?? [];
+	const text = content
+		.map((entry) => getMcpContentText(entry))
+		.filter((entry): entry is string => Boolean(entry))
+		.join("\n");
+	const contentSummary = content.length > 0 ? content.map(describeNonTextMcpContent).join("\n") : stringifyUnknown(result.value);
+	const body = `${isError ? "[tool error]\n" : ""}${text || contentSummary}`;
+	return joinSections(toolLabel, limitText(`${summary}${body}`.trim(), options));
+}
+
+export function formatWebSearch(args: Record<string, unknown>, result: NormalizedResult, options: TranscriptOptions): string {
+	const query = extractWebSearchQuery(args);
+	const header = query ? `web search ${query}` : "web search";
+	return formatWebToolBody(header, args, result, options, undefined);
+}
+
+export function formatWebFetch(args: Record<string, unknown>, result: NormalizedResult, options: TranscriptOptions): string {
+	const target = extractWebFetchTarget(args);
+	const header = target ? `web fetch ${target}` : "web fetch";
+	return formatWebToolBody(header, args, result, options, undefined);
 }
 
 export function formatMcp(args: Record<string, unknown>, result: NormalizedResult, options: TranscriptOptions): string {

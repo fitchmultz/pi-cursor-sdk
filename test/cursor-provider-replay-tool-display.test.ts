@@ -131,6 +131,94 @@ it("replays Cursor grep activity through native grep display", async () => {
 		await collectEvents(streamCursor(makeModel(), replayContext, { apiKey: "test-key" }));
 	});
 
+	it("replays Cursor web search MCP activity through neutral cursor activity cards", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		const registeredTools: RegisteredTool[] = [];
+		await registerNativeToolDisplayForTest(registeredTools);
+
+		let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
+		const runWait = vi.fn(
+			() =>
+				new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
+					resolveRun = resolve;
+				}),
+		);
+		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
+			opts.onDelta({
+				update: {
+					type: "tool-call-started",
+					toolCall: { type: "mcp", args: { toolName: "WebSearch", args: { search_term: "pi mathematics" } } },
+					callId: "web-1",
+				},
+			});
+			opts.onDelta({
+				update: {
+					type: "tool-call-completed",
+					toolCall: {
+						type: "mcp",
+						args: { toolName: "WebSearch", args: { search_term: "pi mathematics" } },
+						result: {
+							status: "success",
+							value: { content: [{ text: { text: "Pi - Wikipedia\nhttps://en.wikipedia.org/wiki/Pi" } }], isError: false },
+						},
+					},
+					callId: "web-1",
+				},
+			});
+			return {
+				id: "run-1",
+				agentId: "agent-1",
+				status: "running",
+				wait: runWait,
+				cancel: vi.fn(),
+				supports: () => true,
+				unsupportedReason: () => undefined,
+			};
+		});
+		mockedCreate.mockResolvedValue({
+			agentId: "agent-1",
+			send: mockSend,
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+
+		const firstEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		const firstDone = getDoneEvent(firstEvents);
+		const toolCall = firstDone.message.content.find(isToolCallBlock);
+		const trace = collectThinkingDeltas(firstEvents);
+
+		expect(firstDone.reason).toBe("toolUse");
+		expect(toolCall.name).toBe("cursor");
+		expect(toolCall.arguments).toMatchObject({
+			query: "pi mathematics",
+			activityTitle: "Cursor web search",
+			activitySummary: "pi mathematics",
+		});
+		expect(trace).not.toContain("Wikipedia");
+
+		const cursorTool = registeredTools.find((tool) => tool.name === "cursor");
+		const toolResult = await cursorTool!.execute(toolCall.id, toolCall.arguments, undefined, undefined, {});
+		expect(toolResult.content[0].text).toContain("Pi - Wikipedia");
+
+		resolveRun({ id: "run-1", status: "finished", result: "Done." });
+
+		const replayContext = makeContext();
+		replayContext.messages = [
+			...replayContext.messages,
+			firstDone.message,
+			{
+				role: "toolResult",
+				toolCallId: toolCall.id,
+				toolName: "cursor",
+				content: toolResult.content,
+				details: toolResult.details,
+				isError: false,
+				timestamp: 2,
+			},
+		];
+		await collectEvents(streamCursor(makeModel(), replayContext, { apiKey: "test-key" }));
+		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
+	});
+
 	it("replays path-only Cursor edit activity through neutral recorded cursor output without pi edit validation", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		const registeredTools: RegisteredTool[] = [];

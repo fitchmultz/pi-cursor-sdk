@@ -108,6 +108,46 @@ describe("cursor sdk event debug sink", () => {
 		}
 	});
 
+	it("snapshots buffered pi stream and timeline records before later mutations", async () => {
+		const artifactDir = mkdtempSync(join(tmpdir(), "pi-cursor-sdk-event-debug-snapshot-"));
+
+		try {
+			const sink = CursorSdkEventDebugSink.maybeCreate({
+				cwd: "/repo",
+				modelId: "composer-2.5",
+				provider: "cursor",
+				env: {
+					PI_CURSOR_SDK_EVENT_DEBUG: "1",
+					PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR: artifactDir,
+				},
+			});
+			const partial = { role: "assistant" as const, content: [{ type: "text" as const, text: "before" }] };
+			const event = { type: "text_delta", delta: "before", partial };
+
+			sink?.recordPiStreamEvent(event);
+			event.delta = "after";
+			partial.content[0] = { type: "text", text: "after" };
+			await sink?.finalize();
+
+			const [piStreamEvent] = readFileSync(join(artifactDir, sdkEventDebugTestUtils.ARTIFACTS.piStreamEvents), "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line));
+			expect(piStreamEvent.event.delta).toBe("before");
+			expect(piStreamEvent.event.partial.content[0].text).toBe("before");
+
+			const timelineEvents = readFileSync(join(artifactDir, sdkEventDebugTestUtils.ARTIFACTS.timeline), "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line));
+			const piStreamTimelineEvent = timelineEvents.find((event) => event.layer === "pi-stream-events");
+			expect(piStreamTimelineEvent.payload.delta).toBe("before");
+			expect(piStreamTimelineEvent.payload.partial.content[0].text).toBe("before");
+		} finally {
+			rmSync(artifactDir, { recursive: true, force: true });
+		}
+	});
+
 	it("can opt in to stderr summary output", async () => {
 		const artifactDir = mkdtempSync(join(tmpdir(), "pi-cursor-sdk-event-debug-"));
 		const stderrLines: string[] = [];
@@ -201,6 +241,136 @@ describe("cursor sdk event debug session grouping", () => {
 			expect(sink?.pinnedRun).toBe(true);
 			expect(sink?.sessionDir).toBeUndefined();
 			expect(sink?.turn).toBeUndefined();
+		} finally {
+			sdkEventDebugTestUtils.resetSessionDebugState();
+			rmSync(artifactDir, { recursive: true, force: true });
+		}
+	});
+
+	it("continues turn numbering after process restart with an existing session manifest", async () => {
+		const baseDir = mkdtempSync(join(tmpdir(), "pi-cursor-sdk-event-debug-resume-"));
+		const sessionFile = join(baseDir, "my-session.jsonl");
+		const { __testUtils: scopeTestUtils } = await import("../src/cursor-session-scope.js");
+
+		sdkEventDebugTestUtils.resetSessionDebugState();
+		scopeTestUtils.set(baseDir, sessionFile);
+
+		try {
+			const env = {
+				PI_CURSOR_SDK_EVENT_DEBUG: "1",
+				PI_CURSOR_SDK_EVENT_DEBUG_DIR: join(baseDir, "events"),
+			};
+			const sink1 = CursorSdkEventDebugSink.maybeCreate({
+				cwd: baseDir,
+				modelId: "composer-2.5",
+				provider: "cursor",
+				env,
+			});
+			sink1?.recordSendMeta({
+				mode: "bootstrap",
+				reason: "initial",
+				resetAgent: false,
+				bootstrap: true,
+				promptText: "turn-one",
+				imageCount: 0,
+				useNativeToolReplay: true,
+				bridgeEnabled: false,
+				nativeReplayId: "replay-1",
+				promptInputTokens: 12,
+			});
+			await sink1?.finalize();
+
+			sdkEventDebugTestUtils.resetSessionDebugState();
+
+			const sink2 = CursorSdkEventDebugSink.maybeCreate({
+				cwd: baseDir,
+				modelId: "composer-2.5",
+				provider: "cursor",
+				env,
+			});
+			sink2?.recordSendMeta({
+				mode: "incremental",
+				reason: "follow-up",
+				resetAgent: false,
+				bootstrap: false,
+				promptText: "turn-two",
+				imageCount: 0,
+				useNativeToolReplay: true,
+				bridgeEnabled: false,
+				nativeReplayId: "replay-2",
+				promptInputTokens: 8,
+			});
+			await sink2?.finalize();
+
+			expect(sink1?.turn).toBe(1);
+			expect(sink2?.turn).toBe(2);
+			expect(sink1?.artifactDir).not.toBe(sink2?.artifactDir);
+
+			const manifest = JSON.parse(
+				readFileSync(join(sink1!.sessionDir!, sdkEventDebugTestUtils.SESSION_MANIFEST), "utf8"),
+			);
+			expect(manifest.turns).toHaveLength(2);
+			expect(manifest.turns[0]).toMatchObject({
+				turn: 1,
+				artifactDir: sink1?.artifactDir,
+				summary: { turn: 1, artifactDir: sink1?.artifactDir },
+			});
+			expect(manifest.turns[1]).toMatchObject({
+				turn: 2,
+				artifactDir: sink2?.artifactDir,
+				summary: { turn: 2, artifactDir: sink2?.artifactDir },
+			});
+			const turnOneMetadata = JSON.parse(
+				readFileSync(join(sink1!.artifactDir, sdkEventDebugTestUtils.ARTIFACTS.metadata), "utf8"),
+			);
+			const turnTwoMetadata = JSON.parse(
+				readFileSync(join(sink2!.artifactDir, sdkEventDebugTestUtils.ARTIFACTS.metadata), "utf8"),
+			);
+			expect(turnOneMetadata.send.promptText).toBe("turn-one");
+			expect(turnTwoMetadata.send.promptText).toBe("turn-two");
+		} finally {
+			sdkEventDebugTestUtils.resetSessionDebugState();
+			scopeTestUtils.reset();
+			rmSync(baseDir, { recursive: true, force: true });
+		}
+	});
+
+	it("clears stale artifacts when reusing a pinned run directory", async () => {
+		const artifactDir = mkdtempSync(join(tmpdir(), "pi-cursor-sdk-event-debug-reuse-"));
+		sdkEventDebugTestUtils.resetSessionDebugState();
+
+		try {
+			const env = {
+				PI_CURSOR_SDK_EVENT_DEBUG: "1",
+				PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR: artifactDir,
+			};
+			const sink1 = CursorSdkEventDebugSink.maybeCreate({
+				cwd: "/repo",
+				modelId: "composer-2.5",
+				provider: "cursor",
+				env,
+			});
+			sink1?.recordPiStreamEvent({ type: "text_delta", delta: "first-run" });
+			await sink1?.finalize();
+			expect(readFileSync(join(artifactDir, sdkEventDebugTestUtils.ARTIFACTS.piStreamEvents), "utf8")).toContain(
+				"first-run",
+			);
+
+			const sink2 = CursorSdkEventDebugSink.maybeCreate({
+				cwd: "/repo",
+				modelId: "composer-2.5",
+				provider: "cursor",
+				env,
+			});
+			sink2?.recordPiStreamEvent({ type: "text_delta", delta: "second-run" });
+			await sink2?.finalize();
+
+			const piStreamEvents = readFileSync(join(artifactDir, sdkEventDebugTestUtils.ARTIFACTS.piStreamEvents), "utf8");
+			expect(piStreamEvents).toContain("second-run");
+			expect(piStreamEvents).not.toContain("first-run");
+			expect(JSON.parse(readFileSync(join(artifactDir, sdkEventDebugTestUtils.ARTIFACTS.summary), "utf8"))).toMatchObject({
+				counts: { piStream: { text_delta: 1 } },
+			});
 		} finally {
 			sdkEventDebugTestUtils.resetSessionDebugState();
 			rmSync(artifactDir, { recursive: true, force: true });

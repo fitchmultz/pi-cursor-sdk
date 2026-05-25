@@ -46,7 +46,6 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `src/cursor-native-tool-display-state.ts` owns native replay display state, env gating, and record/consume helpers.
 - `src/cursor-tool-transcript.ts`, `src/cursor-transcript-utils.ts`, `src/cursor-transcript-tool-formatters.ts`, and `src/cursor-tool-names.ts` handle display-only Cursor native tool replay and transcript labels.
 - `src/cursor-mcp-timeout-override.ts` owns Cursor SDK MCP call timeout overrides for long-running local MCP tools.
-- `src/cursor-agents-context.ts` owns Cursor-model suppression of pi `<project_context>` / `AGENTS.md` duplication and `PI_CURSOR_PRESERVE_PI_AGENTS_MD`.
 - `src/cursor-state.ts` owns `/cursor-fast`, `--cursor-fast`, `--cursor-no-fast`, session state, and global fast defaults.
 - `src/context.ts`, `src/context-window-cache.ts`, and `src/bundled-context-windows.ts` handle prompt conversion and context-window caches.
 - `test/**/*.test.ts` contains Vitest coverage for provider registration, discovery, state, context, bridge, replay, and streaming behavior.

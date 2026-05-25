@@ -75,6 +75,11 @@ function writeSessionManifest(sessionDir: string, manifest: CursorSdkEventDebugS
 	writeFileSync(join(sessionDir, SESSION_MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
+function maxTurnFromManifest(manifest: CursorSdkEventDebugSessionManifest | undefined): number {
+	if (!manifest || manifest.turns.length === 0) return 0;
+	return manifest.turns.reduce((max, entry) => Math.max(max, entry.turn), 0);
+}
+
 function resolveSessionDebugDir(
 	cwd: string,
 	env: Record<string, string | undefined>,
@@ -100,7 +105,8 @@ export function allocateCursorSdkEventDebugTurn(
 
 	let state = sessionDebugStates.get(scopeKey);
 	if (!state || state.sessionDir !== sessionDir) {
-		state = { sessionKey: scopeKey, sessionDir, turnCounter: 0 };
+		const existing = readSessionManifest(sessionDir);
+		state = { sessionKey: scopeKey, sessionDir, turnCounter: maxTurnFromManifest(existing) };
 		sessionDebugStates.set(scopeKey, state);
 	}
 
@@ -138,12 +144,12 @@ export function allocateCursorSdkEventDebugTurn(
 
 export function updateCursorSdkEventDebugSessionManifest(
 	sessionDir: string,
-	turn: number,
+	artifactDir: string,
 	summary: Record<string, unknown>,
 ): void {
 	const manifest = readSessionManifest(sessionDir);
 	if (!manifest) return;
-	const turnEntry = manifest.turns.find((entry) => entry.turn === turn);
+	const turnEntry = manifest.turns.find((entry) => entry.artifactDir === artifactDir);
 	if (!turnEntry) return;
 	turnEntry.finalizedAt = new Date().toISOString();
 	turnEntry.summary = summary;

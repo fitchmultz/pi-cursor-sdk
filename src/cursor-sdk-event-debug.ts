@@ -1,4 +1,4 @@
-import { copyFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { InteractionUpdate } from "@cursor/sdk";
@@ -98,6 +98,18 @@ function resolveCursorSdkEventDebugStderrEnabled(env: Record<string, string | un
 	return parseEnvBoolean(env[CURSOR_SDK_EVENT_DEBUG_STDERR_ENV], false);
 }
 
+function snapshotCursorSdkEventDebugRecord(record: unknown): unknown {
+	try {
+		return structuredClone(record);
+	} catch {
+		try {
+			return JSON.parse(JSON.stringify(record));
+		} catch {
+			return record;
+		}
+	}
+}
+
 export function resolveCursorSdkEventDebugEnabled(env: Record<string, string | undefined> = process.env): boolean {
 	return parseEnvBoolean(env[CURSOR_SDK_EVENT_DEBUG_ENV], false);
 }
@@ -195,6 +207,7 @@ export class CursorSdkEventDebugSink {
 				"Raw artifact files may contain local paths, project text, tool args/results, or secrets from the workspace. Do not commit or share them.",
 			],
 		};
+		this.clearKnownArtifactFiles();
 		writeFileSync(join(this.artifactDir, ARTIFACTS.metadata), `${JSON.stringify(this.metadata, null, 2)}\n`);
 	}
 
@@ -376,7 +389,17 @@ export class CursorSdkEventDebugSink {
 
 	private updateSessionManifest(summary: Record<string, unknown>): void {
 		if (this.pinnedRun || !this.sessionDir || this.turn === undefined) return;
-		updateCursorSdkEventDebugSessionManifest(this.sessionDir, this.turn, summary);
+		updateCursorSdkEventDebugSessionManifest(this.sessionDir, this.artifactDir, summary);
+	}
+
+	private clearKnownArtifactFiles(): void {
+		for (const fileName of Object.values(ARTIFACTS)) {
+			try {
+				unlinkSync(join(this.artifactDir, fileName));
+			} catch {
+				// Ignore missing prior artifacts when reusing a pinned run directory.
+			}
+		}
 	}
 
 	async finalize(): Promise<void> {
@@ -493,14 +516,14 @@ export class CursorSdkEventDebugSink {
 	private bufferJsonl(fileName: string, record: unknown): void {
 		if (this.finalized) return;
 		const records = this.jsonlBuffers.get(fileName) ?? [];
-		records.push(record);
+		records.push(snapshotCursorSdkEventDebugRecord(record));
 		this.jsonlBuffers.set(fileName, records);
 	}
 
 	private flushJsonlBuffers(): void {
 		for (const [fileName, records] of this.jsonlBuffers) {
 			const lines = records.map((record) => `${JSON.stringify(record)}\n`).join("");
-			writeFileSync(join(this.artifactDir, fileName), lines, { flag: "a" });
+			writeFileSync(join(this.artifactDir, fileName), lines);
 		}
 		this.jsonlBuffers.clear();
 	}

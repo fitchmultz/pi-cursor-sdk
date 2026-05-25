@@ -57,6 +57,21 @@ describe("cursor-provider-errors", () => {
 		expect(message).toContain("Cursor SDK run failed");
 	});
 
+	it("scrubs bridge endpoint material from non-generic SDK run failure detail", () => {
+		const endpointToken = "secret-endpoint-token-provider";
+		const sdkDetail = formatCursorSdkRunFailureDetail({
+			id: "run-bridge-leak",
+			status: "error",
+			result: `MCP request failed for http://127.0.0.1:4321/cursor-pi-tool-bridge/${endpointToken}/mcp`,
+		});
+		const message = sanitizeCursorProviderError(sdkDetail, "test-key");
+
+		expect(message).toContain("MCP request failed for [redacted-bridge-endpoint]");
+		expect(message).not.toContain(endpointToken);
+		expect(message).not.toContain("127.0.0.1");
+		expect(message).not.toContain("/cursor-pi-tool-bridge/");
+	});
+
 	it("formats abort causes deterministically", () => {
 		expect(formatCursorSdkAbortMessage(resolveCursorSdkAbortCause({ signalAborted: true }))).toBe(
 			"Cancelled: prompt interrupted.",

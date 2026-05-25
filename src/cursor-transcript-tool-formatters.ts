@@ -617,6 +617,98 @@ function describeNonTextMcpContent(entry: unknown): string {
 	return `[${type} omitted]`;
 }
 
+export function summarizeSemSearch(args: Record<string, unknown>): string {
+	const query = getString(args, "query") ?? "semantic search";
+	const targetDirectories = getArray(args, "targetDirectories");
+	const dirHint =
+		targetDirectories && targetDirectories.length > 0
+			? ` (${targetDirectories.length} dir${targetDirectories.length === 1 ? "" : "s"})`
+			: "";
+	return truncateArg(`${query}${dirHint}`);
+}
+
+export function formatSemSearch(args: Record<string, unknown>, result: NormalizedResult, options: TranscriptOptions): string {
+	const query = getString(args, "query") ?? "semantic search";
+	const header = `semSearch ${truncateArg(query)}`;
+	if (result.status === "error") return joinSections(header, formatError(result.error));
+
+	const value = asRecord(result.value);
+	const results = getString(value, "results");
+	const targetDirectories = getArray(args, "targetDirectories");
+	const explanation = getString(args, "explanation");
+	const lines: string[] = [];
+	if (explanation?.trim()) lines.push(`Explanation: ${explanation.trim()}`);
+	if (targetDirectories && targetDirectories.length > 0) {
+		const dirs = targetDirectories
+			.map((entry) => (typeof entry === "string" ? entry : stringifyUnknown(entry)))
+			.join(", ");
+		lines.push(`Scope: ${dirs}`);
+	}
+	if (results?.trim()) lines.push(results.trim());
+	const body = lines.length > 0 ? lines.join("\n\n") : stringifyUnknown(result.value);
+	return joinSections(header, limitText(body, options));
+}
+
+function formatRecordScreenMode(mode: string | undefined): string {
+	switch (mode) {
+		case "START_RECORDING":
+			return "start recording";
+		case "SAVE_RECORDING":
+			return "save recording";
+		case "DISCARD_RECORDING":
+			return "discard recording";
+		default:
+			return mode ?? "record screen";
+	}
+}
+
+function formatRecordingDurationMs(ms: number | undefined): string | undefined {
+	if (ms === undefined || !Number.isFinite(ms) || ms < 0) return undefined;
+	if (ms < 1000) return `${Math.round(ms)}ms`;
+	const seconds = ms / 1000;
+	return seconds < 60 ? `${seconds.toFixed(1)}s` : `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
+}
+
+export function summarizeRecordScreen(
+	args: Record<string, unknown>,
+	result: NormalizedResult,
+	options: TranscriptOptions,
+): string {
+	const mode = getString(args, "mode");
+	if (result.status === "error") return formatRecordScreenMode(mode);
+	const value = asRecord(result.value);
+	const path = getString(value, "path");
+	const displayPath = path ? formatDisplayPath(path, options.cwd) : undefined;
+	const duration = formatRecordingDurationMs(getNumber(value, "recordingDurationMs"));
+	const modeLabel = formatRecordScreenMode(mode);
+	if (displayPath && duration) return `${displayPath} · ${duration}`;
+	if (displayPath) return displayPath;
+	if (duration) return `${modeLabel} · ${duration}`;
+	return modeLabel;
+}
+
+export function formatRecordScreen(args: Record<string, unknown>, result: NormalizedResult, options: TranscriptOptions): string {
+	const mode = getString(args, "mode");
+	const header = `recordScreen ${formatRecordScreenMode(mode)}`;
+	if (result.status === "error") return joinSections(header, formatError(result.error));
+
+	const value = asRecord(result.value);
+	const path = getString(value, "path");
+	const displayPath = path ? formatDisplayPath(path, options.cwd) : undefined;
+	const duration = formatRecordingDurationMs(getNumber(value, "recordingDurationMs"));
+	const wasCancelled = getBoolean(value, "wasPriorRecordingCancelled");
+	const lines: string[] = [];
+	if (displayPath) lines.push(`Recording: ${displayPath}`);
+	if (duration) lines.push(`Duration: ${duration}`);
+	if (wasCancelled === true) lines.push("Prior recording cancelled.");
+	if (lines.length === 0) {
+		if (mode === "START_RECORDING") lines.push("Recording started.");
+		else if (mode === "DISCARD_RECORDING") lines.push("Recording discarded.");
+		else lines.push("Screen recording updated.");
+	}
+	return joinSections(header, lines.join("\n"));
+}
+
 export function formatMcp(args: Record<string, unknown>, result: NormalizedResult, options: TranscriptOptions): string {
 	const toolName = typeof args.toolName === "string" ? args.toolName : "mcp";
 	if (result.status === "error") return joinSections(toolName, formatError(result.error));

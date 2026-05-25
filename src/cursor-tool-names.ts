@@ -10,6 +10,8 @@ export const CURSOR_REPLAY_LEGACY_TOOL_NAMES = [
 	"cursor_create_plan",
 	"cursor_generate_image",
 	"cursor_mcp",
+	"cursor_sem_search",
+	"cursor_record_screen",
 ] as const;
 
 export type CursorReplayLegacyToolName = (typeof CURSOR_REPLAY_LEGACY_TOOL_NAMES)[number];
@@ -25,6 +27,8 @@ const CURSOR_REPLAY_SOURCE_TOOL_NAMES = {
 	cursor_create_plan: "createPlan",
 	cursor_generate_image: "generateImage",
 	cursor_mcp: "MCP",
+	cursor_sem_search: "semSearch",
+	cursor_record_screen: "recordScreen",
 } as const satisfies Record<CursorReplayLegacyToolName, string>;
 
 const CURSOR_REPLAY_PROMPT_LABELS = {
@@ -37,6 +41,8 @@ const CURSOR_REPLAY_PROMPT_LABELS = {
 	cursor_create_plan: "Cursor plan",
 	cursor_generate_image: "Cursor image generation",
 	cursor_mcp: "Cursor MCP",
+	cursor_sem_search: "Cursor semantic search",
+	cursor_record_screen: "Cursor screen recording",
 } as const satisfies Record<CursorReplayLegacyToolName, string>;
 
 export function isCursorReplayLegacyToolName(toolName: string): toolName is CursorReplayLegacyToolName {

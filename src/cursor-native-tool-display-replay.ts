@@ -281,6 +281,11 @@ function getCursorReplayCallSummary(toolName: CursorReplayToolName, args: Record
 	if (toolName === "cursor_task") return description;
 	if (toolName === "cursor_generate_image") return prompt;
 	if (toolName === "cursor_mcp") return typeof args?.toolName === "string" ? args.toolName : undefined;
+	if (toolName === "cursor_sem_search") return typeof args?.query === "string" ? args.query : undefined;
+	if (toolName === "cursor_record_screen") {
+		if (typeof args?.path === "string") return args.path;
+		if (typeof args?.mode === "string") return args.mode;
+	}
 	if (toolName === CURSOR_REPLAY_ACTIVITY_TOOL_NAME) {
 		if (typeof args?.path === "string") return args.path;
 		if (typeof args?.toolName === "string") return args.toolName;

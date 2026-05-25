@@ -34,6 +34,8 @@ import {
 	formatLs,
 	formatMcp,
 	formatPlan,
+	formatRecordScreen,
+	formatSemSearch,
 	formatRead,
 	formatReadLints,
 	formatShell,
@@ -55,6 +57,8 @@ import {
 	getTodoTotalCount,
 	inferImageMimeType,
 	summarizePlan,
+	summarizeRecordScreen,
+	summarizeSemSearch,
 	summarizeTask,
 	summarizeTodos,
 } from "./cursor-transcript-tool-formatters.js";
@@ -423,6 +427,43 @@ const TOOL_DISPLAY_SPECS: Record<string, ToolDisplaySpec> = {
 			buildActivitySummary: ({ args }) => truncateArg(getString(args, "toolName") ?? "mcp"),
 			buildDetails: ({ result }, contentText) => ({
 				summary: result.status === "error" ? undefined : firstNonEmptyLine(contentText) ?? "MCP result captured",
+			}),
+		},
+	},
+	semSearch: {
+		formatTranscript: ({ args, result, options }) => formatSemSearch(args, result, options),
+		buildPiToolDisplay: (context) => buildActivityReplayDisplay("semSearch", TOOL_DISPLAY_SPECS.semSearch, context),
+		activityReplay: {
+			labelKey: "cursor_sem_search",
+			buildActivityArgs: ({ args }) => {
+				const query = getString(args, "query") ?? "semantic search";
+				return { query: truncateArg(query) };
+			},
+			buildActivitySummary: ({ args }) => summarizeSemSearch(args),
+			buildDetails: ({ result }, contentText) => ({
+				summary: result.status === "error" ? undefined : firstNonEmptyLine(contentText) ?? "semantic search results captured",
+			}),
+		},
+	},
+	recordScreen: {
+		formatTranscript: ({ args, result, options }) => formatRecordScreen(args, result, options),
+		buildPiToolDisplay: (context) => buildActivityReplayDisplay("recordScreen", TOOL_DISPLAY_SPECS.recordScreen, context),
+		activityReplay: {
+			labelKey: "cursor_record_screen",
+			buildActivityArgs: ({ args, result, options }) => {
+				const mode = getString(args, "mode");
+				const path = getString(asRecord(result.value), "path");
+				return {
+					...(mode ? { mode } : {}),
+					...(path ? { path: formatDisplayPath(path, options.cwd) } : {}),
+				};
+			},
+			buildActivitySummary: ({ args, result, options }) => summarizeRecordScreen(args, result, options),
+			buildDetails: ({ args, result, options }, contentText) => ({
+				summary:
+					result.status === "error"
+						? undefined
+						: summarizeRecordScreen(args, result, options) ?? firstNonEmptyLine(contentText) ?? "screen recording updated",
 			}),
 		},
 	},

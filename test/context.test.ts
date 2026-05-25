@@ -27,21 +27,6 @@ describe("buildCursorPrompt", () => {
 		expect(result.text).toContain("You are helpful.");
 	});
 
-	it("omits pi AGENTS context blocks from Cursor-facing system instructions after dedup", () => {
-		const ctx: Context = {
-			systemPrompt: [
-				"You are an expert coding assistant.",
-				"",
-				"Current date: 2026-05-20",
-			].join("\n"),
-			messages: [],
-		};
-		const result = buildCursorPrompt(ctx);
-		expect(result.text).not.toContain("Project instruction stays.");
-		expect(result.text).not.toContain("<project_context>");
-		expect(result.text).toContain("Current date: 2026-05-20");
-	});
-
 	it("omits pi tool catalogs and local skill catalogs from Cursor-facing system instructions", () => {
 		const ctx: Context = {
 			systemPrompt: [

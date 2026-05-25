@@ -114,13 +114,13 @@ function buildReplaySummaryDisplay(
 	details: Record<string, unknown>,
 ): CursorPiToolDisplay {
 	const isError = result.status === "error";
-	const summary = isError ? formatError(result.error) : firstNonEmptyLine(contentText);
+	const summary = isError ? details.summary : (details.summary ?? firstNonEmptyLine(contentText));
 	return {
 		toolName,
 		args,
 		result: textToolResult(contentText, {
 			...details,
-			summary: details.summary ?? summary,
+			summary,
 			expandedText: details.expandedText ?? contentText,
 		}),
 		isError,

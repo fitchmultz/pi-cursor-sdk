@@ -951,5 +951,7 @@ describe("formatCursorToolTranscript", () => {
 		});
 		expect(display.result.content[0].text.length).toBeLessThan(1200);
 		expect(display.result.content[0].text).not.toContain("x".repeat(500));
+		expect(display.result.details?.summary).toBeUndefined();
+		expect(JSON.stringify(display.result.details ?? {})).not.toContain("x".repeat(500));
 	});
 });

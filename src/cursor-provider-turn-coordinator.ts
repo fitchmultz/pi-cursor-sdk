@@ -444,12 +444,19 @@ export class CursorSdkTurnCoordinator {
 			this.resolvedApiKey,
 		);
 		const toolName = display.toolName;
-		if (this.liveRun) {
+		const disposition = resolveNativeReplayDisposition({
+			toolName,
+			useNativeToolReplay: this.useNativeToolReplay,
+			activeToolNames: this.activeToolNames,
+			hasLiveRun: this.liveRun !== undefined,
+		});
+
+		if (disposition === "queue_replay" && this.liveRun) {
 			this.nativeToolReplayStarted = true;
 			const id = `${this.nativeReplayId}-tool-${++this.nativeToolDisplayCounter}`;
 			this.recordDisplayDecision({
 				action: "queue_replay",
-				disposition: "transcript_trace",
+				disposition,
 				toolName,
 				source: "started",
 				reason: "incomplete-started-tool-call",
@@ -461,10 +468,14 @@ export class CursorSdkTurnCoordinator {
 			});
 			return;
 		}
-		const traceText = formatIncompleteCursorToolTrace(display);
+
+		const traceText =
+			disposition === "inactive_trace"
+				? formatInactiveCursorReplayTrace(display)
+				: formatIncompleteCursorToolTrace(display);
 		this.recordDisplayDecision({
 			action: "emit_trace",
-			disposition: "transcript_trace",
+			disposition,
 			toolName,
 			source: "started",
 			reason: "incomplete-started-tool-call",

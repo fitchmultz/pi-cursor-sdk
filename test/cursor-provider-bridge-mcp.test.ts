@@ -516,4 +516,43 @@ describe("streamCursor bridge MCP", () => {
 			await transport.close().catch(() => undefined);
 		}
 	});
+
+	it("surfaces incomplete Cursor tools as transcript traces in bridge-only live runs", async () => {
+		process.env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS = "1";
+		registerBridgeForProviderTest({
+			active: ["read"],
+			tools: [createBuiltinToolInfo("read", Type.Object({ path: Type.String() }), "Read files")],
+		});
+
+		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
+			opts.onDelta({
+				update: {
+					type: "tool-call-started",
+					toolCall: { name: "read", args: { path: "README.md" } },
+					callId: "c-incomplete",
+				},
+			});
+			return {
+				id: "run-1",
+				agentId: "agent-1",
+				status: "finished",
+				wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished", result: "done" }),
+				cancel: vi.fn(),
+				supports: () => true,
+				unsupportedReason: () => undefined,
+			};
+		});
+		mockedCreate.mockResolvedValue({
+			agentId: "agent-1",
+			send: mockSend,
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+
+		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		const trace = collectThinkingDeltas(events);
+
+		expect(hasEventType(events, "toolcall_start")).toBe(false);
+		expect(trace).toContain("Cursor read did not complete");
+		expect(trace).toContain("missing completion");
+	});
 });

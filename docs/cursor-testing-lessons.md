@@ -323,6 +323,99 @@ With `PI_CURSOR_SDK_EVENT_DEBUG=1`, each discarded started call is recorded in `
 
 Stderr output for these records requires `PI_CURSOR_SDK_EVENT_DEBUG_STDERR=1`. This complements the standalone `npm run debug:sdk-events` probe by interpreting a specific provider discard path during normal pi runs.
 
+## Tool calls listed as plain text (#40 triage)
+
+**Symptom:** Assistant output lists tool invocations (for example `Tool call`, `Cursor activity`, `call cursor-replay-…`, `toolName`, `browser_navigate`) instead of pi tool execution cards/results.
+
+**What the screenshot in [#40](https://github.com/fitchmultz/pi-cursor-sdk/issues/40) shows:** Plain assistant text that mirrors pi's **prompt transcript format** for replay tool calls (`Tool call (Cursor activity, call cursor-replay-…): …` from `src/context.ts`) rather than a rendered pi `toolCall` card. That pattern usually means the Cursor model **narrated** a tool call as text; it is not proof that pi failed to emit `toolcall_start` / `toolUse`.
+
+**Do not close #40 as duplicate of #55 without session JSONL.** #55 surfaces scrubbed SDK run failures and abort causes in the TUI. #40 can occur with no error toast when the model prints tool metadata as assistant text, when replay is display-only but the user expected real execution, when stale native replay routing or plan-strip resync gaps produce `Tool * not found` errors (see **#52**), or when started SDK tools were discarded at run end (see **#52** maintainer debug and [Discarded incomplete SDK tool calls](#discarded-incomplete-sdk-tool-calls) above). A hard **process exit** from uncaught `ConnectError` / `ETIMEDOUT` is **#43**, not #40 text echo.
+
+### Reporter checklist (required before claiming a provider bug)
+
+Ask the reporter (or capture yourself) for:
+
+| Field | Why |
+| --- | --- |
+| `pi --version` and installed `pi-cursor-sdk` version | Confirms extension/runtime in use |
+| Model ID (for example `cursor/composer-2.5`) | Routing/replay behavior is model-scoped |
+| Exact repro prompt and prior turns | Multi-turn replay history affects prompt text |
+| Flags: `--cursor-no-fast`, `PI_CURSOR_PI_TOOL_BRIDGE`, `PI_CURSOR_EXPOSE_BUILTIN_TOOLS`, `PI_CURSOR_SETTING_SOURCES` | Bridge vs native-only vs narrowed settings |
+| Whether the listed names are `pi__*` bridge MCP, Cursor-native (`browser_navigate`, `WebSearch`), or `cursor-replay-*` replay IDs | Three different surfaces (see [Cursor native tool replay](./cursor-native-tool-replay.md#live-bridge-vs-replay)) |
+| Red toast / `errorMessage` text, if any | Distinguishes #55 failure surfacing from silent text echo |
+| Process exit / uncaught `ConnectError` / `ETIMEDOUT` stack trace, if any | Hard network crash (**#43**), not #40 model text echo |
+| Session JSONL path (redact secrets before sharing) | Source of truth for `toolCall` vs plain `text` blocks; scan for replay `Tool * not found` (**#52**) |
+
+### Capture steps (maintainers)
+
+Use an isolated session dir and do not paste auth, tokens, or raw debug payloads into issues.
+
+```bash
+SMOKE_DIR="/tmp/pi-cursor-sdk-issue40-$(date +%s)"
+mkdir -p "$SMOKE_DIR/home/.pi/agent"
+cp "$HOME/.pi/agent/auth.json" "$SMOKE_DIR/home/.pi/agent/auth.json"
+chmod 600 "$SMOKE_DIR/home/.pi/agent/auth.json"
+
+env -i HOME="$SMOKE_DIR/home" PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" \
+  MISE_DISABLE=1 \
+  PI_CURSOR_PI_TOOL_BRIDGE_DEBUG=1 \
+  pi -e . --cursor-no-fast --model cursor/composer-2.5 \
+  --session-dir "$SMOKE_DIR/session" \
+  -p '<exact reporter prompt>'
+```
+
+Optional provider/SDK timelines (separate from pi session JSONL; see [Pi provider SDK event capture](#pi-provider-sdk-event-capture) and [Cursor SDK event capture probe](#cursor-sdk-event-capture-probe)):
+
+For pi parsing, replay routing, or bridge timing, prefer:
+
+```bash
+npm run debug:provider-events -- \
+  --cwd "$PWD" \
+  --model cursor/composer-2.5 \
+  --prompt '<exact reporter prompt>' \
+  --out "$SMOKE_DIR/provider-events"
+```
+
+Or add `PI_CURSOR_SDK_EVENT_DEBUG=1` to the pi run above (writes under `.debug/cursor-sdk-events/`).
+
+For raw Cursor SDK surfaces only:
+
+```bash
+npm run debug:sdk-events -- \
+  --cwd "$PWD" \
+  --model composer-2.5 \
+  --prompt '<exact reporter prompt>' \
+  --out "$SMOKE_DIR/sdk-events"
+```
+
+### JSONL classification (decision tree)
+
+Start with whether pi stayed alive:
+
+0. **pi process exited / shell returned with uncaught `ConnectError` (`ETIMEDOUT`, code 14, `read ETIMEDOUT`)** — hard network crash bypassing provider error surfacing. Route to **#43** (coordinate with #55 for caught-failure messaging). If tools were mid-flight, note whether session JSONL ends abruptly; do not classify as #40 model text echo.
+
+Then inspect the failing assistant turn in `$SMOKE_DIR/session/*.jsonl`:
+
+1. **Error `toolResult` (`isError: true`) or error assistant message contains `Tool grep/cursor/find/ls not found`** — stale `context.tools` snapshot or plan-strip resync gap after plan-mode execute stripped active tools. Run `node scripts/validate-smoke-jsonl.mjs --replay-errors-only "$SMOKE_DIR/session"`. Optional: `display-decisions.jsonl` from `PI_CURSOR_SDK_EVENT_DEBUG=1` shows `inactive_trace` routing. Route to **#52** — not model text echo (those strings appear in persisted error records, not narrated `Tool call (` lines). See [Dual-check invariant](#dual-check-invariant-contexttools-vs-pi-active-tools).
+2. **`content` has `type: "toolCall"` blocks and matching `toolResult` rows** — pi executed or replayed tools; if the TUI still looked like plain text, capture a screenshot and pi version (possible pi TUI/display issue, not provider dispatch).
+3. **`content` is only `type: "text"` and text contains `Tool call (` / `cursor-replay-` / serialized arg keys** — model text echo of prompt transcript format; not #55, not #52 stale routing. Compare with `buildCursorPrompt()` output in the prior turn.
+4. **No `toolCall` blocks, no error toast, user expected real execution** — check whether names are replay-only (`cursor-replay-*`) or Cursor-native MCP; replay never re-runs work ([replay doc](./cursor-native-tool-replay.md)).
+5. **`stopReason: "error"` or scrubbed `errorMessage`** — classify under **#55**; check whether incomplete started tools were discarded (`discardIncompleteStartedToolCalls()`). Discarded starts with no completion and no model text echo: see `coordinator-events.jsonl` phase `discarded-incomplete-started-tool-call` ([Discarded incomplete SDK tool calls](#discarded-incomplete-sdk-tool-calls) above); route broader stale/inactive replay gaps to **#52**.
+6. **Bridge expected (`pi__*` in Cursor MCP)** — inspect stderr `[pi-cursor-sdk:bridge]` JSONL with `PI_CURSOR_PI_TOOL_BRIDGE_DEBUG=1` for pending/unresolved bridge requests.
+
+Quick structural scan (no secrets):
+
+```bash
+node scripts/validate-smoke-jsonl.mjs --replay-errors-only "$SMOKE_DIR/session"
+rg '"type": "toolCall"|Tool call \(Cursor|cursor-replay-' "$SMOKE_DIR/session"/*.jsonl
+```
+
+### When to file follow-ups
+
+- **#43** — pi exited from uncaught `ConnectError` / `ETIMEDOUT` during Cursor SDK HTTP traffic (hard crash, not a scrubbed #55 toast).
+- **#55** — caught SDK run failure or abort with missing/opaque detail (already addressed on main for surfacing).
+- **#52** — stale/inactive native replay routing after plan-strip or stale `context.tools` snapshot (`Tool * not found` in JSONL, `inactive_trace` in `display-decisions.jsonl`); or maintainer needs an explicit "started X, never completed" debug line when JSONL shows no completion and no model text echo.
+- **New issue** — bridge dispatch failure with `[pi-cursor-sdk:bridge]` evidence, or proven provider bug with JSONL showing missing `toolCall` despite SDK `tool-call-completed` in `on-delta.jsonl` from `debug:provider-events` or `debug:sdk-events` artifacts.
 ## Related docs and scripts
 
 - [Cursor live smoke checklist](./cursor-live-smoke-checklist.md)

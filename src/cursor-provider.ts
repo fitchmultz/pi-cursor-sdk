@@ -51,6 +51,15 @@ import { buildCursorModelSelection } from "./model-discovery.js";
 import { getCheckpointContextWindow, saveCachedContextWindow } from "./context-window-cache.js";
 import { CursorSdkTurnCoordinator } from "./cursor-provider-turn-coordinator.js";
 import { isCursorNativeToolDisplayRuntimeEnabled } from "./cursor-native-tool-display.js";
+import {
+	formatCursorSdkAbortMessage,
+	formatCursorSdkRunFailureDetail,
+	MISSING_CURSOR_API_KEY_MESSAGE,
+	resolveCursorSdkAbortCause,
+	sanitizeCursorProviderError,
+} from "./cursor-provider-errors.js";
+import { getEffectiveCursorSettingSources } from "./cursor-setting-sources.js";
+import { hasUsableText } from "./cursor-record-utils.js";
 
 function makeInitialMessage(model: Model<Api>): AssistantMessage {
 	return {
@@ -73,39 +82,12 @@ function makeInitialMessage(model: Model<Api>): AssistantMessage {
 }
 
 const CURSOR_API_KEY_ENV_VAR = "CURSOR_API_KEY";
-const MISSING_API_KEY_MESSAGE =
-	"Cursor SDK runs require a Cursor API key. Run /login -> Use an API key -> Cursor, set CURSOR_API_KEY before starting pi, or restart pi with --api-key.";
-const GENERIC_CURSOR_SDK_ERROR_MESSAGE =
-	"Cursor SDK request failed. The API key may be missing, invalid, or unauthorized. Run /login -> Use an API key -> Cursor, verify CURSOR_API_KEY, or pass --api-key, then retry.";
-const AUTH_CURSOR_SDK_ERROR_MESSAGE =
-	"Cursor SDK request failed because the API key may be invalid or unauthorized. Run /login -> Use an API key -> Cursor, verify CURSOR_API_KEY, or pass --api-key, then retry.";
-import { getEffectiveCursorSettingSources } from "./cursor-setting-sources.js";
-import { scrubSensitiveText } from "./cursor-sensitive-text.js";
-import { hasUsableText } from "./cursor-record-utils.js";
-
-function isGenericErrorMessage(message: string): boolean {
-	const normalized = message.trim().toLowerCase();
-	return normalized === "" || normalized === "error" || normalized === "unknown error";
-}
-
-function isLikelyAuthError(message: string): boolean {
-	return /\b(unauthorized|unauthorised|forbidden|invalid api key|invalid key|authentication|auth|401|403)\b/i.test(message);
-}
 
 function resolveCursorApiKey(apiKey?: string): string | undefined {
 	const trimmed = apiKey?.trim();
 	if (!trimmed) return undefined;
 	if (trimmed === CURSOR_API_KEY_ENV_VAR) return process.env.CURSOR_API_KEY?.trim();
 	return trimmed;
-}
-
-function sanitizeError(error: unknown, apiKey?: string): string {
-	const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
-	if (message === MISSING_API_KEY_MESSAGE) return MISSING_API_KEY_MESSAGE;
-	const scrubbed = scrubSensitiveText(message, apiKey).trim();
-	if (isGenericErrorMessage(scrubbed)) return GENERIC_CURSOR_SDK_ERROR_MESSAGE;
-	if (isLikelyAuthError(scrubbed)) return AUTH_CURSOR_SDK_ERROR_MESSAGE;
-	return scrubbed || GENERIC_CURSOR_SDK_ERROR_MESSAGE;
 }
 
 async function cacheSdkContextWindow(agentId: string, modelId: string): Promise<void> {
@@ -153,7 +135,7 @@ export function streamCursor(
 			}
 
 			const apiKey = resolveCursorApiKey(options?.apiKey);
-			if (!apiKey) throw new Error(MISSING_API_KEY_MESSAGE);
+			if (!apiKey) throw new Error(MISSING_CURSOR_API_KEY_MESSAGE);
 			resolvedApiKey = apiKey;
 
 			// pi-ai Context/SimpleStreamOptions do not expose ExtensionContext.cwd; bridge via session_start
@@ -276,14 +258,26 @@ export function streamCursor(
 								selectCursorFinalText(result.result, liveRun.textDeltas, liveRun.emittedText, turnCoordinator.planTextCandidate),
 							);
 						} else if (result.status === "cancelled" || options?.signal?.aborted) {
-							cursorLiveRuns.markCancelled(liveRun);
+							cursorLiveRuns.markCancelled(
+								liveRun,
+								formatCursorSdkAbortMessage(
+									resolveCursorSdkAbortCause({
+										signalAborted: options?.signal?.aborted,
+										sdkStatusCancelled: result.status === "cancelled",
+									}),
+								),
+							);
 						} else {
-							cursorLiveRuns.markError(liveRun, sanitizeError(result.result ?? "Cursor SDK run failed", resolvedApiKey ?? options?.apiKey));
+							const failureDetail = formatCursorSdkRunFailureDetail(result, run?.result);
+							cursorLiveRuns.markError(
+								liveRun,
+								sanitizeCursorProviderError(failureDetail, resolvedApiKey ?? options?.apiKey),
+							);
 						}
 					})
 					.catch(async (error: unknown) => {
 						if (liveRun.disposed) return;
-						cursorLiveRuns.markError(liveRun, sanitizeError(error, resolvedApiKey ?? options?.apiKey));
+						cursorLiveRuns.markError(liveRun, sanitizeCursorProviderError(error, resolvedApiKey ?? options?.apiKey));
 					});
 
 				try {
@@ -312,11 +306,18 @@ export function streamCursor(
 			if (result.status === "cancelled") {
 				await abandonSessionCursorAgent(sessionAgentScopeKey);
 				partial.stopReason = "aborted";
+				partial.errorMessage = formatCursorSdkAbortMessage(
+					resolveCursorSdkAbortCause({
+						signalAborted: options?.signal?.aborted,
+						sdkStatusCancelled: true,
+					}),
+				);
 				stream.push({ type: "error", reason: "aborted", error: partial });
 			} else if (result.status === "error") {
 				await abandonSessionCursorAgent(sessionAgentScopeKey);
 				partial.stopReason = "error";
-				partial.errorMessage = sanitizeError(result.result ?? "Cursor SDK run failed", resolvedApiKey ?? options?.apiKey);
+				const failureDetail = formatCursorSdkRunFailureDetail(result, run.result);
+				partial.errorMessage = sanitizeCursorProviderError(failureDetail, resolvedApiKey ?? options?.apiKey);
 				stream.push({ type: "error", reason: "error", error: partial });
 			} else {
 				commitSessionAgentSend(sessionAgentScopeKey, context, bootstrap);
@@ -332,10 +333,13 @@ export function streamCursor(
 			else await abandonSessionCursorAgent(sessionAgentScopeKey);
 			if (error instanceof CursorLiveRunAbortError) {
 				partial.stopReason = "aborted";
+				partial.errorMessage = formatCursorSdkAbortMessage(
+					resolveCursorSdkAbortCause({ signalAborted: options?.signal?.aborted }),
+				);
 				stream.push({ type: "error", reason: "aborted", error: partial });
 			} else {
 				partial.stopReason = "error";
-				partial.errorMessage = sanitizeError(error, resolvedApiKey ?? options?.apiKey);
+				partial.errorMessage = sanitizeCursorProviderError(error, resolvedApiKey ?? options?.apiKey);
 				stream.push({ type: "error", reason: "error", error: partial });
 			}
 		} finally {

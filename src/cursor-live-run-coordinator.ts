@@ -46,6 +46,7 @@ export interface CursorLiveRun {
 	cancelled: boolean;
 	disposed: boolean;
 	errorMessage?: string;
+	abortMessage?: string;
 	chainUserInputAfterCompletion: boolean;
 }
 
@@ -70,7 +71,7 @@ export interface CursorLiveRunCoordinator {
 	start(params: CursorLiveRunCreateParams): CursorLiveRun;
 	attachSdkRun(run: CursorLiveRun, sdkRun: CursorLiveSdkRun): void;
 	markFinished(run: CursorLiveRun, finalText: string): void;
-	markCancelled(run: CursorLiveRun): void;
+	markCancelled(run: CursorLiveRun, abortMessage?: string): void;
 	markError(run: CursorLiveRun, errorMessage: string): void;
 	queueEvent(run: CursorLiveRun, event: CursorLiveQueuedEvent): void;
 	peekEvent(run: CursorLiveRun): CursorLiveQueuedEvent | undefined;
@@ -294,9 +295,10 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 			coordinator.requestIdleDispose(run);
 		},
 
-		markCancelled(run): void {
+		markCancelled(run, abortMessage): void {
 			if (run.disposed) return;
 			run.cancelled = true;
+			run.abortMessage = abortMessage;
 			run.done = true;
 			notifyProgress(run);
 			coordinator.requestIdleDispose(run);

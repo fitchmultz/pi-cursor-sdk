@@ -44,14 +44,20 @@ import { join } from "node:path";
 describe("streamCursor bridge MCP", () => {
 	beforeEach(resetCursorProviderTestState);
 
-it("surfaces live-run wait error status as a provider error", async () => {
+	it("surfaces empty live-run error status with run metadata", async () => {
 		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
 			opts.onDelta({ update: { type: "text-delta", text: "partial" } });
 			return {
-				id: "run-1",
+				id: "run-abc123456789",
 				agentId: "agent-1",
 				status: "error",
-				wait: vi.fn().mockResolvedValue({ id: "run-1", status: "error", result: "Cursor SDK run failed" }),
+				wait: vi.fn().mockResolvedValue({
+					id: "run-abc123456789",
+					status: "error",
+					result: "Cursor SDK run failed",
+					durationMs: 900,
+					model: { id: "composer-2.5" },
+				}),
 				cancel: vi.fn(),
 				supports: () => true,
 				unsupportedReason: () => undefined,
@@ -67,7 +73,36 @@ it("surfaces live-run wait error status as a provider error", async () => {
 		const error = getErrorEvent(events);
 
 		expect(error.reason).toBe("error");
-		expect(error.error.errorMessage).toContain("Cursor SDK run failed");
+		expect(error.error.errorMessage).toContain("model composer-2.5");
+		expect(error.error.errorMessage).toContain("900ms");
+		expect(error.error.errorMessage).not.toBe("Cursor SDK run failed");
+		expect(hasEventType(events, "done")).toBe(false);
+	});
+
+	it("surfaces live-run wait error status as a provider error", async () => {
+		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
+			opts.onDelta({ update: { type: "text-delta", text: "partial" } });
+			return {
+				id: "run-1",
+				agentId: "agent-1",
+				status: "error",
+				wait: vi.fn().mockResolvedValue({ id: "run-1", status: "error", result: "MCP tool call timed out after 60s" }),
+				cancel: vi.fn(),
+				supports: () => true,
+				unsupportedReason: () => undefined,
+			};
+		});
+		mockedCreate.mockResolvedValue({
+			agentId: "agent-1",
+			send: mockSend,
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+
+		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		const error = getErrorEvent(events);
+
+		expect(error.reason).toBe("error");
+		expect(error.error.errorMessage).toContain("MCP tool call timed out after 60s");
 		expect(hasEventType(events, "done")).toBe(false);
 	});
 

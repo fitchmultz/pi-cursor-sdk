@@ -60,6 +60,7 @@ it("aborts after agent creation without sending a prompt when already cancelled"
 
 		expect(error.reason).toBe("aborted");
 		expect(error.error.stopReason).toBe("aborted");
+		expect(error.error.errorMessage).toBe("Cancelled: prompt interrupted.");
 		expect(mockSend).not.toHaveBeenCalled();
 		expect(mockDispose).toHaveBeenCalledTimes(1);
 	});

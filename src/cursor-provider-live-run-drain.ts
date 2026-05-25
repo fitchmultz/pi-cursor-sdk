@@ -23,6 +23,7 @@ import { resetSessionCursorAgent } from "./cursor-session-agent.js";
 import { applyCursorApproximateUsage } from "./cursor-usage-accounting.js";
 import { CursorPartialContentEmitter } from "./cursor-partial-content-emitter.js";
 import { hasUsableText } from "./cursor-record-utils.js";
+import { formatCursorSdkAbortMessage, resolveCursorSdkAbortCause } from "./cursor-provider-errors.js";
 import { formatInactiveCursorReplayTrace } from "./cursor-native-replay-trace.js";
 import { partitionNativeToolsByActiveContext } from "./cursor-native-replay-routing.js";
 
@@ -308,11 +309,15 @@ export async function drainCursorLiveRunTurn(
 
 		if (run.disposed) {
 			partial.stopReason = "aborted";
+			partial.errorMessage = formatCursorSdkAbortMessage(
+				resolveCursorSdkAbortCause({ liveRunDisposed: true }),
+			);
 			stream.push({ type: "error", reason: "aborted", error: partial });
 			return "aborted";
 		}
 		if (run.cancelled) {
 			partial.stopReason = "aborted";
+			if (run.abortMessage) partial.errorMessage = run.abortMessage;
 			stream.push({ type: "error", reason: "aborted", error: partial });
 			await cursorLiveRuns.release(run);
 			return "aborted";

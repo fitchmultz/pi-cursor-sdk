@@ -805,9 +805,60 @@ export function formatMcp(args: Record<string, unknown>, result: NormalizedResul
 	return joinSections(toolName, limitText(body, options));
 }
 
+const UNKNOWN_TOOL_FALLBACK_MAX_ARGS = 8;
+const UNKNOWN_TOOL_FALLBACK_MAX_CHARS = 240;
+const UNKNOWN_TOOL_FALLBACK_MAX_LINES = 6;
+
+function summarizeUnknownToolArgValue(value: unknown): string {
+	if (typeof value === "string") return truncateArg(value);
+	if (typeof value === "number" || typeof value === "boolean") return String(value);
+	if (Array.isArray(value)) {
+		const preview = value.slice(0, 3).map((entry) => summarizeUnknownToolArgValue(entry)).join(", ");
+		const omitted = value.length - Math.min(value.length, 3);
+		return omitted > 0 ? `[${preview}, +${omitted} more]` : `[${preview}]`;
+	}
+	return truncateArg(stringifyUnknown(value).replace(/\s+/g, " "));
+}
+
+function summarizeUnknownToolArgs(args: Record<string, unknown>): string {
+	const entries = Object.entries(args).slice(0, UNKNOWN_TOOL_FALLBACK_MAX_ARGS);
+	if (entries.length === 0) return "";
+	const parts = entries.map(([key, value]) => `${key}=${summarizeUnknownToolArgValue(value)}`);
+	const omitted = Object.keys(args).length - entries.length;
+	const body = parts.join(", ");
+	return omitted > 0 ? `${body} (+${omitted} more)` : body;
+}
+
+function summarizeUnknownToolResult(value: unknown, options: TranscriptOptions): string {
+	const text = stringifyUnknown(value).trim();
+	if (!text) return "";
+	return limitText(text.replace(/\s+/g, " "), {
+		...options,
+		maxChars: options.maxChars ?? UNKNOWN_TOOL_FALLBACK_MAX_CHARS,
+		maxLines: options.maxLines ?? UNKNOWN_TOOL_FALLBACK_MAX_LINES,
+	});
+}
+
+function summarizeUnknownToolError(error: unknown, options: TranscriptOptions): string {
+	const text = formatError(error).trim();
+	if (!text) return "Error";
+	return limitText(text, {
+		...options,
+		maxChars: options.maxChars ?? UNKNOWN_TOOL_FALLBACK_MAX_CHARS,
+		maxLines: options.maxLines ?? UNKNOWN_TOOL_FALLBACK_MAX_LINES,
+	});
+}
+
 export function formatFallback(name: string, args: Record<string, unknown>, result: NormalizedResult, options: TranscriptOptions): string {
 	const header = name === "unknown" ? "Cursor tool" : name;
-	if (result.status === "error") return joinSections(header, formatError(result.error));
-	const argsText = Object.keys(args).length > 0 ? `${stringifyUnknown(args)}\n\n` : "";
-	return joinSections(header, limitText(`${argsText}${stringifyUnknown(result.value)}`.trim(), options));
+	if (result.status === "error") {
+		const argsSummary = summarizeUnknownToolArgs(args);
+		const errorSummary = summarizeUnknownToolError(result.error, options);
+		const body = [argsSummary, errorSummary].filter(Boolean).join("\n\n");
+		return joinSections(header, body ? limitText(body, options) : undefined);
+	}
+	const argsSummary = summarizeUnknownToolArgs(args);
+	const resultSummary = summarizeUnknownToolResult(result.value, options);
+	const body = [argsSummary, resultSummary].filter(Boolean).join("\n\n");
+	return joinSections(header, body ? limitText(body, options) : undefined);
 }

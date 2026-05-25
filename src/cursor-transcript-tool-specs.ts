@@ -154,14 +154,22 @@ function buildActivityReplayDisplay(cursorToolName: string, spec: ToolDisplaySpe
 }
 
 function buildGenericPiToolDisplay(context: ToolDisplayContext): CursorPiToolDisplay {
-	const { name, args, result, options } = context;
-	const isError = result.status === "error";
-	return {
-		toolName: name,
-		args,
-		result: textToolResult(isError ? formatError(result.error) : limitText(stringifyUnknown(result.value), options)),
-		isError,
-	};
+	const { rawName, name, args, result, options } = context;
+	const displayName = rawName.trim() || name;
+	const activityTitle = getCursorReplayDisplayLabel(CURSOR_REPLAY_ACTIVITY_TOOL_NAME);
+	const activitySummary = truncateArg(displayName === "unknown" ? "tool" : displayName);
+	const activityArgs = buildCursorActivityDisplayArgs({ cursorToolName: activitySummary }, activityTitle, activitySummary);
+	const contentText = formatFallback(name, args, result, options);
+	const summary =
+		result.status === "error"
+			? undefined
+			: firstNonEmptyLine(contentText) ?? activitySummary;
+	return buildReplaySummaryDisplay(CURSOR_REPLAY_ACTIVITY_TOOL_NAME, activityArgs, result, contentText, {
+		cursorToolName: name,
+		title: activityTitle,
+		summary,
+		expandedText: contentText,
+	});
 }
 
 function buildEditPiToolDisplay(context: ToolDisplayContext): CursorPiToolDisplay {

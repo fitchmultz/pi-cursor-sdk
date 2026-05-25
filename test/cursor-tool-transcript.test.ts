@@ -877,4 +877,79 @@ describe("formatCursorToolTranscript", () => {
 		expect(transcript).toContain("line 0\nline 1\nline 2");
 		expect(transcript).toContain("17 more lines");
 	});
+
+	it("bounds unknown future Cursor tool completions with neutral activity cards", () => {
+		const largePayload = "x".repeat(5000);
+		const toolCall = {
+			name: "futureSemSearchWidget",
+			args: {
+				query: largePayload,
+				...Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`field-${index}`, `value-${index}`])),
+			},
+			result: {
+				status: "success",
+				value: { matches: Array.from({ length: 40 }, (_, index) => ({ path: `src/file-${index}.ts`, score: index })) },
+			},
+		};
+
+		const transcript = formatCursorToolTranscript(toolCall);
+		expect(transcript.startsWith("futureSemSearchWidget\n\n")).toBe(true);
+		expect(transcript).toContain("query=");
+		expect(transcript).toContain("(+5 more)");
+		expect(transcript.length).toBeLessThan(1200);
+		expect(transcript).not.toContain(largePayload);
+
+		const display = buildCursorPiToolDisplay(toolCall);
+		expect(display).toMatchObject({
+			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
+			args: {
+				cursorToolName: "futureSemSearchWidget",
+				activityTitle: "Cursor activity",
+				activitySummary: "futureSemSearchWidget",
+			},
+			result: {
+				details: {
+					cursorToolName: "futureSemSearchWidget",
+					title: "Cursor activity",
+				},
+			},
+			isError: false,
+		});
+		expect(display.result.content[0].text.length).toBeLessThan(1200);
+	});
+
+	it("bounds unknown future Cursor tool error completions with neutral activity cards", () => {
+		const largeError = { message: "x".repeat(5000), details: Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`field-${index}`, "y".repeat(200)])) };
+		const toolCall = {
+			name: "futureBrokenWidget",
+			args: {
+				query: "x".repeat(5000),
+				...Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`field-${index}`, `value-${index}`])),
+			},
+			result: {
+				status: "error",
+				error: largeError,
+			},
+		};
+
+		const transcript = formatCursorToolTranscript(toolCall);
+		expect(transcript.startsWith("futureBrokenWidget\n\n")).toBe(true);
+		expect(transcript).toContain("query=");
+		expect(transcript).toContain("Error:");
+		expect(transcript.length).toBeLessThan(1200);
+		expect(transcript).not.toContain("x".repeat(500));
+
+		const display = buildCursorPiToolDisplay(toolCall);
+		expect(display).toMatchObject({
+			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
+			args: {
+				cursorToolName: "futureBrokenWidget",
+				activityTitle: "Cursor activity",
+				activitySummary: "futureBrokenWidget",
+			},
+			isError: true,
+		});
+		expect(display.result.content[0].text.length).toBeLessThan(1200);
+		expect(display.result.content[0].text).not.toContain("x".repeat(500));
+	});
 });

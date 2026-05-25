@@ -1,12 +1,18 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+	CURSOR_SDK_EVENT_DEBUG_ENV,
 	CURSOR_SDK_EVENT_DEBUG_LOG_PREFIX,
+	CURSOR_SDK_EVENT_DEBUG_STDERR_ENV,
+	DISCARDED_INCOMPLETE_TOOL_CALL_REASON,
 	CursorSdkEventDebugSink,
+	hashCursorSdkCallId,
+	recordDiscardedIncompleteStartedToolCall,
 	resolveCursorSdkEventDebugBaseDir,
 	resolveCursorSdkEventDebugEnabled,
+	serializeDiscardedIncompleteStartedToolCall,
 	__testUtils as sdkEventDebugTestUtils,
 } from "../src/cursor-sdk-event-debug.js";
 import { parseDebugProviderEventsArgs } from "../scripts/debug-provider-events.mjs";
@@ -374,6 +380,91 @@ describe("cursor sdk event debug session grouping", () => {
 		} finally {
 			sdkEventDebugTestUtils.resetSessionDebugState();
 			rmSync(artifactDir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("discarded incomplete started tool calls", () => {
+	it("hashes call ids without exposing raw values", () => {
+		expect(hashCursorSdkCallId("secret-call-id-123")).toMatch(/^[a-f0-9]{8}$/);
+		expect(hashCursorSdkCallId("secret-call-id-123")).toBe(hashCursorSdkCallId("secret-call-id-123"));
+		expect(hashCursorSdkCallId("secret-call-id-123")).not.toBe("secret-call-id-123");
+	});
+
+	it("serializes discarded incomplete started tool calls with bounded fields", () => {
+		expect(
+			serializeDiscardedIncompleteStartedToolCall({
+				toolName: "read",
+				callId: "call-abc",
+			}),
+		).toEqual({
+			event: "discarded-incomplete-started-tool-call",
+			toolName: "read",
+			callIdHash: hashCursorSdkCallId("call-abc"),
+			reason: DISCARDED_INCOMPLETE_TOOL_CALL_REASON,
+		});
+	});
+
+	it("records discarded incomplete started tool calls to coordinator-events.jsonl without stderr by default", async () => {
+		const artifactDir = mkdtempSync(join(tmpdir(), "pi-cursor-sdk-discarded-debug-"));
+		const stderrLines: string[] = [];
+		const originalWrite = process.stderr.write.bind(process.stderr);
+		process.stderr.write = ((chunk: string | Uint8Array) => {
+			stderrLines.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+			return true;
+		}) as typeof process.stderr.write;
+
+		try {
+			const sink = CursorSdkEventDebugSink.maybeCreate({
+				cwd: "/repo",
+				modelId: "composer-2.5",
+				provider: "cursor",
+				env: {
+					PI_CURSOR_SDK_EVENT_DEBUG: "1",
+					PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR: artifactDir,
+				},
+			});
+			recordDiscardedIncompleteStartedToolCall(
+				sink,
+				{ [CURSOR_SDK_EVENT_DEBUG_ENV]: "1" },
+				{ toolName: "read", callId: "call-abc" },
+			);
+			await sink?.finalize();
+
+			const coordinatorEvents = readFileSync(join(artifactDir, sdkEventDebugTestUtils.ARTIFACTS.coordinatorEvents), "utf8");
+			expect(coordinatorEvents).toContain('"phase":"discarded-incomplete-started-tool-call"');
+			expect(coordinatorEvents).toContain('"toolName":"read"');
+			expect(coordinatorEvents).toContain(`"callIdHash":"${hashCursorSdkCallId("call-abc")}"`);
+			expect(coordinatorEvents).toContain(`"reason":"${DISCARDED_INCOMPLETE_TOOL_CALL_REASON}"`);
+			expect(coordinatorEvents).not.toContain("call-abc");
+			expect(stderrLines.some((line) => line.includes("discarded-incomplete-started-tool-call"))).toBe(false);
+		} finally {
+			process.stderr.write = originalWrite;
+			rmSync(artifactDir, { recursive: true, force: true });
+		}
+	});
+
+	it("can opt in to stderr output for discarded incomplete started tool calls", () => {
+		const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+		try {
+			recordDiscardedIncompleteStartedToolCall(undefined, {}, { toolName: "read", callId: "call-abc" });
+			expect(stderr).not.toHaveBeenCalled();
+
+			recordDiscardedIncompleteStartedToolCall(
+				undefined,
+				{ [CURSOR_SDK_EVENT_DEBUG_ENV]: "1", [CURSOR_SDK_EVENT_DEBUG_STDERR_ENV]: "1" },
+				{ toolName: "read", callId: "call-abc" },
+			);
+			expect(stderr).toHaveBeenCalledOnce();
+			const line = String(stderr.mock.calls[0]?.[0]);
+			expect(line.startsWith(`${CURSOR_SDK_EVENT_DEBUG_LOG_PREFIX} `)).toBe(true);
+			expect(line).toContain('"event":"discarded-incomplete-started-tool-call"');
+			expect(line).toContain('"toolName":"read"');
+			expect(line).toContain(`"callIdHash":"${hashCursorSdkCallId("call-abc")}"`);
+			expect(line).toContain(`"reason":"${DISCARDED_INCOMPLETE_TOOL_CALL_REASON}"`);
+			expect(line).not.toContain("call-abc");
+		} finally {
+			stderr.mockRestore();
 		}
 	});
 });

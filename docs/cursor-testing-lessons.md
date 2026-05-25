@@ -274,7 +274,7 @@ Artifacts under `--out` (default `.debug/cursor-sdk-events/<timestamp>/` under `
 - `bridge-events.jsonl` — bridge lifecycle/request diagnostics (file-only; no stderr unless bridge debug is also enabled)
 - `bridge-raw.jsonl` — raw bridged MCP args/results
 - `display-decisions.jsonl` — per-tool native replay routing (`queue_replay`, `emit_trace`, `inactive_trace`, dedupe skips, bridge ignores) with transcript/trace text
-- `coordinator-events.jsonl` — turn-coordinator side effects (task progress labels, etc.)
+- `coordinator-events.jsonl` — turn-coordinator side effects (task progress labels, discarded incomplete started tool calls, etc.)
 - `drain-events.jsonl` — live-run pre-send drain and per-turn drain lifecycle (`turn_start`, `turn_end`, inactive replay traces, native display registration)
 - `timeline.jsonl` — merged cross-layer timeline (one grep-friendly stream for the whole turn)
 - `pi-session-snapshot.jsonl` — copy of pi session JSONL at turn finalize (session dir also gets latest `pi-session.jsonl`)
@@ -310,6 +310,18 @@ Optional env:
 - `PI_CURSOR_SDK_EVENT_DEBUG_STDERR=1` — also print the summary line to stderr (off by default so the pi TUI stays normal)
 
 Capture is file-only by default: no stderr markers, and bridge diagnostics during SDK event debug go to `bridge-events.jsonl` instead of `[pi-cursor-sdk:bridge]` unless you separately set `PI_CURSOR_PI_TOOL_BRIDGE_DEBUG=1`. Raw payloads stay on disk and may contain secrets — do not commit or share them.
+
+### Discarded incomplete SDK tool calls
+
+When Cursor emits `tool-call-started` without a matching completion/step result, the provider discards the leftover started call at run end without synthetic replay errors. Default UX stays unchanged.
+
+With `PI_CURSOR_SDK_EVENT_DEBUG=1`, each discarded started call is recorded in `coordinator-events.jsonl` under phase `discarded-incomplete-started-tool-call` with:
+
+- normalized SDK tool name
+- scrubbed call-id hash (raw call IDs are not written)
+- reason `no-completion-at-run-end`
+
+Stderr output for these records requires `PI_CURSOR_SDK_EVENT_DEBUG_STDERR=1`. This complements the standalone `npm run debug:sdk-events` probe by interpreting a specific provider discard path during normal pi runs.
 
 ## Related docs and scripts
 

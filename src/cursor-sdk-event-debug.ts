@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { copyFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AssistantMessageEventStream } from "@earendil-works/pi-ai";
@@ -129,6 +130,49 @@ export interface CursorSdkEventDebugRecorder {
 	recordDrainEvent(phase: string, payload: unknown): void;
 	recordFinalPartial(partial: unknown): void;
 	finalize(): Promise<void>;
+}
+
+export const DISCARDED_INCOMPLETE_TOOL_CALL_REASON = "no-completion-at-run-end";
+
+export function hashCursorSdkCallId(callId: string): string {
+	return createHash("sha256").update(callId).digest("hex").slice(0, 8);
+}
+
+export interface DiscardedIncompleteStartedToolCallRecord {
+	event: "discarded-incomplete-started-tool-call";
+	toolName: string;
+	callIdHash: string;
+	reason: typeof DISCARDED_INCOMPLETE_TOOL_CALL_REASON;
+}
+
+export function serializeDiscardedIncompleteStartedToolCall(record: {
+	toolName: string;
+	callId: string;
+	reason?: typeof DISCARDED_INCOMPLETE_TOOL_CALL_REASON;
+}): DiscardedIncompleteStartedToolCallRecord {
+	return {
+		event: "discarded-incomplete-started-tool-call",
+		toolName: record.toolName,
+		callIdHash: hashCursorSdkCallId(record.callId),
+		reason: record.reason ?? DISCARDED_INCOMPLETE_TOOL_CALL_REASON,
+	};
+}
+
+export function recordDiscardedIncompleteStartedToolCall(
+	recorder: CursorSdkEventDebugRecorder | undefined,
+	env: Record<string, string | undefined>,
+	record: { toolName: string; callId: string; reason?: typeof DISCARDED_INCOMPLETE_TOOL_CALL_REASON },
+): void {
+	if (!recorder && !resolveCursorSdkEventDebugEnabled(env)) return;
+	try {
+		const payload = serializeDiscardedIncompleteStartedToolCall(record);
+		recorder?.recordCoordinatorEvent("discarded-incomplete-started-tool-call", payload);
+		if (resolveCursorSdkEventDebugStderrEnabled(env) && resolveCursorSdkEventDebugEnabled(env)) {
+			process.stderr.write(`${CURSOR_SDK_EVENT_DEBUG_LOG_PREFIX} ${JSON.stringify(payload)}\n`);
+		}
+	} catch {
+		// Debug logging must never affect provider execution.
+	}
 }
 
 export function attachCursorSdkEventDebugPiStreamTap(

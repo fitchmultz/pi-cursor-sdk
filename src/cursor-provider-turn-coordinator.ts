@@ -9,8 +9,11 @@ import { CursorPartialContentEmitter } from "./cursor-partial-content-emitter.js
 import { asRecord, getField, hasUsableText } from "./cursor-record-utils.js";
 import { scrubPiToolDisplay, scrubSensitiveText } from "./cursor-sensitive-text.js";
 import { buildCursorPiToolDisplay, formatCursorToolTranscript, getCursorCreatePlanText, mergeCursorToolCalls } from "./cursor-tool-transcript.js";
-import type { CursorSdkEventDebugRecorder } from "./cursor-sdk-event-debug.js";
-import { getString, getToolArgs, getToolName } from "./cursor-transcript-utils.js";
+import {
+	recordDiscardedIncompleteStartedToolCall,
+	type CursorSdkEventDebugRecorder,
+} from "./cursor-sdk-event-debug.js";
+import { getString, getToolArgs, getToolName, normalizeToolName } from "./cursor-transcript-utils.js";
 
 function formatCursorToolName(toolCall: unknown): string {
 	return truncateCursorDisplayLine(getToolName(toolCall), 80) || "unknown";
@@ -156,6 +159,13 @@ export class CursorSdkTurnCoordinator {
 	}
 
 	discardIncompleteStartedToolCalls(): void {
+		for (const [callId, toolCall] of this.startedToolCalls) {
+			if (typeof callId !== "string") continue;
+			recordDiscardedIncompleteStartedToolCall(this.debugRecorder, process.env, {
+				toolName: normalizeToolName(getToolName(toolCall)),
+				callId,
+			});
+		}
 		this.startedToolCalls.clear();
 		this.bridgeStartedToolCallIds.clear();
 		this.activeShellCallIds.clear();

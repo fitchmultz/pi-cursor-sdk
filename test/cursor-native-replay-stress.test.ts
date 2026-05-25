@@ -40,6 +40,34 @@ function mockFinishedGrepSend() {
 	});
 }
 
+function mockFinishedTaskSend() {
+	return vi.fn(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
+		opts.onDelta({
+			update: {
+				type: "tool-call-completed",
+				toolCall: {
+					name: "task",
+					args: { description: "Verify plan-strip resync" },
+					result: {
+						status: "success",
+						value: { result: { success: { command: "echo ok", stdout: "ok\n" } } },
+					},
+				},
+				callId: "task-1",
+			},
+		});
+		return {
+			id: "run-1",
+			agentId: "agent-1",
+			status: "finished",
+			wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished", result: "done" }),
+			cancel: vi.fn(),
+			supports: () => true,
+			unsupportedReason: () => undefined,
+		};
+	});
+}
+
 describe("native replay stress", () => {
 	beforeEach(async () => {
 		cursorProviderTestUtils.setCursorNativeReplayIdleDisposeMs(0);
@@ -62,6 +90,25 @@ describe("native replay stress", () => {
 		mockedCreate.mockResolvedValue({
 			agentId: "agent-1",
 			send: mockFinishedGrepSend(),
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+
+		const context = makeContext();
+		context.tools = pi.getActiveTools().map((name) => ({ name, description: name, parameters: Type.Object({}) }));
+		const events = await collectEvents(streamCursor(CURSOR_MODEL, context, { apiKey: "test-key" }));
+		expect(hasEventType(events, "toolcall_start")).toBe(true);
+	});
+
+	it("plan strip then turn_start resync replays neutral task activity when context.tools match active tools", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		const pi = await createNativeToolDisplayPiForTest();
+		pi.setActiveTools(["read", "bash", "edit", "write"]);
+		await pi.runEventHandlers("turn_start", { model: CURSOR_MODEL });
+		expect(pi.getActiveTools()).toContain("cursor");
+
+		mockedCreate.mockResolvedValue({
+			agentId: "agent-1",
+			send: mockFinishedTaskSend(),
 			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
 		});
 

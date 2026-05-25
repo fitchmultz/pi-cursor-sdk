@@ -55,7 +55,68 @@ When Cursor reports completed tool activity, the extension can display recorded 
 
 Cursor `glob` activity is displayed through native `find` cards.
 
+For the full `@cursor/sdk@^1.0.13` `ToolType` set, disposition matrix, and runtime alias normalization, see [SDK ToolType replay matrix](#sdk-tooltype-replay-matrix) below. Official SDK reference: https://cursor.com/docs/sdk/typescript
+
 Edit and write activity replays through pi-facing `edit` and `write` cards only when replay arguments truthfully satisfy the matching pi schema, but still uses recorded Cursor results only. The adapter passes through truthful Cursor paths, content when Cursor reported it, and recorded diff/details; it does not pretend Cursor's editing schema is pi's schema and it fails closed if a recorded replay result is missing. Cursor `StrReplace` with recorded replacement text displays as native-looking `edit`; path-only Cursor `edit` and notebook edit activity fall back to neutral Cursor activity so pi does not reject the replay before recorded-result handling. Cursor `write` displays as native-looking `write`. Diagnostics, delete, todos/plans, task, image, MCP, semantic search, and screen recording activity use neutral Cursor activity cards with pi's default success/error tool shell. Neutral Cursor activity cards carry display metadata such as `activityTitle` and `activitySummary`, so partial/collapsed cards can say `Cursor plan`, `Cursor todos`, `Cursor MCP`, `Cursor semantic search`, `Cursor screen recording`, or `Cursor edit` instead of only `Cursor activity`. These replay tools only display recorded Cursor results; they never mutate files or execute tool work directly. Replay paths are normalized to workspace-relative paths when possible. Collapsed replay cards include bounded previews for diffs and text details so small edits, todos, task output, and MCP results are visible without expanding; edit previews omit raw unified diff headers and show compact numbered changed/context lines using pi's native diff added/removed/context colors, and write previews use syntax highlighting when pi can infer a language from the path. Image generation replay cards show the saved image path in the collapsed summary and render the image inline when pi terminal image display is enabled and the generated file is still readable.
+
+## SDK ToolType replay matrix
+
+Source of truth for SDK tool names: `@cursor/sdk@^1.0.13` conversation `ToolType` values and https://cursor.com/docs/sdk/typescript
+
+Implementation owners: `src/cursor-transcript-tool-specs.ts` (`TOOL_DISPLAY_SPECS`), `src/cursor-native-tool-display-replay.ts`, and `src/cursor-transcript-utils.ts` (`normalizeToolName()`).
+
+This matrix covers **Cursor native tool replay only**. It does not describe the [live pi MCP bridge](#live-bridge-vs-replay) or Cursor-native host tools, settings, plugins, and configured MCP servers from the Cursor SDK local-agent path.
+
+| SDK `ToolType` | pi disposition | pi card / tool name | Notes |
+| --- | --- | --- | --- |
+| `read` | native replay | `read` | Recorded Cursor read results |
+| `shell` | native replay | `bash` | SDK `shell` maps to pi `bash` cards |
+| `grep` | native replay | `grep` | |
+| `glob` | native replay | `find` | Intentional mapping; not a missing `glob` replay bug |
+| `ls` | native replay | `ls` | |
+| `edit` | native replay or neutral activity | `edit` or `cursor` | Native `edit` only when recorded args satisfy pi's `edit` schema; path-only or notebook edits fall back to neutral **Cursor edit** activity |
+| `write` | native replay or neutral activity | `write` or `cursor` | Native `write` only when recorded content/path args satisfy pi's `write` schema; otherwise neutral **Cursor write** activity |
+| `delete` | neutral activity | `cursor` | Collapsed label **Cursor delete** |
+| `readLints` | neutral activity | `cursor` | Collapsed label **Cursor diagnostics** |
+| `updateTodos` | neutral activity | `cursor` | Collapsed label **Cursor todos**; display-only, does not drive pi todos |
+| `createPlan` | neutral activity | `cursor` | Collapsed label **Cursor plan**; display-only, does not drive pi plan mode |
+| `task` | neutral activity | `cursor` | Collapsed label **Cursor task** |
+| `generateImage` | neutral activity | `cursor` | Collapsed label **Cursor image generation** |
+| `mcp` | neutral activity | `cursor` | Collapsed label **Cursor MCP**; includes host/MCP completions routed as SDK `mcp` |
+| `semSearch` | neutral activity | `cursor` | Collapsed label **Cursor semantic search**; semantic codebase search, not web search |
+| `recordScreen` | neutral activity | `cursor` | Collapsed label **Cursor screen recording** |
+
+**Fallback path:** SDK tool names with no spec entry (future or unknown types) use `formatCursorToolTranscriptFromSpec()` → `formatFallback()` in `src/cursor-transcript-tool-formatters.ts`. Those completions still appear as bounded scrubbed transcript activity, not native pi tool cards.
+
+Neutral activity rows use pi tool name `cursor` with `activityTitle` / `activitySummary` metadata. Legacy internal replay label keys such as `cursor_sem_search` are compatibility details; user-visible collapsed cards use labels like **Cursor semantic search**.
+
+## Runtime alias normalization
+
+Before lookup in `TOOL_DISPLAY_SPECS`, completed SDK tool names pass through `normalizeToolName()` in `src/cursor-transcript-utils.ts`. Documented aliases:
+
+| Runtime alias | Canonical SDK name |
+| --- | --- |
+| `read_file` | `read` |
+| `list_dir` | `ls` |
+| `run_terminal_cmd`, `terminal`, `bash`, `shell` | `shell` |
+| `grep_search`, `search` | `grep` |
+| `file_search` | `glob` |
+| `write_file`, `writefile` | `write` |
+| `strreplace`, `str_replace`, `str-replace`, `edit_file`, `editfile`, `edit_notebook`, `editnotebook`, `notebook_edit`, `notebookedit` | `edit` |
+
+Unlisted aliases keep their original name and fall through to the spec lookup or fallback transcript path.
+
+## Intentional mappings and fallbacks
+
+These behaviors are by design. They are not pi replay execution bugs:
+
+- **`glob` → `find`:** Cursor glob completions render as native pi `find` cards.
+- **`shell` → `bash`:** Cursor shell completions render as native pi `bash` cards, including aliases normalized to `shell`.
+- **`edit` / `StrReplace` / notebook edits:** native pi `edit` cards only when recorded replay args truthfully satisfy pi's `edit` schema; otherwise neutral **Cursor edit** activity so pi validation does not reject the replay before recorded-result handling.
+- **`write`:** native pi `write` cards only when recorded content/path args satisfy pi's schema; otherwise neutral **Cursor write** activity.
+- **Plan/todo tools:** `createPlan` and `updateTodos` replay is display-only and does not drive pi plan mode or pi todo state (see [What replay does not do](#what-replay-does-not-do)).
+- **`semSearch`:** semantic codebase search activity, not web search.
+- **Unknown/future SDK tools:** bounded scrubbed activity transcript fallback until a spec is added.
 
 ## What replay does not do
 

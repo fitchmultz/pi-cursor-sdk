@@ -107,6 +107,15 @@ Use a short written plan before multi-file behavior changes, SDK integration cha
 - Live `pi`/Cursor smoke tests may call external services and require Cursor auth in `~/.pi/agent/auth.json` and/or `CURSOR_API_KEY`; run them for Cursor provider/runtime changes. If auth is unavailable, report live smoke as release-blocked instead of skipped-ready. See `docs/cursor-testing-lessons.md` for isolated harness auth seeding.
 - For Cursor provider/runtime changes, follow `docs/cursor-live-smoke-checklist.md`. Assume every runtime surface is in scope. Use real `pi -e . --cursor-no-fast --model cursor/composer-2.5` invocations, a temporary `--session-dir`, manual observation, and no secret printing. Do not mark release-ready with optional/deferred/mostly-passing smoke items outstanding.
 
+## PR review workflow (maintainer)
+
+When the user requests a PR review (including thermo-nuclear / deep maintainability review):
+
+- Remediate **every** finding, structural and polish; do not leave “nice to have” items open.
+- Prefer dispatching a `cursor/composer-2.5` subagent for remedial code/docs changes; the parent session coordinates review, commit, push, and re-review loops.
+- After remediations land, **repeat the review** on the updated branch until there are **no** remaining findings (including docs/PR-body drift and test-contract gaps).
+- Do not approve on passing tests alone.
+
 ## Progress updates and handoff
 
 For multi-step or tool-heavy work, give short progress updates after meaningful milestones: what changed, what is being checked, and any blocker. Final handoff should include changed files, validation commands/results, skipped checks with reasons, and any follow-up risks.

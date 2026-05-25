@@ -137,6 +137,53 @@ describe("streamCursor Cursor tool lifecycle", () => {
 		expect(trace).toContain("read README.md");
 	});
 
+	it("does not emit lifecycle progress for fast lifecycle-eligible MCP completions", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
+			opts.onDelta({
+				update: {
+					type: "tool-call-started",
+					toolCall: { name: "mcp", args: { toolName: "external_search" } },
+					callId: "mcp-fast-1",
+				},
+			});
+			opts.onDelta({
+				update: {
+					type: "tool-call-completed",
+					toolCall: {
+						name: "mcp",
+						args: { toolName: "external_search" },
+						result: { status: "success", value: { content: [{ type: "text", text: "ok" }] } },
+					},
+					callId: "mcp-fast-1",
+				},
+			});
+			await delayBeyondLifecycleDefer();
+			opts.onDelta({ update: { type: "text-delta", text: "done" } });
+			return {
+				id: "run-1",
+				agentId: "agent-1",
+				status: "finished",
+				wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
+				cancel: vi.fn(),
+				supports: () => true,
+				unsupportedReason: () => undefined,
+			};
+		});
+		mockedCreate.mockResolvedValue({
+			agentId: "agent-1",
+			send: mockSend,
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+
+		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		const trace = collectThinkingDeltas(events);
+
+		expect(trace).not.toContain("Cursor MCP:");
+		expect(trace).toContain("external_search");
+		expect(trace).toContain("ok");
+	});
+
 	it("does not emit lifecycle progress for delayed pi bridge MCP calls", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		registerBridgeForProviderTest({

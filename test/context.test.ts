@@ -27,6 +27,31 @@ describe("buildCursorPrompt", () => {
 		expect(result.text).toContain("You are helpful.");
 	});
 
+	it("omits pi AGENTS context blocks from Cursor-facing system instructions", () => {
+		const ctx: Context = {
+			systemPrompt: [
+				"You are an expert coding assistant.",
+				"",
+				"<project_context>",
+				"",
+				"Project-specific instructions and guidelines:",
+				"",
+				'<project_instructions path="/repo/AGENTS.md">',
+				"Project instruction stays.",
+				"</project_instructions>",
+				"",
+				"</project_context>",
+				"",
+				"Current date: 2026-05-20",
+			].join("\n"),
+			messages: [],
+		};
+		const result = buildCursorPrompt(ctx);
+		expect(result.text).not.toContain("Project instruction stays.");
+		expect(result.text).not.toContain("<project_context>");
+		expect(result.text).toContain("Current date: 2026-05-20");
+	});
+
 	it("omits pi tool catalogs and local skill catalogs from Cursor-facing system instructions", () => {
 		const ctx: Context = {
 			systemPrompt: [
@@ -45,10 +70,6 @@ describe("buildCursorPrompt", () => {
 				"Pi documentation (read only when needed):",
 				"- Main documentation: /pi/README.md",
 				"",
-				"<project_context>",
-				"Project instruction stays.",
-				"</project_context>",
-				"",
 				"The following skills provide specialized instructions for specific tasks.",
 				"Use the read tool to load a skill's file when the task matches its description.",
 				"When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
@@ -65,7 +86,6 @@ describe("buildCursorPrompt", () => {
 		};
 		const result = buildCursorPrompt(ctx);
 		expect(result.text).toContain("Pi tool catalog omitted");
-		expect(result.text).toContain("Project instruction stays.");
 		expect(result.text).toContain("Current date: 2026-05-20");
 		expect(result.text).not.toContain("custom_private_tool");
 		expect(result.text).not.toContain("private-skill");

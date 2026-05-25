@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Suppress duplicate pi `AGENTS.md` / `<project_context>` injection on Cursor models while Cursor `settingSources` load project and user rules. Honors `-nc`, restores full pi context when switching to non-Cursor models, and supports `PI_CURSOR_PRESERVE_PI_AGENTS_MD=1` opt-out.
+
 ## 0.1.18 - 2026-05-23
 
 ### Added

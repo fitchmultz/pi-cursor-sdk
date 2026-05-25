@@ -5,6 +5,7 @@ import { registerCursorNativeToolDisplay } from "./cursor-native-tool-display.js
 import { registerCursorPiToolBridge } from "./cursor-pi-tool-bridge.js";
 import { registerCursorQuestionTool } from "./cursor-question-tool.js";
 import { registerCursorSessionCwd } from "./cursor-session-cwd.js";
+import { registerCursorAgentsContextDedup } from "./cursor-agents-context.js";
 import { registerCursorSessionAgent } from "./cursor-session-agent.js";
 import { streamCursor } from "./cursor-provider.js";
 
@@ -21,7 +22,8 @@ type CursorExtensionApi =
 	& Parameters<typeof registerCursorFastControls>[0]
 	& Parameters<typeof registerCursorNativeToolDisplay>[0]
 	& Parameters<typeof registerCursorQuestionTool>[0]
-	& Parameters<typeof registerCursorPiToolBridge>[0];
+	& Parameters<typeof registerCursorPiToolBridge>[0]
+	& Parameters<typeof registerCursorAgentsContextDedup>[0];
 
 function createCursorProviderConfig(models: ProviderModelConfig[]): ProviderConfig {
 	return {
@@ -46,6 +48,7 @@ export default async function (pi: CursorExtensionApi) {
 	registerCursorNativeToolDisplay(pi);
 	registerCursorQuestionTool(pi);
 	registerCursorPiToolBridge(pi);
+	registerCursorAgentsContextDedup(pi);
 	let fallbackIssue: CursorModelFallbackIssue | undefined;
 	const models = await discoverModels({
 		onFallback: (issue) => {

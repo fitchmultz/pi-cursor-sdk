@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { Type } from "typebox";
 import {
 	resetCursorProviderTestState,
 	mockedCreate,
@@ -8,13 +9,18 @@ import {
 	collectThinkingDeltas,
 	getDoneEvent,
 	isToolCallBlock,
+	registerBridgeForProviderTest,
 	registerNativeToolDisplayForTest,
+	createBridgeToolInfo,
+	delayBeforeToolCompletion,
 	type CursorDeltaHandler,
 	type RegisteredTool,
 } from "./helpers/cursor-provider-harness.js";
 import { streamCursor } from "../src/cursor-provider.js";
+import { CURSOR_TOOL_LIFECYCLE_DEFER_MS } from "../src/cursor-tool-lifecycle.js";
 
-const delayBeforeToolCompletion = () => new Promise((resolve) => setTimeout(resolve, 120));
+const delayBeyondLifecycleDefer = () =>
+	new Promise((resolve) => setTimeout(resolve, CURSOR_TOOL_LIFECYCLE_DEFER_MS + 80));
 
 describe("streamCursor Cursor tool lifecycle", () => {
 	beforeEach(resetCursorProviderTestState);
@@ -131,28 +137,34 @@ describe("streamCursor Cursor tool lifecycle", () => {
 		expect(trace).toContain("read README.md");
 	});
 
-	it("does not emit lifecycle progress for pi bridge MCP starts", async () => {
-		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
+	it("does not emit lifecycle progress for delayed pi bridge MCP calls", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		registerBridgeForProviderTest({
+			active: ["sem_reindex"],
+			tools: [createBridgeToolInfo("sem_reindex", Type.Object({ target: Type.String() }), "Reindex semantic cache")],
+		});
+
 		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
 			opts.onDelta({
 				update: {
 					type: "tool-call-started",
 					toolCall: {
 						name: "mcp",
-						args: { toolName: "pi__read", description: "bridge read should stay silent" },
+						args: { toolName: "pi__sem_reindex", description: "bridge semantic reindex should stay silent" },
 					},
-					callId: "bridge-1",
+					callId: "bridge-mcp-1",
 				},
 			});
+			await delayBeyondLifecycleDefer();
 			opts.onDelta({
 				update: {
 					type: "tool-call-completed",
 					toolCall: {
 						name: "mcp",
-						args: { toolName: "pi__read" },
-						result: { status: "success", value: { content: "ok" } },
+						args: { toolName: "pi__sem_reindex" },
+						result: { status: "success", value: { content: [{ type: "text", text: "ok" }] } },
 					},
-					callId: "bridge-1",
+					callId: "bridge-mcp-1",
 				},
 			});
 			opts.onDelta({ update: { type: "text-delta", text: "done" } });
@@ -160,21 +172,22 @@ describe("streamCursor Cursor tool lifecycle", () => {
 				id: "run-1",
 				agentId: "agent-1",
 				status: "finished",
-				wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
+				wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished", result: "done" }),
 				cancel: vi.fn(),
 				supports: () => true,
 				unsupportedReason: () => undefined,
 			};
 		});
 		mockedCreate.mockResolvedValue({
+			agentId: "agent-1",
 			send: mockSend,
 			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
 		});
 
-		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		const events = await collectEvents(streamCursor(makeModel("composer-2"), makeContext(), { apiKey: "test-key" }));
 		const trace = collectThinkingDeltas(events);
 
 		expect(trace).not.toContain("Cursor MCP:");
-		expect(trace).not.toContain("bridge read should stay silent");
+		expect(trace).not.toContain("bridge semantic reindex should stay silent");
 	});
 });

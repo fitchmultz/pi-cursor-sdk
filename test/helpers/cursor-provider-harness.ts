@@ -103,6 +103,8 @@ export function makeModel(id = "test-model"): Model<"cursor-sdk"> {
 	};
 }
 
+export const delayBeforeToolCompletion = () => new Promise((resolve) => setTimeout(resolve, 120));
+
 export function makeContext(): Context {
 	return {
 		systemPrompt: "Be helpful.",

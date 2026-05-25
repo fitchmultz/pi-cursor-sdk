@@ -34,4 +34,20 @@ describe("cursor tool lifecycle", () => {
 		);
 		expect(progress).toBe("Cursor MCP: external_search\n");
 	});
+
+	it("does not leak endpoint URLs or absolute private paths in lifecycle labels", () => {
+		const secretPath = "/Users/test/Projects/secret-project/src/file.ts";
+		const secretUrl = "https://api.example.com/v1/secret-endpoint";
+
+		expect(buildCursorToolLifecycleLabel({ name: "shell", args: { command: `cd ${secretPath} && npm test` } })).toBe("shell");
+		expect(buildCursorToolLifecycleLabel({ name: "webFetch", args: { url: secretUrl } })).toBe("web fetch");
+		expect(buildCursorToolLifecycleLabel({ name: "generateImage", args: { path: secretPath } })).toBe("image generation");
+		expect(buildCursorToolLifecycleLabel({ name: "recordScreen", args: { path: secretPath } })).toBe("screen recording");
+		expect(buildCursorToolLifecycleLabel({ name: "task", args: { description: `Inspect ${secretPath}` } })).toBe("task");
+
+		const progress = formatCursorToolLifecycleProgressText({ name: "webFetch", args: { url: secretUrl } });
+		expect(progress).toBe("Cursor web fetch: web fetch\n");
+		expect(progress).not.toContain(secretUrl);
+		expect(progress).not.toContain(secretPath);
+	});
 });

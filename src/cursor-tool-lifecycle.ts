@@ -1,11 +1,7 @@
 import { truncateCursorDisplayLine } from "./cursor-display-text.js";
 import { getCursorReplayDisplayLabel, type CursorReplayLegacyToolName } from "./cursor-tool-names.js";
 import { scrubSensitiveText } from "./cursor-sensitive-text.js";
-import {
-	extractWebFetchTarget,
-	extractWebSearchQuery,
-	resolveTranscriptToolName,
-} from "./cursor-web-tool-activity.js";
+import { extractWebSearchQuery, resolveTranscriptToolName } from "./cursor-web-tool-activity.js";
 import { firstNonEmptyLine, getArray, getString, getToolArgs, getToolName, normalizeToolName, truncateArg } from "./cursor-transcript-utils.js";
 
 /** Defer pending lifecycle lines so fast start+complete pairs coalesce into the completed replay card only. */
@@ -45,48 +41,54 @@ function getCursorToolLifecycleTitle(toolCall: unknown): string {
 	return `Cursor ${normalizeToolName(name)}`;
 }
 
+function containsCursorLifecycleUnsafeDetail(text: string): boolean {
+	if (/\bhttps?:\/\//i.test(text)) return true;
+	if (/\bwww\.\S+/i.test(text)) return true;
+	if (/(?:^|[\s'"({])(?:~\/|\/(?:Users|home|private|var|tmp|etc|opt)(?:\/|$))/i.test(text)) return true;
+	if (/(?:^|[\s'"({])[A-Za-z]:[\\/]/.test(text)) return true;
+	return false;
+}
+
+function scrubLifecycleDetail(value: string | undefined, apiKey?: string): string | undefined {
+	if (!value?.trim()) return undefined;
+	const scrubbed = truncateCursorDisplayLine(scrubSensitiveText(value, apiKey));
+	if (containsCursorLifecycleUnsafeDetail(scrubbed)) return undefined;
+	return scrubbed;
+}
+
 export function buildCursorToolLifecycleLabel(toolCall: unknown, apiKey?: string): string | undefined {
 	const args = getToolArgs(toolCall);
 	const name = resolveTranscriptToolName(getToolName(toolCall), args);
 	const normalized = normalizeToolName(name).toLowerCase();
 
-	const scrub = (value: string | undefined): string | undefined => {
-		if (!value?.trim()) return undefined;
-		return truncateCursorDisplayLine(scrubSensitiveText(value, apiKey));
-	};
-
 	switch (normalized) {
 		case "task": {
-			return scrub(getString(args, "description"));
+			return scrubLifecycleDetail(getString(args, "description"), apiKey) ?? "task";
 		}
 		case "shell": {
-			return scrub(getString(args, "command")) ?? "shell";
+			return "shell";
 		}
 		case "mcp": {
-			return scrub(getString(args, "toolName")) ?? "mcp";
+			return scrubLifecycleDetail(getString(args, "toolName"), apiKey) ?? "mcp";
 		}
 		case "generateimage": {
-			return (
-				scrub(getString(args, "prompt") ?? getString(args, "description")) ??
-				scrub(getString(args, "path") ?? getString(args, "filePath")) ??
-				"image generation"
-			);
+			return scrubLifecycleDetail(getString(args, "prompt") ?? getString(args, "description"), apiKey) ?? "image generation";
 		}
 		case "recordscreen": {
-			return scrub(getString(args, "mode")) ?? scrub(getString(args, "path")) ?? "screen recording";
+			return scrubLifecycleDetail(getString(args, "mode"), apiKey) ?? "screen recording";
 		}
 		case "semsearch": {
-			return scrub(getString(args, "query")) ?? "semantic search";
+			return scrubLifecycleDetail(getString(args, "query"), apiKey) ?? "semantic search";
 		}
 		case "websearch": {
-			return scrub(extractWebSearchQuery(args)) ?? "web search";
+			return scrubLifecycleDetail(extractWebSearchQuery(args), apiKey) ?? "web search";
 		}
 		case "webfetch": {
-			return scrub(extractWebFetchTarget(args)) ?? "web fetch";
+			return "web fetch";
 		}
 		case "createplan": {
 			const plan = getString(args, "plan");
-			return scrub(plan ? firstNonEmptyLine(plan) ?? plan : undefined) ?? "plan";
+			return scrubLifecycleDetail(plan ? firstNonEmptyLine(plan) ?? plan : undefined, apiKey) ?? "plan";
 		}
 		case "updatetodos": {
 			const todos = getArray(args, "todos") ?? getArray(args, "items");

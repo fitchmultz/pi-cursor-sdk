@@ -88,8 +88,9 @@ This matrix covers **Cursor native tool replay only**. It does not describe the 
 | `recordScreen` | neutral activity | `cursor` | Collapsed label **Cursor screen recording** |
 | *(host/MCP alias)* `WebSearch` / `web_search` / similar | neutral activity | `cursor` | Collapsed label **Cursor web search**; display-only Cursor web access reported by the SDK, not an executable pi web tool |
 | *(host/MCP alias)* `WebFetch` / `web_fetch` / similar | neutral activity | `cursor` | Collapsed label **Cursor web fetch**; display-only Cursor web access reported by the SDK, not an executable pi web tool |
+| _(no spec; future/unknown SDK name)_ | neutral activity | `cursor` | Collapsed label **Cursor** plus SDK tool name via `buildGenericPiToolDisplay()`; bounded fallback transcript only |
 
-**Fallback path:** SDK tool names with no spec entry (future or unknown types) use `formatCursorToolTranscriptFromSpec()` → `formatFallback()` in `src/cursor-transcript-tool-formatters.ts`. Those completions still appear as bounded scrubbed transcript activity, not native pi tool cards.
+**Unknown/future fallback path:** SDK tool names with no `TOOL_DISPLAY_SPECS` entry (future or unknown types) use `buildGenericPiToolDisplay()` in `src/cursor-transcript-tool-specs.ts` with bounded `formatFallback()` content from `src/cursor-transcript-tool-formatters.ts`. When native replay is enabled, those completions queue through neutral pi tool name `cursor` (not native pi `read`/`bash`/… cards). Collapsed labels read like **Cursor futureSemSearchWidget** (title `Cursor` plus the SDK tool name) with optional bounded `activitySummary` from scrubbed args/result lines. Errors keep `details.summary` undefined so unbounded raw errors do not leak into replay cards (#52). Known explicit specs still win over this path; pi and bridge tool names are never shadowed.
 
 Neutral activity rows use pi tool name `cursor` with `activityTitle` / `activitySummary` metadata. Legacy internal replay label keys such as `cursor_sem_search` are compatibility details; user-visible collapsed cards use labels like **Cursor semantic search**.
 
@@ -122,7 +123,7 @@ These behaviors are by design. They are not pi replay execution bugs:
 - **Plan/todo tools:** `createPlan` and `updateTodos` replay is display-only and does not drive pi plan mode or pi todo state (see [What replay does not do](#what-replay-does-not-do)).
 - **`semSearch`:** semantic codebase search activity, not web search.
 - **Web search/fetch:** visible **Cursor web search** / **Cursor web fetch** activity when the SDK reports completed replayable tool data (SDK `mcp` with web `toolName` or host aliases above). These cards are display-only; pi does not expose executable web search/fetch tools through replay.
-- **Unknown/future SDK tools:** bounded scrubbed activity transcript fallback until a spec is added.
+- **Unknown/future SDK tools:** neutral Cursor activity cards titled with the SDK tool name (for example **Cursor futureSemSearchWidget**) and bounded scrubbed args/result/error text until an explicit spec is added.
 
 ## What replay does not do
 

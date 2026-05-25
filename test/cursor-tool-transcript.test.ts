@@ -938,17 +938,17 @@ describe("formatCursorToolTranscript", () => {
 			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
 			args: {
 				cursorToolName: "futureSemSearchWidget",
-				activityTitle: "Cursor activity",
-				activitySummary: "futureSemSearchWidget",
+				activityTitle: "Cursor futureSemSearchWidget",
 			},
 			result: {
 				details: {
 					cursorToolName: "futureSemSearchWidget",
-					title: "Cursor activity",
+					title: "Cursor futureSemSearchWidget",
 				},
 			},
 			isError: false,
 		});
+		expect(display.args.activitySummary).toContain("query=");
 		expect(display.result.content[0].text.length).toBeLessThan(1200);
 	});
 
@@ -978,11 +978,11 @@ describe("formatCursorToolTranscript", () => {
 			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
 			args: {
 				cursorToolName: "futureBrokenWidget",
-				activityTitle: "Cursor activity",
-				activitySummary: "futureBrokenWidget",
+				activityTitle: "Cursor futureBrokenWidget",
 			},
 			isError: true,
 		});
+		expect(display.args.activitySummary).toBeUndefined();
 		expect(display.result.content[0].text.length).toBeLessThan(1200);
 		expect(display.result.content[0].text).not.toContain("x".repeat(500));
 		expect(display.result.details?.summary).toBeUndefined();

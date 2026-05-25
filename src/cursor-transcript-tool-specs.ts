@@ -153,17 +153,28 @@ function buildActivityReplayDisplay(cursorToolName: string, spec: ToolDisplaySpe
 	);
 }
 
+function buildGenericUnknownToolActivityTitle(displayName: string): string {
+	if (displayName === "unknown") return "Cursor tool";
+	return `Cursor ${truncateArg(displayName)}`;
+}
+
 function buildGenericPiToolDisplay(context: ToolDisplayContext): CursorPiToolDisplay {
 	const { rawName, name, args, result, options } = context;
 	const displayName = rawName.trim() || name;
-	const activityTitle = getCursorReplayDisplayLabel(CURSOR_REPLAY_ACTIVITY_TOOL_NAME);
-	const activitySummary = truncateArg(displayName === "unknown" ? "tool" : displayName);
-	const activityArgs = buildCursorActivityDisplayArgs({ cursorToolName: activitySummary }, activityTitle, activitySummary);
+	const activityTitle = buildGenericUnknownToolActivityTitle(displayName);
 	const contentText = formatFallback(name, args, result, options);
+	const fallbackBody = contentText.includes("\n\n") ? contentText.slice(contentText.indexOf("\n\n") + 2) : "";
+	const activitySummary =
+		result.status === "error" ? undefined : firstNonEmptyLine(fallbackBody);
+	const activityArgs = buildCursorActivityDisplayArgs(
+		{ cursorToolName: displayName === "unknown" ? "tool" : displayName },
+		activityTitle,
+		activitySummary,
+	);
 	const summary =
 		result.status === "error"
 			? undefined
-			: firstNonEmptyLine(contentText) ?? activitySummary;
+			: activitySummary ?? truncateArg(displayName === "unknown" ? "tool" : displayName);
 	return buildReplaySummaryDisplay(CURSOR_REPLAY_ACTIVITY_TOOL_NAME, activityArgs, result, contentText, {
 		cursorToolName: name,
 		title: activityTitle,

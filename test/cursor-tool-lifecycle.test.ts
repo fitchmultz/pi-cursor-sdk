@@ -41,6 +41,10 @@ describe("cursor tool lifecycle", () => {
 		const unsafeDetailCases = [
 			{ name: "task", args: { description: "Inspect /root/.ssh/id_rsa" }, expected: "task" },
 			{ name: "task", args: { description: "Open file:///Users/test/secret" }, expected: "task" },
+			{ name: "task", args: { description: "path=/root/.ssh/id_rsa" }, expected: "task" },
+			{ name: "task", args: { description: "--file=/Users/test/secret" }, expected: "task" },
+			{ name: "task", args: { description: "cwd=C:\\Users\\test\\secret" }, expected: "task" },
+			{ name: "task", args: { description: "path=~/secret" }, expected: "task" },
 			{ name: "semSearch", args: { query: "/Volumes/Secrets/file" }, expected: "semantic search" },
 			{ name: "createPlan", args: { plan: "ssh://host/path\nnext step" }, expected: "plan" },
 		] as const;
@@ -54,7 +58,7 @@ describe("cursor tool lifecycle", () => {
 		for (const { name, args, expected } of unsafeDetailCases) {
 			expect(buildCursorToolLifecycleLabel({ name, args })).toBe(expected);
 			const progress = formatCursorToolLifecycleProgressText({ name, args });
-			expect(progress).not.toMatch(/\/root\/|file:\/\/|\/Volumes\/|ssh:\/\//);
+			expect(progress).not.toMatch(/\/root\/|file:\/\/|\/Volumes\/|ssh:\/\/|\/Users\/|~\/secret/);
 		}
 
 		const progress = formatCursorToolLifecycleProgressText({ name: "webFetch", args: { url: secretUrl } });

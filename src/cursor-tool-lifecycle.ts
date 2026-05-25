@@ -41,12 +41,15 @@ function getCursorToolLifecycleTitle(toolCall: unknown): string {
 	return `Cursor ${normalizeToolName(name)}`;
 }
 
+/** Prefixes that commonly introduce path/URI values in free-text pending lifecycle details. */
+const LIFECYCLE_DETAIL_PATH_PREFIX = String.raw`(?:^|[\s'"({=,:;\[\]{}])`;
+
 function containsCursorLifecycleUnsafeDetail(text: string): boolean {
 	if (/\b[a-z][a-z0-9+.-]*:\/\//i.test(text)) return true;
 	if (/\bwww\.\S+/i.test(text)) return true;
-	if (/(?:^|[\s'"({])~\/\S*/.test(text)) return true;
-	if (/(?:^|[\s'"({])\/\S+/.test(text)) return true;
-	if (/(?:^|[\s'"({])[A-Za-z]:[\\/]/.test(text)) return true;
+	if (new RegExp(`${LIFECYCLE_DETAIL_PATH_PREFIX}~\\/\\S*`).test(text)) return true;
+	if (new RegExp(`${LIFECYCLE_DETAIL_PATH_PREFIX}\\/\\S+`).test(text)) return true;
+	if (new RegExp(`${LIFECYCLE_DETAIL_PATH_PREFIX}[A-Za-z]:[\\\\/]`).test(text)) return true;
 	return false;
 }
 

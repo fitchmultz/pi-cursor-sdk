@@ -9,7 +9,7 @@ import { CursorPartialContentEmitter } from "./cursor-partial-content-emitter.js
 import { asRecord, getField, hasUsableText } from "./cursor-record-utils.js";
 import { scrubPiToolDisplay, scrubSensitiveText } from "./cursor-sensitive-text.js";
 import { buildCursorPiToolDisplay, formatCursorToolTranscript, getCursorCreatePlanText, mergeCursorToolCalls } from "./cursor-tool-transcript.js";
-import { recordActiveCursorSdkCoordinatorEvent, recordActiveCursorSdkDisplayDecision } from "./cursor-sdk-event-debug.js";
+import type { CursorSdkEventDebugRecorder } from "./cursor-sdk-event-debug.js";
 import { getString, getToolArgs, getToolName } from "./cursor-transcript-utils.js";
 
 function formatCursorToolName(toolCall: unknown): string {
@@ -104,6 +104,7 @@ export interface CursorSdkTurnCoordinatorOptions {
 	activeToolNames?: ReadonlySet<string>;
 	nativeReplayId: string;
 	textDeltas: string[];
+	debugRecorder?: CursorSdkEventDebugRecorder;
 }
 
 export class CursorSdkTurnCoordinator {
@@ -118,6 +119,7 @@ export class CursorSdkTurnCoordinator {
 	readonly textDeltas: string[];
 
 	private readonly contentEmitter: CursorPartialContentEmitter;
+	private readonly debugRecorder?: CursorSdkEventDebugRecorder;
 	private nativeToolDisplayCounter = 0;
 	private nativeToolReplayStarted = false;
 	private cursorPlanTextCandidate: string | undefined;
@@ -141,6 +143,7 @@ export class CursorSdkTurnCoordinator {
 		this.activeToolNames = options.activeToolNames;
 		this.nativeReplayId = options.nativeReplayId;
 		this.textDeltas = options.textDeltas;
+		this.debugRecorder = options.debugRecorder;
 		this.contentEmitter = new CursorPartialContentEmitter(options.stream, options.partial, undefined, false);
 	}
 
@@ -423,7 +426,7 @@ export class CursorSdkTurnCoordinator {
 		toolName: string,
 		source: "delta" | "step",
 	): void {
-		recordActiveCursorSdkDisplayDecision({
+		this.debugRecorder?.recordDisplayDecision({
 			action: "ignore-bridge",
 			toolName,
 			identity,
@@ -431,10 +434,8 @@ export class CursorSdkTurnCoordinator {
 		});
 	}
 
-	private recordDisplayDecision(
-		decision: Parameters<typeof recordActiveCursorSdkDisplayDecision>[0],
-	): void {
-		recordActiveCursorSdkDisplayDecision(decision);
+	private recordDisplayDecision(decision: Parameters<CursorSdkEventDebugRecorder["recordDisplayDecision"]>[0]): void {
+		this.debugRecorder?.recordDisplayDecision(decision);
 	}
 
 	private emitCursorToolTrace(text: string): void {
@@ -458,7 +459,7 @@ export class CursorSdkTurnCoordinator {
 
 	private emitCursorTaskProgress(label: string): void {
 		const progressText = `Cursor task: ${label}\n`;
-		recordActiveCursorSdkCoordinatorEvent("task_progress", { label, progressText, liveRun: this.liveRun !== undefined });
+		this.debugRecorder?.recordCoordinatorEvent("task_progress", { label, progressText, liveRun: this.liveRun !== undefined });
 		if (this.liveRun) {
 			cursorLiveRuns.queueEvent(this.liveRun, { type: "thinking-delta", text: progressText });
 			return;

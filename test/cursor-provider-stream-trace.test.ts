@@ -32,6 +32,7 @@ import {
 import { streamCursor, __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
 import { __testUtils as contextWindowCacheTestUtils } from "../src/context-window-cache.js";
 import { __testUtils as modelDiscoveryTestUtils } from "../src/model-discovery.js";
+import { __testUtils as sdkEventDebugTestUtils } from "../src/cursor-sdk-event-debug.js";
 import type { Context } from "@earendil-works/pi-ai";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -97,6 +98,242 @@ it("detects trailing user messages only after tool results", () => {
 
 		const done = getDoneEvent(events);
 		expect(done).toBeDefined();
+	});
+
+	it("captures provider debug artifacts through streamCursor when enabled", async () => {
+		const artifactDir = mkdtempSync(join(tmpdir(), "pi-cursor-provider-debug-"));
+		const previousDebug = process.env.PI_CURSOR_SDK_EVENT_DEBUG;
+		const previousRunDir = process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR;
+		process.env.PI_CURSOR_SDK_EVENT_DEBUG = "1";
+		process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR = artifactDir;
+
+		try {
+			const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
+				opts.onDelta({ update: { type: "text-delta", text: "debugged" } });
+				return {
+					id: "run-debug",
+					agentId: "agent-debug",
+					status: "finished",
+					wait: vi.fn().mockResolvedValue({ id: "run-debug", status: "finished" }),
+					cancel: vi.fn(),
+					supports: () => false,
+					unsupportedReason: () => "conversation unsupported",
+					stream: async function* () {
+						yield { type: "assistant", message: { content: [{ type: "text", text: "debugged" }] } };
+					},
+				};
+			});
+			mockedCreate.mockResolvedValue({
+				send: mockSend,
+				[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+			});
+
+			await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+
+			expect(readFileSync(join(artifactDir, "on-delta.jsonl"), "utf8")).toContain('"text-delta"');
+			expect(readFileSync(join(artifactDir, "pi-stream-events.jsonl"), "utf8")).toContain('"text_delta"');
+			expect(readFileSync(join(artifactDir, "stream-events.jsonl"), "utf8")).toContain('"assistant"');
+			expect(JSON.parse(readFileSync(join(artifactDir, "summary.json"), "utf8"))).toMatchObject({
+				artifactDir,
+				waitResultRecorded: true,
+			});
+		} finally {
+			if (previousDebug === undefined) delete process.env.PI_CURSOR_SDK_EVENT_DEBUG;
+			else process.env.PI_CURSOR_SDK_EVENT_DEBUG = previousDebug;
+			if (previousRunDir === undefined) delete process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR;
+			else process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR = previousRunDir;
+			rmSync(artifactDir, { recursive: true, force: true });
+		}
+	});
+
+	it("records continuation drain artifacts on the next turn debug sink", async () => {
+		const previousNativeDisplay = process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY;
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		const registeredTools: RegisteredTool[] = [];
+		await registerNativeToolDisplayForTest(registeredTools);
+
+		const baseDir = mkdtempSync(join(tmpdir(), "pi-cursor-provider-debug-continuation-"));
+		const sessionFile = join(baseDir, "session.jsonl");
+		const eventsDir = join(baseDir, "events");
+		const previousDebug = process.env.PI_CURSOR_SDK_EVENT_DEBUG;
+		const previousDebugDir = process.env.PI_CURSOR_SDK_EVENT_DEBUG_DIR;
+		const { __testUtils: scopeTestUtils } = await import("../src/cursor-session-scope.js");
+
+		sdkEventDebugTestUtils.resetSessionDebugState();
+		scopeTestUtils.set(baseDir, sessionFile);
+		process.env.PI_CURSOR_SDK_EVENT_DEBUG = "1";
+		process.env.PI_CURSOR_SDK_EVENT_DEBUG_DIR = eventsDir;
+
+		let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
+		const runWait = vi.fn(
+			() =>
+				new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
+					resolveRun = resolve;
+				}),
+		);
+		let firstOnDelta: CursorDeltaHandler | undefined;
+		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
+			firstOnDelta = opts.onDelta;
+			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "bash", args: { command: "git status" } }, callId: "c1" } });
+			opts.onDelta({
+				update: {
+					type: "tool-call-completed",
+					toolCall: {
+						name: "bash",
+						result: { status: "success", value: { stdout: "clean", stderr: "", exitCode: 0 } },
+					},
+					callId: "c1",
+				},
+			});
+			return {
+				id: "run-1",
+				agentId: "agent-1",
+				status: "running",
+				wait: runWait,
+				cancel: vi.fn(),
+				supports: () => true,
+				unsupportedReason: () => undefined,
+			};
+		});
+		mockedCreate.mockResolvedValue({
+			agentId: "agent-1",
+			send: mockSend,
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+
+		try {
+			const firstEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+			expect(getDoneEvent(firstEvents).reason).toBe("toolUse");
+
+			firstOnDelta?.({ update: { type: "text-delta", text: "Late scoped text." } });
+			const secondEventsPromise = collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+			await Promise.resolve();
+			resolveRun({ id: "run-1", status: "finished", result: "Late scoped final." });
+			await secondEventsPromise;
+
+			const sessionSlug = sdkEventDebugTestUtils.slugSessionKey(sessionFile);
+			const manifest = JSON.parse(
+				readFileSync(join(eventsDir, "sessions", sessionSlug, sdkEventDebugTestUtils.SESSION_MANIFEST), "utf8"),
+			);
+			expect(manifest.turns).toHaveLength(2);
+
+			const parseDrainPhases = (artifactDir: string): string[] =>
+				readFileSync(join(artifactDir, sdkEventDebugTestUtils.ARTIFACTS.drainEvents), "utf8")
+					.trim()
+					.split("\n")
+					.filter(Boolean)
+					.map((line) => JSON.parse(line).phase as string);
+
+			expect(parseDrainPhases(manifest.turns[0].artifactDir)).toContain("turn_end");
+			expect(parseDrainPhases(manifest.turns[1].artifactDir)).toEqual(
+				expect.arrayContaining(["pre_send_start", "turn_start", "turn_end", "pre_send_end"]),
+			);
+		} finally {
+			sdkEventDebugTestUtils.resetSessionDebugState();
+			scopeTestUtils.reset();
+			if (previousDebug === undefined) delete process.env.PI_CURSOR_SDK_EVENT_DEBUG;
+			else process.env.PI_CURSOR_SDK_EVENT_DEBUG = previousDebug;
+			if (previousDebugDir === undefined) delete process.env.PI_CURSOR_SDK_EVENT_DEBUG_DIR;
+			else process.env.PI_CURSOR_SDK_EVENT_DEBUG_DIR = previousDebugDir;
+			if (previousNativeDisplay === undefined) delete process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY;
+			else process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = previousNativeDisplay;
+			rmSync(baseDir, { recursive: true, force: true });
+		}
+	});
+
+	it("records turn_end and pre_send_end when aborting during live-run progress wait", async () => {
+		const previousNativeDisplay = process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY;
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		const registeredTools: RegisteredTool[] = [];
+		await registerNativeToolDisplayForTest(registeredTools);
+
+		const baseDir = mkdtempSync(join(tmpdir(), "pi-cursor-provider-debug-abort-"));
+		const sessionFile = join(baseDir, "session.jsonl");
+		const eventsDir = join(baseDir, "events");
+		const previousDebug = process.env.PI_CURSOR_SDK_EVENT_DEBUG;
+		const previousDebugDir = process.env.PI_CURSOR_SDK_EVENT_DEBUG_DIR;
+		const { __testUtils: scopeTestUtils } = await import("../src/cursor-session-scope.js");
+
+		sdkEventDebugTestUtils.resetSessionDebugState();
+		scopeTestUtils.set(baseDir, sessionFile);
+		process.env.PI_CURSOR_SDK_EVENT_DEBUG = "1";
+		process.env.PI_CURSOR_SDK_EVENT_DEBUG_DIR = eventsDir;
+
+		const controller = new AbortController();
+		let firstOnDelta: CursorDeltaHandler | undefined;
+		const runWait = vi.fn(() => new Promise<{ id: string; status: "finished"; result: string }>(() => {}));
+		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
+			firstOnDelta = opts.onDelta;
+			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "bash", args: { command: "git status" } }, callId: "c1" } });
+			opts.onDelta({
+				update: {
+					type: "tool-call-completed",
+					toolCall: {
+						name: "bash",
+						result: { status: "success", value: { stdout: "clean", stderr: "", exitCode: 0 } },
+					},
+					callId: "c1",
+				},
+			});
+			return {
+				id: "run-1",
+				agentId: "agent-1",
+				status: "running",
+				wait: runWait,
+				cancel: vi.fn(),
+				supports: () => true,
+				unsupportedReason: () => undefined,
+			};
+		});
+		mockedCreate.mockResolvedValue({
+			agentId: "agent-1",
+			send: mockSend,
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+
+		const parseDrainEvents = (artifactDir: string): Array<{ phase: string; payload?: { outcome?: string; reason?: string } }> =>
+			readFileSync(join(artifactDir, sdkEventDebugTestUtils.ARTIFACTS.drainEvents), "utf8")
+				.trim()
+				.split("\n")
+				.filter(Boolean)
+				.map((line) => JSON.parse(line));
+
+		try {
+			const firstEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+			expect(getDoneEvent(firstEvents).reason).toBe("toolUse");
+
+			firstOnDelta?.({ update: { type: "text-delta", text: "Late scoped text." } });
+			const secondEventsPromise = collectEvents(
+				streamCursor(makeModel(), makeContext(), { apiKey: "test-key", signal: controller.signal }),
+			);
+			await Promise.resolve();
+			controller.abort();
+			const secondEvents = await secondEventsPromise;
+			expect(getErrorEvent(secondEvents).reason).toBe("aborted");
+
+			const sessionSlug = sdkEventDebugTestUtils.slugSessionKey(sessionFile);
+			const manifest = JSON.parse(
+				readFileSync(join(eventsDir, "sessions", sessionSlug, sdkEventDebugTestUtils.SESSION_MANIFEST), "utf8"),
+			);
+			expect(manifest.turns).toHaveLength(2);
+
+			const drainEvents = parseDrainEvents(manifest.turns[1].artifactDir);
+			expect(drainEvents.map((event) => event.phase)).toEqual(
+				expect.arrayContaining(["pre_send_start", "turn_start", "turn_end", "pre_send_end"]),
+			);
+			expect(drainEvents.find((event) => event.phase === "turn_end")?.payload).toMatchObject({ outcome: "aborted", reason: "signal_aborted" });
+			expect(drainEvents.find((event) => event.phase === "pre_send_end")?.payload).toMatchObject({ outcome: "aborted", reason: "signal_aborted" });
+		} finally {
+			sdkEventDebugTestUtils.resetSessionDebugState();
+			scopeTestUtils.reset();
+			if (previousDebug === undefined) delete process.env.PI_CURSOR_SDK_EVENT_DEBUG;
+			else process.env.PI_CURSOR_SDK_EVENT_DEBUG = previousDebug;
+			if (previousDebugDir === undefined) delete process.env.PI_CURSOR_SDK_EVENT_DEBUG_DIR;
+			else process.env.PI_CURSOR_SDK_EVENT_DEBUG_DIR = previousDebugDir;
+			if (previousNativeDisplay === undefined) delete process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY;
+			else process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = previousNativeDisplay;
+			rmSync(baseDir, { recursive: true, force: true });
+		}
 	});
 
 	it("emits createPlan args as final visible text when native replay is unavailable", async () => {

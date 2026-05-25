@@ -10,7 +10,7 @@ import {
 import type { CursorNativeToolDisplayItem } from "./cursor-native-tool-display.js";
 import type { CursorPiBridgeToolRequest, CursorPiToolBridgeRun } from "./cursor-pi-tool-bridge.js";
 import { getCursorSessionScopeKey } from "./cursor-session-scope.js";
-import { recordActiveCursorSdkLiveRunEvent } from "./cursor-sdk-event-debug.js";
+import type { CursorSdkEventDebugRecorder } from "./cursor-sdk-event-debug.js";
 
 export class CursorLiveRunAbortError extends Error {
 	constructor() {
@@ -49,6 +49,7 @@ export interface CursorLiveRun {
 	errorMessage?: string;
 	abortMessage?: string;
 	chainUserInputAfterCompletion: boolean;
+	debugRecorder?: CursorSdkEventDebugRecorder;
 }
 
 export interface CursorLiveRunCreateParams {
@@ -59,6 +60,7 @@ export interface CursorLiveRunCreateParams {
 	sessionAgentScopeKey?: string;
 	promptInputTokens: number;
 	textDeltas?: string[];
+	debugRecorder?: CursorSdkEventDebugRecorder;
 }
 
 export interface CursorLiveRunCoordinatorDeps {
@@ -270,6 +272,7 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 				cancelled: false,
 				disposed: false,
 				chainUserInputAfterCompletion: false,
+				debugRecorder: params.debugRecorder,
 			};
 			privateStates.set(run, {
 				waiters: new Set(),
@@ -316,7 +319,7 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 		queueEvent(run, event): void {
 			if (run.disposed) return;
 			run.pendingEvents.push(event);
-			recordActiveCursorSdkLiveRunEvent(event);
+			run.debugRecorder?.recordLiveRunEvent(event);
 			notifyProgress(run);
 		},
 

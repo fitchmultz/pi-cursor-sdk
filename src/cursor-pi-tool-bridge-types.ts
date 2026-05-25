@@ -1,5 +1,6 @@
 import type { McpServerConfig } from "@cursor/sdk";
 import type { Context, ToolResultMessage } from "@earendil-works/pi-ai";
+import type { CursorSdkEventDebugRecorder } from "./cursor-sdk-event-debug.js";
 import type {
 	ExtensionAPI,
 	ExtensionHandler,
@@ -64,6 +65,7 @@ export interface CursorPiToolBridgeRun {
 	hasPendingPiToolCallId(piToolCallId: string): boolean;
 	isBridgeMcpToolCall(toolCall: unknown): boolean;
 	setOnToolRequest(handler?: (request: CursorPiBridgeToolRequest) => void): void;
+	setDebugRecorder(recorder?: CursorSdkEventDebugRecorder): void;
 	cancel(reason: string): void;
 	dispose(): Promise<void>;
 }
@@ -77,4 +79,5 @@ export interface CursorPiToolBridge {
 
 export interface CursorPiToolBridgeRunOptions {
 	onToolRequest?: (request: CursorPiBridgeToolRequest) => void;
+	debugRecorder?: CursorSdkEventDebugRecorder;
 }

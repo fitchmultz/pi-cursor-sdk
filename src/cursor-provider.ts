@@ -52,8 +52,6 @@ import { getCheckpointContextWindow, saveCachedContextWindow } from "./context-w
 import {
 	attachCursorSdkEventDebugPiStreamTap,
 	CursorSdkEventDebugSink,
-	recordActiveCursorSdkFinalPartial,
-	setActiveCursorSdkEventDebugSink,
 } from "./cursor-sdk-event-debug.js";
 import { CursorSdkTurnCoordinator } from "./cursor-provider-turn-coordinator.js";
 import { isCursorNativeToolDisplayRuntimeEnabled } from "./cursor-native-tool-display.js";
@@ -146,13 +144,11 @@ export function streamCursor(
 				provider: model.provider,
 			});
 			sdkEventDebugRef.current = sdkEventDebug;
-			setActiveCursorSdkEventDebugSink(sdkEventDebug);
 			sdkEventDebug?.recordContextSnapshot(context);
 
-			if ((await drainExistingCursorLiveRunBeforeSend(stream, partial, model, context, options?.signal)) === "stream_ended") {
-				recordActiveCursorSdkFinalPartial(partial);
+			if ((await drainExistingCursorLiveRunBeforeSend(stream, partial, model, context, options?.signal, sdkEventDebug)) === "stream_ended") {
+				sdkEventDebug?.recordFinalPartial(partial);
 				await sdkEventDebug?.finalize();
-				setActiveCursorSdkEventDebugSink(undefined);
 				sdkEventDebugRef.current = undefined;
 				stream.end();
 				return;
@@ -173,6 +169,7 @@ export function streamCursor(
 				cwd,
 				modelSelection: selection,
 				settingSources,
+				debugRecorder: sdkEventDebug,
 				onBridgeToolRequest: (request: CursorPiBridgeToolRequest) => {
 					if (liveRunForBridgeQueue && !liveRunForBridgeQueue.disposed) {
 						cursorLiveRuns.queueEvent(liveRunForBridgeQueue, { type: "bridge-tool", request });
@@ -235,6 +232,7 @@ export function streamCursor(
 						sessionAgentScopeKey,
 						promptInputTokens,
 						textDeltas,
+						debugRecorder: sdkEventDebug,
 					})
 				: undefined;
 			if (liveRun) {
@@ -254,6 +252,7 @@ export function streamCursor(
 				activeToolNames,
 				nativeReplayId,
 				textDeltas,
+				debugRecorder: sdkEventDebug,
 			});
 
 			// Handle abort signal
@@ -315,12 +314,11 @@ export function streamCursor(
 
 			if (liveRun) {
 				deferSdkEventDebugFinalize = true;
-				void run
+				const waitCompletion = run
 					.wait()
 					.then(async (result) => {
 						sdkEventDebug?.recordWaitResult(result);
 						await sdkEventDebug?.captureRunArtifacts(run);
-						await sdkEventDebug?.finalize();
 						if (liveRun.disposed) return;
 						turnCoordinator.discardIncompleteStartedToolCalls();
 						await cacheSdkContextWindow(liveRun.agent.agentId, model.id);
@@ -353,7 +351,6 @@ export function streamCursor(
 						sdkEventDebug?.recordWaitResult({ status: "error", error: String(error) });
 						sdkEventDebug?.recordError("run_wait", error);
 						await sdkEventDebug?.captureRunArtifacts(run);
-						await sdkEventDebug?.finalize();
 						if (liveRun.disposed) return;
 						cursorLiveRuns.markError(liveRun, sanitizeCursorProviderError(error, resolvedApiKey ?? options?.apiKey));
 					});
@@ -363,13 +360,24 @@ export function streamCursor(
 						await cursorLiveRuns.waitForProgress(liveRun, options?.signal);
 						await settleCursorLiveToolBatch(liveRun);
 						turnCoordinator.closeTraceBlock();
-						await drainCursorLiveRunTurn(stream, partial, model, context, liveRun, 0, { mode: "emit", signal: options?.signal });
+						await drainCursorLiveRunTurn(stream, partial, model, context, liveRun, 0, {
+							mode: "emit",
+							signal: options?.signal,
+							debugRecorder: sdkEventDebug,
+						});
 					});
 				} catch (error) {
 					if (error instanceof CursorLiveRunAbortError) await cursorLiveRuns.release(liveRun);
 					throw error;
+				} finally {
+					sdkEventDebugRef.current = undefined;
+					void waitCompletion
+						.finally(async () => {
+							sdkEventDebug?.recordFinalPartial(partial);
+							await sdkEventDebug?.finalize();
+						})
+						.catch(() => {});
 				}
-				recordActiveCursorSdkFinalPartial(partial);
 				agent = null;
 				return;
 			}
@@ -426,10 +434,9 @@ export function streamCursor(
 			}
 		} finally {
 			if (!deferSdkEventDebugFinalize) {
-				recordActiveCursorSdkFinalPartial(partial);
+				sdkEventDebug?.recordFinalPartial(partial);
 				await sdkEventDebug?.finalize();
 			}
-			setActiveCursorSdkEventDebugSink(undefined);
 			sdkEventDebugRef.current = undefined;
 			restoreCursorSdkOutputFilter?.();
 

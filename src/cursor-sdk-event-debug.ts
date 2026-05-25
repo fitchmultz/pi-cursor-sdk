@@ -1,50 +1,38 @@
-import { appendFileSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { createHash } from "node:crypto";
-import { basename, join, resolve } from "node:path";
+import { copyFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { InteractionUpdate } from "@cursor/sdk";
 import type { CursorPiToolBridgeDiagnosticEvent } from "./cursor-pi-tool-bridge-diagnostics.js";
 import { serializeCursorPiToolBridgeDiagnostic } from "./cursor-pi-tool-bridge-diagnostics.js";
 import type { CursorPiBridgeToolRequest } from "./cursor-pi-tool-bridge-types.js";
 import type { CursorLiveQueuedEvent } from "./cursor-live-run-coordinator.js";
-import { getCursorSessionFile, getCursorSessionScopeKey } from "./cursor-session-scope.js";
+import { getCursorSessionFile } from "./cursor-session-scope.js";
 import { parseEnvBoolean } from "./cursor-env-boolean.js";
+import {
+	ARTIFACTS,
+	CURSOR_SDK_EVENT_DEBUG_ENV,
+	CURSOR_SDK_EVENT_DEBUG_LOG_PREFIX,
+	CURSOR_SDK_EVENT_DEBUG_STDERR_ENV,
+	SESSION_MANIFEST,
+	SESSION_PI_SESSION_SNAPSHOT,
+} from "./cursor-sdk-event-debug-constants.js";
+import {
+	allocateCursorSdkEventDebugTurn,
+	resetCursorSdkEventDebugSessionStateForTests,
+	slugSessionKey,
+	updateCursorSdkEventDebugSessionManifest,
+	type CursorSdkEventDebugTurnAllocation,
+} from "./cursor-sdk-event-debug-session.js";
 
-export const CURSOR_SDK_EVENT_DEBUG_ENV = "PI_CURSOR_SDK_EVENT_DEBUG";
-export const CURSOR_SDK_EVENT_DEBUG_DIR_ENV = "PI_CURSOR_SDK_EVENT_DEBUG_DIR";
-export const CURSOR_SDK_EVENT_DEBUG_RUN_DIR_ENV = "PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR";
-export const CURSOR_SDK_EVENT_DEBUG_SESSION_DIR_ENV = "PI_CURSOR_SDK_EVENT_DEBUG_SESSION_DIR";
-export const CURSOR_SDK_EVENT_DEBUG_STDERR_ENV = "PI_CURSOR_SDK_EVENT_DEBUG_STDERR";
-export const CURSOR_SDK_EVENT_DEBUG_LOG_PREFIX = "[pi-cursor-sdk:sdk-events]";
-
-const SESSION_MANIFEST = "session.json";
-const ANONYMOUS_SESSION_SCOPE_KEY = "__anonymous__";
-
-const ARTIFACTS = {
-	metadata: "metadata.json",
-	sendPayload: "send-payload.json",
-	contextSnapshot: "context-snapshot.json",
-	onDelta: "on-delta.jsonl",
-	onStep: "on-step.jsonl",
-	streamEvents: "stream-events.jsonl",
-	piStreamEvents: "pi-stream-events.jsonl",
-	providerEvents: "provider-events.jsonl",
-	liveRunEvents: "live-run-events.jsonl",
-	bridgeEvents: "bridge-events.jsonl",
-	bridgeRaw: "bridge-raw.jsonl",
-	displayDecisions: "display-decisions.jsonl",
-	coordinatorEvents: "coordinator-events.jsonl",
-	drainEvents: "drain-events.jsonl",
-	timeline: "timeline.jsonl",
-	piSessionSnapshot: "pi-session-snapshot.jsonl",
-	finalPartial: "final-partial.json",
-	errors: "errors.jsonl",
-	waitResult: "wait-result.json",
-	conversation: "conversation.json",
-	summary: "summary.json",
-} as const;
-
-const SESSION_PI_SESSION_SNAPSHOT = "pi-session.jsonl";
+export {
+	CURSOR_SDK_EVENT_DEBUG_DIR_ENV,
+	CURSOR_SDK_EVENT_DEBUG_ENV,
+	CURSOR_SDK_EVENT_DEBUG_LOG_PREFIX,
+	CURSOR_SDK_EVENT_DEBUG_RUN_DIR_ENV,
+	CURSOR_SDK_EVENT_DEBUG_SESSION_DIR_ENV,
+	CURSOR_SDK_EVENT_DEBUG_STDERR_ENV,
+	resolveCursorSdkEventDebugBaseDir,
+} from "./cursor-sdk-event-debug-constants.js";
 
 export type CursorSdkDisplayDecisionAction = "skip-duplicate" | "queue_replay" | "emit_trace" | "ignore-bridge";
 
@@ -97,30 +85,6 @@ interface CursorSdkRunLike {
 	conversation?: () => Promise<unknown>;
 }
 
-interface CursorSdkEventDebugSessionState {
-	sessionKey: string;
-	sessionDir: string;
-	turnCounter: number;
-}
-
-interface CursorSdkEventDebugSessionManifest {
-	sessionKey: string;
-	sessionFile?: string;
-	sessionDir: string;
-	createdAt: string;
-	updatedAt: string;
-	turns: Array<{
-		turn: number;
-		artifactDir: string;
-		startedAt: string;
-		finalizedAt?: string;
-		summary?: Record<string, unknown>;
-	}>;
-}
-
-let activeCursorSdkEventDebugSink: CursorSdkEventDebugSink | undefined;
-const sessionDebugStates = new Map<string, CursorSdkEventDebugSessionState>();
-
 function eventType(value: unknown): string {
 	if (value && typeof value === "object") {
 		if ("type" in value && typeof value.type === "string") return value.type;
@@ -128,100 +92,6 @@ function eventType(value: unknown): string {
 		if ("kind" in value && typeof value.kind === "string") return value.kind;
 	}
 	return "unknown";
-}
-
-function sanitizePathSegment(value: string): string {
-	return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "session";
-}
-
-function slugSessionKey(scopeKey: string): string {
-	if (scopeKey === ANONYMOUS_SESSION_SCOPE_KEY) {
-		return `anonymous-${process.pid}`;
-	}
-	const fileBase = sanitizePathSegment(basename(scopeKey).replace(/\.jsonl?$/i, "") || "session");
-	const hash = createHash("sha256").update(scopeKey).digest("hex").slice(0, 8);
-	return `${fileBase}-${hash}`;
-}
-
-function resolvePinnedRunArtifactDir(runDirOverride: string | undefined): string | undefined {
-	const trimmed = runDirOverride?.trim();
-	if (!trimmed) return undefined;
-	const dir = resolve(trimmed);
-	mkdirSync(dir, { recursive: true });
-	return dir;
-}
-
-function readSessionManifest(sessionDir: string): CursorSdkEventDebugSessionManifest | undefined {
-	try {
-		return JSON.parse(readFileSync(join(sessionDir, SESSION_MANIFEST), "utf8")) as CursorSdkEventDebugSessionManifest;
-	} catch {
-		return undefined;
-	}
-}
-
-function writeSessionManifest(sessionDir: string, manifest: CursorSdkEventDebugSessionManifest): void {
-	writeFileSync(join(sessionDir, SESSION_MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`);
-}
-
-function resolveSessionDebugDir(
-	cwd: string,
-	env: Record<string, string | undefined>,
-	scopeKey: string,
-): string {
-	const pinned = env[CURSOR_SDK_EVENT_DEBUG_SESSION_DIR_ENV]?.trim();
-	if (pinned) return resolve(pinned);
-	return join(resolveCursorSdkEventDebugBaseDir(cwd, env), "sessions", slugSessionKey(scopeKey));
-}
-
-function allocateTurnArtifactDir(
-	cwd: string,
-	env: Record<string, string | undefined>,
-): { artifactDir: string; sessionDir?: string; turn?: number; sessionKey?: string; pinnedRun: boolean } {
-	const pinnedRunDir = resolvePinnedRunArtifactDir(env[CURSOR_SDK_EVENT_DEBUG_RUN_DIR_ENV]);
-	if (pinnedRunDir) {
-		return { artifactDir: pinnedRunDir, pinnedRun: true };
-	}
-
-	const scopeKey = getCursorSessionScopeKey();
-	const sessionDir = resolveSessionDebugDir(cwd, env, scopeKey);
-	mkdirSync(sessionDir, { recursive: true });
-
-	let state = sessionDebugStates.get(scopeKey);
-	if (!state || state.sessionDir !== sessionDir) {
-		state = { sessionKey: scopeKey, sessionDir, turnCounter: 0 };
-		sessionDebugStates.set(scopeKey, state);
-	}
-
-	state.turnCounter += 1;
-	const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-	const artifactDir = join(sessionDir, `turn-${String(state.turnCounter).padStart(3, "0")}-${stamp}`);
-	mkdirSync(artifactDir, { recursive: true });
-
-	const existing = readSessionManifest(sessionDir);
-	const manifest: CursorSdkEventDebugSessionManifest = existing ?? {
-		sessionKey: scopeKey,
-		sessionFile: getCursorSessionFile(),
-		sessionDir,
-		createdAt: new Date().toISOString(),
-		updatedAt: new Date().toISOString(),
-		turns: [],
-	};
-	manifest.sessionFile = getCursorSessionFile();
-	manifest.updatedAt = new Date().toISOString();
-	manifest.turns.push({
-		turn: state.turnCounter,
-		artifactDir,
-		startedAt: new Date().toISOString(),
-	});
-	writeSessionManifest(sessionDir, manifest);
-
-	return {
-		artifactDir,
-		sessionDir,
-		turn: state.turnCounter,
-		sessionKey: scopeKey,
-		pinnedRun: false,
-	};
 }
 
 function resolveCursorSdkEventDebugStderrEnabled(env: Record<string, string | undefined> = process.env): boolean {
@@ -232,51 +102,21 @@ export function resolveCursorSdkEventDebugEnabled(env: Record<string, string | u
 	return parseEnvBoolean(env[CURSOR_SDK_EVENT_DEBUG_ENV], false);
 }
 
-export function resolveCursorSdkEventDebugBaseDir(cwd: string, env: Record<string, string | undefined> = process.env): string {
-	const raw = env[CURSOR_SDK_EVENT_DEBUG_DIR_ENV]?.trim();
-	return resolve(cwd, raw || ".debug/cursor-sdk-events");
-}
-
-export function setActiveCursorSdkEventDebugSink(sink: CursorSdkEventDebugSink | undefined): void {
-	activeCursorSdkEventDebugSink = sink;
-}
-
-export function getActiveCursorSdkEventDebugSink(): CursorSdkEventDebugSink | undefined {
-	return activeCursorSdkEventDebugSink;
-}
-
-export function recordActiveCursorSdkLiveRunEvent(event: CursorLiveQueuedEvent): void {
-	activeCursorSdkEventDebugSink?.recordLiveRunEvent(event);
-}
-
-export function recordActiveCursorSdkBridgeDiagnostic(event: CursorPiToolBridgeDiagnosticEvent): void {
-	activeCursorSdkEventDebugSink?.recordBridgeDiagnostic(event);
-}
-
-export function recordActiveCursorSdkBridgeRaw(payload: {
-	kind: "queued" | "resolved" | "rejected";
-	request: CursorPiBridgeToolRequest;
-	result?: unknown;
-	error?: unknown;
-	rejectionKind?: string;
-}): void {
-	activeCursorSdkEventDebugSink?.recordBridgeRaw(payload);
-}
-
-export function recordActiveCursorSdkDisplayDecision(decision: CursorSdkDisplayDecisionRecord): void {
-	activeCursorSdkEventDebugSink?.recordDisplayDecision(decision);
-}
-
-export function recordActiveCursorSdkCoordinatorEvent(phase: string, payload: unknown): void {
-	activeCursorSdkEventDebugSink?.recordCoordinatorEvent(phase, payload);
-}
-
-export function recordActiveCursorSdkDrainEvent(phase: string, payload: unknown): void {
-	activeCursorSdkEventDebugSink?.recordDrainEvent(phase, payload);
-}
-
-export function recordActiveCursorSdkFinalPartial(partial: unknown): void {
-	activeCursorSdkEventDebugSink?.recordFinalPartial(partial);
+export interface CursorSdkEventDebugRecorder {
+	recordLiveRunEvent(event: CursorLiveQueuedEvent): void;
+	recordBridgeDiagnostic(event: CursorPiToolBridgeDiagnosticEvent): void;
+	recordBridgeRaw(payload: {
+		kind: "queued" | "resolved" | "rejected";
+		request: CursorPiBridgeToolRequest;
+		result?: unknown;
+		error?: unknown;
+		rejectionKind?: string;
+	}): void;
+	recordDisplayDecision(decision: CursorSdkDisplayDecisionRecord): void;
+	recordCoordinatorEvent(phase: string, payload: unknown): void;
+	recordDrainEvent(phase: string, payload: unknown): void;
+	recordFinalPartial(partial: unknown): void;
+	finalize(): Promise<void>;
 }
 
 export function attachCursorSdkEventDebugPiStreamTap(
@@ -315,7 +155,9 @@ export class CursorSdkEventDebugSink {
 		errors: 0,
 	};
 	private metadata: Record<string, unknown>;
+	private readonly jsonlBuffers = new Map<string, unknown[]>();
 	private finalized = false;
+	private finalizationPromise: Promise<void> | undefined;
 	private waitResultRecorded = false;
 	private streamCapturePromise: Promise<void> | undefined;
 	private readonly streamCaptureErrors: unknown[] = [];
@@ -323,18 +165,12 @@ export class CursorSdkEventDebugSink {
 	static maybeCreate(options: CursorSdkEventDebugSinkOptions): CursorSdkEventDebugSink | undefined {
 		const env = options.env ?? process.env;
 		if (!resolveCursorSdkEventDebugEnabled(env)) return undefined;
-		const allocation = allocateTurnArtifactDir(options.cwd, env);
+		const allocation = allocateCursorSdkEventDebugTurn(options.cwd, env);
 		return new CursorSdkEventDebugSink(allocation, options, env);
 	}
 
 	private constructor(
-		allocation: {
-			artifactDir: string;
-			sessionDir?: string;
-			turn?: number;
-			sessionKey?: string;
-			pinnedRun: boolean;
-		},
+		allocation: CursorSdkEventDebugTurnAllocation,
 		options: CursorSdkEventDebugSinkOptions,
 		env: Record<string, string | undefined>,
 	) {
@@ -365,7 +201,7 @@ export class CursorSdkEventDebugSink {
 	recordProviderMeta(meta: Record<string, unknown>): void {
 		this.metadata = {
 			...this.metadata,
-			provider: meta,
+			providerMeta: meta,
 		};
 		writeFileSync(join(this.artifactDir, ARTIFACTS.metadata), `${JSON.stringify(this.metadata, null, 2)}\n`);
 	}
@@ -540,20 +376,16 @@ export class CursorSdkEventDebugSink {
 
 	private updateSessionManifest(summary: Record<string, unknown>): void {
 		if (this.pinnedRun || !this.sessionDir || this.turn === undefined) return;
-		const manifest = readSessionManifest(this.sessionDir);
-		if (!manifest) return;
-		const turnEntry = manifest.turns.find((entry) => entry.turn === this.turn);
-		if (!turnEntry) return;
-		turnEntry.finalizedAt = new Date().toISOString();
-		turnEntry.summary = summary;
-		manifest.updatedAt = new Date().toISOString();
-		manifest.sessionFile = getCursorSessionFile();
-		writeSessionManifest(this.sessionDir, manifest);
+		updateCursorSdkEventDebugSessionManifest(this.sessionDir, this.turn, summary);
 	}
 
 	async finalize(): Promise<void> {
+		this.finalizationPromise ??= this.finalizeOnce();
+		await this.finalizationPromise;
+	}
+
+	private async finalizeOnce(): Promise<void> {
 		if (this.finalized) return;
-		this.finalized = true;
 		if (this.streamCapturePromise) {
 			await this.streamCapturePromise.catch(() => undefined);
 		}
@@ -589,17 +421,19 @@ export class CursorSdkEventDebugSink {
 				error instanceof Error ? error.message : String(error),
 			),
 		};
+		this.flushJsonlBuffers();
 		writeFileSync(join(this.artifactDir, ARTIFACTS.summary), `${JSON.stringify(summary, null, 2)}\n`);
 		this.updateSessionManifest(summary);
 		if (resolveCursorSdkEventDebugStderrEnabled(this.env)) {
 			process.stderr.write(`${CURSOR_SDK_EVENT_DEBUG_LOG_PREFIX} ${JSON.stringify(summary)}\n`);
 		}
+		this.finalized = true;
 	}
 
 	private appendProviderJsonl(phase: string, payload: unknown): void {
 		const elapsedMs = Date.now() - this.startedAt;
 		const record = { ts: new Date().toISOString(), elapsedMs, turn: this.turn, phase, payload };
-		appendFileSync(join(this.artifactDir, ARTIFACTS.providerEvents), `${JSON.stringify(record)}\n`);
+		this.bufferJsonl(ARTIFACTS.providerEvents, record);
 		this.counts.provider[phase] = (this.counts.provider[phase] ?? 0) + 1;
 		this.recordTimeline("provider", phase, payload);
 	}
@@ -607,7 +441,7 @@ export class CursorSdkEventDebugSink {
 	private appendCoordinatorJsonl(phase: string, payload: unknown): void {
 		const elapsedMs = Date.now() - this.startedAt;
 		const record = { ts: new Date().toISOString(), elapsedMs, turn: this.turn, phase, payload };
-		appendFileSync(join(this.artifactDir, ARTIFACTS.coordinatorEvents), `${JSON.stringify(record)}\n`);
+		this.bufferJsonl(ARTIFACTS.coordinatorEvents, record);
 		this.counts.coordinator[phase] = (this.counts.coordinator[phase] ?? 0) + 1;
 		this.recordTimeline("coordinator", phase, payload);
 	}
@@ -615,7 +449,7 @@ export class CursorSdkEventDebugSink {
 	private appendDrainJsonl(phase: string, payload: unknown): void {
 		const elapsedMs = Date.now() - this.startedAt;
 		const record = { ts: new Date().toISOString(), elapsedMs, turn: this.turn, phase, payload };
-		appendFileSync(join(this.artifactDir, ARTIFACTS.drainEvents), `${JSON.stringify(record)}\n`);
+		this.bufferJsonl(ARTIFACTS.drainEvents, record);
 		this.counts.drain[phase] = (this.counts.drain[phase] ?? 0) + 1;
 		this.recordTimeline("drain", phase, payload);
 	}
@@ -630,7 +464,7 @@ export class CursorSdkEventDebugSink {
 			kind,
 			payload,
 		};
-		appendFileSync(join(this.artifactDir, ARTIFACTS.timeline), `${JSON.stringify(record)}\n`);
+		this.bufferJsonl(ARTIFACTS.timeline, record);
 		const timelineKey = `${layer}:${kind}`;
 		this.counts.timeline[timelineKey] = (this.counts.timeline[timelineKey] ?? 0) + 1;
 	}
@@ -649,16 +483,27 @@ export class CursorSdkEventDebugSink {
 			turn: this.turn,
 			[recordKey]: value,
 		};
-		appendFileSync(join(this.artifactDir, fileName), `${JSON.stringify(record)}\n`);
+		this.bufferJsonl(fileName, record);
 		const type = countKey ?? eventType(value);
 		counts[type] = (counts[type] ?? 0) + 1;
 		const layer = fileName.replace(/\.jsonl$/, "");
 		this.recordTimeline(layer, type, value);
 	}
-}
 
-export function resetCursorSdkEventDebugSessionStateForTests(): void {
-	sessionDebugStates.clear();
+	private bufferJsonl(fileName: string, record: unknown): void {
+		if (this.finalized) return;
+		const records = this.jsonlBuffers.get(fileName) ?? [];
+		records.push(record);
+		this.jsonlBuffers.set(fileName, records);
+	}
+
+	private flushJsonlBuffers(): void {
+		for (const [fileName, records] of this.jsonlBuffers) {
+			const lines = records.map((record) => `${JSON.stringify(record)}\n`).join("");
+			writeFileSync(join(this.artifactDir, fileName), lines, { flag: "a" });
+		}
+		this.jsonlBuffers.clear();
+	}
 }
 
 export const __testUtils = {

@@ -16,6 +16,7 @@ import {
 } from "./cursor-pi-tool-bridge.js";
 import { computeCursorContextFingerprint } from "./context.js";
 import { getCursorSessionScopeKey, onCursorSessionScopeKeyChange } from "./cursor-session-scope.js";
+import type { CursorSdkEventDebugRecorder } from "./cursor-sdk-event-debug.js";
 
 export interface SessionCursorAgentSendState {
 	bootstrapped: boolean;
@@ -75,6 +76,7 @@ interface SessionCursorAgentCreateParams {
 	modelSelection: ModelSelection;
 	settingSources?: SettingSource[];
 	onBridgeToolRequest?: (request: CursorPiBridgeToolRequest) => void;
+	debugRecorder?: CursorSdkEventDebugRecorder;
 	createAgent?: typeof Agent.create;
 }
 
@@ -174,6 +176,7 @@ function leaseFromEntry(
 	created: boolean,
 ): SessionCursorAgentLease {
 	bindBridgeToolRequest(entry, params.onBridgeToolRequest);
+	entry.bridgeRun?.setDebugRecorder(params.debugRecorder);
 	return {
 		scopeKey,
 		agent: entry.agent!,
@@ -193,6 +196,7 @@ async function createSessionAgentEntry(
 	if (registeredBridge) {
 		bridgeRun = await registeredBridge.createRun({
 			onToolRequest: params.onBridgeToolRequest,
+			debugRecorder: params.debugRecorder,
 		});
 		if (!bridgeRun.enabled || !bridgeRun.mcpServers) {
 			await bridgeRun.dispose();

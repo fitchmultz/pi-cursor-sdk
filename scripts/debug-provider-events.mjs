@@ -367,7 +367,9 @@ async function main(argv = process.argv.slice(2), env = process.env) {
 	console.log(JSON.stringify(await runDebugProviderEvents(args)));
 }
 
-main().catch((error) => {
-	console.error(error instanceof Error ? error.message : String(error));
-	process.exitCode = 1;
-});
+if (import.meta.url === new URL(process.argv[1], "file:").href) {
+	main().catch((error) => {
+		console.error(error instanceof Error ? error.message : String(error));
+		process.exitCode = 1;
+	});
+}

@@ -361,9 +361,9 @@ export function streamCursor(
 					.catch(async (error: unknown) => {
 						sdkEventDebug?.recordWaitResult({ status: "error", error: String(error) });
 						sdkEventDebug?.recordError("run_wait", error);
+						turnCoordinatorForCleanup?.discardIncompleteStartedToolCalls();
 						await sdkEventDebug?.captureRunArtifacts(run);
 						if (liveRun.disposed) return;
-						turnCoordinatorForCleanup?.discardIncompleteStartedToolCalls();
 						cursorLiveRuns.markError(liveRun, sanitizeCursorProviderError(error, resolvedApiKey ?? options?.apiKey));
 					});
 
@@ -431,9 +431,9 @@ export function streamCursor(
 			}
 			} catch (error) {
 				sdkEventDebug?.recordError("provider_stream", error);
+				turnCoordinatorForCleanup?.discardIncompleteStartedToolCalls();
 				if (activeLiveRun && !activeLiveRun.disposed) await cursorLiveRuns.release(activeLiveRun);
 				else await abandonSessionCursorAgent(sessionAgentScopeKey);
-				turnCoordinatorForCleanup?.discardIncompleteStartedToolCalls();
 				if (error instanceof CursorLiveRunAbortError) {
 					pushSanitizedStreamError(error, "aborted");
 				} else {

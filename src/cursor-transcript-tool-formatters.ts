@@ -1,4 +1,5 @@
 import { resolveCursorEditDiff } from "./cursor-edit-diff.js";
+import { scrubSensitiveText } from "./cursor-sensitive-text.js";
 import { getFirstStringByKeys } from "./cursor-record-utils.js";
 import {
 	asRecord,
@@ -740,7 +741,7 @@ export function getMcpResultPreview(result: NormalizedResult): string | undefine
 		const text = getMcpContentText(entry);
 		if (text) {
 			const line = firstNonEmptyLine(text);
-			if (line) return truncateArg(line, 120);
+			if (line) return truncateArg(scrubSensitiveText(line), 120);
 		}
 		const summary = describeNonTextMcpContent(entry);
 		if (summary) return summary;

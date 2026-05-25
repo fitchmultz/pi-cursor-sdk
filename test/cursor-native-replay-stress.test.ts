@@ -177,4 +177,52 @@ describe("native replay stress", () => {
 		expect(hasEventType(events, "toolcall_start")).toBe(false);
 		expect(collectThinkingDeltas(events)).toMatch(/find/i);
 	});
+
+	it("inactive MCP trace scrubs secrets from collapsed summary", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		await createNativeToolDisplayPiForTest();
+		const secret = "super-secret-key-12345";
+		mockedCreate.mockResolvedValue({
+			agentId: "agent-1",
+			send: vi.fn(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
+				opts.onDelta({
+					update: {
+						type: "tool-call-completed",
+						toolCall: {
+							name: "mcp",
+							args: { toolName: "auth" },
+							result: {
+								status: "success",
+								value: {
+									content: [{ text: { text: `apiKey=${secret}\nBearer bearer-token-value` } }],
+								},
+							},
+						},
+						callId: "mcp-1",
+					},
+				});
+				return {
+					id: "run-1",
+					agentId: "agent-1",
+					status: "finished",
+					wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished", result: "done" }),
+					cancel: vi.fn(),
+					supports: () => true,
+					unsupportedReason: () => undefined,
+				};
+			}),
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+
+		const context = makeContext();
+		context.tools = [{ name: "read", description: "Read", parameters: Type.Object({}) }];
+		const events = await collectEvents(streamCursor(makeModel(), context, { apiKey: secret }));
+		const trace = collectThinkingDeltas(events);
+
+		expect(hasEventType(events, "toolcall_start")).toBe(false);
+		expect(trace).toMatch(/Cursor MCP/i);
+		expect(trace).toContain("[redacted]");
+		expect(trace).not.toContain(secret);
+		expect(trace).not.toContain("bearer-token-value");
+	});
 });

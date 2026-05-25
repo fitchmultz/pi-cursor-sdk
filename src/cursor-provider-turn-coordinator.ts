@@ -362,7 +362,7 @@ export class CursorSdkTurnCoordinator {
 
 		const traceText =
 			disposition === "inactive_trace"
-				? formatInactiveCursorReplayTrace(display)
+				? formatInactiveCursorReplayTrace(scrubPiToolDisplay(display, this.resolvedApiKey))
 				: transcript || `Cursor tool: ${formatCursorToolName(toolCall)} completed`;
 		this.emitCursorToolTrace(traceText);
 	}

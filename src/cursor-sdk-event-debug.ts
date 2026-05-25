@@ -134,6 +134,12 @@ export interface CursorSdkEventDebugRecorder {
 
 export const DISCARDED_INCOMPLETE_TOOL_CALL_REASON = "no-completion-at-run-end";
 
+export type DiscardedIncompleteStartedToolCallReason =
+	| typeof DISCARDED_INCOMPLETE_TOOL_CALL_REASON
+	| "abort"
+	| "sdk-failure"
+	| "run-drain";
+
 export function hashCursorSdkCallId(callId: string): string {
 	return createHash("sha256").update(callId).digest("hex").slice(0, 8);
 }
@@ -142,13 +148,13 @@ export interface DiscardedIncompleteStartedToolCallRecord {
 	event: "discarded-incomplete-started-tool-call";
 	toolName: string;
 	callIdHash: string;
-	reason: typeof DISCARDED_INCOMPLETE_TOOL_CALL_REASON;
+	reason: DiscardedIncompleteStartedToolCallReason;
 }
 
 export function serializeDiscardedIncompleteStartedToolCall(record: {
 	toolName: string;
 	callId: string;
-	reason?: typeof DISCARDED_INCOMPLETE_TOOL_CALL_REASON;
+	reason?: DiscardedIncompleteStartedToolCallReason;
 }): DiscardedIncompleteStartedToolCallRecord {
 	return {
 		event: "discarded-incomplete-started-tool-call",
@@ -161,7 +167,7 @@ export function serializeDiscardedIncompleteStartedToolCall(record: {
 export function recordDiscardedIncompleteStartedToolCall(
 	recorder: CursorSdkEventDebugRecorder | undefined,
 	env: Record<string, string | undefined>,
-	record: { toolName: string; callId: string; reason?: typeof DISCARDED_INCOMPLETE_TOOL_CALL_REASON },
+	record: { toolName: string; callId: string; reason?: DiscardedIncompleteStartedToolCallReason },
 ): void {
 	if (!recorder && !resolveCursorSdkEventDebugEnabled(env)) return;
 	try {

@@ -7,6 +7,7 @@ import {
 	makeContext,
 	collectEvents,
 	collectThinkingDeltas,
+	collectTextDeltas,
 	getDoneEvent,
 	getErrorEvent,
 	isToolCallBlock,
@@ -17,13 +18,15 @@ import {
 	type CursorDeltaHandler,
 	type RegisteredTool,
 } from "./helpers/cursor-provider-harness.js";
-import { streamCursor } from "../src/cursor-provider.js";
+import { streamCursor, __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
 import { CursorSdkEventDebugSink } from "../src/cursor-sdk-event-debug.js";
 import { __testUtils as sessionAgentTestUtils } from "../src/cursor-session-agent.js";
 import { CURSOR_TOOL_LIFECYCLE_DEFER_MS } from "../src/cursor-tool-lifecycle.js";
 
 const delayBeyondLifecycleDefer = () =>
 	new Promise((resolve) => setTimeout(resolve, CURSOR_TOOL_LIFECYCLE_DEFER_MS + 80));
+
+const lifecycleShellProgressPattern = /Cursor shell: (shell|npm test)/;
 
 const slowCleanupMs = CURSOR_TOOL_LIFECYCLE_DEFER_MS + 120;
 
@@ -284,14 +287,15 @@ describe("streamCursor Cursor tool lifecycle", () => {
 
 		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 		const error = getErrorEvent(events);
-		expect(collectThinkingDeltas(events)).not.toMatch(/Cursor shell:/);
+		expect(collectThinkingDeltas(events)).not.toMatch(lifecycleShellProgressPattern);
+		expect(collectThinkingDeltas(events)).toContain("Cursor shell did not complete");
 		const contentSnapshot = [...error.error.content];
-		expect(contentSnapshot).toEqual([]);
+		expect(contentSnapshot.some((block) => block.type === "thinking")).toBe(true);
 
 		await delayBeyondLifecycleDefer();
 
 		expect(error.error.content).toEqual(contentSnapshot);
-		expect(collectThinkingDeltas(events)).not.toMatch(/Cursor shell:/);
+		expect(collectThinkingDeltas(events)).not.toMatch(lifecycleShellProgressPattern);
 		disposeSpy.mockRestore();
 	});
 
@@ -325,11 +329,11 @@ describe("streamCursor Cursor tool lifecycle", () => {
 
 		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 		const trace = collectThinkingDeltas(events);
-		expect(trace).not.toMatch(/Cursor shell:/);
+		expect(trace).not.toMatch(lifecycleShellProgressPattern);
 
 		await delayBeyondLifecycleDefer();
 
-		expect(collectThinkingDeltas(events)).not.toMatch(/Cursor shell:/);
+		expect(collectThinkingDeltas(events)).not.toMatch(lifecycleShellProgressPattern);
 		captureSpy.mockRestore();
 		delete process.env.PI_CURSOR_SDK_EVENT_DEBUG;
 		delete process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR;
@@ -366,12 +370,32 @@ describe("streamCursor Cursor tool lifecycle", () => {
 		});
 
 		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
-		const trace = collectThinkingDeltas(events);
-		expect(trace).not.toMatch(/Cursor shell:/);
+		const done = getDoneEvent(events);
+		expect(done.reason).toBe("toolUse");
+		expect(collectThinkingDeltas(events)).not.toMatch(lifecycleShellProgressPattern);
+
+		const incompleteToolCall = done.message.content.find(isToolCallBlock);
+		const replayContext = makeContext();
+		replayContext.messages = [
+			...replayContext.messages,
+			done.message,
+			{
+				role: "toolResult" as const,
+				toolCallId: incompleteToolCall!.id,
+				toolName: "cursor",
+				content: [{ type: "text" as const, text: "Cursor shell did not complete" }],
+				isError: true,
+				timestamp: 2,
+			},
+		];
+		const finalEvents = await collectEvents(streamCursor(makeModel(), replayContext, { apiKey: "test-key" }));
+		expect(getDoneEvent(finalEvents).reason).toBe("stop");
+		expect(collectTextDeltas(finalEvents)).toBe("Done.");
+		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
 
 		await delayBeyondLifecycleDefer();
 
-		expect(collectThinkingDeltas(events)).not.toMatch(/Cursor shell:/);
+		expect(collectThinkingDeltas(events)).not.toMatch(lifecycleShellProgressPattern);
 		captureSpy.mockRestore();
 		delete process.env.PI_CURSOR_SDK_EVENT_DEBUG;
 		delete process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR;
@@ -408,16 +432,37 @@ describe("streamCursor Cursor tool lifecycle", () => {
 			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
 		});
 
-		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
-		const error = getErrorEvent(events);
-		expect(collectThinkingDeltas(events)).not.toMatch(/Cursor shell:/);
-		const contentSnapshot = [...error.error.content];
-		expect(contentSnapshot).toEqual([]);
+		const firstEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		const firstDone = getDoneEvent(firstEvents);
+		expect(firstDone.reason).toBe("toolUse");
+		const incompleteToolCall = firstDone.message.content.find(isToolCallBlock);
+		expect(incompleteToolCall).toMatchObject({
+			name: "cursor",
+			arguments: { activityTitle: "Cursor shell", activitySummary: "SDK run failed" },
+		});
+		expect(collectThinkingDeltas(firstEvents)).not.toMatch(lifecycleShellProgressPattern);
+
+		const replayContext = makeContext();
+		replayContext.messages = [
+			...replayContext.messages,
+			firstDone.message,
+			{
+				role: "toolResult" as const,
+				toolCallId: incompleteToolCall!.id,
+				toolName: "cursor",
+				content: [{ type: "text" as const, text: "Cursor shell did not complete" }],
+				isError: true,
+				timestamp: 2,
+			},
+		];
+		const secondEvents = await collectEvents(streamCursor(makeModel(), replayContext, { apiKey: "test-key" }));
+		expect(getErrorEvent(secondEvents).reason).toBe("error");
+		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
 
 		await delayBeyondLifecycleDefer();
 
-		expect(error.error.content).toEqual(contentSnapshot);
-		expect(collectThinkingDeltas(events)).not.toMatch(/Cursor shell:/);
+		expect(collectThinkingDeltas(firstEvents)).not.toMatch(lifecycleShellProgressPattern);
+		expect(collectThinkingDeltas(secondEvents)).not.toMatch(lifecycleShellProgressPattern);
 		captureSpy.mockRestore();
 		delete process.env.PI_CURSOR_SDK_EVENT_DEBUG;
 		delete process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR;

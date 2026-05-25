@@ -379,6 +379,7 @@ describe("streamCursor bridge MCP", () => {
 			expect(trace).not.toContain("duplicate bridge replay");
 			expect(trace).not.toContain("duplicate bridge onStep");
 			expect(trace).not.toContain("Cursor task:");
+			expect(trace).not.toContain("Cursor MCP did not complete");
 			expect(trace).not.toContain("Cursor tool started without a completion event");
 			expect(nativeToolDisplayTestUtils.nativeToolResultCount()).toBe(0);
 

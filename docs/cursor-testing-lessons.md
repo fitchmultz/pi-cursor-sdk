@@ -313,15 +313,15 @@ Capture is file-only by default: no stderr markers, and bridge diagnostics durin
 
 ### Discarded incomplete SDK tool calls
 
-When Cursor emits `tool-call-started` without a matching completion/step result, the provider discards the leftover started call at run end without synthetic replay errors. Default UX stays unchanged.
+When Cursor emits `tool-call-started` without a matching completion/step result, the provider surfaces a bounded neutral **Cursor … did not complete** activity card or thinking trace at run end. pi bridge MCP calls (`pi__*`) are excluded because pi already shows the real pi tool execution path.
 
-With `PI_CURSOR_SDK_EVENT_DEBUG=1`, each discarded started call is recorded in `coordinator-events.jsonl` under phase `discarded-incomplete-started-tool-call` with:
+With `PI_CURSOR_SDK_EVENT_DEBUG=1`, each discarded started call is also recorded in `coordinator-events.jsonl` under phase `discarded-incomplete-started-tool-call` with:
 
 - normalized SDK tool name
 - scrubbed call-id hash (raw call IDs are not written)
-- reason `no-completion-at-run-end`
+- reason such as `no-completion-at-run-end`, `abort`, or `sdk-failure`
 
-Stderr output for these records requires `PI_CURSOR_SDK_EVENT_DEBUG_STDERR=1`. This complements the standalone `npm run debug:sdk-events` probe by interpreting a specific provider discard path during normal pi runs.
+Stderr output for these records requires `PI_CURSOR_SDK_EVENT_DEBUG_STDERR=1`. This complements the standalone `npm run debug:sdk-events` probe by interpreting a specific provider discard path during normal pi runs. User-visible incomplete cards explain the gap in the TUI; debug artifacts remain maintainer-only (**#52**).
 
 ## Tool calls listed as plain text (#40 triage)
 

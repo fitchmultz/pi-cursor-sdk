@@ -289,7 +289,7 @@ it("replays Cursor createPlan as a neutral cursor card before final plan text", 
 		]);
 	});
 
-	it("suppresses Cursor tool starts that never receive completion events during native replay", async () => {
+	it("surfaces incomplete Cursor tool starts during native replay before final text", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		const registeredTools: RegisteredTool[] = [];
 		await registerNativeToolDisplayForTest(registeredTools);
@@ -357,15 +357,46 @@ it("replays Cursor createPlan as a neutral cursor card before final plan text", 
 		const replayEvents = await replayEventsPromise;
 		const replayDone = getDoneEvent(replayEvents);
 		const replayText = collectTextDeltas(replayEvents);
+		const incompleteToolCall = replayDone.message.content.find(isToolCallBlock);
 
-		expect(replayDone.reason).toBe("stop");
-		expect(replayText).toBe("Done.");
-		expect(replayDone.message.content.some((block) => block.type === "text" && block.text === "Done.")).toBe(true);
-		expect(replayDone.message.content.some(isToolCallBlock)).toBe(false);
-		expect(nativeToolDisplayTestUtils.nativeToolResultCount()).toBe(0);
+		expect(replayDone.reason).toBe("toolUse");
+		expect(replayText).toBe("");
+		expect(incompleteToolCall).toMatchObject({
+			name: "cursor",
+			arguments: { activityTitle: "Cursor MCP", activitySummary: "missing completion" },
+		});
+		expect(nativeToolDisplayTestUtils.nativeToolResultCount()).toBe(1);
+
+		const incompleteReplayContext = makeContext();
+		incompleteReplayContext.messages = [
+			...incompleteReplayContext.messages,
+			firstDone.message,
+			{
+				role: "toolResult" as const,
+				toolCallId: toolCall.id,
+				toolName: "read",
+				content: toolResult.content,
+				details: toolResult.details,
+				isError: false,
+				timestamp: 2,
+			},
+			replayDone.message,
+			{
+				role: "toolResult" as const,
+				toolCallId: incompleteToolCall!.id,
+				toolName: "cursor",
+				content: [{ type: "text" as const, text: "Cursor MCP did not complete" }],
+				isError: true,
+				timestamp: 4,
+			},
+		];
+		const finalEvents = await collectEvents(streamCursor(makeModel(), incompleteReplayContext, { apiKey: "test-key" }));
+		expect(getDoneEvent(finalEvents).reason).toBe("stop");
+		expect(collectTextDeltas(finalEvents)).toBe("Done.");
+		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
 	});
 
-	it("suppresses a native replay run that only has started Cursor tool calls", async () => {
+	it("surfaces incomplete native replay runs that only have started Cursor tool calls", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		const registeredTools: RegisteredTool[] = [];
 		await registerNativeToolDisplayForTest(registeredTools);
@@ -401,14 +432,33 @@ it("replays Cursor createPlan as a neutral cursor card before final plan text", 
 		const events = await eventsPromise;
 		const done = getDoneEvent(events);
 		const text = collectTextDeltas(events);
-		const trace = collectThinkingDeltas(events);
 
-		expect(done.reason).toBe("stop");
-		expect(text).toBe("Done.");
-		expect(trace).not.toContain("Cursor tool started without a completion event");
-		expect(done.message.content).toEqual([{ type: "text", text: "Done." }]);
-		expect(hasEventType(events, "toolcall_start")).toBe(false);
-		expect(nativeToolDisplayTestUtils.nativeToolResultCount()).toBe(0);
+		expect(done.reason).toBe("toolUse");
+		expect(text).toBe("");
+		expect(done.message.content.find(isToolCallBlock)).toMatchObject({
+			name: "cursor",
+			arguments: { activityTitle: "Cursor read", activitySummary: "missing completion" },
+		});
+		expect(hasEventType(events, "toolcall_start")).toBe(true);
+		expect(nativeToolDisplayTestUtils.nativeToolResultCount()).toBe(1);
+
+		const replayContext = makeContext();
+		replayContext.messages = [
+			...replayContext.messages,
+			done.message,
+			{
+				role: "toolResult" as const,
+				toolCallId: done.message.content.find(isToolCallBlock)!.id,
+				toolName: "cursor",
+				content: [{ type: "text" as const, text: "Cursor read did not complete" }],
+				isError: true,
+				timestamp: 2,
+			},
+		];
+		const finalEvents = await collectEvents(streamCursor(makeModel(), replayContext, { apiKey: "test-key" }));
+		expect(getDoneEvent(finalEvents).reason).toBe("stop");
+		expect(collectTextDeltas(finalEvents)).toBe("Done.");
+		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
 	});
 
 	it("counts thinking plus tool-call replay turns as nonzero assistant activity", async () => {

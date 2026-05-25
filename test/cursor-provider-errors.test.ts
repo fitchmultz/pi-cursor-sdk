@@ -72,6 +72,16 @@ describe("cursor-provider-errors", () => {
 		expect(message).not.toContain("/cursor-pi-tool-bridge/");
 	});
 
+	it("maps connect-layer network timeouts to actionable retry guidance", () => {
+		expect(sanitizeCursorProviderError(new Error("ConnectError: [unavailable] read ETIMEDOUT"), "test-key")).toContain(
+			"timed out during network I/O",
+		);
+		expect(sanitizeCursorProviderError("ConnectError: read ETIMEDOUT", "test-key")).toContain("Check your connection and retry");
+		expect(sanitizeCursorProviderError(new Error("ConnectError: [unavailable] read ETIMEDOUT"), "test-key")).not.toContain(
+			"ETIMEDOUT",
+		);
+	});
+
 	it("formats abort causes deterministically", () => {
 		expect(formatCursorSdkAbortMessage(resolveCursorSdkAbortCause({ signalAborted: true }))).toBe(
 			"Cancelled: prompt interrupted.",

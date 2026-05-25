@@ -7,6 +7,8 @@ const GENERIC_CURSOR_SDK_ERROR_MESSAGE =
 	"Cursor SDK request failed. The API key may be missing, invalid, or unauthorized. Run /login -> Use an API key -> Cursor, verify CURSOR_API_KEY, or pass --api-key, then retry.";
 const AUTH_CURSOR_SDK_ERROR_MESSAGE =
 	"Cursor SDK request failed because the API key may be invalid or unauthorized. Run /login -> Use an API key -> Cursor, verify CURSOR_API_KEY, or pass --api-key, then retry.";
+const NETWORK_CURSOR_SDK_ERROR_MESSAGE =
+	"Cursor SDK request timed out during network I/O. Check your connection and retry; if this keeps happening, try again later or verify Cursor service availability.";
 
 const GENERIC_CURSOR_RUN_FAILURE_TEXT = "cursor sdk run failed";
 
@@ -24,6 +26,14 @@ function isKnownGenericRunFailureText(message: string): boolean {
 
 function isLikelyAuthError(message: string): boolean {
 	return /\b(unauthorized|unauthorised|forbidden|invalid api key|invalid key|authentication|auth|401|403)\b/i.test(message);
+}
+
+function isLikelyNetworkTimeout(message: string): boolean {
+	return (
+		/\b(ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENETUNREACH|EAI_AGAIN)\b/i.test(message) ||
+		/\bConnectError\b.*\b(unavailable|deadline|timeout|timed out)\b/i.test(message) ||
+		/\bread ETIMEDOUT\b/i.test(message)
+	);
 }
 
 function shortRunId(runId: string): string {
@@ -81,5 +91,6 @@ export function sanitizeCursorProviderError(error: unknown, apiKey?: string): st
 	const scrubbed = scrubSensitiveText(message, apiKey).trim();
 	if (isGenericErrorMessage(scrubbed)) return GENERIC_CURSOR_SDK_ERROR_MESSAGE;
 	if (isLikelyAuthError(scrubbed)) return AUTH_CURSOR_SDK_ERROR_MESSAGE;
+	if (isLikelyNetworkTimeout(scrubbed)) return NETWORK_CURSOR_SDK_ERROR_MESSAGE;
 	return scrubbed || GENERIC_CURSOR_SDK_ERROR_MESSAGE;
 }

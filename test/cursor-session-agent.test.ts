@@ -203,6 +203,41 @@ describe("cursor-session-agent", () => {
 		expect(mockDispose).not.toHaveBeenCalled();
 	});
 
+	it("does not leave ConnectError from orphaned Agent.create as an unhandled rejection", async () => {
+		const rejections: unknown[] = [];
+		const onUnhandledRejection = (reason: unknown) => {
+			rejections.push(reason);
+		};
+		process.on("unhandledRejection", onUnhandledRejection);
+
+		let rejectCreate: (error: Error) => void = () => {};
+		const mockDisposeLate = vi.fn().mockResolvedValue(undefined);
+		const createAgent = vi.fn().mockImplementation(
+			() =>
+				new Promise((_resolve, reject) => {
+					rejectCreate = reject;
+				}),
+		);
+
+		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/test.jsonl");
+		const params = {
+			apiKey: "test-key",
+			cwd: "/tmp/project",
+			modelSelection: { id: "composer-2.5" },
+			createAgent,
+		};
+
+		const acquirePromise = acquireSessionCursorAgent(params);
+		await vi.waitFor(() => expect(createAgent).toHaveBeenCalledTimes(1));
+		await sessionAgentTestUtils.disposeSessionCursorAgent("/tmp/sessions/test.jsonl");
+		rejectCreate(new Error("ConnectError: [unavailable] read ETIMEDOUT"));
+
+		await expect(acquirePromise).rejects.toThrow("ConnectError: [unavailable] read ETIMEDOUT");
+		await Promise.resolve();
+		expect(rejections).toEqual([]);
+		process.off("unhandledRejection", onUnhandledRejection);
+	});
+
 	it("detects when a follow-up send should bootstrap after branch shrink", () => {
 		const sendState = {
 			bootstrapped: true,

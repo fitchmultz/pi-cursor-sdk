@@ -153,8 +153,14 @@ async function disposePoolEntryForScope(scopeKey: string, options?: { terminal?:
 	const entry = sessionAgentsByScope.get(scopeKey);
 	invalidatedScopeKeys.delete(scopeKey);
 	if (!entry) return;
+	const orphanedCreating = entry.creating;
 	sessionAgentsByScope.delete(scopeKey);
-	if (entry.creating || !entry.agent) return;
+	if (entry.creating || !entry.agent) {
+		orphanedCreating?.catch(() => {
+			// In-flight Agent.create was orphaned by scope disposal; active waiters surface errors elsewhere.
+		});
+		return;
+	}
 	await disposePoolEntry(entry);
 }
 

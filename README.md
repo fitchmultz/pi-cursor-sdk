@@ -272,6 +272,8 @@ When a Cursor run fails after auth is configured, pi now surfaces scrubbed provi
 
 Aborted runs now include a likely cause when determinable, for example `Cancelled: prompt interrupted.` for user cancel or `Cancelled: Cursor SDK run was cancelled.` for SDK-side cancellation.
 
+Network timeouts from the Cursor SDK connect layer (for example `ConnectError: read ETIMEDOUT`) surface as a scrubbed retry hint instead of crashing pi. Check your connection and retry; persistent timeouts may indicate a transient Cursor service or network issue.
+
 You can also restart pi with a key in the same shell or launcher that starts pi:
 
 ```bash

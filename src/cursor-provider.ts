@@ -129,7 +129,17 @@ export function streamCursor(
 		let sdkEventDebug: CursorSdkEventDebugSink | undefined;
 		let deferSdkEventDebugFinalize = false;
 
+		const pushSanitizedStreamError = (error: unknown, reason: "error" | "aborted" = "error"): void => {
+			partial.stopReason = reason;
+			partial.errorMessage =
+				reason === "aborted"
+					? formatCursorSdkAbortMessage(resolveCursorSdkAbortCause({ signalAborted: options?.signal?.aborted }))
+					: sanitizeCursorProviderError(error, resolvedApiKey ?? options?.apiKey);
+			stream.push({ type: "error", reason, error: partial });
+		};
+
 		try {
+			try {
 			const throwIfAborted = (): void => {
 				if (options?.signal?.aborted) throw new CursorLiveRunAbortError();
 			};
@@ -150,7 +160,6 @@ export function streamCursor(
 				sdkEventDebug?.recordFinalPartial(partial);
 				await sdkEventDebug?.finalize();
 				sdkEventDebugRef.current = undefined;
-				stream.end();
 				return;
 			}
 
@@ -417,36 +426,41 @@ export function streamCursor(
 				applyCursorApproximateUsage(partial, model, context, promptInputTokens);
 				stream.push({ type: "done", reason: "stop", message: partial });
 			}
-		} catch (error) {
-			sdkEventDebug?.recordError("provider_stream", error);
-			if (activeLiveRun && !activeLiveRun.disposed) await cursorLiveRuns.release(activeLiveRun);
-			else await abandonSessionCursorAgent(sessionAgentScopeKey);
-			if (error instanceof CursorLiveRunAbortError) {
-				partial.stopReason = "aborted";
-				partial.errorMessage = formatCursorSdkAbortMessage(
-					resolveCursorSdkAbortCause({ signalAborted: options?.signal?.aborted }),
-				);
-				stream.push({ type: "error", reason: "aborted", error: partial });
-			} else {
-				partial.stopReason = "error";
-				partial.errorMessage = sanitizeCursorProviderError(error, resolvedApiKey ?? options?.apiKey);
-				stream.push({ type: "error", reason: "error", error: partial });
-			}
-		} finally {
-			if (!deferSdkEventDebugFinalize) {
-				sdkEventDebug?.recordFinalPartial(partial);
-				await sdkEventDebug?.finalize();
-			}
-			sdkEventDebugRef.current = undefined;
-			restoreCursorSdkOutputFilter?.();
+			} catch (error) {
+				sdkEventDebug?.recordError("provider_stream", error);
+				if (activeLiveRun && !activeLiveRun.disposed) await cursorLiveRuns.release(activeLiveRun);
+				else await abandonSessionCursorAgent(sessionAgentScopeKey);
+				if (error instanceof CursorLiveRunAbortError) {
+					pushSanitizedStreamError(error, "aborted");
+				} else {
+					pushSanitizedStreamError(error, "error");
+				}
+			} finally {
+				if (!deferSdkEventDebugFinalize) {
+					sdkEventDebug?.recordFinalPartial(partial);
+					await sdkEventDebug?.finalize();
+				}
+				sdkEventDebugRef.current = undefined;
+				restoreCursorSdkOutputFilter?.();
 
-			if (abortSignal && abortListener) {
-				abortSignal.removeEventListener("abort", abortListener);
+				if (abortSignal && abortListener) {
+					abortSignal.removeEventListener("abort", abortListener);
+				}
 			}
+		} catch (error) {
+			if (activeLiveRun && !activeLiveRun.disposed) await cursorLiveRuns.release(activeLiveRun).catch(() => {});
+			else await abandonSessionCursorAgent(sessionAgentScopeKey).catch(() => {});
+			pushSanitizedStreamError(error, "error");
 		}
 
 		stream.end();
-	})();
+	})().catch((error: unknown) => {
+		const partial = makeInitialMessage(model);
+		partial.stopReason = "error";
+		partial.errorMessage = sanitizeCursorProviderError(error, resolveCursorApiKey(options?.apiKey));
+		stream.push({ type: "error", reason: "error", error: partial });
+		stream.end();
+	});
 
 	return stream;
 }

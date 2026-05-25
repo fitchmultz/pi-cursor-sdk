@@ -6,7 +6,9 @@ import type {
 	ExtensionContext,
 	ExtensionHandler,
 } from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { parseEnvBoolean } from "./cursor-env-boolean.js";
+import { isCursorModel } from "./cursor-model.js";
 import {
 	cursorSettingSourcesLoadProjectAgentsRules,
 	cursorSettingSourcesLoadUserAgentsRules,
@@ -26,6 +28,11 @@ function normalizeContextPath(filePath: string): string {
 	return filePath.replace(/\\/g, "/");
 }
 
+function normalizeDirPath(dirPath: string): string {
+	const normalized = normalizeContextPath(dirPath).replace(/\/+$/, "");
+	return normalized || "/";
+}
+
 export type PiAgentsContextFile = {
 	path: string;
 	content: string;
@@ -42,34 +49,43 @@ export function getAgentsContextFileBaseName(filePath: string): string {
 	return normalized.slice(normalized.lastIndexOf("/") + 1).toLowerCase();
 }
 
-export function isPiAgentDirContextPath(filePath: string): boolean {
-	return /\/\.pi\/agent\//i.test(normalizeContextPath(filePath));
+/** Actual pi agent dir `AGENTS.md` — overlaps Cursor `user` setting source (global agent instructions). */
+export function isPiAgentDirAgentsMdPath(filePath: string, agentDir: string = getAgentDir()): boolean {
+	const normalized = normalizeContextPath(filePath);
+	const agentsMdPath = `${normalizeDirPath(agentDir)}/agents.md`;
+	return normalized.toLowerCase() === agentsMdPath.toLowerCase();
 }
 
-/** `~/.pi/agent/AGENTS.md` — overlaps Cursor `user` setting source (global agent instructions). */
-export function isPiAgentDirAgentsMdPath(filePath: string): boolean {
-	return /\/\.pi\/agent\/agents\.md$/i.test(normalizeContextPath(filePath));
+/** Actual pi agent dir `CLAUDE.md` — kept because Cursor user rules use `~/.claude/CLAUDE.md`. */
+export function isPiAgentDirClaudeMdPath(filePath: string, agentDir: string = getAgentDir()): boolean {
+	const normalized = normalizeContextPath(filePath);
+	const claudeMdPath = `${normalizeDirPath(agentDir)}/claude.md`;
+	return normalized.toLowerCase() === claudeMdPath.toLowerCase();
 }
 
 /**
  * Classify whether a pi-loaded context file overlaps Cursor ambient rules.
  * Project/repo `AGENTS.md` and `CLAUDE.md` overlap Cursor `project` sources.
- * Only `~/.pi/agent/AGENTS.md` overlaps Cursor `user`; `~/.pi/agent/CLAUDE.md` is kept
+ * Only the actual pi agent dir `AGENTS.md` overlaps Cursor `user`; agent-dir `CLAUDE.md` is kept
  * because Cursor user rules use `~/.claude/CLAUDE.md`, not pi's agent dir path.
  */
-export function classifyContextFileOverlap(filePath: string): PiAgentsContextOverlap {
+export function classifyContextFileOverlap(
+	filePath: string,
+	agentDir: string = getAgentDir(),
+): PiAgentsContextOverlap {
 	const base = getAgentsContextFileBaseName(filePath);
 	if (!CURSOR_OVERLAPPING_CONTEXT_BASE_NAMES.has(base)) return "none";
-	if (base === "agents.md" && isPiAgentDirAgentsMdPath(filePath)) return "cursor-user-agents";
-	if (!isPiAgentDirContextPath(filePath)) return "cursor-project-rules";
-	return "none";
+	if (base === "agents.md" && isPiAgentDirAgentsMdPath(filePath, agentDir)) return "cursor-user-agents";
+	if (base === "claude.md" && isPiAgentDirClaudeMdPath(filePath, agentDir)) return "none";
+	return "cursor-project-rules";
 }
 
 export function shouldRemovePiAgentsContextFile(
 	file: PiAgentsContextFile,
 	settingSources: SettingSource[] | undefined,
+	agentDir?: string,
 ): boolean {
-	switch (classifyContextFileOverlap(file.path)) {
+	switch (classifyContextFileOverlap(file.path, agentDir)) {
 		case "cursor-user-agents":
 			return cursorSettingSourcesLoadUserAgentsRules(settingSources);
 		case "cursor-project-rules":
@@ -83,11 +99,12 @@ export function shouldSuppressPiAgentsContext(
 	model: ExtensionContext["model"],
 	contextFiles: readonly PiAgentsContextFile[],
 	settingSources: SettingSource[] | undefined,
+	agentDir?: string,
 ): boolean {
-	if (model?.provider !== "cursor") return false;
+	if (!isCursorModel(model)) return false;
 	if (parseEnvBoolean(process.env[CURSOR_PRESERVE_PI_AGENTS_MD_ENV], false)) return false;
 	if (contextFiles.length === 0) return false;
-	return contextFiles.some((file) => shouldRemovePiAgentsContextFile(file, settingSources));
+	return contextFiles.some((file) => shouldRemovePiAgentsContextFile(file, settingSources, agentDir));
 }
 
 /** Exact pi `buildSystemPrompt()` serialization for one context file block (including trailing blank line). */
@@ -106,11 +123,12 @@ export function removePiAgentsContextFromSystemPrompt(
 	systemPrompt: string,
 	contextFiles: readonly PiAgentsContextFile[],
 	settingSources: SettingSource[] | undefined,
+	agentDir?: string,
 ): string {
 	const retainedContextFiles: PiAgentsContextFile[] = [];
 	let removedAny = false;
 	for (const file of contextFiles) {
-		if (shouldRemovePiAgentsContextFile(file, settingSources)) {
+		if (shouldRemovePiAgentsContextFile(file, settingSources, agentDir)) {
 			removedAny = true;
 			continue;
 		}
@@ -129,22 +147,28 @@ export function removePiAgentsContextFromSystemPrompt(
 export function resolveCursorFacingSystemPrompt(
 	systemPrompt: string,
 	model: ExtensionContext["model"],
-	systemPromptOptions: BuildSystemPromptOptions,
+	systemPromptOptions?: BuildSystemPromptOptions,
 	settingSourcesRaw?: string,
+	agentDir?: string,
 ): string {
+	if (!systemPromptOptions) return systemPrompt;
 	const contextFiles = systemPromptOptions.contextFiles ?? [];
 	const settingSources = getEffectiveCursorSettingSources(settingSourcesRaw);
-	if (!shouldSuppressPiAgentsContext(model, contextFiles, settingSources)) {
+	if (!shouldSuppressPiAgentsContext(model, contextFiles, settingSources, agentDir)) {
 		return systemPrompt;
 	}
-	return removePiAgentsContextFromSystemPrompt(systemPrompt, contextFiles, settingSources);
+	return removePiAgentsContextFromSystemPrompt(systemPrompt, contextFiles, settingSources, agentDir);
 }
 
 type CursorAgentsContextExtensionApi = Pick<ExtensionAPI, "on">;
 
 export function registerCursorAgentsContextDedup(pi: CursorAgentsContextExtensionApi): void {
 	const handler: ExtensionHandler<BeforeAgentStartEvent, BeforeAgentStartEventResult> = (event, ctx) => {
-		const resolved = resolveCursorFacingSystemPrompt(event.systemPrompt, ctx.model, event.systemPromptOptions);
+		const resolved = resolveCursorFacingSystemPrompt(
+			event.systemPrompt,
+			ctx.model,
+			event.systemPromptOptions,
+		);
 		if (resolved === event.systemPrompt) return;
 		return { systemPrompt: resolved };
 	};

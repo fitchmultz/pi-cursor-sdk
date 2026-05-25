@@ -1,3 +1,4 @@
+import type { BuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
 import {
 	PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX,
 	serializePiProjectContextSection,
@@ -6,6 +7,13 @@ import {
 } from "../../src/cursor-agents-context.js";
 
 export { PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX, serializePiProjectContextSection, serializePiProjectInstructionsBlock };
+
+export function makeSystemPromptOptions(
+	contextFiles: PiAgentsContextFile[],
+	cwd = "/repo",
+): BuildSystemPromptOptions {
+	return { cwd, contextFiles, selectedTools: [] };
+}
 
 /** Minimal pi-like system prompt containing only the project_context subset this feature owns. */
 export function buildPiSystemPromptWithContextFiles(

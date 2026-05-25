@@ -6,6 +6,7 @@ import {
 	registerNativeCursorTool,
 	type NativeCursorToolName,
 } from "./cursor-native-tool-display-tools.js";
+import { isCursorModel } from "./cursor-model.js";
 import {
 	isCursorNativeToolDisplayRequested,
 	isCursorNativeToolRegistrationRequested,
@@ -32,10 +33,6 @@ function hasNonBuiltinTool(pi: Pick<ExtensionAPI, "getAllTools">, toolName: Nati
 }
 
 type NativeRegistrationContext = { hasUI: boolean; ui: Pick<ExtensionContext["ui"], "notify">; model?: ExtensionContext["model"] };
-
-function isCursorModel(model: ExtensionContext["model"]): boolean {
-	return model?.provider === "cursor" || model?.api === "cursor-sdk";
-}
 
 export function syncRegisteredNativeCursorToolsForModel(pi: Pick<ExtensionAPI, "getActiveTools" | "setActiveTools">, model: ExtensionContext["model"]): void {
 	if (registeredNativeToolNames.size === 0) return;

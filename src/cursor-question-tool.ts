@@ -1,6 +1,7 @@
 import type { BeforeAgentStartEvent, ExtensionAPI, ExtensionContext, ExtensionHandler, SessionStartEvent, TurnStartEvent } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { isCursorModel } from "./cursor-model.js";
 import { resolveCursorPiToolBridgeEnabled } from "./cursor-pi-tool-bridge.js";
 
 export const CURSOR_ASK_QUESTION_TOOL_NAME = "cursor_ask_question";
@@ -82,10 +83,6 @@ const CursorAskQuestionParamsSchema = Type.Object({
 	allowCustom: Type.Optional(Type.Boolean({ description: "Allow a typed answer in addition to listed options; defaults to true" })),
 	questions: Type.Optional(Type.Array(QuestionSchema, { description: "Ask multiple questions sequentially" })),
 });
-
-function isCursorModel(model: ExtensionContext["model"]): boolean {
-	return model?.provider === "cursor" || model?.api === "cursor-sdk";
-}
 
 function normalizeOption(option: RawQuestionOption, index: number): CursorQuestionOption | undefined {
 	if (typeof option === "string") {

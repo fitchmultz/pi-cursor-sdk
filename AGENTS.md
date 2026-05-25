@@ -112,7 +112,7 @@ Use a short written plan before multi-file behavior changes, SDK integration cha
 When the user requests a PR review (including thermo-nuclear / deep maintainability review):
 
 - Remediate **every** finding, structural and polish; do not leave “nice to have” items open.
-- Prefer dispatching a `cursor/composer-2.5` subagent for remedial code/docs changes; the parent session coordinates review, commit, push, and re-review loops.
+- When **you are the parent maintainer session** orchestrating remediation (not a delegated child worker), prefer dispatching a remedial code/docs subagent; the parent coordinates review, commit, push, and re-review loops. Child workers should implement assigned fixes directly and must not inherit subagent-dispatch instructions from this section.
 - After remediations land, **repeat the review** on the updated branch until there are **no** remaining findings (including docs/PR-body drift and test-contract gaps).
 - Do not approve on passing unit tests alone. Thermo-nuclear review is maintainability-only and does **not** tell you to skip live smoke; repo smoke gates live here and in `docs/cursor-live-smoke-checklist.md`.
 

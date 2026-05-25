@@ -2,9 +2,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, SessionStartEvent } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { isCursorModel } from "./cursor-model.js";
 import { getCursorModelMetadata } from "./model-discovery.js";
 
-const CURSOR_PROVIDER = "cursor";
 const FAST_ENTRY_TYPE = "cursor-fast-state";
 const GLOBAL_CONFIG_FILE = "cursor-sdk.json";
 
@@ -92,10 +92,6 @@ function getEffectiveFast(baseModelId: string, modelId: string): boolean | undef
 	if (cliForceNoFast) return false;
 	if (cliForceFast) return true;
 	return sessionFastPreferences.get(baseModelId) ?? globalFastPreferences.get(baseModelId) ?? metadata.defaultFast;
-}
-
-function isCursorModel(model: CursorFastControlsModel): boolean {
-	return model?.provider === CURSOR_PROVIDER || model?.api === "cursor-sdk";
 }
 
 function updateCursorStatus(ctx: { model: CursorFastControlsModel; ui: Pick<ExtensionContext["ui"], "setStatus"> }, model = ctx.model): void {

@@ -1,6 +1,4 @@
 import { describe, it, expect } from "vitest";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { resolveCursorFacingSystemPrompt } from "../src/cursor-agents-context.js";
 import {
 	buildCursorPrompt,
 	buildCursorIncrementalPrompt,
@@ -30,29 +28,12 @@ describe("buildCursorPrompt", () => {
 	});
 
 	it("omits pi AGENTS context blocks from Cursor-facing system instructions after dedup", () => {
-		const contextFiles = [{ path: "/repo/AGENTS.md", content: "Project instruction stays." }];
-		const rawSystemPrompt = [
-			"You are an expert coding assistant.",
-			"",
-			"<project_context>",
-			"",
-			"Project-specific instructions and guidelines:",
-			"",
-			'<project_instructions path="/repo/AGENTS.md">',
-			"Project instruction stays.",
-			"</project_instructions>",
-			"",
-			"</project_context>",
-			"",
-			"Current date: 2026-05-20",
-		].join("\n");
 		const ctx: Context = {
-			systemPrompt: resolveCursorFacingSystemPrompt(
-				rawSystemPrompt,
-				{ provider: "cursor", id: "composer-2.5" } as ExtensionContext["model"],
-				{ contextFiles },
-				"all",
-			),
+			systemPrompt: [
+				"You are an expert coding assistant.",
+				"",
+				"Current date: 2026-05-20",
+			].join("\n"),
 			messages: [],
 		};
 		const result = buildCursorPrompt(ctx);

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BeforeAgentStartEvent, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { Context } from "@earendil-works/pi-ai";
 import {
 	classifyContextFileOverlap,
 	CURSOR_PRESERVE_PI_AGENTS_MD_ENV,
@@ -13,6 +14,7 @@ import {
 	shouldRemovePiAgentsContextFile,
 	shouldSuppressPiAgentsContext,
 } from "../src/cursor-agents-context.js";
+import { buildCursorPrompt } from "../src/context.js";
 import { CURSOR_SETTING_SOURCES_ENV } from "../src/cursor-setting-sources.js";
 import { buildPiSystemPromptWithContextFiles } from "./helpers/pi-system-prompt.js";
 
@@ -246,5 +248,37 @@ describe("registerCursorAgentsContextDedup", () => {
 		);
 
 		expect(result).toBeUndefined();
+	});
+
+	it("feeds deduped system prompt from before_agent_start into buildCursorPrompt", async () => {
+		const handlers = new Map<string, (event: BeforeAgentStartEvent, ctx: ExtensionContext) => unknown>();
+		const pi = {
+			on: vi.fn((event: string, handler: (event: BeforeAgentStartEvent, ctx: ExtensionContext) => unknown) => {
+				handlers.set(event, handler);
+			}),
+		};
+		registerCursorAgentsContextDedup(pi);
+
+		const prompt = buildPiSystemPromptWithContextFiles([PROJECT_FILE]);
+		const hookResult = await handlers.get("before_agent_start")?.(
+			{
+				type: "before_agent_start",
+				prompt: "hello",
+				systemPrompt: prompt,
+				systemPromptOptions: { contextFiles: [PROJECT_FILE] },
+			},
+			{ model: { provider: "cursor", id: "composer-2.5" } } as ExtensionContext,
+		);
+
+		expect(hookResult?.systemPrompt).toBeTypeOf("string");
+		expect(hookResult?.systemPrompt).not.toContain("Project guidance");
+
+		const ctx: Context = {
+			systemPrompt: hookResult?.systemPrompt ?? prompt,
+			messages: [],
+		};
+		const result = buildCursorPrompt(ctx);
+		expect(result.text).not.toContain("Project guidance");
+		expect(result.text).not.toContain("<project_context>");
 	});
 });

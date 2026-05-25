@@ -79,7 +79,7 @@ const GENERIC_CURSOR_SDK_ERROR_MESSAGE =
 	"Cursor SDK request failed. The API key may be missing, invalid, or unauthorized. Run /login -> Use an API key -> Cursor, verify CURSOR_API_KEY, or pass --api-key, then retry.";
 const AUTH_CURSOR_SDK_ERROR_MESSAGE =
 	"Cursor SDK request failed because the API key may be invalid or unauthorized. Run /login -> Use an API key -> Cursor, verify CURSOR_API_KEY, or pass --api-key, then retry.";
-import { resolveCursorSettingSources } from "./cursor-setting-sources.js";
+import { getEffectiveCursorSettingSources } from "./cursor-setting-sources.js";
 import { scrubSensitiveText } from "./cursor-sensitive-text.js";
 import { hasUsableText } from "./cursor-record-utils.js";
 
@@ -161,7 +161,7 @@ export function streamCursor(
 			const cwd = getCursorSessionCwd();
 			const fastEnabled = getEffectiveFastForModelId(model.id);
 			const selection = buildCursorModelSelection(model.id, options?.reasoning ?? "off", fastEnabled);
-			const settingSources = resolveCursorSettingSources(process.env.PI_CURSOR_SETTING_SOURCES);
+			const settingSources = getEffectiveCursorSettingSources();
 
 			installCursorMcpToolTimeoutOverride();
 			restoreCursorSdkOutputFilter = installCursorSdkOutputFilter();

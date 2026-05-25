@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Suppress duplicate pi `AGENTS.md` injection on Cursor models only when effective Cursor `settingSources` load the overlapping `user` / `project` rule layers. Uses exact `contextFiles` block removal via `before_agent_start`, honors `-nc` and `PI_CURSOR_SETTING_SOURCES=none`, restores full pi context when switching to non-Cursor models, and supports `PI_CURSOR_PRESERVE_PI_AGENTS_MD=1` opt-out.
+- Suppress duplicate pi `AGENTS.md` injection on Cursor models only when effective Cursor `settingSources` load the overlapping `user` / `project` rule layers. Uses exact `contextFiles` block removal exclusively via the `before_agent_start` hook (not in `buildCursorPrompt` sanitization), honors `-nc` and `PI_CURSOR_SETTING_SOURCES=none`, restores full pi context when switching to non-Cursor models, and supports `PI_CURSOR_PRESERVE_PI_AGENTS_MD=1` opt-out.
 
 ## 0.1.18 - 2026-05-23
 

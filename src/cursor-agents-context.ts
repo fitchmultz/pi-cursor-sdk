@@ -20,8 +20,13 @@ export const CURSOR_PRESERVE_PI_AGENTS_MD_ENV = "PI_CURSOR_PRESERVE_PI_AGENTS_MD
 export const PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX = '<project_instructions path="';
 const PI_PROJECT_INSTRUCTIONS_CLOSE = "</project_instructions>";
 
+// Matches pi `buildSystemPrompt()` English `<project_context>` wrapper; tests use real buildSystemPrompt() fixtures.
 const PROJECT_CONTEXT_WRAPPER_PATTERN =
 	/\n*<project_context>\n*\n*Project-specific instructions and guidelines:\n*\n*<\/project_context>\n*/;
+
+function normalizeContextPath(filePath: string): string {
+	return filePath.replace(/\\/g, "/");
+}
 
 export type PiAgentsContextFile = {
 	path: string;
@@ -38,18 +43,17 @@ export type PiAgentsContextOverlap = "none" | "cursor-user-agents" | "cursor-pro
 const CURSOR_OVERLAPPING_CONTEXT_BASE_NAMES = new Set(["agents.md", "claude.md"]);
 
 export function getAgentsContextFileBaseName(filePath: string): string {
-	const normalized = filePath.replace(/\\/g, "/");
+	const normalized = normalizeContextPath(filePath);
 	return normalized.slice(normalized.lastIndexOf("/") + 1).toLowerCase();
 }
 
 export function isPiAgentDirContextPath(filePath: string): boolean {
-	return /\/\.pi\/agent\//i.test(filePath.replace(/\\/g, "/"));
+	return /\/\.pi\/agent\//i.test(normalizeContextPath(filePath));
 }
 
 /** `~/.pi/agent/AGENTS.md` — overlaps Cursor `user` setting source (global agent instructions). */
 export function isPiAgentDirAgentsMdPath(filePath: string): boolean {
-	const normalized = filePath.replace(/\\/g, "/");
-	return /\/\.pi\/agent\/agents\.md$/i.test(normalized);
+	return /\/\.pi\/agent\/agents\.md$/i.test(normalizeContextPath(filePath));
 }
 
 /**

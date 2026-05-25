@@ -16,32 +16,68 @@ import type { SettingSource } from "@cursor/sdk";
 
 export const CURSOR_PRESERVE_PI_AGENTS_MD_ENV = "PI_CURSOR_PRESERVE_PI_AGENTS_MD";
 
+/** Opening tag prefix pi `buildSystemPrompt()` uses for each context file (path attribute only). */
+export const PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX = '<project_instructions path="';
+const PI_PROJECT_INSTRUCTIONS_CLOSE = "</project_instructions>";
+
+const PROJECT_CONTEXT_WRAPPER_PATTERN =
+	/\n*<project_context>\n*\n*Project-specific instructions and guidelines:\n*\n*<\/project_context>\n*/;
+
 export type PiAgentsContextFile = {
 	path: string;
 	content: string;
 };
 
-const PROJECT_CONTEXT_WRAPPER_PATTERN =
-	/\n*<project_context>\n*\n*Project-specific instructions and guidelines:\n*\n*<\/project_context>\n*/;
+/**
+ * Overlap classes for pi context files that Cursor also loads via `settingSources`.
+ * @see https://cursor.com/docs/rules — Cursor reads project `CLAUDE.md` like `AGENTS.md`.
+ */
+export type PiAgentsContextOverlap = "none" | "cursor-user-agents" | "cursor-project-rules";
 
-/** Matches pi `buildSystemPrompt()` project-instruction blocks. */
-export function buildProjectInstructionsBlock(filePath: string, content: string): string {
-	return `<project_instructions path="${filePath}">\n${content}\n</project_instructions>\n\n`;
+/** Pi context filenames that can overlap Cursor project/user ambient rules. */
+const CURSOR_OVERLAPPING_CONTEXT_BASE_NAMES = new Set(["agents.md", "claude.md"]);
+
+export function getAgentsContextFileBaseName(filePath: string): string {
+	const normalized = filePath.replace(/\\/g, "/");
+	return normalized.slice(normalized.lastIndexOf("/") + 1).toLowerCase();
 }
 
-export function isPiGlobalAgentsContextFile(filePath: string): boolean {
+export function isPiAgentDirContextPath(filePath: string): boolean {
+	return /\/\.pi\/agent\//i.test(filePath.replace(/\\/g, "/"));
+}
+
+/** `~/.pi/agent/AGENTS.md` — overlaps Cursor `user` setting source (global agent instructions). */
+export function isPiAgentDirAgentsMdPath(filePath: string): boolean {
 	const normalized = filePath.replace(/\\/g, "/");
-	return /\/\.pi\/agent\/(AGENTS\.md|AGENTS\.MD|CLAUDE\.md|CLAUDE\.MD)$/i.test(normalized);
+	return /\/\.pi\/agent\/agents\.md$/i.test(normalized);
+}
+
+/**
+ * Classify whether a pi-loaded context file overlaps Cursor ambient rules.
+ * Project/repo `AGENTS.md` and `CLAUDE.md` overlap Cursor `project` sources.
+ * Only `~/.pi/agent/AGENTS.md` overlaps Cursor `user`; `~/.pi/agent/CLAUDE.md` is kept
+ * because Cursor user rules use `~/.claude/CLAUDE.md`, not pi's agent dir path.
+ */
+export function classifyContextFileOverlap(filePath: string): PiAgentsContextOverlap {
+	const base = getAgentsContextFileBaseName(filePath);
+	if (!CURSOR_OVERLAPPING_CONTEXT_BASE_NAMES.has(base)) return "none";
+	if (base === "agents.md" && isPiAgentDirAgentsMdPath(filePath)) return "cursor-user-agents";
+	if (!isPiAgentDirContextPath(filePath)) return "cursor-project-rules";
+	return "none";
 }
 
 export function shouldRemovePiAgentsContextFile(
 	file: PiAgentsContextFile,
 	settingSources: SettingSource[] | undefined,
 ): boolean {
-	if (isPiGlobalAgentsContextFile(file.path)) {
-		return cursorSettingSourcesLoadUserAgentsRules(settingSources);
+	switch (classifyContextFileOverlap(file.path)) {
+		case "cursor-user-agents":
+			return cursorSettingSourcesLoadUserAgentsRules(settingSources);
+		case "cursor-project-rules":
+			return cursorSettingSourcesLoadProjectAgentsRules(settingSources);
+		default:
+			return false;
 	}
-	return cursorSettingSourcesLoadProjectAgentsRules(settingSources);
 }
 
 export function shouldSuppressPiAgentsContext(
@@ -55,14 +91,26 @@ export function shouldSuppressPiAgentsContext(
 	return contextFiles.some((file) => shouldRemovePiAgentsContextFile(file, settingSources));
 }
 
+/** Remove one pi `<project_instructions path="...">` block by path (content-agnostic). */
+export function removePiProjectInstructionsBlockByPath(systemPrompt: string, filePath: string): string {
+	const openTag = `${PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX}${filePath}">`;
+	const start = systemPrompt.indexOf(openTag);
+	if (start < 0) return systemPrompt;
+	const closeStart = systemPrompt.indexOf(PI_PROJECT_INSTRUCTIONS_CLOSE, start);
+	if (closeStart < 0) return systemPrompt;
+	let end = closeStart + PI_PROJECT_INSTRUCTIONS_CLOSE.length;
+	while (end < systemPrompt.length && systemPrompt[end] === "\n") end += 1;
+	return systemPrompt.slice(0, start) + systemPrompt.slice(end);
+}
+
 function cleanupProjectContextWrapper(systemPrompt: string): string {
-	if (systemPrompt.includes("<project_instructions")) {
+	if (systemPrompt.includes(PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX)) {
 		return systemPrompt.replace(/\n{3,}/g, "\n\n").trim();
 	}
 	return systemPrompt.replace(PROJECT_CONTEXT_WRAPPER_PATTERN, "\n\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-/** Remove only pi-generated instruction blocks listed in `contextFiles` that Cursor setting sources replace. */
+/** Remove pi context blocks that overlap Cursor setting sources. */
 export function removePiAgentsContextFromSystemPrompt(
 	systemPrompt: string,
 	contextFiles: readonly PiAgentsContextFile[],
@@ -72,9 +120,9 @@ export function removePiAgentsContextFromSystemPrompt(
 	let removedAny = false;
 	for (const file of contextFiles) {
 		if (!shouldRemovePiAgentsContextFile(file, settingSources)) continue;
-		const block = buildProjectInstructionsBlock(file.path, file.content);
-		if (!result.includes(block)) continue;
-		result = result.replace(block, "");
+		const next = removePiProjectInstructionsBlockByPath(result, file.path);
+		if (next === result) continue;
+		result = next;
 		removedAny = true;
 	}
 	if (!removedAny) return systemPrompt;

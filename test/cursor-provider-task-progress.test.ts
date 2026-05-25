@@ -14,6 +14,8 @@ import {
 } from "./helpers/cursor-provider-harness.js";
 import { streamCursor } from "../src/cursor-provider.js";
 
+const delayBeforeToolCompletion = () => new Promise((resolve) => setTimeout(resolve, 120));
+
 describe("streamCursor Cursor task progress", () => {
 	beforeEach(resetCursorProviderTestState);
 
@@ -37,6 +39,7 @@ describe("streamCursor Cursor task progress", () => {
 					callId: "task-1",
 				},
 			});
+			await delayBeforeToolCompletion();
 			opts.onDelta({
 				update: {
 					type: "tool-call-completed",
@@ -165,6 +168,7 @@ describe("streamCursor Cursor task progress", () => {
 					modelCallId: "model-1",
 				},
 			});
+			await delayBeforeToolCompletion();
 			opts.onDelta({
 				update: {
 					type: "tool-call-completed",
@@ -211,6 +215,7 @@ describe("streamCursor Cursor task progress", () => {
 					callId: "task-1",
 				},
 			});
+			await delayBeforeToolCompletion();
 			opts.onDelta({
 				update: {
 					type: "tool-call-completed",

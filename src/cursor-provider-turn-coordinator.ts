@@ -14,6 +14,11 @@ import {
 	type CursorSdkEventDebugRecorder,
 } from "./cursor-sdk-event-debug.js";
 import { getString, getToolArgs, getToolName, normalizeToolName } from "./cursor-transcript-utils.js";
+import {
+	CURSOR_TOOL_LIFECYCLE_DEFER_MS,
+	formatCursorToolLifecycleProgressText,
+	isCursorToolLifecycleEligible,
+} from "./cursor-tool-lifecycle.js";
 
 function formatCursorToolName(toolCall: unknown): string {
 	return truncateCursorDisplayLine(getToolName(toolCall), 80) || "unknown";
@@ -32,17 +37,6 @@ interface CursorShellOutputDeltas {
 function isCursorShellToolCall(toolCall: unknown): boolean {
 	const normalizedName = getToolName(toolCall).replace(/\s+/g, " ").trim().toLowerCase();
 	return normalizedName === "shell" || normalizedName === "run_terminal_cmd" || normalizedName === "terminal" || normalizedName === "bash";
-}
-
-function isCursorTaskToolCall(toolCall: unknown): boolean {
-	return getToolName(toolCall).replace(/\s+/g, " ").trim().toLowerCase() === "task";
-}
-
-function extractCursorTaskProgressLabel(toolCall: unknown, apiKey?: string): string | undefined {
-	if (!isCursorTaskToolCall(toolCall)) return undefined;
-	const description = getString(getToolArgs(toolCall), "description");
-	if (!description?.trim()) return undefined;
-	return truncateCursorDisplayLine(scrubSensitiveText(description, apiKey));
 }
 
 function getCursorShellOutputDelta(update: InteractionUpdate): CursorShellOutputDelta | undefined {
@@ -134,7 +128,8 @@ export class CursorSdkTurnCoordinator {
 	private readonly completedToolIdentities = new Set<string>();
 	private readonly completedStartedToolFingerprints = new Set<string>();
 	private readonly completedFallbackToolFingerprints = new Set<string>();
-	private readonly emittedTaskProgressCallIds = new Set<string>();
+	private readonly emittedLifecycleCallIds = new Set<string>();
+	private readonly lifecycleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 	constructor(options: CursorSdkTurnCoordinatorOptions) {
 		this.stream = options.stream;
@@ -171,7 +166,9 @@ export class CursorSdkTurnCoordinator {
 		this.activeShellCallIds.clear();
 		this.ambiguousShellOutputCallIds.clear();
 		this.shellOutputDeltasByCallId.clear();
-		this.emittedTaskProgressCallIds.clear();
+		this.emittedLifecycleCallIds.clear();
+		for (const timer of this.lifecycleTimers.values()) clearTimeout(timer);
+		this.lifecycleTimers.clear();
 	}
 
 	closeTraceBlock(): void {
@@ -209,14 +206,14 @@ export class CursorSdkTurnCoordinator {
 			return;
 		}
 		if (update.type === "partial-tool-call") {
-			this.maybeEmitCursorTaskProgress(update.callId, update.toolCall);
+			this.maybeScheduleCursorToolLifecycle(update.callId, update.toolCall);
 			return;
 		}
 		if (update.type === "tool-call-started") {
 			if (this.liveRun?.bridgeRun?.isBridgeMcpToolCall(update.toolCall)) {
 				if (typeof update.callId === "string") this.bridgeStartedToolCallIds.add(update.callId);
 			} else {
-				this.maybeEmitCursorTaskProgress(update.callId, update.toolCall);
+				this.maybeScheduleCursorToolLifecycle(update.callId, update.toolCall);
 				this.startedToolCalls.set(update.callId, update.toolCall);
 				if (isCursorShellToolCall(update.toolCall)) this.activeShellCallIds.add(update.callId);
 			}
@@ -458,18 +455,39 @@ export class CursorSdkTurnCoordinator {
 		this.contentEmitter.appendThinkingBlock(traceText);
 	}
 
-	private maybeEmitCursorTaskProgress(callId: unknown, toolCall: unknown): void {
-		if (typeof callId !== "string" || this.emittedTaskProgressCallIds.has(callId)) return;
+	private maybeScheduleCursorToolLifecycle(callId: unknown, toolCall: unknown): void {
+		if (typeof callId !== "string" || this.emittedLifecycleCallIds.has(callId)) return;
 		if (this.liveRun?.bridgeRun?.isBridgeMcpToolCall(toolCall)) return;
-		const label = extractCursorTaskProgressLabel(toolCall, this.resolvedApiKey);
-		if (!label) return;
-		this.emittedTaskProgressCallIds.add(callId);
-		this.emitCursorTaskProgress(label);
+		if (!isCursorToolLifecycleEligible(toolCall)) return;
+
+		this.cancelCursorToolLifecycleTimer(callId);
+		const timer = setTimeout(() => {
+			this.lifecycleTimers.delete(callId);
+			if (!this.startedToolCalls.has(callId)) return;
+			if (this.emittedLifecycleCallIds.has(callId)) return;
+			this.emitCursorToolLifecycle(callId, toolCall);
+		}, CURSOR_TOOL_LIFECYCLE_DEFER_MS);
+		timer.unref?.();
+		this.lifecycleTimers.set(callId, timer);
 	}
 
-	private emitCursorTaskProgress(label: string): void {
-		const progressText = `Cursor task: ${label}\n`;
-		this.debugRecorder?.recordCoordinatorEvent("task_progress", { label, progressText, liveRun: this.liveRun !== undefined });
+	private cancelCursorToolLifecycleTimer(callId: string): void {
+		const timer = this.lifecycleTimers.get(callId);
+		if (!timer) return;
+		clearTimeout(timer);
+		this.lifecycleTimers.delete(callId);
+	}
+
+	private emitCursorToolLifecycle(callId: string, toolCall: unknown): void {
+		const progressText = formatCursorToolLifecycleProgressText(toolCall, this.resolvedApiKey);
+		if (!progressText) return;
+		this.emittedLifecycleCallIds.add(callId);
+		this.debugRecorder?.recordCoordinatorEvent("tool_lifecycle", {
+			callId,
+			toolName: normalizeToolName(getToolName(toolCall)),
+			progressText,
+			liveRun: this.liveRun !== undefined,
+		});
 		if (this.liveRun) {
 			cursorLiveRuns.queueEvent(this.liveRun, { type: "thinking-delta", text: progressText });
 			return;
@@ -490,6 +508,7 @@ export class CursorSdkTurnCoordinator {
 	}
 
 	private clearStartedToolCall(callId: string): void {
+		this.cancelCursorToolLifecycleTimer(callId);
 		this.startedToolCalls.delete(callId);
 		this.bridgeStartedToolCallIds.delete(callId);
 		this.activeShellCallIds.delete(callId);

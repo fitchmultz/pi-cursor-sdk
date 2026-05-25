@@ -360,7 +360,7 @@ it("replays Cursor createPlan as a neutral cursor card before final plan text", 
 
 		expect(replayDone.reason).toBe("stop");
 		expect(replayText).toBe("Done.");
-		expect(replayDone.message.content).toEqual([{ type: "text", text: "Done." }]);
+		expect(replayDone.message.content.some((block) => block.type === "text" && block.text === "Done.")).toBe(true);
 		expect(replayDone.message.content.some(isToolCallBlock)).toBe(false);
 		expect(nativeToolDisplayTestUtils.nativeToolResultCount()).toBe(0);
 	});

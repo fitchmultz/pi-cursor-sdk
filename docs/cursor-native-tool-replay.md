@@ -140,6 +140,18 @@ If a Cursor read completion reports no content, the extension may include a boun
 
 Other unsupported Cursor SDK tools may still be described through a bounded scrubbed activity transcript when the SDK reports completed tool-call data. Started Cursor SDK tool calls that never receive a completion event are discarded without a synthetic replay error; missing completion is not itself treated as a Cursor tool failure. Explicit failures remain visible when Cursor reports an error through a completed tool call or step result. Some Cursor-internal workflow actions (including web search/fetch that never surfaces as replayable SDK tool completions) may only appear in Cursor's own thinking stream, assistant text, or not be reported as replayable SDK tool data at all.
 
+## Low-noise tool lifecycle visibility
+
+Most Cursor tool visibility is completion-based: the completed replay card (or bounded transcript trace) is the source of truth for recorded results. For long-running or externally meaningful tools, the provider may also surface one low-noise in-progress line while Cursor is still waiting on the tool.
+
+Lifecycle rules:
+
+- Eligible tools include `task`, `shell`, `mcp`, `generateImage`, `recordScreen`, `semSearch`, web search/fetch activity, and plan/todo activity. Fast local tools such as `read`, `grep`, and `glob` do not get lifecycle lines in normal cases.
+- Lifecycle text is emitted as a single bounded, scrubbed thinking line such as `Cursor MCP: external_search` or `Cursor shell: npm test`. It is not a separate permanent replay card and does not rerun tools.
+- A short defer window coalesces fast start+complete pairs: if a tool completes before the defer elapses, only the completed replay card/trace is shown.
+- pi bridge MCP calls (`pi__*`) are excluded because pi already shows the real pi tool execution path.
+- Implementation: `src/cursor-tool-lifecycle.ts` (eligibility/labels) and `src/cursor-provider-turn-coordinator.ts` (defer, emit, bridge exclusion).
+
 ## Ordering and non-interactive output
 
 As Cursor SDK tool completions arrive, the extension mirrors native Codex ordering by ending a tool-use turn, letting pi render the recorded tool results, then continuing with live post-tool Cursor thinking/text, later Cursor tool batches, or Cursor's final answer as the next assistant turn. For plan-mode runs, neutral Cursor plan/todo cards can therefore appear before the final Cursor plan text.

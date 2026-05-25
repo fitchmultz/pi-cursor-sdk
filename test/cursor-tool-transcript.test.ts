@@ -809,6 +809,8 @@ describe("formatCursorToolTranscript", () => {
 				{ cwd: dir },
 			);
 
+			expect(display.args).toMatchObject({ localReadPreview: true });
+			expect(display.result.details).toMatchObject({ localReadPreview: true });
 			expect(display.result.content[0].text).toContain(
 				"[local file preview at transcript time; Cursor read result content was unavailable]",
 			);

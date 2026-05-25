@@ -4,6 +4,7 @@ import { getLanguageFromPath, highlightCode, type ToolDefinition } from "@earend
 import { Image, Text, type Component } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { resolveCursorEditDiff } from "./cursor-edit-diff.js";
+import { LOCAL_READ_PREVIEW_NOTICE, isLocalReadPreviewContent } from "./cursor-transcript-utils.js";
 import {
 	CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
 	getCursorReplayDisplayLabel,
@@ -443,6 +444,27 @@ export function renderCursorReplayResult(
 	if (details?.cursorToolName === "generateImage") return renderCursorGenerateImageResult(result, options, theme, context, isError);
 	if (details?.title) return renderExpandableCursorReplayResult(details.title, result, options, theme, context, isError);
 	return new Text(text || theme.fg("success", "Cursor tool result replayed"), 0, 0);
+}
+
+export function renderNativeLookingCursorReadReplayResult(
+	result: Parameters<CursorReplayRenderResult>[0],
+	options: Parameters<CursorReplayRenderResult>[1],
+	theme: Parameters<CursorReplayRenderResult>[2],
+	context: Parameters<CursorReplayRenderResult>[3],
+	renderBase: () => Component | undefined,
+): Component {
+	const base = renderBase?.() ?? new Text("", 0, 0);
+	if (!(base instanceof Text)) return base;
+	const readArgs = context.args as Record<string, unknown> | undefined;
+	const replayDetails = result.details as Record<string, unknown> | undefined;
+	const usesLocalPreview =
+		readArgs?.localReadPreview === true ||
+		replayDetails?.localReadPreview === true ||
+		isLocalReadPreviewContent(firstContentText(result));
+	if (usesLocalPreview && !options.expanded && !context.isError) {
+		base.setText(`\n${theme.fg("warning", LOCAL_READ_PREVIEW_NOTICE)}`);
+	}
+	return base;
 }
 
 export function createCursorReplayOnlyToolDefinition(toolName: CursorReplayToolName): ToolDefinition<typeof cursorReplayToolSchema, unknown> {

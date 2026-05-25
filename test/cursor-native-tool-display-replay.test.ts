@@ -4,8 +4,11 @@ import {
 	CURSOR_REPLAY_PREVIEW_MAX_LINE_CHARS,
 	formatCursorReplayDiff,
 	formatCursorReplayFilePreview,
+	renderNativeLookingCursorReadReplayResult,
 	type CursorReplayRenderTheme,
 } from "../src/cursor-native-tool-display-replay.js";
+import { LOCAL_READ_PREVIEW_NOTICE } from "../src/cursor-transcript-utils.js";
+import { Text } from "@earendil-works/pi-tui";
 
 const theme = {
 	fg: (_name: string, value: string) => value,
@@ -38,5 +41,24 @@ describe("cursor native replay rendering", () => {
 
 		expect(rendered).toContain("more diff lines hidden");
 		expect(rendered).not.toContain("full diff");
+	});
+
+	it("shows local read preview disclaimer in collapsed native read replay results", () => {
+		const result = {
+			content: [{ type: "text" as const, text: `${LOCAL_READ_PREVIEW_NOTICE}\n# Local preview\n` }],
+			details: { localReadPreview: true },
+		};
+		const rendered = renderNativeLookingCursorReadReplayResult(
+			result,
+			{ expanded: false, isPartial: false },
+			theme,
+			{ isError: false, args: { path: "README.md", localReadPreview: true } },
+			() => new Text("", 0, 0),
+		)
+			.render(120)
+			.join("\n");
+
+		expect(rendered).toContain(LOCAL_READ_PREVIEW_NOTICE);
+		expect(rendered).not.toContain("# Local preview");
 	});
 });

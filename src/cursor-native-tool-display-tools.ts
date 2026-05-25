@@ -21,6 +21,7 @@ import {
 	createCursorReplayOnlyToolDefinition,
 	renderCursorReplayResult,
 	renderNativeLookingCursorFileMutationCall,
+	renderNativeLookingCursorReadReplayResult,
 } from "./cursor-native-tool-display-replay.js";
 import {
 	consumeCursorNativeToolDisplay,
@@ -65,6 +66,16 @@ export function wrapNativeCursorTool<TParams extends TSchema, TDetails, TState>(
 			return getCurrentDefinition().execute(toolCallId, params, signal, onUpdate, ctx);
 		},
 		renderCall(args, theme, context) {
+			if (definition.name === "read" && isCursorReplayToolCallId(context.toolCallId)) {
+				const currentRenderCall = getCurrentDefinition().renderCall;
+				const rendered = currentRenderCall ? currentRenderCall(args, theme, context) : new Text("", 0, 0);
+				const text = rendered instanceof Text ? rendered : new Text("", 0, 0);
+				if ((args as Record<string, unknown>).localReadPreview === true && !context.expanded) {
+					const current = text.render(120).join("\n");
+					text.setText(`${current}${theme.fg("muted", " · local file preview")}`);
+				}
+				return text;
+			}
 			if (isCursorFileMutationToolName(definition.name) && isCursorReplayToolCallId(context.toolCallId)) {
 				return renderNativeLookingCursorFileMutationCall(definition.name, args as Record<string, unknown>, theme, context.isPartial);
 			}
@@ -75,6 +86,11 @@ export function wrapNativeCursorTool<TParams extends TSchema, TDetails, TState>(
 			const details = asCursorReplayToolDetails(result.details);
 			if (isCursorFileMutationToolName(definition.name) && details?.cursorToolName === definition.name) {
 				return renderCursorReplayResult(result, options, theme, context, context.isError);
+			}
+			if (definition.name === "read" && isCursorReplayToolCallId(context.toolCallId)) {
+				return renderNativeLookingCursorReadReplayResult(result, options, theme, context, () =>
+					getCurrentDefinition().renderResult?.(result, options, theme, context),
+				);
 			}
 			const currentRenderResult = getCurrentDefinition().renderResult;
 			return currentRenderResult ? currentRenderResult(result, options, theme, context) : new Text("", 0, 0);

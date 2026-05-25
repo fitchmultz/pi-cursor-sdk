@@ -61,6 +61,7 @@ import {
 	summarizeSemSearch,
 	summarizeTask,
 	summarizeTodos,
+	usesLocalReadPreview,
 } from "./cursor-transcript-tool-formatters.js";
 
 export interface ToolDisplayContext {
@@ -242,10 +243,14 @@ const TOOL_DISPLAY_SPECS: Record<string, ToolDisplaySpec> = {
 		formatTranscript: ({ args, result, options }) => formatRead(args, result, options),
 		buildPiToolDisplay: ({ args, result, options }) => {
 			const isError = result.status === "error";
+			const usesLocalPreview = !isError && usesLocalReadPreview(args, result, options);
 			return {
 				toolName: "read",
-				args: buildReadDisplayArgs(args, options),
-				result: textToolResult(isError ? formatError(result.error) : formatNativeReadDisplayContent(args, result, options)),
+				args: buildReadDisplayArgs(args, options, result),
+				result: textToolResult(
+					isError ? formatError(result.error) : formatNativeReadDisplayContent(args, result, options),
+					usesLocalPreview ? { localReadPreview: true } : undefined,
+				),
 				isError,
 			};
 		},

@@ -603,6 +603,62 @@ describe("extension factory", () => {
 		});
 	});
 
+	it("labels collapsed native read replay cards when only local preview content is available", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		mockedDiscover.mockResolvedValueOnce([]);
+		const dir = mkdtempSync(join(tmpdir(), "pi-cursor-read-preview-replay-"));
+		try {
+			writeFileSync(join(dir, "README.md"), "# Local preview body\n");
+			const pi = createMockPi();
+			await extensionFactory(pi);
+			await runSessionStartHandlers(pi, { cwd: dir });
+
+			const notice = "[local file preview at transcript time; Cursor read result content was unavailable]";
+			recordCursorNativeToolDisplay({
+				id: "cursor-replay-1-1-tool-1",
+				toolName: "read",
+				args: { path: "README.md", localReadPreview: true },
+				result: {
+					content: [{ type: "text", text: `${notice}\n# Local preview body\n` }],
+					details: { localReadPreview: true },
+				},
+				isError: false,
+			});
+
+			const readTool = pi._tools.find((tool) => tool.name === "read");
+			const theme = {
+				fg: (style: string, text: string) => (style === "warning" || style === "muted" ? `<${style}>${text}</${style}>` : text),
+				bold: (text: string) => text,
+			} as never;
+			const replayContext = {
+				isError: false,
+				toolCallId: "cursor-replay-1-1-tool-1",
+				args: { path: "README.md", localReadPreview: true },
+				expanded: false,
+			} as never;
+			const options = { expanded: false, isPartial: false } as never;
+
+			const callRendered = readTool.renderCall?.({ path: "README.md", localReadPreview: true }, theme, replayContext)?.render(120).join("\n") ?? "";
+			const resultRendered =
+				readTool.renderResult?.(
+					{
+						content: [{ type: "text", text: `${notice}\n# Local preview body\n` }],
+						details: { localReadPreview: true },
+					},
+					options,
+					theme,
+					replayContext,
+				)?.render(120).join("\n") ?? "";
+
+			expect(callRendered).toContain("read README.md");
+			expect(callRendered).toContain("local file preview");
+			expect(resultRendered).toContain(notice);
+			expect(resultRendered).not.toContain("# Local preview body");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("renders Cursor generateImage replay results with a visible path and image fallback", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		mockedDiscover.mockResolvedValueOnce([]);

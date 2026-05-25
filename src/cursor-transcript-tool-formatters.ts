@@ -27,6 +27,21 @@ import {
 	type TranscriptOptions,
 } from "./cursor-transcript-utils.js";
 
+export function usesLocalReadPreview(args: Record<string, unknown>, result: NormalizedResult, options: TranscriptOptions): boolean {
+	if (result.status === "error") return false;
+	const value = asRecord(result.value);
+	const resultContent = getString(value, "content");
+	if (resultContent && resultContent.length > 0) return false;
+	const rawPath = typeof args.path === "string" ? args.path : undefined;
+	if (!rawPath) return false;
+	const readOptions = {
+		...options,
+		maxChars: options.maxChars ?? DEFAULT_READ_TRANSCRIPT_CHARS,
+		maxLines: options.maxLines ?? DEFAULT_READ_TRANSCRIPT_LINES,
+	};
+	return readFilePreview(rawPath, readOptions) !== undefined;
+}
+
 function getReadContent(args: Record<string, unknown>, result: NormalizedResult, options: TranscriptOptions): string {
 	const rawPath = typeof args.path === "string" ? args.path : undefined;
 	const readOptions = {
@@ -57,9 +72,17 @@ export function formatRead(args: Record<string, unknown>, result: NormalizedResu
 	return joinSections(`read ${path}`, limitText(getReadContent(args, result, options), readOptions, totalLines));
 }
 
-export function buildReadDisplayArgs(args: Record<string, unknown>, options: TranscriptOptions): Record<string, unknown> {
+export function buildReadDisplayArgs(
+	args: Record<string, unknown>,
+	options: TranscriptOptions,
+	result?: NormalizedResult,
+): Record<string, unknown> {
 	const rawPath = typeof args.path === "string" ? args.path : undefined;
-	return rawPath ? { ...args, path: formatDisplayPath(rawPath, options.cwd) } : args;
+	const displayArgs = rawPath ? { ...args, path: formatDisplayPath(rawPath, options.cwd) } : args;
+	if (result && usesLocalReadPreview(args, result, options)) {
+		return { ...displayArgs, localReadPreview: true };
+	}
+	return displayArgs;
 }
 
 function buildPathDisplayArgs(args: Record<string, unknown>, options: TranscriptOptions): Record<string, unknown> {

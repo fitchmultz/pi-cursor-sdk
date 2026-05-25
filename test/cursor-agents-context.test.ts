@@ -1,5 +1,8 @@
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { BeforeAgentStartEvent, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { BeforeAgentStartEvent, BuildSystemPromptOptions, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Context } from "@earendil-works/pi-ai";
 import {
 	classifyContextFileOverlap,
@@ -9,8 +12,9 @@ import {
 	PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX,
 	registerCursorAgentsContextDedup,
 	removePiAgentsContextFromSystemPrompt,
-	removePiProjectInstructionsBlockByPath,
 	resolveCursorFacingSystemPrompt,
+	serializePiProjectContextSection,
+	serializePiProjectInstructionsBlock,
 	shouldRemovePiAgentsContextFile,
 	shouldSuppressPiAgentsContext,
 } from "../src/cursor-agents-context.js";
@@ -27,6 +31,25 @@ const GLOBAL_FILE = { path: GLOBAL_AGENTS_PATH, content: "Global guidance" };
 const GLOBAL_CLAUDE_FILE = { path: GLOBAL_CLAUDE_PATH, content: "Global claude guidance" };
 const PROJECT_FILE = { path: PROJECT_AGENTS_PATH, content: "Project guidance" };
 const PROJECT_CLAUDE_FILE = { path: PROJECT_CLAUDE_PATH, content: "Project claude guidance" };
+
+type PiBuildSystemPrompt = (options: BuildSystemPromptOptions) => string;
+let cachedBuildSystemPrompt: PiBuildSystemPrompt | undefined;
+
+function loadInstalledPiBuildSystemPrompt(): PiBuildSystemPrompt {
+	if (cachedBuildSystemPrompt) return cachedBuildSystemPrompt;
+	const piMain = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
+	const piPackageRoot = dirname(dirname(piMain));
+	const require = createRequire(piMain);
+	cachedBuildSystemPrompt = require(join(piPackageRoot, "dist/core/system-prompt.js")).buildSystemPrompt as PiBuildSystemPrompt;
+	return cachedBuildSystemPrompt;
+}
+
+function getProjectContextSection(systemPrompt: string): string {
+	const start = systemPrompt.indexOf("\n\n<project_context>");
+	const close = "</project_context>\n";
+	const end = systemPrompt.indexOf(close, start) + close.length;
+	return systemPrompt.slice(start, end);
+}
 
 beforeEach(() => {
 	delete process.env[CURSOR_PRESERVE_PI_AGENTS_MD_ENV];
@@ -59,7 +82,27 @@ describe("shouldRemovePiAgentsContextFile", () => {
 	});
 });
 
-describe("removePiAgentsContextFromSystemPrompt with real pi buildSystemPrompt output", () => {
+describe("pi project_context serialization helpers", () => {
+	it("serializes context blocks and sections in pi's project_context shape", () => {
+		expect(serializePiProjectInstructionsBlock(PROJECT_FILE)).toBe(
+			'<project_instructions path="/repo/AGENTS.md">\nProject guidance\n</project_instructions>\n\n',
+		);
+		expect(serializePiProjectContextSection([PROJECT_FILE])).toBe(
+			'\n\n<project_context>\n\nProject-specific instructions and guidelines:\n\n<project_instructions path="/repo/AGENTS.md">\nProject guidance\n</project_instructions>\n\n</project_context>\n',
+		);
+	});
+
+	it("matches installed pi buildSystemPrompt project_context output", () => {
+		const prompt = loadInstalledPiBuildSystemPrompt()({
+			cwd: "/repo",
+			contextFiles: [GLOBAL_FILE, PROJECT_FILE],
+			selectedTools: [],
+		});
+		expect(getProjectContextSection(prompt)).toBe(serializePiProjectContextSection([GLOBAL_FILE, PROJECT_FILE]));
+	});
+});
+
+describe("removePiAgentsContextFromSystemPrompt with pi project_context fixtures", () => {
 	it("removes AGENTS.md blocks Cursor will load under all", () => {
 		const prompt = buildPiSystemPromptWithContextFiles([GLOBAL_FILE, PROJECT_FILE]);
 		expect(prompt).toContain(`${PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX}${GLOBAL_AGENTS_PATH}">`);
@@ -100,7 +143,7 @@ describe("removePiAgentsContextFromSystemPrompt with real pi buildSystemPrompt o
 		expect(stripped).not.toContain("Project claude guidance");
 	});
 
-	it("does not break when AGENTS content contains a literal closing tag", () => {
+	it("does not break when AGENTS content contains a literal project_context close tag", () => {
 		const trickyFile = {
 			path: PROJECT_AGENTS_PATH,
 			content: "Use </project_context> only in docs, not as markup.",
@@ -110,15 +153,25 @@ describe("removePiAgentsContextFromSystemPrompt with real pi buildSystemPrompt o
 		expect(stripped).not.toContain("Use </project_context> only in docs");
 		expect(stripped).not.toContain("<project_context>");
 	});
-});
 
-describe("removePiProjectInstructionsBlockByPath", () => {
-	it("removes by path without matching serialized content", () => {
-		const prompt = buildPiSystemPromptWithContextFiles([PROJECT_FILE]);
-		const mutated = prompt.replace("Project guidance", "Changed guidance");
-		const stripped = removePiProjectInstructionsBlockByPath(mutated, PROJECT_AGENTS_PATH);
-		expect(stripped).not.toContain(PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX);
-		expect(stripped).not.toContain("Changed guidance");
+	it("does not break when AGENTS content contains a literal project_instructions close tag", () => {
+		const trickyFile = {
+			path: PROJECT_AGENTS_PATH,
+			content: "Document </project_instructions> as escaped text only.",
+		};
+		const prompt = buildPiSystemPromptWithContextFiles([trickyFile]);
+		const stripped = removePiAgentsContextFromSystemPrompt(prompt, [trickyFile], ["all"]);
+		expect(stripped).not.toContain("Document </project_instructions>");
+		expect(stripped).not.toContain("<project_context>");
+	});
+
+	it("keeps non-overlapping context files while removing AGENTS overlap", () => {
+		const customFile = { path: "/repo/CUSTOM.md", content: "Custom repo guidance stays." };
+		const prompt = buildPiSystemPromptWithContextFiles([PROJECT_FILE, customFile]);
+		const stripped = removePiAgentsContextFromSystemPrompt(prompt, [PROJECT_FILE, customFile], ["all"]);
+		expect(stripped).not.toContain("Project guidance");
+		expect(stripped).toContain("Custom repo guidance stays.");
+		expect(stripped).toContain("<project_context>");
 	});
 });
 

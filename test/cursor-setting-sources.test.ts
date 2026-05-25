@@ -53,9 +53,12 @@ describe("getEffectiveCursorSettingSources", () => {
 
 	it("reads from process env by default", () => {
 		const previous = process.env[CURSOR_SETTING_SOURCES_ENV];
-		process.env[CURSOR_SETTING_SOURCES_ENV] = "plugins";
-		expect(getEffectiveCursorSettingSources()).toEqual(["plugins"]);
-		if (previous === undefined) delete process.env[CURSOR_SETTING_SOURCES_ENV];
-		else process.env[CURSOR_SETTING_SOURCES_ENV] = previous;
+		try {
+			process.env[CURSOR_SETTING_SOURCES_ENV] = "plugins";
+			expect(getEffectiveCursorSettingSources()).toEqual(["plugins"]);
+		} finally {
+			if (previous === undefined) delete process.env[CURSOR_SETTING_SOURCES_ENV];
+			else process.env[CURSOR_SETTING_SOURCES_ENV] = previous;
+		}
 	});
 });

@@ -1,29 +1,20 @@
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import type { BuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
+import {
+	PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX,
+	serializePiProjectContextSection,
+	serializePiProjectInstructionsBlock,
+	type PiAgentsContextFile,
+} from "../../src/cursor-agents-context.js";
 
-type PiBuildSystemPrompt = (options: BuildSystemPromptOptions) => string;
+export { PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX, serializePiProjectContextSection, serializePiProjectInstructionsBlock };
 
-let cachedBuildSystemPrompt: PiBuildSystemPrompt | undefined;
-
-/** Load pi's real `buildSystemPrompt()` from installed package dist (not a public export). */
-export function loadPiBuildSystemPrompt(): PiBuildSystemPrompt {
-	if (cachedBuildSystemPrompt) return cachedBuildSystemPrompt;
-	const piMain = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
-	const piPackageRoot = dirname(dirname(piMain));
-	const require = createRequire(piMain);
-	cachedBuildSystemPrompt = require(join(piPackageRoot, "dist/core/system-prompt.js")).buildSystemPrompt as PiBuildSystemPrompt;
-	return cachedBuildSystemPrompt;
-}
-
+/** Minimal pi-like system prompt containing only the project_context subset this feature owns. */
 export function buildPiSystemPromptWithContextFiles(
-	contextFiles: Array<{ path: string; content: string }>,
+	contextFiles: PiAgentsContextFile[],
 	cwd = "/repo",
 ): string {
-	return loadPiBuildSystemPrompt()({
-		cwd,
-		contextFiles,
-		selectedTools: [],
-	});
+	let prompt =
+		"You are an expert coding assistant operating inside pi, a coding agent harness.\n\nGuidelines:\n- Be concise in your responses";
+	prompt += serializePiProjectContextSection(contextFiles);
+	prompt += `\nCurrent date: 2026-01-01\nCurrent working directory: ${cwd}`;
+	return prompt;
 }

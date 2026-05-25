@@ -19,10 +19,8 @@ export const CURSOR_PRESERVE_PI_AGENTS_MD_ENV = "PI_CURSOR_PRESERVE_PI_AGENTS_MD
 /** Opening tag prefix pi `buildSystemPrompt()` uses for each context file (path attribute only). */
 export const PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX = '<project_instructions path="';
 const PI_PROJECT_INSTRUCTIONS_CLOSE = "</project_instructions>";
-
-// Matches pi `buildSystemPrompt()` English `<project_context>` wrapper; tests use real buildSystemPrompt() fixtures.
-const PROJECT_CONTEXT_WRAPPER_PATTERN =
-	/\n*<project_context>\n*\n*Project-specific instructions and guidelines:\n*\n*<\/project_context>\n*/;
+const PI_PROJECT_CONTEXT_OPEN = "\n\n<project_context>\n\nProject-specific instructions and guidelines:\n\n";
+const PI_PROJECT_CONTEXT_CLOSE = "</project_context>\n";
 
 function normalizeContextPath(filePath: string): string {
 	return filePath.replace(/\\/g, "/");
@@ -33,10 +31,7 @@ export type PiAgentsContextFile = {
 	content: string;
 };
 
-/**
- * Overlap classes for pi context files that Cursor also loads via `settingSources`.
- * @see https://cursor.com/docs/rules — Cursor reads project `CLAUDE.md` like `AGENTS.md`.
- */
+/** Overlap classes for pi context files that Cursor also loads via `settingSources`. */
 export type PiAgentsContextOverlap = "none" | "cursor-user-agents" | "cursor-project-rules";
 
 /** Pi context filenames that can overlap Cursor project/user ambient rules. */
@@ -95,23 +90,15 @@ export function shouldSuppressPiAgentsContext(
 	return contextFiles.some((file) => shouldRemovePiAgentsContextFile(file, settingSources));
 }
 
-/** Remove one pi `<project_instructions path="...">` block by path (content-agnostic). */
-export function removePiProjectInstructionsBlockByPath(systemPrompt: string, filePath: string): string {
-	const openTag = `${PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX}${filePath}">`;
-	const start = systemPrompt.indexOf(openTag);
-	if (start < 0) return systemPrompt;
-	const closeStart = systemPrompt.indexOf(PI_PROJECT_INSTRUCTIONS_CLOSE, start);
-	if (closeStart < 0) return systemPrompt;
-	let end = closeStart + PI_PROJECT_INSTRUCTIONS_CLOSE.length;
-	while (end < systemPrompt.length && systemPrompt[end] === "\n") end += 1;
-	return systemPrompt.slice(0, start) + systemPrompt.slice(end);
+/** Exact pi `buildSystemPrompt()` serialization for one context file block (including trailing blank line). */
+export function serializePiProjectInstructionsBlock(file: PiAgentsContextFile): string {
+	return `${PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX}${file.path}">\n${file.content}\n${PI_PROJECT_INSTRUCTIONS_CLOSE}\n\n`;
 }
 
-function cleanupProjectContextWrapper(systemPrompt: string): string {
-	if (systemPrompt.includes(PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX)) {
-		return systemPrompt.replace(/\n{3,}/g, "\n\n").trim();
-	}
-	return systemPrompt.replace(PROJECT_CONTEXT_WRAPPER_PATTERN, "\n\n").replace(/\n{3,}/g, "\n\n").trim();
+/** Exact pi `buildSystemPrompt()` serialization for the full project context section. */
+export function serializePiProjectContextSection(contextFiles: readonly PiAgentsContextFile[]): string {
+	if (contextFiles.length === 0) return "";
+	return `${PI_PROJECT_CONTEXT_OPEN}${contextFiles.map(serializePiProjectInstructionsBlock).join("")}${PI_PROJECT_CONTEXT_CLOSE}`;
 }
 
 /** Remove pi context blocks that overlap Cursor setting sources. */
@@ -120,17 +107,23 @@ export function removePiAgentsContextFromSystemPrompt(
 	contextFiles: readonly PiAgentsContextFile[],
 	settingSources: SettingSource[] | undefined,
 ): string {
-	let result = systemPrompt;
+	const retainedContextFiles: PiAgentsContextFile[] = [];
 	let removedAny = false;
 	for (const file of contextFiles) {
-		if (!shouldRemovePiAgentsContextFile(file, settingSources)) continue;
-		const next = removePiProjectInstructionsBlockByPath(result, file.path);
-		if (next === result) continue;
-		result = next;
-		removedAny = true;
+		if (shouldRemovePiAgentsContextFile(file, settingSources)) {
+			removedAny = true;
+			continue;
+		}
+		retainedContextFiles.push(file);
 	}
 	if (!removedAny) return systemPrompt;
-	return cleanupProjectContextWrapper(result);
+
+	const originalSection = serializePiProjectContextSection(contextFiles);
+	const start = systemPrompt.indexOf(originalSection);
+	if (start < 0) return systemPrompt;
+
+	const replacementSection = serializePiProjectContextSection(retainedContextFiles);
+	return systemPrompt.slice(0, start) + replacementSection + systemPrompt.slice(start + originalSection.length);
 }
 
 export function resolveCursorFacingSystemPrompt(

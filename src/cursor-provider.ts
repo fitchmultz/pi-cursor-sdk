@@ -139,6 +139,7 @@ export function streamCursor(
 		};
 
 		try {
+			let turnCoordinatorForCleanup: CursorSdkTurnCoordinator | undefined;
 			try {
 			const throwIfAborted = (): void => {
 				if (options?.signal?.aborted) throw new CursorLiveRunAbortError();
@@ -263,6 +264,7 @@ export function streamCursor(
 				textDeltas,
 				debugRecorder: sdkEventDebug,
 			});
+			turnCoordinatorForCleanup = turnCoordinator;
 
 			// Handle abort signal
 			let run: Awaited<ReturnType<SDKAgent["send"]>> | null = null;
@@ -361,6 +363,7 @@ export function streamCursor(
 						sdkEventDebug?.recordError("run_wait", error);
 						await sdkEventDebug?.captureRunArtifacts(run);
 						if (liveRun.disposed) return;
+						turnCoordinatorForCleanup?.discardIncompleteStartedToolCalls();
 						cursorLiveRuns.markError(liveRun, sanitizeCursorProviderError(error, resolvedApiKey ?? options?.apiKey));
 					});
 
@@ -430,6 +433,7 @@ export function streamCursor(
 				sdkEventDebug?.recordError("provider_stream", error);
 				if (activeLiveRun && !activeLiveRun.disposed) await cursorLiveRuns.release(activeLiveRun);
 				else await abandonSessionCursorAgent(sessionAgentScopeKey);
+				turnCoordinatorForCleanup?.discardIncompleteStartedToolCalls();
 				if (error instanceof CursorLiveRunAbortError) {
 					pushSanitizedStreamError(error, "aborted");
 				} else {

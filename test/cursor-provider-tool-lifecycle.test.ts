@@ -8,6 +8,7 @@ import {
 	collectEvents,
 	collectThinkingDeltas,
 	getDoneEvent,
+	getErrorEvent,
 	isToolCallBlock,
 	registerBridgeForProviderTest,
 	registerNativeToolDisplayForTest,
@@ -236,5 +237,83 @@ describe("streamCursor Cursor tool lifecycle", () => {
 
 		expect(trace).not.toContain("Cursor MCP:");
 		expect(trace).not.toContain("bridge semantic reindex should stay silent");
+	});
+
+	it("does not append deferred lifecycle progress after non-live run.wait rejection", async () => {
+		const waitError = new Error("run wait failed");
+		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
+			opts.onDelta({
+				update: {
+					type: "tool-call-started",
+					toolCall: { name: "shell", args: { command: "npm test" } },
+					callId: "shell-wait-fail-1",
+				},
+			});
+			return {
+				id: "run-shell-fail",
+				agentId: "agent-1",
+				status: "running",
+				wait: vi.fn().mockRejectedValue(waitError),
+				cancel: vi.fn(),
+				supports: () => true,
+				unsupportedReason: () => undefined,
+			};
+		});
+		mockedCreate.mockResolvedValue({
+			agentId: "agent-1",
+			send: mockSend,
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+
+		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		const error = getErrorEvent(events);
+		expect(collectThinkingDeltas(events)).not.toMatch(/Cursor shell:/);
+		const contentSnapshot = [...error.error.content];
+		expect(contentSnapshot).toEqual([]);
+
+		await delayBeyondLifecycleDefer();
+
+		expect(error.error.content).toEqual(contentSnapshot);
+		expect(collectThinkingDeltas(events)).not.toMatch(/Cursor shell:/);
+	});
+
+	it("does not append deferred lifecycle progress after live background run.wait rejection", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		await registerNativeToolDisplayForTest([]);
+		const waitError = new Error("run wait failed");
+		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
+			opts.onDelta({
+				update: {
+					type: "tool-call-started",
+					toolCall: { name: "shell", args: { command: "npm test" } },
+					callId: "shell-live-wait-fail-1",
+				},
+			});
+			return {
+				id: "run-shell-live-fail",
+				agentId: "agent-1",
+				status: "running",
+				wait: vi.fn().mockRejectedValue(waitError),
+				cancel: vi.fn(),
+				supports: () => true,
+				unsupportedReason: () => undefined,
+			};
+		});
+		mockedCreate.mockResolvedValue({
+			agentId: "agent-1",
+			send: mockSend,
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+
+		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		const error = getErrorEvent(events);
+		expect(collectThinkingDeltas(events)).not.toMatch(/Cursor shell:/);
+		const contentSnapshot = [...error.error.content];
+		expect(contentSnapshot).toEqual([]);
+
+		await delayBeyondLifecycleDefer();
+
+		expect(error.error.content).toEqual(contentSnapshot);
+		expect(collectThinkingDeltas(events)).not.toMatch(/Cursor shell:/);
 	});
 });

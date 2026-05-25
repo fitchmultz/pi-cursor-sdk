@@ -329,9 +329,9 @@ export function streamCursor(
 					.wait()
 					.then(async (result) => {
 						sdkEventDebug?.recordWaitResult(result);
+						turnCoordinator.discardIncompleteStartedToolCalls();
 						await sdkEventDebug?.captureRunArtifacts(run);
 						if (liveRun.disposed) return;
-						turnCoordinator.discardIncompleteStartedToolCalls();
 						await cacheSdkContextWindow(liveRun.agent.agentId, model.id);
 						if (liveRun.disposed) return;
 						if (result.status === "finished" && !options?.signal?.aborted) {
@@ -396,8 +396,8 @@ export function streamCursor(
 
 			const result = await run.wait();
 			sdkEventDebug?.recordWaitResult(result);
-			await sdkEventDebug?.captureRunArtifacts(run);
 			turnCoordinator.discardIncompleteStartedToolCalls();
+			await sdkEventDebug?.captureRunArtifacts(run);
 			await cacheSdkContextWindow(agent.agentId, model.id);
 
 			// Close any open thinking/activity trace, then use the final run result only when

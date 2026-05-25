@@ -454,7 +454,6 @@ export function renderNativeLookingCursorReadReplayResult(
 	renderBase: () => Component | undefined,
 ): Component {
 	const base = renderBase?.() ?? new Text("", 0, 0);
-	if (!(base instanceof Text)) return base;
 	const readArgs = context.args as Record<string, unknown> | undefined;
 	const replayDetails = result.details as Record<string, unknown> | undefined;
 	const usesLocalPreview =
@@ -462,7 +461,12 @@ export function renderNativeLookingCursorReadReplayResult(
 		replayDetails?.localReadPreview === true ||
 		isLocalReadPreviewContent(firstContentText(result));
 	if (usesLocalPreview && !options.expanded && !context.isError) {
-		base.setText(`\n${theme.fg("warning", LOCAL_READ_PREVIEW_NOTICE)}`);
+		const noticeText = `\n${theme.fg("warning", LOCAL_READ_PREVIEW_NOTICE)}`;
+		if (base instanceof Text) {
+			base.setText(noticeText);
+			return base;
+		}
+		return new Text(noticeText, 0, 0);
 	}
 	return base;
 }

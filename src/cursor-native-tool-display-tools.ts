@@ -69,12 +69,16 @@ export function wrapNativeCursorTool<TParams extends TSchema, TDetails, TState>(
 			if (definition.name === "read" && isCursorReplayToolCallId(context.toolCallId)) {
 				const currentRenderCall = getCurrentDefinition().renderCall;
 				const rendered = currentRenderCall ? currentRenderCall(args, theme, context) : new Text("", 0, 0);
-				const text = rendered instanceof Text ? rendered : new Text("", 0, 0);
 				if ((args as Record<string, unknown>).localReadPreview === true && !context.expanded) {
-					const current = text.render(120).join("\n");
-					text.setText(`${current}${theme.fg("muted", " · local file preview")}`);
+					const baseText = rendered.render(120).join("\n").trimEnd();
+					const labeled = `${baseText}${theme.fg("muted", " · local file preview")}`;
+					if (rendered instanceof Text) {
+						rendered.setText(labeled);
+						return rendered;
+					}
+					return new Text(labeled, 0, 0);
 				}
-				return text;
+				return rendered;
 			}
 			if (isCursorFileMutationToolName(definition.name) && isCursorReplayToolCallId(context.toolCallId)) {
 				return renderNativeLookingCursorFileMutationCall(definition.name, args as Record<string, unknown>, theme, context.isPartial);

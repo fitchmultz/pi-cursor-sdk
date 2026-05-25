@@ -26,6 +26,7 @@ import { hasUsableText } from "./cursor-record-utils.js";
 import { formatCursorSdkAbortMessage, resolveCursorSdkAbortCause } from "./cursor-provider-errors.js";
 import { formatInactiveCursorReplayTrace } from "./cursor-native-replay-trace.js";
 import { partitionNativeToolsByActiveContext } from "./cursor-native-replay-routing.js";
+import { recordActiveCursorSdkDrainEvent } from "./cursor-sdk-event-debug.js";
 
 export const DEFAULT_CURSOR_NATIVE_REPLAY_IDLE_DISPOSE_MS = 5 * 60 * 1000;
 const CURSOR_NATIVE_REPLAY_TOOL_ID_PATTERN = /^(cursor-replay-\d+-\d+)-tool-\d+$/;
@@ -195,6 +196,11 @@ function emitCursorNativeToolUseTurn(
 		if (block.type === "toolCall") stream.push({ type: "toolcall_end", contentIndex, toolCall: block, partial });
 		if (recordCursorNativeToolDisplay({ ...tool, terminate: shouldTerminate })) {
 			run.recordedToolDisplayIds.push(tool.id);
+			recordActiveCursorSdkDrainEvent("native_tool_display_recorded", {
+				toolId: tool.id,
+				toolName: tool.toolName,
+				terminate: shouldTerminate,
+			});
 		}
 	}
 	applyCursorApproximateUsage(partial, model, context, cursorLiveRuns.takeTurnInputTokens(run, toolResultInputTokens));
@@ -206,7 +212,13 @@ function emitCursorNativeToolUseTurn(
 function emitInactiveCursorReplayTrace(turn: CursorLiveTurnState, tools: CursorNativeToolDisplayItem[]): void {
 	if (tools.length === 0) return;
 	for (const tool of tools) {
-		turn.emitter.appendThinkingBlock(formatInactiveCursorReplayTrace(tool));
+		const traceText = formatInactiveCursorReplayTrace(tool);
+		recordActiveCursorSdkDrainEvent("inactive_replay_trace", {
+			toolId: tool.id,
+			toolName: tool.toolName,
+			traceText,
+		});
+		turn.emitter.appendThinkingBlock(traceText);
 	}
 }
 
@@ -269,6 +281,21 @@ async function emitCursorLiveRunPendingToolUseTurn(
 	return "tool_use";
 }
 
+function finishCursorLiveRunDrainTurn(
+	outcome: CursorLiveRunDrainOutcome,
+	run: CursorLiveRun,
+	extra: Record<string, unknown> = {},
+): CursorLiveRunDrainOutcome {
+	recordActiveCursorSdkDrainEvent("turn_end", {
+		outcome,
+		runId: run.id,
+		pendingEventCount: run.pendingEvents.length,
+		done: run.done,
+		...extra,
+	});
+	return outcome;
+}
+
 export async function drainCursorLiveRunTurn(
 	stream: AssistantMessageEventStream,
 	partial: AssistantMessage,
@@ -278,6 +305,12 @@ export async function drainCursorLiveRunTurn(
 	toolResultInputTokens: number,
 	options: { mode: CursorLiveRunDrainMode; signal?: AbortSignal },
 ): Promise<CursorLiveRunDrainOutcome> {
+	recordActiveCursorSdkDrainEvent("turn_start", {
+		mode: options.mode,
+		runId: run.id,
+		pendingEventCount: run.pendingEvents.length,
+		done: run.done,
+	});
 	const turn: CursorLiveTurnState = {
 		emitter: new CursorPartialContentEmitter(stream, partial, -1, true),
 		emittedText: "",
@@ -286,7 +319,7 @@ export async function drainCursorLiveRunTurn(
 	while (true) {
 		if (options.mode === "chain_user_input" && cursorLiveRuns.isReady(run)) {
 			await cursorLiveRuns.release(run);
-			return "chain_user_input";
+			return finishCursorLiveRunDrainTurn("chain_user_input", run);
 		}
 
 		while (cursorLiveRuns.peekEvent(run)) {
@@ -300,7 +333,7 @@ export async function drainCursorLiveRunTurn(
 				toolResultInputTokens,
 				options,
 			);
-			if (toolUse === "tool_use") return toolUse;
+			if (toolUse === "tool_use") return finishCursorLiveRunDrainTurn("tool_use", run);
 			if (toolUse === "handled") continue;
 			const event = cursorLiveRuns.shiftEvent(run);
 			if (!event || event.type === "tool" || event.type === "bridge-tool") continue;
@@ -313,26 +346,26 @@ export async function drainCursorLiveRunTurn(
 				resolveCursorSdkAbortCause({ liveRunDisposed: true }),
 			);
 			stream.push({ type: "error", reason: "aborted", error: partial });
-			return "aborted";
+			return finishCursorLiveRunDrainTurn("aborted", run, { reason: "disposed" });
 		}
 		if (run.cancelled) {
 			partial.stopReason = "aborted";
 			if (run.abortMessage) partial.errorMessage = run.abortMessage;
 			stream.push({ type: "error", reason: "aborted", error: partial });
 			await cursorLiveRuns.release(run);
-			return "aborted";
+			return finishCursorLiveRunDrainTurn("aborted", run, { reason: "cancelled" });
 		}
 		if (run.errorMessage) {
 			partial.stopReason = "error";
 			partial.errorMessage = run.errorMessage;
 			stream.push({ type: "error", reason: "error", error: partial });
 			await cursorLiveRuns.release(run);
-			return "error";
+			return finishCursorLiveRunDrainTurn("error", run);
 		}
 		if (run.done) {
 			if (options.mode === "chain_user_input") {
 				await cursorLiveRuns.release(run);
-				return "chain_user_input";
+				return finishCursorLiveRunDrainTurn("chain_user_input", run, { reason: "run_done" });
 			}
 			turn.emitter.closeAll();
 			const finalText = trimCurrentTurnAlreadyEmittedCursorText(run.finalText ?? run.textDeltas.join(""), turn.emittedText, run.emittedText);
@@ -343,7 +376,7 @@ export async function drainCursorLiveRunTurn(
 			partial.stopReason = "stop";
 			stream.push({ type: "done", reason: "stop", message: partial });
 			await cursorLiveRuns.release(run);
-			return "stop";
+			return finishCursorLiveRunDrainTurn("stop", run, { finalTextLength: finalText.length });
 		}
 
 		await cursorLiveRuns.waitForProgress(run, options.signal);
@@ -357,9 +390,13 @@ export async function drainExistingCursorLiveRunBeforeSend(
 	context: Context,
 	signal?: AbortSignal,
 ): Promise<LiveRunPreSendOutcome> {
+	recordActiveCursorSdkDrainEvent("pre_send_start", {});
 	while (true) {
 		const run = getPendingCursorLiveRun(context) ?? getActiveCursorLiveRunForCurrentScope();
-		if (!run || run.disposed) return "continue_send";
+		if (!run || run.disposed) {
+			recordActiveCursorSdkDrainEvent("pre_send_end", { outcome: "continue_send", reason: "no_pending_run" });
+			return "continue_send";
+		}
 
 		try {
 			const outcome = await cursorLiveRuns.withRunLease(run, signal, async () => {
@@ -376,11 +413,19 @@ export async function drainExistingCursorLiveRunBeforeSend(
 					mode: shouldChainUserInput ? "chain_user_input" : "emit",
 					signal,
 				});
-				return drainOutcome === "chain_user_input" ? "continue_send" : "stream_ended";
+				const mapped = drainOutcome === "chain_user_input" ? "continue_send" : "stream_ended";
+				recordActiveCursorSdkDrainEvent("pre_send_iteration", {
+					runId: run.id,
+					drainOutcome,
+					outcome: mapped,
+					shouldChainUserInput,
+				});
+				return mapped;
 			});
 			if (outcome === "continue_send" && !run.disposed && cursorLiveRuns.getActiveForScope(run.sessionAgentScopeKey) === run) {
 				continue;
 			}
+			recordActiveCursorSdkDrainEvent("pre_send_end", { outcome, runId: run.id });
 			return outcome;
 		} catch (error) {
 			if (error instanceof CursorLiveRunAbortError) await cursorLiveRuns.release(run);

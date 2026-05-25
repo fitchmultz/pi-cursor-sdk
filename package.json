@@ -29,6 +29,7 @@
 		"scripts/isolated-cursor-smoke.sh",
 		"scripts/validate-smoke-jsonl.mjs",
 		"scripts/debug-sdk-events.mjs",
+		"scripts/debug-provider-events.mjs",
 		"scripts/lib/cursor-probe-utils.mjs",
 		"scripts/lib/cursor-sdk-output-filter.mjs",
 		"README.md",
@@ -53,7 +54,8 @@
 		"smoke:isolated": "scripts/isolated-cursor-smoke.sh",
 		"smoke:steering": "node scripts/steering-rpc-smoke.mjs",
 		"smoke:jsonl": "node scripts/validate-smoke-jsonl.mjs",
-		"debug:sdk-events": "node scripts/debug-sdk-events.mjs"
+		"debug:sdk-events": "node scripts/debug-sdk-events.mjs",
+		"debug:provider-events": "node scripts/debug-provider-events.mjs"
 	},
 	"dependencies": {
 		"@cursor/sdk": "^1.0.13",

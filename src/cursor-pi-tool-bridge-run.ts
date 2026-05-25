@@ -16,6 +16,7 @@ import {
 	type CursorPiToolBridgeRequestDiagnosticFields,
 	writeCursorPiToolBridgeDiagnostic,
 } from "./cursor-pi-tool-bridge-diagnostics.js";
+import { recordActiveCursorSdkBridgeRaw } from "./cursor-sdk-event-debug.js";
 import type {
 	CursorPiBridgeToolRequest,
 	CursorPiToolBridgeRun,
@@ -290,9 +291,11 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 				}
 				this.queuedRequests.push(request);
 				this.emitRequestQueuedDiagnostic(request);
+				recordActiveCursorSdkBridgeRaw({ kind: "queued", request });
 				return;
 			}
 			this.emitRequestQueuedDiagnostic(request);
+			recordActiveCursorSdkBridgeRaw({ kind: "queued", request });
 			this.dispatchPendingToolRequest(pending, this.onToolRequest);
 		});
 	}
@@ -321,6 +324,7 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 		pending.settled = true;
 		this.removePending(pending);
 		this.emitRequestResolvedDiagnostic(pending.request, result.isError === true);
+		recordActiveCursorSdkBridgeRaw({ kind: "resolved", request: pending.request, result });
 		pending.resolve(result);
 	}
 
@@ -329,6 +333,12 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 		pending.settled = true;
 		this.removePending(pending);
 		this.emitRequestRejectedDiagnostic(pending.request, kind);
+		recordActiveCursorSdkBridgeRaw({
+			kind: "rejected",
+			request: pending.request,
+			error: error.message,
+			rejectionKind: kind,
+		});
 		pending.reject(error);
 	}
 

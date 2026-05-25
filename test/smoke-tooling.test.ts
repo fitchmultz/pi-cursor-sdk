@@ -12,12 +12,14 @@ describe("smoke tooling package checks", () => {
 		expect(run(process.execPath, ["--check", "scripts/steering-rpc-smoke.mjs"]).status).toBe(0);
 		expect(run(process.execPath, ["--check", "scripts/validate-smoke-jsonl.mjs"]).status).toBe(0);
 		expect(run(process.execPath, ["--check", "scripts/debug-sdk-events.mjs"]).status).toBe(0);
+		expect(run(process.execPath, ["--check", "scripts/debug-provider-events.mjs"]).status).toBe(0);
 
 		const liveHelp = run("scripts/tmux-live-smoke.sh", ["--help"]);
 		const isolatedHelp = run("scripts/isolated-cursor-smoke.sh", ["--help"]);
 		const steeringHelp = run(process.execPath, ["scripts/steering-rpc-smoke.mjs", "--help"]);
 		const jsonlHelp = run(process.execPath, ["scripts/validate-smoke-jsonl.mjs", "--help"]);
 		const sdkEventsHelp = run(process.execPath, ["scripts/debug-sdk-events.mjs", "--help"]);
+		const providerEventsHelp = run(process.execPath, ["scripts/debug-provider-events.mjs", "--help"]);
 
 		expect(liveHelp.status).toBe(0);
 		expect(liveHelp.stdout).toContain("retry-empty-output");
@@ -30,6 +32,8 @@ describe("smoke tooling package checks", () => {
 		expect(jsonlHelp.stdout).toContain("--replay-errors");
 		expect(sdkEventsHelp.status).toBe(0);
 		expect(sdkEventsHelp.stdout).toContain("Capture timestamped Cursor SDK event timelines");
+		expect(providerEventsHelp.status).toBe(0);
+		expect(providerEventsHelp.stdout).toContain("Capture raw Cursor SDK onDelta/onStep payloads through pi's provider path");
 	});
 
 	it("packages smoke scripts and avoids reusing the v0.1.16 tarball version", () => {
@@ -46,6 +50,7 @@ describe("smoke tooling package checks", () => {
 		expect(paths.has("scripts/steering-rpc-smoke.mjs")).toBe(true);
 		expect(paths.has("scripts/validate-smoke-jsonl.mjs")).toBe(true);
 		expect(paths.has("scripts/debug-sdk-events.mjs")).toBe(true);
+		expect(paths.has("scripts/debug-provider-events.mjs")).toBe(true);
 		expect(paths.has("CHANGELOG.md")).toBe(true);
 		expect(paths.has("README.md")).toBe(true);
 		expect([...paths].some((path) => path.startsWith("dist/") || path.startsWith("coverage/") || path.startsWith(".pi/") || path.includes("smoke-dir"))).toBe(false);

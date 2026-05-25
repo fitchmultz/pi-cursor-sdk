@@ -9,6 +9,7 @@ import { CursorPartialContentEmitter } from "./cursor-partial-content-emitter.js
 import { asRecord, getField, hasUsableText } from "./cursor-record-utils.js";
 import { scrubPiToolDisplay, scrubSensitiveText } from "./cursor-sensitive-text.js";
 import { buildCursorPiToolDisplay, formatCursorToolTranscript, getCursorCreatePlanText, mergeCursorToolCalls } from "./cursor-tool-transcript.js";
+import { recordActiveCursorSdkCoordinatorEvent, recordActiveCursorSdkDisplayDecision } from "./cursor-sdk-event-debug.js";
 import { getString, getToolArgs, getToolName } from "./cursor-transcript-utils.js";
 
 function formatCursorToolName(toolCall: unknown): string {
@@ -215,7 +216,10 @@ export class CursorSdkTurnCoordinator {
 				toolCall: update.toolCall,
 				startedToolCall: this.startedToolCalls.get(update.callId),
 			});
-			if (resolution.action === "ignore-bridge") return;
+			if (resolution.action === "ignore-bridge") {
+				this.recordIgnoreBridgeDecision(resolution.identity, getToolName(update.toolCall), "delta");
+				return;
+			}
 			this.handleCompletedToolCall(resolution.toolCall, {
 				identity: resolution.identity,
 				source: resolution.source,
@@ -251,7 +255,10 @@ export class CursorSdkTurnCoordinator {
 			callId: stepId,
 			toolCall,
 		});
-		if (resolution.action === "ignore-bridge") return;
+		if (resolution.action === "ignore-bridge") {
+			this.recordIgnoreBridgeDecision(resolution.identity, getToolName(toolCall), "step");
+			return;
+		}
 		this.handleCompletedToolCall(resolution.toolCall, {
 			identity: resolution.identity,
 			source: resolution.source,
@@ -328,11 +335,37 @@ export class CursorSdkTurnCoordinator {
 
 		const transcript = scrubSensitiveText(formatCursorToolTranscript(toolCall, { cwd: this.cwd }), this.resolvedApiKey);
 		const display = buildCursorPiToolDisplay(toolCall, { cwd: this.cwd });
+		const toolName = display.toolName;
 		const fingerprint = this.getToolFingerprint({ toolName: display.toolName, args: display.args, result: display.result });
-		if (options.identity && this.completedToolIdentities.has(options.identity)) return;
+		if (options.identity && this.completedToolIdentities.has(options.identity)) {
+			this.recordDisplayDecision({
+				action: "skip-duplicate",
+				toolName,
+				identity: options.identity,
+				source: options.source,
+				reason: "identity-already-completed",
+			});
+			return;
+		}
 		if (options.source === "started") {
-			if (this.completedFallbackToolFingerprints.has(fingerprint)) return;
+			if (this.completedFallbackToolFingerprints.has(fingerprint)) {
+				this.recordDisplayDecision({
+					action: "skip-duplicate",
+					toolName,
+					identity: options.identity,
+					source: options.source,
+					reason: "fallback-fingerprint-already-completed",
+				});
+				return;
+			}
 		} else if (this.completedStartedToolFingerprints.has(fingerprint) || this.completedFallbackToolFingerprints.has(fingerprint)) {
+			this.recordDisplayDecision({
+				action: "skip-duplicate",
+				toolName,
+				identity: options.identity,
+				source: options.source,
+				reason: "fingerprint-already-completed",
+			});
 			return;
 		}
 		if (options.identity) this.completedToolIdentities.add(options.identity);
@@ -353,6 +386,15 @@ export class CursorSdkTurnCoordinator {
 			this.nativeToolReplayStarted = true;
 			const id = `${this.nativeReplayId}-tool-${++this.nativeToolDisplayCounter}`;
 			const scrubbedDisplay = scrubPiToolDisplay(display, this.resolvedApiKey);
+			this.recordDisplayDecision({
+				action: "queue_replay",
+				disposition,
+				toolName,
+				identity: options.identity,
+				source: options.source,
+				transcript,
+				replayToolId: id,
+			});
 			cursorLiveRuns.queueEvent(this.liveRun, {
 				type: "tool",
 				tool: { ...scrubbedDisplay, id },
@@ -364,7 +406,35 @@ export class CursorSdkTurnCoordinator {
 			disposition === "inactive_trace"
 				? formatInactiveCursorReplayTrace(scrubPiToolDisplay(display, this.resolvedApiKey))
 				: transcript || `Cursor tool: ${formatCursorToolName(toolCall)} completed`;
+		this.recordDisplayDecision({
+			action: "emit_trace",
+			disposition,
+			toolName,
+			identity: options.identity,
+			source: options.source,
+			transcript,
+			traceText,
+		});
 		this.emitCursorToolTrace(traceText);
+	}
+
+	private recordIgnoreBridgeDecision(
+		identity: string | undefined,
+		toolName: string,
+		source: "delta" | "step",
+	): void {
+		recordActiveCursorSdkDisplayDecision({
+			action: "ignore-bridge",
+			toolName,
+			identity,
+			source,
+		});
+	}
+
+	private recordDisplayDecision(
+		decision: Parameters<typeof recordActiveCursorSdkDisplayDecision>[0],
+	): void {
+		recordActiveCursorSdkDisplayDecision(decision);
 	}
 
 	private emitCursorToolTrace(text: string): void {
@@ -388,6 +458,7 @@ export class CursorSdkTurnCoordinator {
 
 	private emitCursorTaskProgress(label: string): void {
 		const progressText = `Cursor task: ${label}\n`;
+		recordActiveCursorSdkCoordinatorEvent("task_progress", { label, progressText, liveRun: this.liveRun !== undefined });
 		if (this.liveRun) {
 			cursorLiveRuns.queueEvent(this.liveRun, { type: "thinking-delta", text: progressText });
 			return;

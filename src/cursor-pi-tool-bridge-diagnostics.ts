@@ -1,5 +1,9 @@
 import { stableNameHash } from "./cursor-pi-tool-bridge-mcp.js";
 import { parseEnvBoolean } from "./cursor-env-boolean.js";
+import {
+	recordActiveCursorSdkBridgeDiagnostic,
+	resolveCursorSdkEventDebugEnabled,
+} from "./cursor-sdk-event-debug.js";
 
 export const CURSOR_PI_TOOL_BRIDGE_DEBUG_ENV = "PI_CURSOR_PI_TOOL_BRIDGE_DEBUG";
 export const CURSOR_PI_TOOL_BRIDGE_DIAGNOSTIC_PREFIX = "[pi-cursor-sdk:bridge]";
@@ -170,6 +174,13 @@ export function serializeCursorPiToolBridgeDiagnostic(event: CursorPiToolBridgeD
 }
 
 export function writeCursorPiToolBridgeDiagnostic(env: Record<string, string | undefined>, event: CursorPiToolBridgeDiagnosticEvent): void {
+	if (resolveCursorSdkEventDebugEnabled(env)) {
+		try {
+			recordActiveCursorSdkBridgeDiagnostic(event);
+		} catch {
+			// Diagnostics must never affect bridge execution.
+		}
+	}
 	if (!resolveCursorPiToolBridgeDebugEnabled(env)) return;
 	try {
 		process.stderr.write(`${CURSOR_PI_TOOL_BRIDGE_DIAGNOSTIC_PREFIX} ${JSON.stringify(serializeCursorPiToolBridgeDiagnostic(event))}\n`);

@@ -238,6 +238,79 @@ Stdout prints artifact paths and summary counts only. Raw payloads stay on disk 
 
 Hard repo rule: Cursor SDK behavior claims must come from the installed `@cursor/sdk` package and/or https://cursor.com/docs/sdk/typescript, not from memory or ad-hoc probes alone.
 
+## Pi provider SDK event capture
+
+When debugging pi parsing, replay routing, bridge timing, or send-plan behavior, capture the raw `onDelta`/`onStep` payloads **as the Cursor provider receives them** instead of using the direct SDK probe above.
+
+One-shot maintainer script (RPC pi run, gitignored artifacts by default):
+
+```bash
+CURSOR_API_KEY=... npm run debug:provider-events -- \
+  --cwd . \
+  --model cursor/composer-2.5 \
+  --prompt 'Repro prompt here' \
+  --out .debug/cursor-sdk-events/manual-repro
+```
+
+Or read a prompt from disk:
+
+```bash
+CURSOR_API_KEY=... npm run debug:provider-events -- \
+  --prompt-file .debug/repro-prompt.txt \
+  --out .debug/cursor-sdk-events/manual-repro
+```
+
+Artifacts under `--out` (default `.debug/cursor-sdk-events/<timestamp>/` under `--cwd`):
+
+- `metadata.json` — model, cwd, send-plan/provider metadata
+- `context-snapshot.json` — full pi `Context` passed into the provider turn
+- `send-payload.json` — exact `agent.send()` input (text + images)
+- `on-delta.jsonl` — raw `InteractionUpdate` objects passed to `turnCoordinator.handleDelta`
+- `on-step.jsonl` — raw `onStep` payloads passed to `turnCoordinator.handleStep`
+- `stream-events.jsonl` — raw `run.stream()` events when supported
+- `pi-stream-events.jsonl` — exact pi stream events emitted to the TUI (`text_delta`, `thinking_delta`, replay cards, `done`, etc.)
+- `provider-events.jsonl` — provider lifecycle markers (`agent_send_start`, `agent_send_returned`, …)
+- `live-run-events.jsonl` — queued native replay / bridge live-run events
+- `bridge-events.jsonl` — bridge lifecycle/request diagnostics (file-only; no stderr unless bridge debug is also enabled)
+- `bridge-raw.jsonl` — raw bridged MCP args/results
+- `display-decisions.jsonl` — per-tool native replay routing (`queue_replay`, `emit_trace`, `inactive_trace`, dedupe skips, bridge ignores) with transcript/trace text
+- `coordinator-events.jsonl` — turn-coordinator side effects (task progress labels, etc.)
+- `drain-events.jsonl` — live-run pre-send drain and per-turn drain lifecycle (`turn_start`, `turn_end`, inactive replay traces, native display registration)
+- `timeline.jsonl` — merged cross-layer timeline (one grep-friendly stream for the whole turn)
+- `pi-session-snapshot.jsonl` — copy of pi session JSONL at turn finalize (session dir also gets latest `pi-session.jsonl`)
+- `final-partial.json` — assistant partial emitted to pi at end of the provider turn
+- `errors.jsonl` — provider/stream/conversation failures
+- `wait-result.json` — `run.wait()` result
+- `conversation.json` — `run.conversation()` when supported
+- `summary.json` — counts and artifact paths
+
+During any normal pi session you can also opt in with:
+
+```bash
+PI_CURSOR_SDK_EVENT_DEBUG=1 pi -e . --model cursor/composer-2.5
+```
+
+Multi-turn sessions group automatically by pi session file:
+
+```text
+.debug/cursor-sdk-events/sessions/<session-slug>/
+  session.json                 # index of all turns in this pi session
+  turn-001-<timestamp>/        # first provider turn
+  turn-002-<timestamp>/        # second provider turn
+  ...
+```
+
+Each turn still gets the full per-turn artifact bundle above. Use `session.json` to jump between turns while debugging incremental send, bridge resolution, or native replay continuation across pi messages. For tool-heavy turns, trace/thinking replay often drains on the **next** pi message — check turn N+1 `drain-events.jsonl` and `pi-stream-events.jsonl` alongside turn N `display-decisions.jsonl`.
+
+Optional env:
+
+- `PI_CURSOR_SDK_EVENT_DEBUG_DIR` — base directory (default `.debug/cursor-sdk-events`)
+- `PI_CURSOR_SDK_EVENT_DEBUG_SESSION_DIR` — exact session root for all turns in the current pi session
+- `PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR` — exact artifact directory for one isolated turn (the maintainer script sets this via `--out`; bypasses session grouping)
+- `PI_CURSOR_SDK_EVENT_DEBUG_STDERR=1` — also print the summary line to stderr (off by default so the pi TUI stays normal)
+
+Capture is file-only by default: no stderr markers, and bridge diagnostics during SDK event debug go to `bridge-events.jsonl` instead of `[pi-cursor-sdk:bridge]` unless you separately set `PI_CURSOR_PI_TOOL_BRIDGE_DEBUG=1`. Raw payloads stay on disk and may contain secrets — do not commit or share them.
+
 ## Related docs and scripts
 
 - [Cursor live smoke checklist](./cursor-live-smoke-checklist.md)
@@ -246,4 +319,5 @@ Hard repo rule: Cursor SDK behavior claims must come from the installed `@cursor
 - `scripts/tmux-live-smoke.sh`
 - `scripts/validate-smoke-jsonl.mjs`
 - `scripts/debug-sdk-events.mjs`
+- `scripts/debug-provider-events.mjs`
 - `test/helpers/cursor-provider-harness.ts` — controllable native replay pi mock (`createNativeToolDisplayPiForTest`)

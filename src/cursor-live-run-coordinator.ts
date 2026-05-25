@@ -10,6 +10,7 @@ import {
 import type { CursorNativeToolDisplayItem } from "./cursor-native-tool-display.js";
 import type { CursorPiBridgeToolRequest, CursorPiToolBridgeRun } from "./cursor-pi-tool-bridge.js";
 import { getCursorSessionScopeKey } from "./cursor-session-scope.js";
+import { recordActiveCursorSdkLiveRunEvent } from "./cursor-sdk-event-debug.js";
 
 export class CursorLiveRunAbortError extends Error {
 	constructor() {
@@ -315,6 +316,7 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 		queueEvent(run, event): void {
 			if (run.disposed) return;
 			run.pendingEvents.push(event);
+			recordActiveCursorSdkLiveRunEvent(event);
 			notifyProgress(run);
 		},
 

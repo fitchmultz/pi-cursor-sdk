@@ -632,6 +632,47 @@ it("replays native Cursor tools as a toolUse turn before final text", async () =
 		expect(mockDispose).toHaveBeenCalledTimes(1);
 	});
 
+	it("surfaces incomplete started Cursor tools when aborting a scoped native live run", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		const registeredTools: RegisteredTool[] = [];
+		await registerNativeToolDisplayForTest(registeredTools);
+
+		const controller = new AbortController();
+		const mockDispose = vi.fn().mockResolvedValue(undefined);
+		const cancelRun = vi.fn().mockResolvedValue(undefined);
+		const runWait = vi.fn(() => new Promise<{ id: string; status: "finished"; result: string }>(() => {}));
+		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
+			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "read", args: { path: "README.md" } }, callId: "c1" } });
+			return {
+				id: "run-1",
+				agentId: "agent-1",
+				status: "running",
+				wait: runWait,
+				cancel: cancelRun,
+				supports: () => true,
+				unsupportedReason: () => undefined,
+			};
+		});
+		mockedCreate.mockResolvedValue({
+			agentId: "agent-1",
+			send: mockSend,
+			[Symbol.asyncDispose]: mockDispose,
+		});
+
+		const eventsPromise = collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key", signal: controller.signal }));
+		await vi.waitFor(() => expect(mockSend).toHaveBeenCalled());
+		controller.abort();
+		const events = await eventsPromise;
+
+		expect(getErrorEvent(events).reason).toBe("aborted");
+		expect(collectThinkingDeltas(events)).toContain("Cursor read did not complete");
+		expect(collectThinkingDeltas(events)).toContain("aborted");
+		expect(getEventsOfType(events, "toolcall_start")).toHaveLength(0);
+		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
+		expect(cancelRun).toHaveBeenCalled();
+		expect(mockDispose).toHaveBeenCalledTimes(1);
+	});
+
 	it("replays incomplete started Cursor tools as neutral cursor activity cards before final text", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		const registeredTools: RegisteredTool[] = [];

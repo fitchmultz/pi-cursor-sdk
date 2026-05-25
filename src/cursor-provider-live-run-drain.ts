@@ -105,6 +105,25 @@ export async function settleCursorLiveToolBatch(run: CursorLiveRun): Promise<voi
 	await scheduler.wait(75);
 }
 
+export function flushPendingCursorLiveRunTraceEventsToStream(
+	stream: AssistantMessageEventStream,
+	partial: AssistantMessage,
+	run: CursorLiveRun,
+): void {
+	if (run.disposed) return;
+	const turn: CursorLiveTurnState = {
+		emitter: new CursorPartialContentEmitter(stream, partial, -1, true),
+		emittedText: "",
+	};
+	while (true) {
+		const event = cursorLiveRuns.peekEvent(run);
+		if (!event || event.type === "tool" || event.type === "bridge-tool") break;
+		cursorLiveRuns.shiftEvent(run);
+		emitCursorLiveQueuedEvent(turn, event, run);
+	}
+	turn.emitter.closeAll();
+}
+
 function emitCursorLiveQueuedEvent(
 	turn: CursorLiveTurnState,
 	event: Exclude<CursorLiveQueuedEvent, { type: "tool" } | { type: "bridge-tool" }>,

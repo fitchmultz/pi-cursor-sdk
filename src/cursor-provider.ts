@@ -37,6 +37,7 @@ import {
 	cursorLiveRuns,
 	drainCursorLiveRunTurn,
 	drainExistingCursorLiveRunBeforeSend,
+	flushPendingCursorLiveRunTraceEventsToStream,
 	DEFAULT_CURSOR_NATIVE_REPLAY_IDLE_DISPOSE_MS,
 	getPendingCursorLiveRun,
 	hasTrailingUserMessagesAfterToolResults,
@@ -386,7 +387,12 @@ export function streamCursor(
 						});
 					});
 				} catch (error) {
-					if (error instanceof CursorLiveRunAbortError) await cursorLiveRuns.release(liveRun);
+					if (error instanceof CursorLiveRunAbortError) {
+						turnCoordinator.discardIncompleteStartedToolCalls("abort");
+						turnCoordinator.closeTraceBlock();
+						flushPendingCursorLiveRunTraceEventsToStream(stream, partial, liveRun);
+						await cursorLiveRuns.release(liveRun);
+					}
 					throw error;
 				} finally {
 					sdkEventDebugRef.current = undefined;

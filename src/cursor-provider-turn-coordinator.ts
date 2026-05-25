@@ -451,7 +451,8 @@ export class CursorSdkTurnCoordinator {
 			hasLiveRun: this.liveRun !== undefined,
 		});
 
-		if (disposition === "queue_replay" && this.liveRun) {
+		// Aborted live runs emit trace visibility only; do not synthesize a toolUse replay turn.
+		if (disposition === "queue_replay" && this.liveRun && reason !== "abort") {
 			this.nativeToolReplayStarted = true;
 			const id = `${this.nativeReplayId}-tool-${++this.nativeToolDisplayCounter}`;
 			this.recordDisplayDecision({

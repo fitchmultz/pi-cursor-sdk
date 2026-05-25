@@ -473,6 +473,40 @@ describe("formatCursorToolTranscript", () => {
 		expect(transcript).not.toContain("base64-image-data");
 	});
 
+	it("labels completed Cursor web search MCP activity instead of generic Cursor MCP", () => {
+		const toolCall = {
+			name: "mcp",
+			args: { toolName: "WebSearch", args: { search_term: "pi extension" } },
+			result: { status: "success", value: { content: [{ text: { text: "result snippet" } }], isError: false } },
+		};
+		const display = buildCursorPiToolDisplay(toolCall);
+		const transcript = formatCursorToolTranscript(toolCall);
+
+		expect(display).toMatchObject({
+			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
+			args: { query: "pi extension", activityTitle: "Cursor web search", activitySummary: "pi extension" },
+			result: { details: { cursorToolName: "webSearch", title: "Cursor web search" } },
+		});
+		expect(display.args.activityTitle).not.toBe("Cursor MCP");
+		expect(transcript).toContain("web search pi extension");
+		expect(transcript).not.toContain("WebSearch\n");
+	});
+
+	it("labels completed Cursor web fetch host activity with bounded URL summary", () => {
+		const toolCall = {
+			name: "web_fetch",
+			args: { url: "https://example.com/docs" },
+			result: { status: "success", value: { content: [{ text: { text: "docs page" } }], isError: false } },
+		};
+		const display = buildCursorPiToolDisplay(toolCall);
+
+		expect(display).toMatchObject({
+			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
+			args: { url: "https://example.com/docs", activityTitle: "Cursor web fetch", activitySummary: "https://example.com/docs" },
+			result: { details: { cursorToolName: "webFetch", title: "Cursor web fetch" } },
+		});
+	});
+
 	it("formats completed semSearch activity with bounded results text", () => {
 		const results = "src/index.ts:42 — export function main()\nsrc/util.ts:10 — helper";
 		const display = buildCursorPiToolDisplay({

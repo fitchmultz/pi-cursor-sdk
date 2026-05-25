@@ -28,6 +28,12 @@ function getNestedMcpArgs(args: Record<string, unknown>): Record<string, unknown
 	return nested && typeof nested === "object" && !Array.isArray(nested) ? (nested as Record<string, unknown>) : {};
 }
 
+function getMcpToolName(args: Record<string, unknown>): string | undefined {
+	const toolName = typeof args.toolName === "string" ? args.toolName : typeof args.tool_name === "string" ? args.tool_name : undefined;
+	const trimmed = toolName?.trim();
+	return trimmed || undefined;
+}
+
 function firstNonEmptyString(...values: Array<string | undefined>): string | undefined {
 	for (const value of values) {
 		const trimmed = value?.trim();
@@ -71,8 +77,7 @@ export function resolveTranscriptToolName(rawName: string, args: Record<string, 
 	const directWebKind = classifyCursorWebToolKind(rawName) ?? classifyCursorWebToolKind(normalized);
 	if (directWebKind) return directWebKind;
 	if (normalized === "mcp") {
-		const mcpToolName = typeof args.toolName === "string" ? args.toolName : undefined;
-		const mcpWebKind = classifyCursorWebToolKind(mcpToolName);
+		const mcpWebKind = classifyCursorWebToolKind(getMcpToolName(args));
 		if (mcpWebKind) return mcpWebKind;
 	}
 	return normalized;

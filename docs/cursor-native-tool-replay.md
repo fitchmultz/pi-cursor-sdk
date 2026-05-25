@@ -83,9 +83,11 @@ This matrix covers **Cursor native tool replay only**. It does not describe the 
 | `createPlan` | neutral activity | `cursor` | Collapsed label **Cursor plan**; display-only, does not drive pi plan mode |
 | `task` | neutral activity | `cursor` | Collapsed label **Cursor task** |
 | `generateImage` | neutral activity | `cursor` | Collapsed label **Cursor image generation** |
-| `mcp` | neutral activity | `cursor` | Collapsed label **Cursor MCP**; includes host/MCP completions routed as SDK `mcp` |
+| `mcp` | neutral activity | `cursor` | Collapsed label **Cursor MCP** for non-web MCP completions; web search/fetch MCP `toolName` values reclassify to the rows below |
 | `semSearch` | neutral activity | `cursor` | Collapsed label **Cursor semantic search**; semantic codebase search, not web search |
 | `recordScreen` | neutral activity | `cursor` | Collapsed label **Cursor screen recording** |
+| *(host/MCP alias)* `WebSearch` / `web_search` / similar | neutral activity | `cursor` | Collapsed label **Cursor web search**; display-only Cursor web access reported by the SDK, not an executable pi web tool |
+| *(host/MCP alias)* `WebFetch` / `web_fetch` / similar | neutral activity | `cursor` | Collapsed label **Cursor web fetch**; display-only Cursor web access reported by the SDK, not an executable pi web tool |
 
 **Fallback path:** SDK tool names with no spec entry (future or unknown types) use `formatCursorToolTranscriptFromSpec()` → `formatFallback()` in `src/cursor-transcript-tool-formatters.ts`. Those completions still appear as bounded scrubbed transcript activity, not native pi tool cards.
 
@@ -104,8 +106,10 @@ Before lookup in `TOOL_DISPLAY_SPECS`, completed SDK tool names pass through `no
 | `file_search` | `glob` |
 | `write_file`, `writefile` | `write` |
 | `strreplace`, `str_replace`, `str-replace`, `edit_file`, `editfile`, `edit_notebook`, `editnotebook`, `notebook_edit`, `notebookedit` | `edit` |
+| `websearch`, `web_search`, `web-search` | `webSearch` (via `resolveTranscriptToolName()`) |
+| `webfetch`, `web_fetch`, `web-fetch` | `webFetch` (via `resolveTranscriptToolName()`) |
 
-Unlisted aliases keep their original name and fall through to the spec lookup or fallback transcript path.
+Unlisted aliases keep their original name and fall through to the spec lookup or fallback transcript path. SDK `mcp` completions whose nested `toolName` is `WebSearch` / `web_search` / `WebFetch` / `web_fetch` (or `tool_name`) also resolve to `webSearch` / `webFetch` before display lookup.
 
 ## Intentional mappings and fallbacks
 
@@ -117,6 +121,7 @@ These behaviors are by design. They are not pi replay execution bugs:
 - **`write`:** native pi `write` cards only when recorded content/path args satisfy pi's schema; otherwise neutral **Cursor write** activity.
 - **Plan/todo tools:** `createPlan` and `updateTodos` replay is display-only and does not drive pi plan mode or pi todo state (see [What replay does not do](#what-replay-does-not-do)).
 - **`semSearch`:** semantic codebase search activity, not web search.
+- **Web search/fetch:** visible **Cursor web search** / **Cursor web fetch** activity when the SDK reports completed replayable tool data (SDK `mcp` with web `toolName` or host aliases above). These cards are display-only; pi does not expose executable web search/fetch tools through replay.
 - **Unknown/future SDK tools:** bounded scrubbed activity transcript fallback until a spec is added.
 
 ## What replay does not do
@@ -128,6 +133,7 @@ Native replay is display-only:
 - pi does not call Cursor-side MCP servers.
 - replay-only cards do not update pi state or generate images.
 - replay does not expose pi tool schemas to Cursor; the local pi MCP bridge is the separate path that exposes active pi tools.
+- replay does not add pi web search, web fetch, or browser tools; **Cursor web search** / **Cursor web fetch** cards only mirror SDK-reported Cursor web activity.
 - Cursor workflow tools such as `SwitchMode` and Cursor todo state are not pi workflow controls; reported todo/plan events are displayed as Cursor activity only. Plan/todo replay cards do not drive pi plan-mode state.
 
 If a Cursor read completion reports no content, the extension may include a bounded local file preview for safe in-workspace paths. That preview is labeled as a local preview captured at transcript time, not guaranteed Cursor-observed content.

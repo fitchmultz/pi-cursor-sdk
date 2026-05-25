@@ -114,7 +114,16 @@ When the user requests a PR review (including thermo-nuclear / deep maintainabil
 - Remediate **every** finding, structural and polish; do not leave “nice to have” items open.
 - Prefer dispatching a `cursor/composer-2.5` subagent for remedial code/docs changes; the parent session coordinates review, commit, push, and re-review loops.
 - After remediations land, **repeat the review** on the updated branch until there are **no** remaining findings (including docs/PR-body drift and test-contract gaps).
-- Do not approve on passing tests alone.
+- Do not approve on passing unit tests alone. Thermo-nuclear review is maintainability-only and does **not** tell you to skip live smoke; repo smoke gates live here and in `docs/cursor-live-smoke-checklist.md`.
+
+## Pre-commit live smoke (maintainer)
+
+Before **every commit** that touches Cursor provider/runtime, prompt/session send policy, agents-context dedup, bridge, replay, or related extension wiring:
+
+- Run real `pi` against the local extension: `pi -e . --cursor-no-fast --model cursor/composer-2.5` with a fresh `--session-dir` under `/tmp` (see `docs/cursor-live-smoke-checklist.md`).
+- Prefer `npm run smoke:live` (`scripts/tmux-live-smoke.sh`) or the relevant checklist subset via tmux when TUI observation matters; use `npm run smoke:isolated` for full pre-release packaging + live preflight when appropriate.
+- If Cursor auth (`~/.pi/agent/auth.json` or `CURSOR_API_KEY`) is unavailable, **do not commit**—report blocked, not skipped-ready.
+- Unit tests (`npm test`, `npm run typecheck`) are necessary but not sufficient for these commits.
 
 ## Progress updates and handoff
 

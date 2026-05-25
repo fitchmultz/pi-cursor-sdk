@@ -390,7 +390,9 @@ export function streamCursor(
 					if (error instanceof CursorLiveRunAbortError) {
 						turnCoordinator.discardIncompleteStartedToolCalls("abort");
 						turnCoordinator.closeTraceBlock();
-						flushPendingCursorLiveRunTraceEventsToStream(stream, partial, liveRun);
+						flushPendingCursorLiveRunTraceEventsToStream(stream, partial, liveRun, {
+							includeTracesBehindQueuedTools: true,
+						});
 						await cursorLiveRuns.release(liveRun);
 					}
 					throw error;

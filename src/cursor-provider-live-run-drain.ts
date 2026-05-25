@@ -109,6 +109,7 @@ export function flushPendingCursorLiveRunTraceEventsToStream(
 	stream: AssistantMessageEventStream,
 	partial: AssistantMessage,
 	run: CursorLiveRun,
+	options?: { includeTracesBehindQueuedTools?: boolean },
 ): void {
 	if (run.disposed) return;
 	const turn: CursorLiveTurnState = {
@@ -120,6 +121,17 @@ export function flushPendingCursorLiveRunTraceEventsToStream(
 		if (!event || event.type === "tool" || event.type === "bridge-tool") break;
 		cursorLiveRuns.shiftEvent(run);
 		emitCursorLiveQueuedEvent(turn, event, run);
+	}
+	if (options?.includeTracesBehindQueuedTools && run.pendingEvents.length > 0) {
+		const preserved: CursorLiveQueuedEvent[] = [];
+		for (const event of run.pendingEvents) {
+			if (event.type === "tool" || event.type === "bridge-tool") {
+				preserved.push(event);
+				continue;
+			}
+			emitCursorLiveQueuedEvent(turn, event, run);
+		}
+		run.pendingEvents = preserved;
 	}
 	turn.emitter.closeAll();
 }

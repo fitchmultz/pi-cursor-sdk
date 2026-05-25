@@ -33,6 +33,7 @@ import {
 	formatGrep,
 	formatLs,
 	formatMcp,
+	summarizeMcp,
 	formatPlan,
 	formatRecordScreen,
 	formatSemSearch,
@@ -429,9 +430,9 @@ const TOOL_DISPLAY_SPECS: Record<string, ToolDisplaySpec> = {
 				const toolName = getString(args, "toolName") ?? "mcp";
 				return { toolName: truncateArg(toolName) };
 			},
-			buildActivitySummary: ({ args }) => truncateArg(getString(args, "toolName") ?? "mcp"),
-			buildDetails: ({ result }, contentText) => ({
-				summary: result.status === "error" ? undefined : firstNonEmptyLine(contentText) ?? "MCP result captured",
+			buildActivitySummary: ({ args, result }) => summarizeMcp(args, result),
+			buildDetails: ({ args, result }) => ({
+				summary: result.status === "error" ? undefined : summarizeMcp(args, result),
 			}),
 		},
 	},

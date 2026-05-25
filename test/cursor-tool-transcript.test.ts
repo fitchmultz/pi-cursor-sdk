@@ -399,8 +399,8 @@ describe("formatCursorToolTranscript", () => {
 		expect(taskDisplay.result.content[0].text).toContain("context.ts");
 		expect(mcpDisplay).toMatchObject({
 			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-			args: { toolName: "git", activityTitle: "Cursor MCP", activitySummary: "git" },
-			result: { details: { cursorToolName: "mcp", title: "Cursor MCP", summary: "git" } },
+			args: { toolName: "git", activityTitle: "Cursor MCP", activitySummary: "git · ## Git Status ✅" },
+			result: { details: { cursorToolName: "mcp", title: "Cursor MCP", summary: "git · ## Git Status ✅" } },
 			isError: false,
 		});
 		expect(mcpDisplay.result.content[0].text).toContain("## Git Status ✅");

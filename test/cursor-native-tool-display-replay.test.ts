@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { CURSOR_REPLAY_ACTIVITY_TOOL_NAME } from "../src/cursor-tool-names.js";
 import {
 	CURSOR_REPLAY_COLLAPSED_PREVIEW_LINES,
 	CURSOR_REPLAY_PREVIEW_MAX_LINE_CHARS,
 	formatCursorReplayDiff,
 	formatCursorReplayFilePreview,
+	renderCursorReplayCall,
 	renderNativeLookingCursorReadReplayResult,
 	type CursorReplayRenderTheme,
 } from "../src/cursor-native-tool-display-replay.js";
@@ -60,5 +62,53 @@ describe("cursor native replay rendering", () => {
 
 		expect(rendered).toContain(LOCAL_READ_PREVIEW_NOTICE);
 		expect(rendered).not.toContain("# Local preview");
+	});
+
+	it("renders collapsed activity summaries from metadata for neutral cursor cards", () => {
+		const rendered = [
+			renderCursorReplayCall(
+				CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
+				{ activityTitle: "Cursor diagnostics", activitySummary: "0 diagnostics in src/index.ts" },
+				theme,
+				true,
+			),
+			renderCursorReplayCall(
+				CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
+				{ activityTitle: "Cursor todos", activitySummary: "1/2 completed, 1 pending" },
+				theme,
+				true,
+			),
+			renderCursorReplayCall(
+				CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
+				{ activityTitle: "Cursor MCP", activitySummary: "git · ## Git Status ✅", toolName: "git" },
+				theme,
+				true,
+			),
+		]
+			.map((component) => component.render(120).join("\n"))
+			.join("\n");
+
+		expect(rendered).toContain("Cursor diagnostics 0 diagnostics in src/index.ts");
+		expect(rendered).toContain("Cursor todos 1/2 completed, 1 pending");
+		expect(rendered).toContain("Cursor MCP git · ## Git Status ✅");
+	});
+
+	it("renders legacy replay fallbacks for semSearch and recordScreen partial calls", () => {
+		const rendered = [
+			renderCursorReplayCall("cursor_sem_search", { query: "main entrypoint", targetDirectories: ["src"] }, theme, true),
+			renderCursorReplayCall(
+				"cursor_record_screen",
+				{ path: ".cursor/recordings/demo.webm", recordingDurationMs: 4200 },
+				theme,
+				true,
+			),
+			renderCursorReplayCall("cursor_delete", { path: ".debug/delete-me.txt" }, theme, true),
+		]
+			.map((component) => component.render(120).join("\n"))
+			.join("\n");
+
+		expect(rendered).toContain("Cursor semantic search main entrypoint (1 dir)");
+		expect(rendered).toContain("Cursor screen recording .cursor/recordings/demo.webm · 4.2s");
+		expect(rendered).toContain("Cursor delete .debug/delete-me.txt");
 	});
 });

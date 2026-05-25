@@ -259,9 +259,27 @@ function getCursorReplayActivityTitle(toolName: CursorReplayToolName, args: Reco
 	return getCursorReplayToolLabel(toolName);
 }
 
+function formatReplayRecordingDurationMs(ms: number | undefined): string | undefined {
+	if (ms === undefined || !Number.isFinite(ms) || ms < 0) return undefined;
+	if (ms < 1000) return `${Math.round(ms)}ms`;
+	const seconds = ms / 1000;
+	return seconds < 60 ? `${seconds.toFixed(1)}s` : `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
+}
+
+function formatReplaySemSearchQuery(args: Record<string, unknown> | undefined): string | undefined {
+	const query = typeof args?.query === "string" ? args.query.trim() : undefined;
+	if (!query) return undefined;
+	const targetDirectories = Array.isArray(args?.targetDirectories)
+		? args.targetDirectories.filter((entry): entry is string => typeof entry === "string")
+		: [];
+	const dirHint =
+		targetDirectories.length > 0 ? ` (${targetDirectories.length} dir${targetDirectories.length === 1 ? "" : "s"})` : "";
+	return `${query}${dirHint}`;
+}
+
 function getCursorReplayCallSummary(toolName: CursorReplayToolName, args: Record<string, unknown> | undefined): string | undefined {
 	const activitySummary = typeof args?.activitySummary === "string" && args.activitySummary.trim() ? args.activitySummary.trim() : undefined;
-	if (toolName === CURSOR_REPLAY_ACTIVITY_TOOL_NAME && activitySummary) return activitySummary;
+	if (activitySummary) return activitySummary;
 
 	const path = typeof args?.path === "string" ? args.path : undefined;
 	const description = typeof args?.description === "string" ? args.description : undefined;
@@ -272,24 +290,31 @@ function getCursorReplayCallSummary(toolName: CursorReplayToolName, args: Record
 
 	if (toolName === "cursor_edit" || toolName === "cursor_write" || toolName === "cursor_delete") return path ?? "unknown";
 	if (toolName === "cursor_read_lints") {
-		const target = paths.length > 0 ? paths.join(" ") : path;
-		if (target && diagnosticCount !== undefined) return `${target} · ${diagnosticCount} diagnostic${diagnosticCount === 1 ? "" : "s"}`;
+		const target = paths.length > 0 ? paths.join(", ") : path;
+		if (target && diagnosticCount !== undefined) {
+			return `${diagnosticCount} diagnostic${diagnosticCount === 1 ? "" : "s"} in ${target}`;
+		}
 		return target;
 	}
 	if (toolName === "cursor_update_todos" || toolName === "cursor_create_plan") {
 		return totalCount !== undefined ? `${totalCount} item${totalCount === 1 ? "" : "s"}` : undefined;
 	}
 	if (toolName === "cursor_task") return description;
-	if (toolName === "cursor_generate_image") return prompt;
+	if (toolName === "cursor_generate_image") return path ?? prompt;
 	if (toolName === "cursor_mcp") return typeof args?.toolName === "string" ? args.toolName : undefined;
-	if (toolName === "cursor_sem_search") return typeof args?.query === "string" ? args.query : undefined;
+	if (toolName === "cursor_sem_search") return formatReplaySemSearchQuery(args);
 	if (toolName === "cursor_record_screen") {
-		if (typeof args?.path === "string") return args.path;
+		const duration = formatReplayRecordingDurationMs(
+			typeof args?.recordingDurationMs === "number" ? args.recordingDurationMs : undefined,
+		);
+		if (path && duration) return `${path} · ${duration}`;
+		if (path) return path;
 		if (typeof args?.mode === "string") return args.mode;
 	}
 	if (toolName === CURSOR_REPLAY_ACTIVITY_TOOL_NAME) {
-		if (typeof args?.path === "string") return args.path;
+		if (path) return path;
 		if (typeof args?.toolName === "string") return args.toolName;
+		return formatReplaySemSearchQuery(args);
 	}
 	return undefined;
 }

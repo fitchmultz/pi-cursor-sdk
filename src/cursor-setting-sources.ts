@@ -13,3 +13,17 @@ export function resolveCursorSettingSources(raw?: string): SettingSource[] | und
 		.map((entry) => entry.trim())
 		.filter((entry): entry is SettingSource => Boolean(entry));
 }
+
+export function getEffectiveCursorSettingSources(raw: string | undefined = process.env[CURSOR_SETTING_SOURCES_ENV]): SettingSource[] | undefined {
+	return resolveCursorSettingSources(raw);
+}
+
+export function cursorSettingSourcesLoadUserAgentsRules(settingSources: SettingSource[] | undefined): boolean {
+	if (!settingSources?.length) return false;
+	return settingSources.includes("all") || settingSources.includes("user");
+}
+
+export function cursorSettingSourcesLoadProjectAgentsRules(settingSources: SettingSource[] | undefined): boolean {
+	if (!settingSources?.length) return false;
+	return settingSources.includes("all") || settingSources.includes("project");
+}

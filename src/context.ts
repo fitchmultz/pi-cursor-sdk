@@ -2,8 +2,6 @@ import { createHash } from "node:crypto";
 import type { Context, Message, ToolCall } from "@earendil-works/pi-ai";
 import { convertToLlm } from "@earendil-works/pi-coding-agent";
 import type { SDKImage } from "@cursor/sdk";
-import { CURSOR_PRESERVE_PI_AGENTS_MD_ENV, stripPiAgentsContextFromSystemPrompt } from "./cursor-agents-context.js";
-import { parseEnvBoolean } from "./cursor-env-boolean.js";
 import { getCursorPiBridgeContractText } from "./cursor-bridge-contract.js";
 import { getCursorReplayPromptLabel } from "./cursor-tool-names.js";
 
@@ -115,9 +113,6 @@ function sanitizeSystemPromptForCursor(systemPrompt: string): string {
 		"",
 	);
 	sanitized = sanitized.replace(/\n+Semantic code intelligence priority:[\s\S]*$/g, "");
-	if (!parseEnvBoolean(process.env[CURSOR_PRESERVE_PI_AGENTS_MD_ENV], false)) {
-		sanitized = stripPiAgentsContextFromSystemPrompt(sanitized);
-	}
 	return sanitized.trim();
 }
 

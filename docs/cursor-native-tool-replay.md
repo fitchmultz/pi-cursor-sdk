@@ -147,7 +147,7 @@ Most Cursor tool visibility is completion-based: the completed replay card (or b
 Lifecycle rules:
 
 - Eligible tools include `task`, `shell`, `mcp`, `generateImage`, `recordScreen`, `semSearch`, web search/fetch activity, and plan/todo activity. Fast local tools such as `read`, `grep`, and `glob` do not get lifecycle lines in normal cases.
-- Lifecycle text is emitted as a single bounded, scrubbed thinking line such as `Cursor MCP: external_search` or `Cursor shell: npm test`. It is not a separate permanent replay card and does not rerun tools.
+- Lifecycle text is emitted as a single bounded, scrubbed thinking line such as `Cursor MCP: external_search` or `Cursor shell: shell`. Shell pending labels intentionally omit command text; the completed replay card remains the source of truth for recorded shell activity. Lifecycle lines are not separate permanent replay cards and do not rerun tools.
 - A short defer window coalesces fast start+complete pairs: if a tool completes before the defer elapses, only the completed replay card/trace is shown.
 - pi bridge MCP calls (`pi__*`) are excluded because pi already shows the real pi tool execution path.
 - Implementation: `src/cursor-tool-lifecycle.ts` (eligibility/labels) and `src/cursor-provider-turn-coordinator.ts` (defer, emit, bridge exclusion).

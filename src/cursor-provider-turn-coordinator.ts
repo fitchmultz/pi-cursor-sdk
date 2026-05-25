@@ -13,7 +13,7 @@ import {
 	recordDiscardedIncompleteStartedToolCall,
 	type CursorSdkEventDebugRecorder,
 } from "./cursor-sdk-event-debug.js";
-import { getString, getToolArgs, getToolName, normalizeToolName } from "./cursor-transcript-utils.js";
+import { getToolName, normalizeToolName } from "./cursor-transcript-utils.js";
 import {
 	CURSOR_TOOL_LIFECYCLE_DEFER_MS,
 	formatCursorToolLifecycleProgressText,

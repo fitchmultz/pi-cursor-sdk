@@ -42,9 +42,10 @@ function getCursorToolLifecycleTitle(toolCall: unknown): string {
 }
 
 function containsCursorLifecycleUnsafeDetail(text: string): boolean {
-	if (/\bhttps?:\/\//i.test(text)) return true;
+	if (/\b[a-z][a-z0-9+.-]*:\/\//i.test(text)) return true;
 	if (/\bwww\.\S+/i.test(text)) return true;
-	if (/(?:^|[\s'"({])(?:~\/|\/(?:Users|home|private|var|tmp|etc|opt)(?:\/|$))/i.test(text)) return true;
+	if (/(?:^|[\s'"({])~\/\S*/.test(text)) return true;
+	if (/(?:^|[\s'"({])\/\S+/.test(text)) return true;
 	if (/(?:^|[\s'"({])[A-Za-z]:[\\/]/.test(text)) return true;
 	return false;
 }

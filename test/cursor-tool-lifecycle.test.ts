@@ -38,12 +38,24 @@ describe("cursor tool lifecycle", () => {
 	it("does not leak endpoint URLs or absolute private paths in lifecycle labels", () => {
 		const secretPath = "/Users/test/Projects/secret-project/src/file.ts";
 		const secretUrl = "https://api.example.com/v1/secret-endpoint";
+		const unsafeDetailCases = [
+			{ name: "task", args: { description: "Inspect /root/.ssh/id_rsa" }, expected: "task" },
+			{ name: "task", args: { description: "Open file:///Users/test/secret" }, expected: "task" },
+			{ name: "semSearch", args: { query: "/Volumes/Secrets/file" }, expected: "semantic search" },
+			{ name: "createPlan", args: { plan: "ssh://host/path\nnext step" }, expected: "plan" },
+		] as const;
 
 		expect(buildCursorToolLifecycleLabel({ name: "shell", args: { command: `cd ${secretPath} && npm test` } })).toBe("shell");
 		expect(buildCursorToolLifecycleLabel({ name: "webFetch", args: { url: secretUrl } })).toBe("web fetch");
 		expect(buildCursorToolLifecycleLabel({ name: "generateImage", args: { path: secretPath } })).toBe("image generation");
 		expect(buildCursorToolLifecycleLabel({ name: "recordScreen", args: { path: secretPath } })).toBe("screen recording");
 		expect(buildCursorToolLifecycleLabel({ name: "task", args: { description: `Inspect ${secretPath}` } })).toBe("task");
+
+		for (const { name, args, expected } of unsafeDetailCases) {
+			expect(buildCursorToolLifecycleLabel({ name, args })).toBe(expected);
+			const progress = formatCursorToolLifecycleProgressText({ name, args });
+			expect(progress).not.toMatch(/\/root\/|file:\/\/|\/Volumes\/|ssh:\/\//);
+		}
 
 		const progress = formatCursorToolLifecycleProgressText({ name: "webFetch", args: { url: secretUrl } });
 		expect(progress).toBe("Cursor web fetch: web fetch\n");

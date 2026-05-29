@@ -24,7 +24,7 @@ pi install https://github.com/fitchmultz/pi-cursor-sdk
 pi --model cursor/composer-2.5
 ```
 
-3. In pi, run `/login`, choose `Use an API key`, choose `Cursor`, and paste your Cursor API key.
+3. In pi, run `/login`, choose `Use an API key`, choose `Cursor`, and paste your Cursor SDK API key.
 
 If pi started without a key, run `/cursor-refresh-models` after `/login` to refresh the full live Cursor model catalog without restarting pi. Inside pi, use `/model` to choose another Cursor model.
 
@@ -32,7 +32,7 @@ If pi started without a key, run `/cursor-refresh-models` after `/login` to refr
 
 - Node.js 22.19+
 - pi 0.76.0 or newer
-- a Cursor API key saved through `/login`, available as `CURSOR_API_KEY`, or passed with pi's `--api-key`
+- a Cursor SDK API key saved through `/login`, available as `CURSOR_API_KEY`, or passed with pi's `--api-key`
 
 No global `@cursor/sdk` install is required. This package depends on exact `@cursor/sdk@1.0.15`, so normal package installation brings in the SDK version this extension was built and tested against. This package declares a pi **minimum** of 0.76.0 with no maximum peer version, so users who update pi before this extension is republished are not blocked from trying the existing extension. The current validation baseline is pi 0.77.0 plus Cursor SDK 1.0.15; older pi or Cursor SDK compatibility paths are not maintained.
 
@@ -67,7 +67,11 @@ npm install
 pi -e . --model cursor/composer-2.5
 ```
 
-## Configure your Cursor API key
+## Configure your Cursor SDK API key
+
+`pi-cursor-sdk` passes an explicit API key to the Cursor SDK. It does **not** reuse Cursor Agent CLI login, Cursor Desktop login, or Cursor subscription/OAuth state shown by `agent status`.
+
+Use either a user API key from Cursor Dashboard → Integrations or a service account API key from Team settings. Team Admin API keys are not supported by the Cursor SDK. Then configure the key with one of the methods below.
 
 Preferred setup:
 
@@ -80,10 +84,12 @@ Then, inside pi:
 1. Run `/login`.
 2. Select `Use an API key`.
 3. Select `Cursor`.
-4. Paste your Cursor API key.
+4. Paste your Cursor SDK API key.
 5. The key is saved in pi's native `~/.pi/agent/auth.json`.
 
 If pi started without a key, fallback Cursor models still register so `/login` is reachable. After `/login`, fallback model runs can use the stored key, and `/cursor-refresh-models` refreshes the full live Cursor model catalog discovered from the Cursor SDK without restarting pi.
+
+Note: if `/login` shows `Cursor ✓ key in models.json` but you have not saved a Cursor key and `CURSOR_API_KEY` is unset, that status is a pi auth-status limitation. A real Cursor SDK API key is still required for Cursor runs.
 
 Environment setup:
 
@@ -118,8 +124,11 @@ Expected behavior:
 Smoke test:
 
 ```bash
-pi --model cursor/composer-2.5 --cursor-no-fast -p "Reply with: ok"
+pi --model cursor/composer-2.5 --cursor-no-fast --no-session --mode json \
+  -p "Reply exactly PI_CURSOR_MODEL_OK and nothing else."
 ```
+
+Expected: the final assistant text is `PI_CURSOR_MODEL_OK`. If auth is missing or invalid, pi should tell you to configure a Cursor SDK API key via `/login`, `CURSOR_API_KEY`, or `--api-key`.
 
 ## Choosing a model
 
@@ -306,7 +315,7 @@ Actual Cursor runs still need a key from `/login`, `CURSOR_API_KEY`, or `--api-k
 
 ### I can see Cursor models, but runs fail
 
-You may be seeing fallback startup models or a missing/invalid key. In interactive pi, run `/login`, choose `Use an API key`, choose `Cursor`, paste the key, then run `/cursor-refresh-models`.
+You may be seeing fallback startup models or a missing/invalid Cursor SDK API key. Cursor Agent CLI/Desktop login is not reused by this extension. In interactive pi, run `/login`, choose `Use an API key`, choose `Cursor`, paste the key, then run `/cursor-refresh-models`.
 
 When a Cursor run fails after auth is configured, pi now surfaces scrubbed provider detail instead of only `Cursor SDK run failed`. Generic SDK failures include safe run metadata such as model id, a short run id prefix, and duration when available. Check the red toast or assistant error message for that detail before retrying.
 

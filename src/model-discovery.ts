@@ -16,7 +16,7 @@ const FALLBACK_CONTEXT_WINDOW = 128000;
 const FALLBACK_MAX_TOKENS = 16384;
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 const TEXT_AND_IMAGE_INPUT: ProviderModelConfig["input"] = ["text", "image"];
-const AUTH_SETUP_HINT = "/login (Use an API key -> Cursor), CURSOR_API_KEY, or --api-key";
+const AUTH_SETUP_HINT = "/login (Use an API key -> Cursor), CURSOR_API_KEY, or --api-key with a Cursor SDK API key; Cursor Agent CLI/Desktop login is not reused";
 const CATALOG_REFRESH_HINT =
 	"After adding auth to an already-started pi session, run /cursor-refresh-models to refresh the full live Cursor model catalog without restarting pi.";
 

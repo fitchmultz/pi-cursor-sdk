@@ -98,7 +98,7 @@ describe("streamCursor auth and abort", () => {
 				const error = getErrorEvent(events);
 				expect(error).toBeDefined();
 				expect(error.error.errorMessage).toBe(
-					"Cursor SDK runs require a Cursor API key. Run /login -> Use an API key -> Cursor, set CURSOR_API_KEY before starting pi, or restart pi with --api-key.",
+					"Cursor SDK runs require a Cursor SDK API key. Cursor Agent CLI/Desktop login is not reused. Run /login -> Use an API key -> Cursor, set CURSOR_API_KEY before starting pi, or restart pi with --api-key.",
 				);
 				expect(mockedCreate).not.toHaveBeenCalled();
 			} finally {

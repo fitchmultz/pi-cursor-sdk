@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Clarify setup docs and runtime auth messages: `pi-cursor-sdk` requires a Cursor SDK API key and does not reuse Cursor Agent CLI/Desktop login or subscription auth.
+
 ### Fixed
 
 - Prevent Cursor SDK `ConnectError: [unauthenticated]` failures from crashing pi as process-level uncaught exceptions; surface them as recoverable Cursor auth errors instead.

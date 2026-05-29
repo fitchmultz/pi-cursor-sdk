@@ -6,7 +6,6 @@ import type {
 	SessionTreeEvent,
 } from "@earendil-works/pi-coding-agent";
 import { createHash } from "node:crypto";
-import { Agent } from "@cursor/sdk";
 import type { AgentModeOption, ModelSelection, SDKAgent, SettingSource } from "@cursor/sdk";
 import type { Context } from "@earendil-works/pi-ai";
 import {
@@ -17,6 +16,7 @@ import {
 import { computeCursorContextFingerprint } from "./context.js";
 import { getCursorSessionScopeKey, onCursorSessionScopeKeyChange } from "./cursor-session-scope.js";
 import type { CursorSdkEventDebugRecorder } from "./cursor-sdk-event-debug.js";
+import { loadCursorSdk, type CursorSdkModule } from "./cursor-sdk-runtime.js";
 
 export interface SessionCursorAgentSendState {
 	bootstrapped: boolean;
@@ -109,7 +109,7 @@ interface SessionCursorAgentCreateParams {
 	settingSources?: SettingSource[];
 	onBridgeToolRequest?: (request: CursorPiBridgeToolRequest) => void;
 	debugRecorder?: CursorSdkEventDebugRecorder;
-	createAgent?: typeof Agent.create;
+	createAgent?: CursorSdkModule["Agent"]["create"];
 }
 
 interface CursorSessionAgentExtensionApi {
@@ -377,7 +377,7 @@ async function createSessionAgentEntry(
 	}
 
 	const resolvedPoolKey = buildSessionAgentPoolKey(scopeKey, params);
-	const createAgent = params.createAgent ?? Agent.create;
+	const createAgent = params.createAgent ?? (await loadCursorSdk()).Agent.create;
 	let agent: SDKAgent;
 	try {
 		agent = await createAgent({

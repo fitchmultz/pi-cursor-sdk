@@ -1,4 +1,3 @@
-import { createAgentPlatform } from "@cursor/sdk";
 import type { SDKAgent } from "@cursor/sdk";
 import { loadCursorTranscriptWebToolCallsAfterOffset } from "./cursor-agent-message-web-tools.js";
 import { getCheckpointContextWindow, saveCachedContextWindow } from "./context-window-cache.js";
@@ -10,9 +9,11 @@ import {
 	type CursorRunOutcome,
 } from "./cursor-provider-run-outcome.js";
 import type { CursorProviderTurnPrepareResult } from "./cursor-provider-turn-types.js";
+import { loadCursorSdk } from "./cursor-sdk-runtime.js";
 
 export async function cacheSdkContextWindow(agentId: string, modelId: string): Promise<void> {
 	try {
+		const { createAgentPlatform } = await loadCursorSdk();
 		const platform = await createAgentPlatform();
 		const checkpoint = await platform.checkpointStore.loadLatest(agentId);
 		const contextWindow = getCheckpointContextWindow(checkpoint);

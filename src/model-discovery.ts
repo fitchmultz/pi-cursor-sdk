@@ -1,4 +1,3 @@
-import { Cursor } from "@cursor/sdk";
 import type {
 	ModelListItem,
 	ModelParameterDefinition,
@@ -8,6 +7,7 @@ import type {
 import { AuthStorage, type ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import type { ModelThinkingLevel, ThinkingLevelMap } from "@earendil-works/pi-ai";
 import { loadContextWindowCache } from "./context-window-cache.js";
+import { loadCursorSdk } from "./cursor-sdk-runtime.js";
 import { CURSOR_API_KEY_ENV_VAR, resolveCursorApiKey } from "./cursor-api-key.js";
 import { FALLBACK_MODEL_ITEMS } from "./cursor-fallback-models.generated.js";
 import {
@@ -462,6 +462,7 @@ export async function discoverModels(options: DiscoverModelsOptions = {}): Promi
 	}
 
 	try {
+		const { Cursor } = await loadCursorSdk();
 		const models = await Cursor.models.list({ apiKey });
 		if (models.length > 0) {
 			saveModelListCache(keyFingerprint, models);

@@ -108,7 +108,7 @@ Discovery uses pi's native resolution order for this extension: `--api-key`, the
 
 ### Model catalog cache
 
-To avoid a live `Cursor.models.list` network round-trip on every pi startup, the discovered catalog is cached on disk at `~/.pi/agent/cursor-sdk-model-list.json` (written `0600`, keyed by an API-key fingerprint — the key itself is never stored). Warm startups within the cache TTL skip the network call; `/cursor-refresh-models` always bypasses the cache and refreshes the live catalog. If a refresh fails, a previously cached catalog is preferred over the generic bundled fallback.
+To avoid a live `Cursor.models.list` network round-trip on every pi startup, the discovered catalog is cached on disk at `~/.pi/agent/cursor-sdk-model-list.json` (written `0600`, keyed by an API-key fingerprint — the key itself is never stored). Warm startups within the cache TTL skip the network call and avoid loading `@cursor/sdk` until a Cursor turn needs it; `/cursor-refresh-models` always bypasses the cache and refreshes the live catalog. If a refresh fails, a previously cached catalog is preferred over the generic bundled fallback.
 
 ```bash
 # Cache lifetime in milliseconds (default 86400000 = 24h).

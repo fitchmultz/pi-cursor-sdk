@@ -1,5 +1,6 @@
-import { Agent, type AgentMessage } from "@cursor/sdk";
+import type { AgentMessage } from "@cursor/sdk";
 import { asRecord, getArray, getString, stringifyUnknown } from "./cursor-transcript-utils.js";
+import { loadCursorSdk } from "./cursor-sdk-runtime.js";
 
 const CURSOR_AGENT_MESSAGE_PAGE_LIMIT = 8;
 
@@ -21,6 +22,7 @@ function getOneofCaseValue(value: unknown, caseName: string): unknown {
 }
 
 async function hasCursorAgentMessageAt(agentId: string, cwd: string, offset: number): Promise<boolean> {
+	const { Agent } = await loadCursorSdk();
 	const messages = await Agent.messages.list(agentId, { runtime: "local", cwd, limit: 1, offset });
 	return messages.length > 0;
 }
@@ -46,6 +48,7 @@ export async function loadCursorTranscriptWebToolCallsAfterOffset(options: {
 	offset: number | undefined;
 }): Promise<CursorTranscriptCompletedToolCall[]> {
 	if (options.offset === undefined) return [];
+	const { Agent } = await loadCursorSdk();
 	const messages = await Agent.messages.list(options.agentId, {
 		runtime: "local",
 		cwd: options.cwd,

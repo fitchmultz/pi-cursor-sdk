@@ -13,8 +13,8 @@ import {
 	resolveCursorPiToolBridgeEnabled,
 } from "./cursor-pi-tool-bridge-snapshot.js";
 import { bridgeToolExecutionAbortTracker } from "./cursor-pi-tool-bridge-abort.js";
+import { MCP_SERVER_NAME } from "./cursor-pi-tool-bridge-constants.js";
 import { LOOPBACK_HOST, CursorPiToolBridgeRegistry } from "./cursor-pi-tool-bridge-server.js";
-import { MCP_SERVER_NAME } from "./cursor-pi-tool-bridge-run.js";
 import type {
 	CursorPiToolBridge,
 	CursorPiToolBridgeExtensionApi,

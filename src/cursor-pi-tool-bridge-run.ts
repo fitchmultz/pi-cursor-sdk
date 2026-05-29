@@ -9,6 +9,7 @@ import {
 	ListToolsRequestSchema,
 	type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
+import { MCP_ENDPOINT_ROOT, MCP_SERVER_NAME } from "./cursor-pi-tool-bridge-constants.js";
 import {
 	type CursorPiToolBridgeDiagnosticEvent,
 	type CursorPiToolBridgeLifecycleDiagnosticFields,
@@ -38,8 +39,6 @@ export interface CursorPiToolBridgeRunHost {
 	unregisterRun(pathname: string, run: CursorPiToolBridgeRunImpl): Promise<void>;
 }
 
-export const MCP_SERVER_NAME = "pi_tools";
-export const MCP_ENDPOINT_ROOT = "/cursor-pi-tool-bridge";
 const MCP_SERVER_VERSION = "0.1.0";
 
 interface PendingBridgeCall {

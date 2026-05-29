@@ -1,5 +1,4 @@
 import type { SimpleStreamOptions } from "@earendil-works/pi-ai";
-import { Agent } from "@cursor/sdk";
 import { installCursorMcpToolTimeoutOverride } from "./cursor-mcp-timeout-override.js";
 import { installCursorSdkOutputFilter, suppressCursorSdkOutput } from "./cursor-sdk-output-filter.js";
 import {
@@ -26,6 +25,7 @@ import { isCursorNativeToolDisplayRuntimeEnabled } from "./cursor-native-tool-di
 import { MISSING_CURSOR_API_KEY_MESSAGE } from "./cursor-provider-errors.js";
 import { CursorSdkTurnCoordinator } from "./cursor-provider-turn-coordinator.js";
 import { resolveCursorApiKey } from "./cursor-provider-turn-api-key.js";
+import { loadCursorSdk } from "./cursor-sdk-runtime.js";
 import type {
 	CursorProviderTurnPrepareResult,
 	CursorProviderTurnRunnerParams,
@@ -56,6 +56,7 @@ export async function prepareCursorProviderTurn(
 		const agentMode = getEffectiveCursorAgentMode();
 		const selection = buildCursorModelSelection(model.id, options?.reasoning ?? "off", fastEnabled);
 		const settingSources = getEffectiveCursorSettingSources();
+		const { Agent } = await loadCursorSdk();
 
 		installCursorMcpToolTimeoutOverride();
 		restoreCursorSdkOutputFilter = installCursorSdkOutputFilter();

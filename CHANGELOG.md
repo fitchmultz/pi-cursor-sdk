@@ -10,6 +10,7 @@
 
 - Clarify setup docs and runtime auth messages: `pi-cursor-sdk` requires a Cursor SDK API key and does not reuse Cursor Agent CLI/Desktop login or subscription auth.
 - `/cursor-refresh-models` now forces a live catalog refresh, bypassing the on-disk cache and rewriting it. A previously cached catalog is preferred over the bundled fallback when a live refresh fails.
+- Lazy-load the Cursor SDK runtime so warm cached startup paths avoid importing `@cursor/sdk` until live model discovery or a Cursor turn needs it (#100).
 
 ### Fixed
 

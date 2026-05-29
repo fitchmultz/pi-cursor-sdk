@@ -18,7 +18,7 @@ import {
 import { cursorLiveRuns } from "./cursor-provider-live-run-drain.js";
 import { disposeAllSessionCursorAgents } from "./cursor-session-agent.js";
 import { attachCursorSdkEventDebugPiStreamTap, type CursorSdkEventDebugSink } from "./cursor-sdk-event-debug.js";
-import { installCursorSdkAbortErrorSuppression } from "./cursor-sdk-abort-error-guard.js";
+import { installCursorSdkProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
 import { sanitizeCursorProviderError } from "./cursor-provider-errors.js";
 import { CursorProviderTurnRunner, resolveCursorApiKey } from "./cursor-provider-turn-runner.js";
 
@@ -53,7 +53,7 @@ export function streamCursor(
 
 	(async () => {
 		const partial = makeInitialMessage(model);
-		const sdkAbortErrorSuppression = installCursorSdkAbortErrorSuppression();
+		const sdkProcessErrorGuard = installCursorSdkProcessErrorGuard();
 
 		const runner = new CursorProviderTurnRunner({
 			model,
@@ -65,7 +65,7 @@ export function streamCursor(
 		});
 
 		try {
-			await runner.run(sdkAbortErrorSuppression);
+			await runner.run(sdkProcessErrorGuard);
 		} catch (error) {
 			await runner.handleOuterCatch(error);
 		}

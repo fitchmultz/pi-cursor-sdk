@@ -1,6 +1,6 @@
 {
 	"name": "pi-cursor-sdk",
-	"version": "0.1.25",
+	"version": "0.1.26",
 	"description": "pi provider extension backed by @cursor/sdk local agents",
 	"author": "Mitch Fultz (https://github.com/fitchmultz)",
 	"license": "MIT",

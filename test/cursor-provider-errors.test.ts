@@ -2,9 +2,19 @@ import { describe, expect, it } from "vitest";
 import {
 	formatCursorSdkAbortMessage,
 	formatCursorSdkRunFailureDetail,
+	isUnauthenticatedConnectError,
 	resolveCursorSdkAbortCause,
 	sanitizeCursorProviderError,
 } from "../src/cursor-provider-errors.js";
+
+function makeUnauthenticatedConnectError(): Error & { rawMessage: string; code: number; metadata: Headers } {
+	const error = new Error("[unauthenticated] Error") as Error & { rawMessage: string; code: number; metadata: Headers };
+	error.name = "ConnectError";
+	error.rawMessage = "Error";
+	error.code = 16;
+	error.metadata = new Headers({ authorization: "Bearer secret-key" });
+	return error;
+}
 
 describe("cursor-provider-errors", () => {
 	it("builds run metadata when SDK result text is the generic failure string", () => {
@@ -70,6 +80,18 @@ describe("cursor-provider-errors", () => {
 		expect(message).not.toContain(endpointToken);
 		expect(message).not.toContain("127.0.0.1");
 		expect(message).not.toContain("/cursor-pi-tool-bridge/");
+	});
+
+	it("maps Cursor SDK unauthenticated ConnectError to actionable auth guidance", () => {
+		const error = makeUnauthenticatedConnectError();
+		const message = sanitizeCursorProviderError(error, "secret-key");
+
+		expect(isUnauthenticatedConnectError(error)).toBe(true);
+		expect(message).toContain("invalid or unauthorized");
+		expect(message).toContain("/login");
+		expect(message).toContain("CURSOR_API_KEY");
+		expect(message).not.toContain("secret-key");
+		expect(message).not.toContain("Bearer");
 	});
 
 	it("maps connect-layer network timeouts to actionable retry guidance", () => {

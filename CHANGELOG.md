@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Prevent Cursor SDK `ConnectError: [unauthenticated]` failures from crashing pi as process-level uncaught exceptions; surface them as recoverable Cursor auth errors instead.
+
 ## 0.1.25 - 2026-05-28
 
 ### Fixed

@@ -13,7 +13,7 @@ import {
 } from "./cursor-provider-errors.js";
 import { CursorLiveRunAbortError } from "./cursor-live-run-coordinator.js";
 import type { IncompleteCursorToolRunOutcomeInput } from "./cursor-incomplete-tool-visibility.js";
-import type { installCursorSdkAbortErrorSuppression } from "./cursor-sdk-abort-error-guard.js";
+import type { installCursorSdkProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
 import type { CursorSdkEventDebugSink } from "./cursor-sdk-event-debug.js";
 import { awaitFinalizeCursorRunOutcome } from "./cursor-provider-turn-finalize.js";
 import type {
@@ -63,7 +63,7 @@ export interface CursorLiveRunCompletion {
 export interface CursorRunFinalizerParams {
 	runnerParams: CursorProviderTurnRunnerParams;
 	sdkEventDebug: () => CursorSdkEventDebugSink | undefined;
-	sdkAbortErrorSuppression: ReturnType<typeof installCursorSdkAbortErrorSuppression>;
+	sdkProcessErrorGuard: ReturnType<typeof installCursorSdkProcessErrorGuard>;
 	resolvedApiKey: () => string | undefined;
 }
 
@@ -145,13 +145,13 @@ export class CursorRunFinalizer {
 			void liveCompletion.waitCompletion
 				.finally(async () => {
 					await this.finalizeSdkEventDebugBestEffort();
-					this.safeCleanup(() => this.params.sdkAbortErrorSuppression.dispose());
+					this.safeCleanup(() => this.params.sdkProcessErrorGuard.dispose());
 				})
 				.catch(() => {});
 			return;
 		}
 		await this.finalizeSdkEventDebugBestEffort();
-		this.safeCleanup(() => this.params.sdkAbortErrorSuppression.dispose());
+		this.safeCleanup(() => this.params.sdkProcessErrorGuard.dispose());
 	}
 
 	private async applyDirectOutcome(
@@ -195,7 +195,7 @@ export class CursorRunFinalizer {
 			await abandonSessionCursorAgent(prepared?.sessionAgentScopeKey);
 		}
 		if (error instanceof CursorLiveRunAbortError) {
-			this.params.sdkAbortErrorSuppression.suppressAbortErrors();
+			this.params.sdkProcessErrorGuard.suppressAbortErrors();
 			this.pushTerminalError(this.params.runnerParams.partial, "aborted", this.abortMessage());
 		} else {
 			this.pushTerminalError(

@@ -5,7 +5,7 @@ import { buildIncompleteCursorToolRunOutcome } from "../src/cursor-incomplete-to
 import { CursorRunFinalizer } from "../src/cursor-provider-run-finalizer.js";
 import { CursorSdkTurnCoordinator } from "../src/cursor-provider-turn-coordinator.js";
 import type { CursorProviderTurnPrepareResult } from "../src/cursor-provider-turn-types.js";
-import { installCursorSdkAbortErrorSuppression } from "../src/cursor-sdk-abort-error-guard.js";
+import { installCursorSdkProcessErrorGuard } from "../src/cursor-sdk-process-error-guard.js";
 import type { CursorSdkEventDebugSink } from "../src/cursor-sdk-event-debug.js";
 import type { SessionCursorAgentLease } from "../src/cursor-session-agent.js";
 import { createCursorLiveRunAccountingState } from "../src/cursor-live-run-accounting.js";
@@ -91,7 +91,7 @@ describe("CursorRunFinalizer", () => {
 				sdkEventDebugRef: {},
 			},
 			sdkEventDebug: () => undefined,
-			sdkAbortErrorSuppression: installCursorSdkAbortErrorSuppression(),
+			sdkProcessErrorGuard: installCursorSdkProcessErrorGuard(),
 			resolvedApiKey: () => "test-key",
 		});
 		finalizer.startLiveRunCompletion({
@@ -119,7 +119,7 @@ describe("CursorRunFinalizer", () => {
 		const partial = makeAssistantMessage("");
 		const context = makeContext();
 		const model = makeModel();
-		const sdkAbortErrorSuppression = installCursorSdkAbortErrorSuppression();
+		const sdkProcessErrorGuard = installCursorSdkProcessErrorGuard();
 		const turnCoordinator = new CursorSdkTurnCoordinator({
 			stream,
 			partial,
@@ -169,7 +169,7 @@ describe("CursorRunFinalizer", () => {
 				sdkEventDebugRef: {},
 			},
 			sdkEventDebug: () => undefined,
-			sdkAbortErrorSuppression,
+			sdkProcessErrorGuard,
 			resolvedApiKey: () => undefined,
 		});
 
@@ -202,7 +202,7 @@ describe("CursorRunFinalizer", () => {
 		stream.end();
 		const events = await collectAssistantEvents(stream);
 		expect(events.some((event) => event.type === "error" && event.error.errorMessage?.includes("commit failed"))).toBe(true);
-		sdkAbortErrorSuppression.dispose();
+		sdkProcessErrorGuard.dispose();
 	});
 
 	it("does not reclassify a completed direct turn when debug cleanup fails", async () => {
@@ -210,7 +210,7 @@ describe("CursorRunFinalizer", () => {
 		const partial = makeAssistantMessage("");
 		const context = makeContext();
 		const model = makeModel();
-		const sdkAbortErrorSuppression = installCursorSdkAbortErrorSuppression();
+		const sdkProcessErrorGuard = installCursorSdkProcessErrorGuard();
 		const turnCoordinator = new CursorSdkTurnCoordinator({
 			stream,
 			partial,
@@ -264,7 +264,7 @@ describe("CursorRunFinalizer", () => {
 				sdkEventDebugRef: {},
 			},
 			sdkEventDebug: () => debugSink,
-			sdkAbortErrorSuppression,
+			sdkProcessErrorGuard,
 			resolvedApiKey: () => undefined,
 		});
 

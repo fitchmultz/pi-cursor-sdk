@@ -1,7 +1,7 @@
 import { CursorLiveRunAbortError } from "./cursor-live-run-coordinator.js";
 import { drainExistingCursorLiveRunBeforeSend } from "./cursor-provider-live-run-drain.js";
 import { getCursorSessionCwd } from "./cursor-session-cwd.js";
-import { installCursorSdkAbortErrorSuppression } from "./cursor-sdk-abort-error-guard.js";
+import { installCursorSdkProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
 import { CursorSdkEventDebugSink } from "./cursor-sdk-event-debug.js";
 import { awaitFinalizeCursorRunOutcome } from "./cursor-provider-turn-finalize.js";
 import {
@@ -41,7 +41,7 @@ export class CursorProviderTurnRunner {
 		discardIncompleteToolsFromPrepared(prepared, outcome);
 	}
 
-	async run(sdkAbortErrorSuppression: ReturnType<typeof installCursorSdkAbortErrorSuppression>): Promise<void> {
+	async run(sdkProcessErrorGuard: ReturnType<typeof installCursorSdkProcessErrorGuard>): Promise<void> {
 		const { stream, partial, model, context, options, sdkEventDebugRef } = this.params;
 		let prepared: CursorProviderTurnPrepareResult | undefined;
 		let sendResult: CursorProviderTurnSendResult | undefined;
@@ -49,7 +49,7 @@ export class CursorProviderTurnRunner {
 		const runFinalizer = new CursorRunFinalizer({
 			runnerParams: this.params,
 			sdkEventDebug: () => this.sdkEventDebug,
-			sdkAbortErrorSuppression,
+			sdkProcessErrorGuard,
 			resolvedApiKey: () => this.resolvedApiKey,
 		});
 
@@ -84,7 +84,7 @@ export class CursorProviderTurnRunner {
 				params: this.params,
 				prepared,
 				sdkEventDebug: this.sdkEventDebug,
-				sdkAbortErrorSuppression,
+				sdkProcessErrorGuard,
 				throwIfAborted: () => this.throwIfAborted(),
 			});
 			const { send } = sendResult;
@@ -131,7 +131,7 @@ export class CursorProviderTurnRunner {
 		const runFinalizer = new CursorRunFinalizer({
 			runnerParams: this.params,
 			sdkEventDebug: () => this.sdkEventDebug,
-			sdkAbortErrorSuppression: installCursorSdkAbortErrorSuppression(),
+			sdkProcessErrorGuard: installCursorSdkProcessErrorGuard(),
 			resolvedApiKey: () => this.resolvedApiKey,
 		});
 		await runFinalizer.applyTerminalEvent({ kind: "error", prepared: undefined, error });

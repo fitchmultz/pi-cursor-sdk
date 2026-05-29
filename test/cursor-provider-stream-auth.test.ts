@@ -8,6 +8,7 @@ import {
 	makeContext,
 	collectEvents,
 	getErrorEvent,
+	getEventsOfType,
 	hasEventType,
 	registerBridgeForProviderTest,
 	createTestToolInfo,
@@ -16,12 +17,23 @@ import {
 	asMockCursorRun,
 } from "./helpers/cursor-provider-harness.js";
 import { CursorPiToolBridgeRunImpl } from "../src/cursor-pi-tool-bridge-run.js";
-import { __testUtils as cursorSdkAbortErrorGuardTestUtils } from "../src/cursor-sdk-abort-error-guard.js";
+import { __testUtils as cursorSdkProcessGuardTestUtils } from "../src/cursor-sdk-process-error-guard.js";
 import { streamCursor } from "../src/cursor-provider.js";
 import { writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+function makeUnauthenticatedConnectError(): Error & { rawMessage: string; code: number } {
+	const error = new Error("[unauthenticated] Error") as Error & { rawMessage: string; code: number };
+	error.name = "ConnectError";
+	error.rawMessage = "Error";
+	error.code = 16;
+	error.stack =
+		"ConnectError: [unauthenticated] Error\n" +
+		"    at file:///repo/node_modules/@connectrpc/connect/dist/esm/protocol-connect/error-json.js:53:19\n" +
+		"    at file:///repo/node_modules/@cursor/sdk/dist/esm/index.js:8:1086456";
+	return error;
+}
 
 describe("streamCursor auth and abort", () => {
 	beforeEach(resetCursorProviderTestState);
@@ -159,6 +171,61 @@ describe("streamCursor auth and abort", () => {
 		expect(message).toContain("/login");
 		expect(message).toContain("CURSOR_API_KEY");
 		expect(message).not.toContain("super-secret-key-12345");
+	});
+
+	it("labels unauthenticated ConnectError from run.wait as an auth failure", async () => {
+		const mockSend = vi.fn().mockResolvedValue(
+			asMockCursorRun({
+				id: "run-auth-expired",
+				agentId: "agent-1",
+				status: "running",
+				wait: vi.fn().mockRejectedValue(makeUnauthenticatedConnectError()),
+			}),
+		);
+		mockCreatedAgent({ send: mockSend });
+
+		const stream = streamCursor(makeModel(), makeContext(), { apiKey: "test-key" });
+		const events = await collectEvents(stream);
+
+		const error = getErrorEvent(events);
+		expect(error.reason).toBe("error");
+		expect(error.error.errorMessage).toContain("invalid or unauthorized");
+		expect(error.error.errorMessage).toContain("/login");
+		expect(error.error.errorMessage).toContain("CURSOR_API_KEY");
+	});
+
+	it("suppresses duplicate process-level unauthenticated ConnectError during an active provider turn", async () => {
+		const connectError = makeUnauthenticatedConnectError();
+		let processListenerCalled = false;
+		const processListener = () => {
+			processListenerCalled = true;
+		};
+		process.once("uncaughtException", processListener);
+		const mockSend = vi.fn().mockResolvedValue(
+			asMockCursorRun({
+				id: "run-auth-expired",
+				agentId: "agent-1",
+				status: "running",
+				wait: vi.fn().mockImplementation(async () => {
+					process.emit("uncaughtException", connectError, "uncaughtException");
+					throw connectError;
+				}),
+			}),
+		);
+		mockCreatedAgent({ send: mockSend });
+
+		try {
+			const stream = streamCursor(makeModel(), makeContext(), { apiKey: "test-key" });
+			const events = await collectEvents(stream);
+
+			const errors = getEventsOfType(events, "error");
+			expect(errors).toHaveLength(1);
+			expect(errors[0].error.errorMessage).toContain("invalid or unauthorized");
+			expect(processListenerCalled).toBe(false);
+			expect(cursorSdkProcessGuardTestUtils.activeProviderTurnCount()).toBe(0);
+		} finally {
+			process.removeListener("uncaughtException", processListener);
+		}
 	});
 
 	it("cancels bridge runs promptly when aborted during Agent.messages.list offset probing", async () => {
@@ -347,7 +414,7 @@ describe("streamCursor auth and abort", () => {
 		process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR = invalidRunDirFile;
 
 		try {
-			expect(cursorSdkAbortErrorGuardTestUtils.activeSuppressionCount()).toBe(0);
+			expect(cursorSdkProcessGuardTestUtils.activeProviderTurnCount()).toBe(0);
 			const stream = streamCursor(makeModel(), makeContext(), { apiKey: "test-key" });
 			const events = await collectEvents(stream);
 			const error = getErrorEvent(events);
@@ -358,7 +425,7 @@ describe("streamCursor auth and abort", () => {
 				events.findIndex((event) => event.type === "error"),
 			);
 			expect(mockedCreate).not.toHaveBeenCalled();
-			expect(cursorSdkAbortErrorGuardTestUtils.activeSuppressionCount()).toBe(0);
+			expect(cursorSdkProcessGuardTestUtils.activeProviderTurnCount()).toBe(0);
 		} finally {
 			rmSync(invalidRunDirFile, { force: true });
 			if (previousDebug === undefined) delete process.env.PI_CURSOR_SDK_EVENT_DEBUG;

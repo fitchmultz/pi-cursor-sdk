@@ -2,7 +2,7 @@ import type { SendOptions } from "@cursor/sdk";
 import { CursorLiveRunAbortError } from "./cursor-live-run-coordinator.js";
 import { cursorLiveRuns } from "./cursor-provider-live-run-drain.js";
 import { getCursorAgentMessageOffset } from "./cursor-provider-turn-message-offset.js";
-import type { installCursorSdkAbortErrorSuppression } from "./cursor-sdk-abort-error-guard.js";
+import type { installCursorSdkProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
 import type {
 	CursorProviderTurnRunnerParams,
 	CursorProviderTurnPrepareResult,
@@ -14,12 +14,12 @@ export interface SendCursorProviderTurnParams {
 	params: CursorProviderTurnRunnerParams;
 	prepared: CursorProviderTurnPrepareResult;
 	sdkEventDebug: CursorSdkEventDebugSink | undefined;
-	sdkAbortErrorSuppression: ReturnType<typeof installCursorSdkAbortErrorSuppression>;
+	sdkProcessErrorGuard: ReturnType<typeof installCursorSdkProcessErrorGuard>;
 	throwIfAborted: () => void;
 }
 
 export async function sendCursorProviderTurn(sendParams: SendCursorProviderTurnParams): Promise<CursorProviderTurnSendResult> {
-	const { params, prepared, sdkEventDebug, sdkAbortErrorSuppression, throwIfAborted } = sendParams;
+	const { params, prepared, sdkEventDebug, sdkProcessErrorGuard, throwIfAborted } = sendParams;
 	const { options } = params;
 	const { agent, cwd, payload, meta, runtime } = prepared;
 	const { turnCoordinator, liveRun } = runtime;
@@ -27,7 +27,7 @@ export async function sendCursorProviderTurn(sendParams: SendCursorProviderTurnP
 	let completed = false;
 	let sdkRun: Awaited<ReturnType<typeof agent.send>> | null = null;
 	const abortListener = () => {
-		sdkAbortErrorSuppression.suppressAbortErrors();
+		sdkProcessErrorGuard.suppressAbortErrors();
 		liveRun?.bridgeRun?.cancel("Cursor SDK run aborted");
 		if (sdkRun) {
 			sdkRun.cancel().catch(() => {});
@@ -84,7 +84,7 @@ export async function sendCursorProviderTurn(sendParams: SendCursorProviderTurnP
 		});
 		if (liveRun) cursorLiveRuns.attachSdkRun(liveRun, run);
 		if (options?.signal?.aborted) {
-			sdkAbortErrorSuppression.suppressAbortErrors();
+			sdkProcessErrorGuard.suppressAbortErrors();
 			liveRun?.bridgeRun?.cancel("Cursor SDK run aborted");
 			await run.cancel().catch(() => {});
 			throw new CursorLiveRunAbortError();

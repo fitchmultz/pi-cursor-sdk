@@ -26,7 +26,7 @@ function hasActiveAbortSuppression(): boolean {
 }
 
 function isCursorProvenance(source: string): boolean {
-	return source === "cursor-sdk-stack" || source === "cursor-backend-details";
+	return source === "cursor-sdk-stack" || source === "cursor-extension-connect-stack" || source === "cursor-backend-details";
 }
 
 function shouldSuppressProcessError(event: string | symbol, args: readonly unknown[]): boolean {

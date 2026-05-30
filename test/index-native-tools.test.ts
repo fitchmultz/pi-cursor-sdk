@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { resetCapabilitiesCache, setCapabilities } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -186,8 +187,9 @@ describe("extension native Cursor tool replay", () => {
 					replayContext,
 				)?.render(120).join("\n") ?? "";
 
-			expect(callRendered).toContain("read README.md");
-			expect(callRendered).toContain("local file preview");
+			const callRenderedText = stripVTControlCharacters(callRendered);
+			expect(callRenderedText).toContain("read README.md");
+			expect(callRenderedText).toContain("local file preview");
 			expect(resultRendered).toContain(notice);
 			expect(resultRendered).not.toContain("# Local preview body");
 		} finally {

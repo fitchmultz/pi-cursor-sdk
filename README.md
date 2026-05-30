@@ -34,7 +34,7 @@ If pi started without a key, run `/cursor-refresh-models` after `/login` to refr
 - pi 0.76.0 or newer
 - a Cursor SDK API key saved through `/login`, available as `CURSOR_API_KEY`, or passed with pi's `--api-key`
 
-No global `@cursor/sdk` install is required. This package depends on exact `@cursor/sdk@1.0.16`, so normal package installation brings in the SDK version this extension was built and tested against. This package declares a pi **minimum** of 0.76.0 with no maximum peer version, so users who update pi before this extension is republished are not blocked from trying the existing extension. The current validation baseline is pi 0.77.0 plus Cursor SDK 1.0.16; older pi or Cursor SDK compatibility paths are not maintained.
+No global `@cursor/sdk` install is required. This package depends on exact `@cursor/sdk@1.0.16`, so normal package installation brings in the SDK version this extension was built and tested against. This package declares a pi **minimum** of 0.76.0 with no maximum peer version, so users who update pi before this extension is republished are not blocked from trying the existing extension. The current validation baseline is pi 0.78.0 plus Cursor SDK 1.0.16; older pi or Cursor SDK compatibility paths are not maintained.
 
 ## Install
 
@@ -293,7 +293,7 @@ On bootstrap sends, a compact **callable tool surfaces** block is injected into 
 
 ### Maintainer live smoke release gate
 
-For Cursor provider/runtime changes, follow the manual [Cursor live smoke checklist](docs/cursor-live-smoke-checklist.md) before release. For a faster minimal-surface pass first, see [Cursor dogfood checklist](docs/cursor-dogfood-checklist.md). See [Cursor testing lessons](docs/cursor-testing-lessons.md) for auth.json seeding, isolated `/tmp` harness layout, JSONL replay-error scans, and other regression traps. Assume every runtime surface is in scope. The checklist uses real `pi -e . --cursor-no-fast --model cursor/composer-2.5` runs with temporary session dirs, pi 0.77.0 `--session-id`, sealed smoke-runner PATH/env wrappers, Cursor SDK `plan` mode, and mandatory visual TUI card/color inspection. The canonical visual path is `npm run smoke:visual`: offscreen PTY capture rendered through a browser/xterm view and saved as PNG screenshots with Playwright, or with `agent_browser` from the generated HTML when available. Its default matrix is native replay only: native replay registration is forced on, Cursor setting sources are disabled, the pi bridge is off, overlapping built-in pi tools are not exposed, and inherited Cursor SDK event-debug artifact env is cleared; `--event-debug` writes to a deterministic debug directory under the visual output directory. The visible TUI/output, rendered screenshots, scrubbed diagnostics, and persisted JSONL must agree. Do not mark a release ready with optional, deferred, mostly-passing, or unobserved smoke checks outstanding.
+For Cursor provider/runtime changes, follow the manual [Cursor live smoke checklist](docs/cursor-live-smoke-checklist.md) before release. For a faster minimal-surface pass first, see [Cursor dogfood checklist](docs/cursor-dogfood-checklist.md). See [Cursor testing lessons](docs/cursor-testing-lessons.md) for auth.json seeding, isolated `/tmp` harness layout, JSONL replay-error scans, and other regression traps. Assume every runtime surface is in scope. The checklist uses real `pi -e . --cursor-no-fast --model cursor/composer-2.5` runs with temporary session dirs, pi 0.78.0 `--session-id`, sealed smoke-runner PATH/env wrappers, Cursor SDK `plan` mode, and mandatory visual TUI card/color inspection. The canonical visual path is `npm run smoke:visual`: offscreen PTY capture rendered through a browser/xterm view and saved as PNG screenshots with Playwright, or with `agent_browser` from the generated HTML when available. Its default matrix is native replay only: native replay registration is forced on, Cursor setting sources are disabled, the pi bridge is off, overlapping built-in pi tools are not exposed, and inherited Cursor SDK event-debug artifact env is cleared; `--event-debug` writes to a deterministic debug directory under the visual output directory. The visible TUI/output, rendered screenshots, scrubbed diagnostics, and persisted JSONL must agree. Do not mark a release ready with optional, deferred, mostly-passing, or unobserved smoke checks outstanding.
 
 ### Maintainer Cursor SDK event capture
 
@@ -333,7 +333,7 @@ When a Cursor run fails after auth is configured, pi now surfaces scrubbed provi
 
 Aborted runs now include a likely cause when determinable, for example `Cancelled: prompt interrupted.` for user cancel or `Cancelled: Cursor SDK run was cancelled.` for SDK-side cancellation.
 
-Network timeouts from the Cursor SDK connect layer (for example `ConnectError: read ETIMEDOUT`) surface as a scrubbed retry hint instead of crashing pi. Check your connection and retry; persistent timeouts may indicate a transient Cursor service or network issue.
+Network failures from the Cursor SDK connect layer (for example `ConnectError: read ETIMEDOUT` or `ConnectError: [aborted] read ECONNRESET`) surface as a scrubbed retry hint instead of crashing pi. Check your connection and retry; persistent failures may indicate a transient Cursor service or network issue.
 
 You can also restart pi with a key in the same shell or launcher that starts pi:
 
@@ -440,7 +440,7 @@ This usually needs session JSONL to classify. Common cases:
 - **Stale replay routing / plan-strip:** Error `toolResult` or error assistant messages contain `Tool grep/cursor/find/ls not found`, or provider debug shows `inactive_trace` after plan-mode execute stripped active tools — tracked in **#52** (distinct from model text echo and #55).
 - **Replay vs execution:** `cursor-replay-*` IDs and neutral **Cursor MCP** activity cards are display-only recorded Cursor results; they do not re-run browser/MCP work. See [Cursor native tool replay](docs/cursor-native-tool-replay.md).
 - **Run failure / discarded tools:** A red toast with scrubbed detail may indicate an SDK failure (#55). Started-but-never-completed Cursor tools surface neutral **Cursor … did not complete** activity cards with a bounded reason when the run failed/aborted, produced no assistant text, or involved external/side-effectful tools. Incomplete fast local discovery starts (`read`, `grep`, `glob`, `ls`) are debug-only after a successful text-producing run so stale SDK start events do not create red post-answer cards; maintainer debug for the same gap remains in **#52** (`PI_CURSOR_SDK_EVENT_DEBUG=1`).
-- **Hard network crash:** pi exited with uncaught `ConnectError` / `ETIMEDOUT` — **#43**, not #40 text echo.
+- **Hard network crash:** pi exited with an uncaught Cursor SDK `ConnectError` instead of showing a scrubbed retry/auth error — capture the stack/session tail as a process-guard regression, not #40 text echo.
 
 Capture `pi --version`, extension version, model, flags, the exact prompt, and a redacted session dir before filing bugs.
 

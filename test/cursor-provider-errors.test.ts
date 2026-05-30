@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	classifyCursorConnectError,
 	formatCursorSdkAbortMessage,
 	formatCursorSdkRunFailureDetail,
 	isUnauthenticatedConnectError,
@@ -13,6 +14,34 @@ function makeUnauthenticatedConnectError(): Error & { rawMessage: string; code: 
 	error.rawMessage = "Error";
 	error.code = 16;
 	error.metadata = new Headers({ authorization: "Bearer secret-key" });
+	return error;
+}
+
+function makeCursorSdkNetworkConnectError(): Error & { rawMessage: string; code: number; cause: NodeJS.ErrnoException } {
+	const error = new Error("[aborted] read ECONNRESET") as Error & {
+		rawMessage: string;
+		code: number;
+		cause: NodeJS.ErrnoException;
+	};
+	error.name = "ConnectError";
+	error.rawMessage = "read ECONNRESET";
+	error.code = 10;
+	error.cause = Object.assign(new Error("read ECONNRESET"), {
+		code: "ECONNRESET",
+		syscall: "read",
+	});
+	error.stack =
+		"ConnectError: [aborted] read ECONNRESET\n" +
+		"    at file:///repo/node_modules/@connectrpc/connect-node/dist/esm/node-universal-client.js:293:63\n" +
+		"    at file:///repo/node_modules/@cursor/sdk/dist/esm/index.js:8:1086456";
+	return error;
+}
+
+function makeCursorExtensionNetworkConnectError(): Error & { rawMessage: string; code: number; cause: NodeJS.ErrnoException } {
+	const error = makeCursorSdkNetworkConnectError();
+	error.stack =
+		"ConnectError: [aborted] read ECONNRESET\n" +
+		"    at file:///C:/Users/example/.pi/agent/git/github.com/fitchmultz/pi-cursor-sdk/node_modules/@connectrpc/connect-node/dist/esm/node-universal-client.js:293:63";
 	return error;
 }
 
@@ -102,6 +131,24 @@ describe("cursor-provider-errors", () => {
 		expect(sanitizeCursorProviderError(new Error("ConnectError: [unavailable] read ETIMEDOUT"), "test-key")).not.toContain(
 			"ETIMEDOUT",
 		);
+	});
+
+	it("classifies Cursor SDK network ConnectErrors without leaking raw network codes", () => {
+		const error = makeCursorSdkNetworkConnectError();
+		const classification = classifyCursorConnectError(error);
+		const message = sanitizeCursorProviderError(error, "test-key");
+
+		expect(classification).toEqual({ kind: "network", source: "cursor-sdk-stack" });
+		expect(message).toContain("timed out during network I/O");
+		expect(message).toContain("Check your connection and retry");
+		expect(message).not.toContain("ECONNRESET");
+	});
+
+	it("recognizes extension-local connect-node network stacks as Cursor provenance", () => {
+		expect(classifyCursorConnectError(makeCursorExtensionNetworkConnectError())).toEqual({
+			kind: "network",
+			source: "cursor-extension-connect-stack",
+		});
 	});
 
 	it("formats abort causes deterministically", () => {

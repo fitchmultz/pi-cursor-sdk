@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.1.28 - 2026-05-29
+
+### Changed
+
+- Update the local pi validation baseline to `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` `0.78.0` after reviewing the 0.78.0 changelog; peer dependency ranges remain minimum-only at `>=0.76.0` (#108).
+
+### Fixed
+
+- Prevent Cursor SDK ConnectRPC network resets such as `ConnectError: [aborted] read ECONNRESET` from escaping as process-level uncaught exceptions during active Cursor turns; pi now surfaces the existing scrubbed retry guidance and remains available for the next turn (#107).
+
 ## 0.1.27 - 2026-05-29
 
 ### Changed

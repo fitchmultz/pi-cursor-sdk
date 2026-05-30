@@ -47,9 +47,14 @@ function isUnauthenticatedConnectCode(code: unknown): boolean {
 	return code === 16 || (typeof code === "string" && /^(?:16|unauthenticated)$/i.test(code));
 }
 
+function isCursorExtensionConnectStack(stack: string): boolean {
+	return stack.includes("@connectrpc/connect-node") && /(?:^|[\\/])pi-cursor-sdk(?:[\\/]|$)/.test(stack);
+}
+
 function getCursorConnectSource(error: unknown, record: Record<string, unknown> | undefined): CursorConnectErrorSource {
 	const stack = getErrorStack(error, record);
 	if (stack.includes("@cursor/sdk")) return "cursor-sdk-stack";
+	if (isCursorExtensionConnectStack(stack)) return "cursor-extension-connect-stack";
 	const details = Array.isArray(record?.details) ? record.details : [];
 	const hasCursorBackendDetails = details.some((detail) => {
 		const type = getErrorStringField(asRecord(detail), "type");
@@ -58,11 +63,16 @@ function getCursorConnectSource(error: unknown, record: Record<string, unknown> 
 	return hasCursorBackendDetails ? "cursor-backend-details" : "generic-connect";
 }
 
-export type CursorConnectErrorSource = "cursor-sdk-stack" | "cursor-backend-details" | "generic-connect";
+export type CursorConnectErrorSource =
+	| "cursor-sdk-stack"
+	| "cursor-extension-connect-stack"
+	| "cursor-backend-details"
+	| "generic-connect";
 
 export type CursorConnectErrorClassification =
 	| { kind: "abort"; source: "cursor-sdk-stack" }
-	| { kind: "unauthenticated"; source: CursorConnectErrorSource };
+	| { kind: "unauthenticated"; source: CursorConnectErrorSource }
+	| { kind: "network"; source: CursorConnectErrorSource };
 
 export function classifyCursorConnectError(error: unknown): CursorConnectErrorClassification | undefined {
 	const record = asRecord(error);
@@ -87,6 +97,12 @@ export function classifyCursorConnectError(error: unknown): CursorConnectErrorCl
 
 	if (isUnauthenticatedConnectCode(code) || isLikelyAuthError(`${message}\n${rawMessage}`)) {
 		return { kind: "unauthenticated", source: getCursorConnectSource(error, record) };
+	}
+
+	const causeCode = getErrorStringField(cause, "code");
+	const causeSyscall = getErrorStringField(cause, "syscall");
+	if (isLikelyNetworkTimeout(`${message}\n${rawMessage}\n${causeCode ?? ""}\n${causeSyscall ?? ""}`)) {
+		return { kind: "network", source: getCursorConnectSource(error, record) };
 	}
 
 	return undefined;

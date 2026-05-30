@@ -238,7 +238,7 @@ The script writes timestamped artifacts under `--out` (default `/tmp/pi-cursor-s
 
 Stdout prints artifact paths and summary counts only. Raw payloads stay on disk and may contain local paths, project text, tool args/results, or secrets — do not commit or share them.
 
-Hard repo rule: Cursor SDK behavior claims must come from the installed `@cursor/sdk` package and/or https://cursor.com/docs/sdk/typescript, not from memory or ad-hoc probes alone. Current cutover validation targets exact `@cursor/sdk@1.0.16` and pi 0.77.0 local packages.
+Hard repo rule: Cursor SDK behavior claims must come from the installed `@cursor/sdk` package and/or https://cursor.com/docs/sdk/typescript, not from memory or ad-hoc probes alone. Current cutover validation targets exact `@cursor/sdk@1.0.16` and pi 0.78.0 local packages.
 
 ## Pi provider SDK event capture
 
@@ -394,7 +394,7 @@ npm run debug:sdk-events -- \
 
 Start with whether pi stayed alive:
 
-0. **pi process exited / shell returned with uncaught `ConnectError` (`ETIMEDOUT`, code 14, `read ETIMEDOUT`)** — hard network crash bypassing provider error surfacing. Route to **#43** (coordinate with #55 for caught-failure messaging). If tools were mid-flight, note whether session JSONL ends abruptly; do not classify as #40 model text echo.
+0. **pi process exited / shell returned with uncaught `ConnectError` (for example `ETIMEDOUT`, `ECONNRESET`, `read ETIMEDOUT`, or `[aborted] read ECONNRESET`)** — hard network crash bypassing provider error surfacing. Current code guards observed Cursor SDK/network-reset shapes during active Cursor turns and should show scrubbed retry guidance instead; treat a fresh process exit as a process-guard regression, capture the stack/session tail, and route to **#43/#107** rather than #40 model text echo. If tools were mid-flight, note whether session JSONL ends abruptly.
 
 Then inspect the failing assistant turn in `$SMOKE_DIR/session/*.jsonl`:
 
@@ -414,7 +414,7 @@ rg '"type": "toolCall"|Tool call \(Cursor|cursor-replay-' "$SMOKE_DIR/session"/*
 
 ### When to file follow-ups
 
-- **#43** — pi exited from uncaught `ConnectError` / `ETIMEDOUT` during Cursor SDK HTTP traffic (hard crash, not a scrubbed #55 toast).
+- **#43/#107** — pi exited from uncaught Cursor SDK `ConnectError` / network reset during HTTP traffic (hard crash, not a scrubbed #55 toast). Observed `ETIMEDOUT` and `ECONNRESET` shapes should be guarded during active Cursor turns; new exits need stack/session evidence.
 - **#55** — caught SDK run failure or abort with missing/opaque detail (already addressed on main for surfacing).
 - **#52** — stale/inactive native replay routing after plan-strip or stale `context.tools` snapshot (`Tool * not found` in JSONL, `inactive_trace` in `display-decisions.jsonl`); or maintainer needs an explicit "started X, never completed" debug line when JSONL shows no completion and no model text echo.
 - **New issue** — bridge dispatch failure with `[pi-cursor-sdk:bridge]` evidence, or proven provider bug with JSONL showing missing `toolCall` despite SDK `tool-call-completed` in `on-delta.jsonl` from `debug:provider-events` or `debug:sdk-events` artifacts.

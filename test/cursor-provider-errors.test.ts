@@ -63,6 +63,27 @@ function makeProvenanceFreeNetworkConnectError(): Error & { rawMessage: string; 
 	return error;
 }
 
+function makeCursorSdkHttp2EnhanceYourCalmError(): Error & { rawMessage: string; code: number; cause: unknown } {
+	const error = new Error("[unknown] [internal] Stream closed with error code NGHTTP2_ENHANCE_YOUR_CALM") as Error & {
+		rawMessage: string;
+		code: number;
+		cause: unknown;
+	};
+	error.name = "ConnectError";
+	error.rawMessage = "[internal] Stream closed with error code NGHTTP2_ENHANCE_YOUR_CALM";
+	error.code = 2;
+	error.cause = Object.assign(new Error("Stream closed with error code NGHTTP2_ENHANCE_YOUR_CALM"), {
+		name: "ConnectError",
+		rawMessage: "Stream closed with error code NGHTTP2_ENHANCE_YOUR_CALM",
+		code: 13,
+		cause: Object.assign(new Error("Stream closed with error code NGHTTP2_ENHANCE_YOUR_CALM"), { code: "ERR_HTTP2_STREAM_ERROR" }),
+	});
+	error.stack =
+		"ConnectError: [unknown] [internal] Stream closed with error code NGHTTP2_ENHANCE_YOUR_CALM\n" +
+		"    at file:///Users/example/.pi/agent/npm/node_modules/@cursor/sdk/dist/esm/index.js:1:1125976";
+	return error;
+}
+
 function makeCursorBackendUnavailableConnectError(): Error & {
 	rawMessage: string;
 	code: number;
@@ -188,6 +209,17 @@ describe("cursor-provider-errors", () => {
 		expect(message).toContain("failed during network or service I/O");
 		expect(message).toContain("pi will retry automatically");
 		expect(message).not.toContain("ECONNRESET");
+	});
+
+	it("classifies HTTP/2 ENHANCE_YOUR_CALM stream resets as retryable network errors", () => {
+		const error = makeCursorSdkHttp2EnhanceYourCalmError();
+		const classification = classifyCursorConnectError(error);
+		const message = sanitizeCursorProviderError(error, "test-key");
+
+		expect(classification).toEqual({ kind: "network", source: "cursor-sdk-stack" });
+		expect(message).toContain("Network error");
+		expect(message).toContain("pi will retry automatically");
+		expect(message).not.toContain("ENHANCE_YOUR_CALM");
 	});
 
 	it("classifies Cursor backend unavailable ConnectErrors by code and details", () => {

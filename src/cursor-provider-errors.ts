@@ -119,7 +119,9 @@ export function classifyCursorConnectError(error: unknown): CursorConnectErrorCl
 
 	const causeCode = getErrorStringField(cause, "code");
 	const causeSyscall = getErrorStringField(cause, "syscall");
-	if (isLikelyNetworkTimeout(`${message}\n${rawMessage}\n${causeCode ?? ""}\n${causeSyscall ?? ""}`)) {
+	const causeMessage = getErrorStringField(cause, "rawMessage") ?? getErrorStringField(cause, "message") ?? "";
+	const networkProbe = `${message}\n${rawMessage}\n${causeCode ?? ""}\n${causeSyscall ?? ""}\n${causeMessage}`;
+	if (isLikelyNetworkTimeout(networkProbe) || isLikelyHttp2StreamError(networkProbe)) {
 		return { kind: "network", source: getCursorConnectSource(error, record) };
 	}
 
@@ -140,6 +142,13 @@ function isLikelyNetworkTimeout(message: string): boolean {
 		/\bConnectError\b.*\b(unavailable|deadline|timeout|timed out)\b/i.test(message) ||
 		/\bread ETIMEDOUT\b/i.test(message)
 	);
+}
+
+// HTTP/2 stream resets (ENHANCE_YOUR_CALM = server backpressure/rate limit, GOAWAY,
+// REFUSED_STREAM). The local Cursor SDK surfaces these as ConnectErrors that otherwise
+// crash pi as uncaught exceptions. They are transient — classify as network so pi retries.
+function isLikelyHttp2StreamError(message: string): boolean {
+	return /(ENHANCE_YOUR_CALM|ERR_HTTP2_STREAM_ERROR|NGHTTP2_REFUSED_STREAM|NGHTTP2_INTERNAL_ERROR|ERR_HTTP2_GOAWAY_SESSION)/i.test(message);
 }
 
 function shortRunId(runId: string): string {
@@ -198,7 +207,8 @@ export function sanitizeCursorProviderError(error: unknown, apiKey?: string): st
 	const scrubbed = scrubSensitiveText(message, apiKey).trim();
 	const connectClassification = classifyCursorConnectError(error);
 	if (connectClassification?.kind === "unauthenticated" || isLikelyAuthError(scrubbed)) return AUTH_CURSOR_SDK_ERROR_MESSAGE;
-	if (connectClassification?.kind === "network" || isLikelyNetworkTimeout(scrubbed)) return NETWORK_CURSOR_SDK_ERROR_MESSAGE;
+	if (connectClassification?.kind === "network" || isLikelyNetworkTimeout(scrubbed) || isLikelyHttp2StreamError(scrubbed))
+		return NETWORK_CURSOR_SDK_ERROR_MESSAGE;
 	if (isGenericCursorRunFailureMessage(scrubbed)) return RETRYABLE_CURSOR_RUN_FAILURE_PREFIX;
 	if (isGenericErrorMessage(scrubbed)) return GENERIC_CURSOR_SDK_ERROR_MESSAGE;
 	return scrubbed || GENERIC_CURSOR_SDK_ERROR_MESSAGE;

@@ -51,7 +51,9 @@ describe("package metadata cutover baselines", () => {
 	it("bundles the audited Node transport dependency tree for package consumers", () => {
 		expect(packageJson.dependencies.undici).toBe("7.28.0");
 		expect(lockPackageVersion("undici")).toBe("7.28.0");
-		expect(packageJson.bundledDependencies).toEqual(expect.arrayContaining(["@connectrpc/connect-node", "undici"]));
+		expect(packageJson.bundledDependencies).toEqual(
+			expect.arrayContaining(["@cursor/sdk", "@connectrpc/connect-node", "undici"]),
+		);
 	});
 
 	it("removes the obsolete sqlite override", () => {

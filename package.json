@@ -115,6 +115,7 @@
 		"undici": "7.28.0"
 	},
 	"bundledDependencies": [
+		"@cursor/sdk",
 		"@connectrpc/connect-node",
 		"undici"
 	],

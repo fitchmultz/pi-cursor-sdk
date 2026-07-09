@@ -579,7 +579,7 @@ export function resolveCursorSdkConfig(options: ResolveCursorSdkConfigOptions = 
 				valueFrom("environment", env.local?.resume),
 				valueFrom("project", project?.local?.resume),
 				valueFrom("user", user?.local?.resume),
-				valueFrom("builtin", false),
+				valueFrom("builtin", true),
 			]),
 		},
 	};

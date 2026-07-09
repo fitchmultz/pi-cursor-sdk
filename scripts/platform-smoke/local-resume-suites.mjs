@@ -67,8 +67,8 @@ export const LOCAL_RESUME_SUITES = [
 		suite: "cursor-local-resume-default-dry-run",
 		script: "smoke:local-resume:default-dry-run",
 		marker: "local-resume-default-dry-run-smoke-ok",
-		stderrPattern: /config default resumed .* env opt-out rejected it/i,
-		description: "Prove an isolated local.resume config default resumes, and env opt-out wins, without changing built-in defaults.",
+		stderrPattern: /built-in default resumed .* env opt-out rejected it/i,
+		description: "Prove the built-in local resume default resumes, and env opt-out wins.",
 		cursorCalls: 3,
 	},
 	{

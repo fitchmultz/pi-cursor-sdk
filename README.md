@@ -297,11 +297,11 @@ pi --model cursor/composer-2-5 --cursor-local-force
 
 This maps to the next `agent.send(..., { local: { force: true } })` only. It is not a retry loop and does not cancel another live process's existing run handle; use it only when you know the persisted local run is wedged.
 
-Experimental branch-scoped local resume can reattach to recorded local SDK agents after a pi restart. It is off by default and only records agent IDs in pi session custom entries, never user/project config:
+Branch-scoped local resume reattaches to recorded local SDK agents after a pi restart. It is on by default for local runtime and records agent IDs only in pi session custom entries, never user/project config. Disable it per run with CLI/env, or persist an opt-out in config:
 
 ```bash
-PI_CURSOR_LOCAL_RESUME=1 pi --model cursor/composer-2-5
-pi --model cursor/composer-2-5 --cursor-local-resume
+pi --model cursor/composer-2-5 --cursor-no-local-resume
+PI_CURSOR_LOCAL_RESUME=0 pi --model cursor/composer-2-5
 ```
 
 Resume is strict: the current pi session file/id, branch path prefix, cwd/repo root, model/API/tool-surface pool key, and compaction generation must match. If `Agent.resume()` fails, pi bootstraps a new local Cursor agent from the current transcript and streams one display-only continuity note. Superseded local agents can be cleaned up explicitly with `/cursor-local-resume-cleanup --dry-run` and `/cursor-local-resume-cleanup --yes`; cleanup only deletes exact recorded `agent-*` IDs. Cloud resume remains disabled; `/cursor-cloud list|archive|delete` only manages recorded cloud agents.
@@ -315,7 +315,7 @@ Config can also set non-secret defaults in `~/.pi/agent/cursor-sdk.json` or trus
   "local": {
     "autoReview": true,
     "sandboxOptions": { "enabled": true },
-    "resume": false
+    "resume": true
   }
 }
 ```
@@ -341,7 +341,7 @@ Local resume cleanup is explicit and session-ledger scoped:
 
 It only deletes superseded local `agent-*` IDs that this extension recorded as cleanup candidates, one exact ID at a time through the Cursor SDK. It does not sweep the SDK store or call lower-level empty delete filters.
 
-Only enabled local safety values are passed to `Agent.create({ local })`; false/default values are omitted to preserve the current local-agent behavior. Local force is one-shot/manual-only through CLI/env and is passed only to the next `Agent.send({ local: { force: true } })`. Local resume is guarded by `local.resume`, `--cursor-local-resume`, or `PI_CURSOR_LOCAL_RESUME=1` and remains default-off.
+Only enabled local safety values are passed to `Agent.create({ local })`; false/default values are omitted to preserve the current local-agent behavior. Local force is one-shot/manual-only through CLI/env and is passed only to the next `Agent.send({ local: { force: true } })`. Local resume is enabled by default for local runtime; opt out with `local.resume: false`, `--cursor-no-local-resume`, or `PI_CURSOR_LOCAL_RESUME=0`.
 
 ## Images
 

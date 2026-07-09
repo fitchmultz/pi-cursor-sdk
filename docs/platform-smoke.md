@@ -170,9 +170,9 @@ This lane is a cloud-runtime release gate, not a substitute for the local macOS/
 
 ## Focused local resume smoke
 
-The platform matrix includes the required local-resume lanes: restart, safety, tool-surface, abort, tree, copy/switch, fallback, compaction, isolated default/opt-out dry-run, and recorded-ID-only cleanup. The same lanes are available as focused host-local scripts for inner-loop debugging and default-on evidence collection.
+The platform matrix includes the required local-resume lanes: restart, safety, tool-surface, abort, tree, copy/switch, fallback, compaction, default/opt-out proof, and recorded-ID-only cleanup. The same lanes are available as focused host-local scripts for inner-loop debugging and default-on evidence collection.
 
-The smoke starts one sessionful local Cursor run with `PI_CURSOR_LOCAL_RESUME=1`, records the SDK agent id from provider debug metadata, restarts pi against the same session, asks for the remembered token, and verifies:
+The smoke starts one sessionful local Cursor run with local resume enabled by default, records the SDK agent id from provider debug metadata, restarts pi against the same session, asks for the remembered token, and verifies:
 
 - the first run records `localResume: true` and `resumedAgent: false`;
 - the second run records `localResume: true` and `resumedAgent: true`;
@@ -193,7 +193,7 @@ The fallback lane rewrites a persisted handle to a missing local SDK `agent-*`, 
 
 The compaction lane uses an isolated temp pi settings file with `compaction.keepRecentTokens: 1` to force manual compaction without huge dummy prompts. It verifies the pre-compaction SDK agent is not reused, the new handle records `compactionGeneration: 1`, and restart resumes the post-compaction agent.
 
-The default dry-run lane writes `cursor-sdk.json` with `{ "local": { "resume": true } }` only inside the temp `PI_CODING_AGENT_DIR`, verifies that config default resumes, then verifies `PI_CURSOR_LOCAL_RESUME=0` opts out and creates a new agent while bootstrapping the transcript.
+The default/opt-out lane verifies the built-in local resume default resumes, then verifies `PI_CURSOR_LOCAL_RESUME=0` opts out and creates a new agent while bootstrapping the transcript.
 
 The cleanup lane verifies `/cursor-local-resume-cleanup --dry-run` reports only recorded superseded local `agent-*` IDs, `/cursor-local-resume-cleanup --yes` deletes exactly the old recorded ID, the current recorded agent still resumes, and tree navigation to the old handle falls back instead of resuming the deleted agent.
 
@@ -491,7 +491,7 @@ Cursor calls: `2`.
 
 Purpose:
 
-- prove guarded local resume with `PI_CURSOR_LOCAL_RESUME=1` across a pi process restart on each required OS;
+- prove guarded local resume default-on behavior across a pi process restart on each required OS;
 - assert the first turn creates a local `agent-*` and the second turn resumes the same `agent-*`;
 - force local runtime and clear cloud env knobs so ambient cloud settings cannot satisfy this suite.
 
@@ -510,7 +510,7 @@ The remaining local-resume platform suites run the matching focused package scri
 | `cursor-local-resume-copy-switch` | `npm run smoke:local-resume:copy-switch` | copied session file rejects copied resume handle |
 | `cursor-local-resume-fallback` | `npm run smoke:local-resume:fallback` | missing local agent falls back with continuity notice |
 | `cursor-local-resume-compaction` | `npm run smoke:local-resume:compaction` | compaction boundary creates/resumes post-compaction generation |
-| `cursor-local-resume-default-dry-run` | `npm run smoke:local-resume:default-dry-run` | isolated config-default resumes and env opt-out wins |
+| `cursor-local-resume-default-dry-run` | `npm run smoke:local-resume:default-dry-run` | built-in default resumes and env opt-out wins |
 | `cursor-local-resume-cleanup` | `npm run smoke:local-resume:cleanup` | recorded-ID-only cleanup deletes old agent and preserves current agent |
 
 ### `cursor-native-visual-matrix`

@@ -2,7 +2,7 @@
 
 ## Result
 
-Recorded-ID-only local Cursor SDK cleanup is implemented and proved across macOS, Ubuntu, and Windows native. Local resume remains default-off.
+Recorded-ID-only local Cursor SDK cleanup is implemented and proved across macOS, Ubuntu, and Windows native. At capture time local resume remained default-off; after user approval on 2026-07-09, local resume moved to default-on with opt-out.
 
 ## What changed
 
@@ -60,4 +60,4 @@ Focused cleanup proof also passed locally:
 
 ## Recommendation
 
-Local resume default-on is no longer blocked by missing recorded-ID-only cleanup proof. Keep it default-off until the user explicitly approves the product default change; the implementation now has platform proof for restart, safety, tool-surface mismatch, abort, tree navigation, copy/switch, fallback, compaction, default/opt-out dry-run, and cleanup.
+Local resume default-on was no longer blocked by missing recorded-ID-only cleanup proof. User approval to flip the default landed later on 2026-07-09; the implementation has platform proof for restart, safety, tool-surface mismatch, abort, tree navigation, copy/switch, fallback, compaction, default/opt-out proof, and cleanup.

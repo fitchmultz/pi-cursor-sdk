@@ -99,6 +99,7 @@ let cliAutoReview = false;
 let cliSandbox = false;
 let cliLocalForce = false;
 let cliLocalResume = false;
+let cliNoLocalResume = false;
 let envLocalForceConsumed = false;
 let cliCursorRuntime: string | undefined;
 let cliCursorToolTransport: string | undefined;
@@ -283,7 +284,7 @@ export function getCursorCliConfig(): CursorSdkConfig {
 			...(cliAutoReview ? { autoReview: true } : {}),
 			...(cliSandbox ? { sandboxOptions: { enabled: true } } : {}),
 			...(cliLocalForce ? { force: true } : {}),
-			...(cliLocalResume ? { resume: true } : {}),
+			...(cliNoLocalResume ? { resume: false } : cliLocalResume ? { resume: true } : {}),
 		},
 	}) ?? {};
 }
@@ -594,7 +595,13 @@ export function registerCursorRuntimeControls(pi: CursorRuntimeControlsExtension
 	});
 
 	pi.registerFlag("cursor-local-resume", {
-		description: `Resume recorded local Cursor SDK agents for matching pi session branches (or set ${CURSOR_LOCAL_RESUME_ENV}=1)`,
+		description: `Resume recorded local Cursor SDK agents for matching pi session branches (default; or set ${CURSOR_LOCAL_RESUME_ENV}=1)`,
+		type: "boolean",
+		default: false,
+	});
+
+	pi.registerFlag("cursor-no-local-resume", {
+		description: `Disable local Cursor SDK agent resume for this run (or set ${CURSOR_LOCAL_RESUME_ENV}=0)`,
 		type: "boolean",
 		default: false,
 	});
@@ -775,6 +782,7 @@ export function registerCursorRuntimeControls(pi: CursorRuntimeControlsExtension
 			cliSandbox = pi.getFlag("cursor-sandbox") === true;
 			cliLocalForce = pi.getFlag("cursor-local-force") === true;
 			cliLocalResume = pi.getFlag("cursor-local-resume") === true;
+			cliNoLocalResume = pi.getFlag("cursor-no-local-resume") === true;
 			cliCursorRuntime = stringFlagValue(pi.getFlag("cursor-runtime"));
 			cliCursorToolTransport = stringFlagValue(pi.getFlag("cursor-tool-transport"));
 			cliCursorCloudRepo = stringFlagValue(pi.getFlag("cursor-cloud-repo"));
@@ -808,6 +816,7 @@ function resetCursorModeStateForTests(): void {
 	cliSandbox = false;
 	cliLocalForce = false;
 	cliLocalResume = false;
+	cliNoLocalResume = false;
 	envLocalForceConsumed = false;
 	cliCursorRuntime = undefined;
 	cliCursorToolTransport = undefined;

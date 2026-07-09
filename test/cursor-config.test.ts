@@ -289,7 +289,7 @@ describe("Cursor SDK config resolver", () => {
 
 		expect(resolveCursorSdkConfig().local.autoReview).toMatchObject({ value: false, source: "builtin" });
 		expect(resolveCursorSdkConfig().local.force).toMatchObject({ value: false, source: "builtin" });
-		expect(resolveCursorSdkConfig().local.resume).toMatchObject({ value: false, source: "builtin" });
+		expect(resolveCursorSdkConfig().local.resume).toMatchObject({ value: true, source: "builtin" });
 		expect(resolveCursorSdkConfig({ user }).local.sandboxEnabled).toMatchObject({ value: true, source: "user" });
 		expect(resolveCursorSdkConfig({ user, project }).local.autoReview).toMatchObject({ value: false, source: "project" });
 		expect(resolveCursorSdkConfig({ user, project }).local.force).toMatchObject({ value: false, source: "builtin" });

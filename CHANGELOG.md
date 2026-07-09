@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Enable guarded branch-scoped local Cursor SDK resume by default for local runtime; users can opt out with `--cursor-no-local-resume`, `PI_CURSOR_LOCAL_RESUME=0`, or `local.resume: false`.
+
 ### Added
 
 - Add `/cursor-refresh-config` to call the current pooled Cursor SDK agent's `agent.reload()` for filesystem Cursor config refreshes without recreating the agent.
@@ -13,7 +17,7 @@
 - Add explicit Cursor-managed cloud environment selection with `--cursor-cloud-env-type`, `--cursor-cloud-env-name`, `PI_CURSOR_CLOUD_ENV_TYPE`, `PI_CURSOR_CLOUD_ENV_NAME`, and `cloud.environment.type/name` user config. This selects Cursor Cloud `cloud` / `pool` / `machine` environments without forwarding local env values.
 - Stream bounded display-only Cursor Cloud completion telemetry when available: agent/run IDs, pushed branch and PR URL with fetch/checkout hint, passive artifact paths, and raw cloud usage without persisting it into transcript content or feeding that usage into pi accounting.
 - Add `/cursor-cloud list`, `/cursor-cloud archive <bc-agentId>`, and `/cursor-cloud delete <bc-agentId> --yes` for session-branch recorded cloud agents; archive/delete reject empty, non-`bc-`, wildcard, unrecorded, bulk, and unconfirmed delete requests before SDK calls.
-- Add guarded branch-scoped local Cursor SDK resume with `--cursor-local-resume`, `PI_CURSOR_LOCAL_RESUME`, and `local.resume`; it stores SDK agent IDs only in pi session custom entries, re-supplies current model/tool transport, and falls back to create+bootstrap with a display-only continuity note when resume is unavailable.
+- Add guarded branch-scoped local Cursor SDK resume; it stores SDK agent IDs only in pi session custom entries, re-supplies current model/tool transport, and falls back to create+bootstrap with a display-only continuity note when resume is unavailable.
 
 ### Fixed
 

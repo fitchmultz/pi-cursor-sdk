@@ -886,10 +886,8 @@ async function runDefaultDryRunSmoke() {
 	const timeoutMs = parseTimeout();
 	const { artifactRoot, sessionDir, sessionId, seenMetadata } = createRunContext("pi-cursor-local-resume-default-dry-run-smoke-");
 	const token = `LOCAL_DEFAULT_DRY_RUN_${Date.now()}`;
-	let configuredAgentId;
+	let defaultAgentId;
 	console.error(`[local-resume-smoke] artifacts: ${artifactRoot}`);
-	mkdirSync(join(artifactRoot, "agent"), { recursive: true });
-	writeFileSync(join(artifactRoot, "agent", "cursor-sdk.json"), `${JSON.stringify({ local: { resume: true } }, null, 2)}\n`);
 	try {
 		let rpc = startRpc({ artifactDir: artifactRoot, sessionDir, sessionId, localResumeEnv: "unset" });
 		try {
@@ -900,23 +898,24 @@ async function runDefaultDryRunSmoke() {
 				timeoutMs,
 				seenMetadata,
 			});
-			assertTurnMetadata("config default baseline", baseline, { resumedAgent: false });
+			assertTurnMetadata("builtin default baseline", baseline, { resumedAgent: false });
+			if (baseline.metadata.providerMeta?.localResume !== true) fail("builtin default baseline did not record localResume=true", baseline.metadataPath);
 		} finally {
 			await rpc.stop();
 		}
 
 		rpc = startRpc({ artifactDir: artifactRoot, sessionDir, sessionId, localResumeEnv: "unset" });
 		try {
-			const configuredRestart = await promptAndRead({
+			const defaultRestart = await promptAndRead({
 				rpc,
 				artifactDir: artifactRoot,
 				message: "What exact LOCAL_DEFAULT_DRY_RUN token did I ask you to remember? Reply exactly TOKEN=<token> if visible, otherwise NO_TOKEN.",
 				timeoutMs,
 				seenMetadata,
 			});
-			if (!configuredRestart.text.includes(`TOKEN=${token}`)) fail("config default restart did not recall token", JSON.stringify({ expected: `TOKEN=${token}`, actual: configuredRestart.text }, null, 2));
-			assertTurnMetadata("config default restart", configuredRestart, { resumedAgent: true });
-			configuredAgentId = configuredRestart.metadata.run.agentId;
+			if (!defaultRestart.text.includes(`TOKEN=${token}`)) fail("builtin default restart did not recall token", JSON.stringify({ expected: `TOKEN=${token}`, actual: defaultRestart.text }, null, 2));
+			assertTurnMetadata("builtin default restart", defaultRestart, { resumedAgent: true });
+			defaultAgentId = defaultRestart.metadata.run.agentId;
 		} finally {
 			await rpc.stop();
 		}
@@ -938,12 +937,12 @@ async function runDefaultDryRunSmoke() {
 			if (!optedOut.text.includes(`TOKEN=${token}`)) fail("env opt-out run did not bootstrap token from transcript", JSON.stringify({ expected: `TOKEN=${token}`, actual: optedOut.text }, null, 2));
 			if (optedOut.metadata.providerMeta?.localResume !== false) fail("env opt-out run did not record localResume=false", optedOut.metadataPath);
 			if (optedOut.metadata.providerMeta?.resumedAgent !== false) fail("env opt-out run unexpectedly resumed an agent", optedOut.metadataPath);
-			if (optedOut.metadata.run?.agentId === configuredAgentId) fail("env opt-out run reused the configured default agent", JSON.stringify({ configured: configuredAgentId, actual: optedOut.metadata.run?.agentId }, null, 2));
+			if (optedOut.metadata.run?.agentId === defaultAgentId) fail("env opt-out run reused the default-resume agent", JSON.stringify({ configured: defaultAgentId, actual: optedOut.metadata.run?.agentId }, null, 2));
 		} finally {
 			await rpc.stop();
 		}
 		console.log("local-resume-default-dry-run-smoke-ok");
-		console.error(`[local-resume-smoke] isolated config default resumed ${configuredAgentId}; env opt-out rejected it`);
+		console.error(`[local-resume-smoke] built-in default resumed ${defaultAgentId}; env opt-out rejected it`);
 	} finally {
 		cleanupArtifactRoot(artifactRoot);
 	}

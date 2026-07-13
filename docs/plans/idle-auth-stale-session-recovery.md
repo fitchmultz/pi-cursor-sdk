@@ -5,21 +5,22 @@
 **Fork:** https://github.com/tejasghutukade/pi-cursor-sdk  
 **Upstream:** https://github.com/fitchmultz/pi-cursor-sdk  
 **Worktree:** `/Users/tejasghutukade/Projects/pi-cursor-sdk-idle-auth`  
-**Base:** `origin/main` @ `922723a` (v0.1.57 prep)
+**Base:** `origin/main` @ `922723a` (v0.1.57 prep)  
+**Revised:** 2026-07-13 — primary fix flipped from reactive retry to durable pool idle invalidation.
 
 ## Decision needed from you
 
 Reply with one of:
 
-1. **Approve as written** — implement Phase 1 + Phase 2 (retry + messaging + classifier tighten); defer idle TTL.
-2. **Approve + include idle TTL** — also dispose pooled agents after N minutes idle (propose 15m default).
-3. **Revise** — note which sections to change.
+1. **Approve proper fix (recommended)** — implement Phase A (acquire-time idle invalidate) + Phase B (one-shot retry safety net) + Phase C (classifier/messages). Default idle budget **10m** (under observed ~13m floor).
+2. **Approve with different idle budget** — same phases; tell us the minutes (e.g. 5 / 12 / 15).
+3. **Needs more revisions** — note which sections to change.
 
 ---
 
 ## Purpose
 
-Stop intermittent post-idle Cursor turns from failing with a misleading “API key invalid/unauthorized” error when the stored Cursor API key is still valid. Recover silently once by recreating the pooled local session agent, and reserve the hard key message for true key failures.
+Stop intermittent post-idle Cursor turns from failing with a misleading “API key invalid/unauthorized” error when the stored Cursor API key is still valid. Prefer **preventing** reuse of a long-idle pooled SDK agent over recovering after the failure.
 
 ## Problem
 
@@ -33,110 +34,164 @@ verify CURSOR_API_KEY, or pass --api-key, then retry.
 
 ### Observed causal chain
 
-1. `pi-cursor-sdk` pools a long-lived local Cursor SDK agent per session (`src/cursor-session-agent.ts`).
+1. `pi-cursor-sdk` pools a long-lived local Cursor SDK agent per session (`src/cursor-session-agent.ts`). Ready entries have **no idle age check** and are leased forever until pool-key mismatch, lifecycle invalidation, or failure abandon.
 2. After long idle (local evidence: min ~13m, median ~2.8h across 11 session occurrences), the first `agent.send()` on that pooled agent fails with Cursor SDK `ConnectError` / `[unauthenticated]` (gRPC code 16).
 3. `sanitizeCursorProviderError()` in `src/cursor-provider-errors.ts` remaps that to `AUTH_CURSOR_SDK_ERROR_MESSAGE`, which blames the API key.
 4. The turn path already abandons/resets the pool on failure (`abandonSessionCursorAgent` → `resetSessionCursorAgent`).
 5. The user’s next message creates a fresh agent and succeeds with the same key — so the failure is recoverable, but only manually.
 
-Related history: issue [#101](https://github.com/fitchmultz/pi-cursor-sdk/issues/101) / commit `bd531da` fixed the **crash** (`uncaughtException`) path for the same ConnectError class. It did **not** auto-recover the stale pooled agent.
+Related history: issue [#101](https://github.com/fitchmultz/pi-cursor-sdk/issues/101) / commit `bd531da` fixed the **crash** (`uncaughtException`) path for the same ConnectError class. It did **not** stop reuse of a stale pooled agent.
 
 Secondary issue: `isLikelyAuthError` matches bare `\bauth\b`, which can over-classify unrelated messages (e.g. `allow-unauthenticated`).
 
 ### Not the problem
 
 - Missing `auth.json` / missing key at startup (that already uses `MISSING_CURSOR_API_KEY_MESSAGE`).
-- Truly revoked Cursor User API keys (retry with a fresh agent must still fail and then show a hard key error).
+- Truly revoked Cursor User API keys (fresh create/resume must still fail and then show a hard key error).
+- Live-run native-replay idle dispose (`DEFAULT_CURSOR_NATIVE_REPLAY_IDLE_DISPOSE_MS` = 5m) — that path disposes **completed live-run display state**, not the session agent pool itself.
 
-## Solution (proposed)
+## Why the earlier Phase 1+2 plan was a temporary fix
 
-Treat first post-idle `unauthenticated` on an **existing pooled** local agent as **stale session**, not bad key.
+Reacting with “fail → recreate → retry once” after `send()` already returned unauthenticated:
 
-### Phase 1 — one-shot recreate + retry (required)
+- Leaves a user-visible failure race whenever the first attempt fails (cost, latency, risk of double emission if hooked wrong).
+- Treats a durable pool-lifecycle bug as a one-off transport blip.
+- Does not reduce how often the SDK is called on a dead handle.
 
-When a local turn fails with a classified unauthenticated / auth-stale error **and** the turn used a reused pooled agent (`created === false` or equivalent lease flag):
+A retry alone is acceptable only as a **safety net**, not as the primary product behavior.
+
+## Solution options considered
+
+| Approach | Verdict | Why |
+|----------|---------|-----|
+| **A. Acquire-time idle invalidate (lazy TTL)** | **Primary — recommend** | On pool lease of a `ready` entry, if idle age exceeds budget, dispose the handle and fall through to create/resume. Prevents send on stale agents. No background timer races with busy/creating. Matches existing acquire loop shape in `acquireSessionCursorAgent`. |
+| **B. Background setTimeout idle dispose** | Optional hygiene only | Mirrors live-run idle timers, but adds timer/unref/busy races and still leaves a window if the user sends just before the timer fires. Prefer lazy check-on-acquire for correctness; do **not** require background timers for this bug. |
+| **C. One-shot recreate+retry after unauthenticated on reused agent** | **Safety net** | Covers races under the idle budget, clock skew, and SDK auth dying without idle age. Max one retry per turn. |
+| **D. Always create per turn / never pool** | Rejected | Loses local incremental-send benefits and increases create/resume churn for normal interactive use. |
+| **E. Call a hypothetical SDK reauth/refresh API** | Rejected for now | No verified Cursor SDK contract for refreshing auth on a live `SDKAgent` handle. `agent.reload()` is config refresh, not auth reattach. Do not invent SDK behavior (`AGENTS.md` hard rule). |
+| **F. Force-create instead of resume after idle dispose** | Rejected as default | Local resume is default-on; disposing an in-memory handle should **prefer `Agent.resume(agentId)`** with current MCP resupply so Cursor-side continuity survives. Only force-create when resume is disabled/unavailable/fails (existing path). |
+
+### Better long-term design than “timer TTL alone”
+
+**Acquire-time idle invalidation + resume-aware recreate + one-shot retry safety net** is the durable fix:
+
+1. **Prevent** reuse of long-idle pooled handles at lease time (correctness).
+2. **Preserve** Cursor continuity via existing local resume when the in-memory agent is dropped for age.
+3. **Recover** rarely when prevent missed (safety net).
+4. **Tell the truth** in error copy only when a fresh agent also auth-fails (hard key) vs when pool reuse exhausted recovery (stale session wording).
+
+Background pool TTL timers remain optional follow-up for earlier resource release in abandoned sessions; they are not required to close the auth bug.
+
+---
+
+## Solution (proposed — for this PR)
+
+### Phase A — pool idle invalidation on acquire (required, primary)
+
+Track last-use time on active pool entries (stamp when a run completion returns an entry to `ready`, and when a newly created/resumed entry is inserted).
+
+In `tryLeaseReadyEntry` / `acquireSessionCursorAgent` ready path:
+
+1. If `now - lastUsedAtMs >= idleBudgetMs`, dispose that scope’s pool entry and continue the acquire loop (create or resume as today).
+2. Do **not** lease the stale ready entry for send.
+3. Default `idleBudgetMs = 10 * 60 * 1000` (10 minutes) — under the observed ~13.3m failure floor so most post-idle first turns never hit the SDK unauthenticated path.
+4. Keep the constant testable / optionally overridable for unit tests (same pattern as `setCursorNativeReplayIdleDisposeMs`), but **no new public CLI/env/UX** unless you explicitly ask for it later.
+5. Local-only for this slice (same pool path as the bug). Cloud remains create-per-turn without this pool.
+
+**Resume interaction:** age-based disposal must not clear or rewrite resume handles incorrectly. After dispose, the next acquire uses the existing resume path (`localResume` + matching session custom entry). Proof cases: idle invalidate → resume same agent id when eligible; idle invalidate with resume disabled → create+bootstrap.
+
+### Phase B — one-shot recreate+retry safety net (required, secondary)
+
+When a local turn fails with classified unauthenticated / auth-stale error **and** the turn used a reused pooled agent (`created === false`):
 
 1. Reset the session agent for that scope.
-2. Re-prepare / re-send **once** with a freshly created agent and the same resolved API key.
-3. If the retry succeeds, emit the successful turn as normal (user should not see the auth error).
-4. If the retry also fails with auth, then emit the hard invalid/unauthorized key message.
+2. Re-prepare / re-send **once** with a freshly acquired agent (create/resume) and the same resolved API key.
+3. If retry succeeds, emit the successful turn normally (silent recovery; no reconnect banner by default).
+4. If retry also auth-fails, emit the hard invalid/unauthorized key message.
+5. Never retry on user abort / cancellation. Max one automatic recreate+retry per user turn.
 
-Hook points to investigate during implementation (smallest durable place wins):
+Hook points (smallest durable place wins):
 
 | Candidate | Role |
 |-----------|------|
 | `src/cursor-provider-turn-runner.ts` | Outer prepare/send loop; natural place for a single retry of the whole turn |
-| `src/cursor-provider-turn-prepare.ts` | Already calls `resetSessionCursorAgent`; knows pool lease / create vs reuse |
-| `src/cursor-provider-run-finalizer.ts` | Today converts failures into terminal stream errors after abandon |
-| `src/cursor-provider-errors.ts` | Classification helpers used to gate “retryable stale auth” vs “hard key failure” |
+| `src/cursor-provider-turn-prepare.ts` | Reset / recreate; pool lease / create vs reuse |
+| `src/cursor-provider-run-finalizer.ts` | Avoid double-emitting terminal auth error when retry will happen |
+| `src/cursor-provider-errors.ts` | Classification helpers |
 
-**Constraint:** Max one automatic recreate+retry per user turn. No loops. Abort signal must still short-circuit.
-
-### Phase 2 — message + classifier hygiene (required, same PR)
+### Phase C — message + classifier hygiene (required, same PR)
 
 1. Split user-facing copy:
-   - **Stale session (retry exhausted or pre-retry trace if shown):** “Cursor session auth expired after idle; reconnecting…” / “could not reconnect — verify API key…” as appropriate.
-   - **Hard key failure (only after recreate+retry also authenticates badly, or when no agent was ever pooled):** keep / refine current `/login` + `CURSOR_API_KEY` guidance.
+   - **Stale session (retry exhausted):** clear “session auth expired after idle / could not reconnect — verify API key…” wording.
+   - **Hard key failure** (fresh create/resume also unauthenticated, or never had a pooled agent): keep / refine current `/login` + `CURSOR_API_KEY` guidance.
 2. Tighten `isLikelyAuthError` so bare `\bauth\b` is **not** sufficient; prefer specific tokens (`unauthenticated`, `unauthorized`, `invalid api key`, Connect code 16, etc.).
 3. Keep ConnectError code 16 / `[unauthenticated]` as the primary classifier for the recovery path.
 
-### Phase 3 — idle TTL dispose (optional; default **out of this PR**)
+### Explicitly deferred (not this PR unless you insist)
 
-Dispose pooled ready agents after N minutes of inactivity (e.g. 15m) so the first post-idle turn creates a fresh agent without failing.
+- Background setTimeout pool dispose for memory hygiene in never-returning sessions.
+- Public config (`local.poolIdleMs` / env) — ship constant + test override first.
+- Cloud-runtime equivalent recovery (no evidence yet).
 
-Pros: fewer failures to recover.  
-Cons: new timer/lifecycle surface; needs careful interaction with live-run idle dispose and resume.
-
-**Recommendation:** ship Phase 1+2 first; add TTL only if you choose option 2 above.
+---
 
 ## Relevant files
 
 ### Existing (expected touch)
 
+- `src/cursor-session-agent.ts` — `lastUsedAtMs` on ready/busy entries; acquire-time idle invalidate; stamp on return-to-ready / create
 - `src/cursor-provider-errors.ts` — classify stale-session vs hard key; tighten matcher; message constants
-- `src/cursor-provider-turn-runner.ts` — likely one-shot retry orchestration
-- `src/cursor-provider-turn-prepare.ts` — reset / recreate pool entry; expose reuse vs create signal if needed
-- `src/cursor-provider-run-finalizer.ts` — avoid double-emitting terminal auth error when retry will happen
-- `src/cursor-session-agent.ts` — only if lease metadata must expose “reused pool entry”
+- `src/cursor-provider-turn-runner.ts` — one-shot retry orchestration
+- `src/cursor-provider-turn-prepare.ts` — reset / recreate; expose reuse vs create if needed
+- `src/cursor-provider-run-finalizer.ts` — gate terminal auth emission when retry will happen
+- `test/cursor-session-agent*.test.ts` (or closest existing pool tests) — idle invalidate / resume after age dispose
 - `test/cursor-provider-errors.test.ts` — classifier / message contracts
-- `test/cursor-provider-stream-auth.test.ts` — stream/auth integration; extend for recreate+retry
-- `docs/cursor-model-ux-spec.md` — document recoverable idle auth behavior
+- `test/cursor-provider-stream-auth.test.ts` — recreate+retry stream contracts
+- `docs/cursor-model-ux-spec.md` — document idle pool invalidation + recoverable auth behavior
 - `CHANGELOG.md` — user-facing note
-- `README.md` — only if troubleshooting section needs a one-liner
+- `README.md` — only if troubleshooting needs a one-liner
 
-### New (only if runner gets too large)
+### New (only if modules get too large)
 
-- Prefer keeping logic in existing modules. A tiny helper (e.g. `src/cursor-provider-stale-auth-retry.ts`) is OK if it keeps the runner thin; otherwise no new file.
+- Prefer existing modules. Tiny helpers (`cursor-provider-stale-auth-retry.ts`, or idle-budget helpers colocated with session-agent) are OK if they keep the runner/pool thin.
 
 ## Implementation checklist (for after approval)
 
-### 1. Classification API
+### 1. Pool idle invalidate
 
-- [ ] Add a narrow helper, e.g. `isRetryableStaleCursorSessionAuthError(error)`, backed by ConnectError unauthenticated + tightened text rules
-- [ ] Add distinct messages for stale-session vs hard key (no secret leakage; keep scrubbing)
-- [ ] Update `sanitizeCursorProviderError` so first-touch idle auth does not always look like “bad key”
+- [ ] Add `lastUsedAtMs` (or equivalent) to active pool entries; update on create insert and busy→ready
+- [ ] Before leasing `ready`, if idle ≥ budget, dispose and continue acquire loop
+- [ ] Default budget 10m; test override setter/resetter
+- [ ] Idle dispose then resume (when enabled) reuses recorded agent id; opt-out creates fresh
+- [ ] Busy entries are not age-disposed mid-run; age is evaluated at lease time after they become ready
 
-### 2. One-shot retry
+### 2. Classification API
+
+- [ ] `isRetryableStaleCursorSessionAuthError(error)` (or equivalent) from ConnectError unauthenticated + tightened text rules
+- [ ] Distinct messages for stale-session vs hard key; keep secret scrubbing
+- [ ] `sanitizeCursorProviderError` no longer always looks like “bad key” for idle reuse failures after recovery policy applies
+
+### 3. One-shot retry safety net
 
 - [ ] Detect reused pooled agent for the failing attempt
-- [ ] Reset pool entry
-- [ ] Retry prepare+send once with same key / same turn inputs
-- [ ] Emit success path if retry works; emit hard key error only if retry also auth-fails
-- [ ] Never retry on user abort / cancellation
-- [ ] Never retry cloud runtime in this slice unless evidence shows the same failure (local-only by default)
+- [ ] Reset + retry prepare+send once
+- [ ] Success emits normal finished path; dual auth-fail emits hard key once
+- [ ] Abort short-circuits; local-only
 
-### 3. Tests
+### 4. Tests
 
-- [ ] Unit: ConnectError code 16 → stale-session classification; bare `auth` no longer over-matches
-- [ ] Stream/auth: pooled agent fails unauthenticated once → recreate → second send succeeds → stream has no terminal auth error
-- [ ] Stream/auth: both attempts unauthenticated → hard key message once
+- [ ] Unit: ready entry older than budget is disposed; next acquire create/resume runs
+- [ ] Unit: entry younger than budget is reused (`created === false`)
+- [ ] Unit: ConnectError code 16 classifies as retryable stale auth; bare `auth` no longer over-matches
+- [ ] Stream: pooled unauthenticated → recreate → success with no terminal auth error
+- [ ] Stream: both attempts unauthenticated → hard key once
 - [ ] Abort mid-retry does not force a second send
 
-### 4. Docs / packaging
+### 5. Docs / packaging
 
-- [ ] UX spec note under session/agent pooling or auth troubleshooting
+- [ ] UX spec: pool idle invalidate + silent retry safety net
 - [ ] CHANGELOG entry
-- [ ] Ask before changing public UX copy if anything beyond the already-misleading auth string expands user-facing surface (this plan already includes that change; approval covers it)
+- [ ] Approval of this plan covers the public error-copy split already listed
 
 ## Validation
 
@@ -148,7 +203,7 @@ npm run typecheck
 npm run typecheck:tests
 ```
 
-Provider/runtime gate (required before maintaining that this commit is release-ready; per `AGENTS.md`):
+Provider/runtime gate (required before release-ready / pre-commit for this runtime change; per `AGENTS.md`):
 
 ```bash
 npm run smoke:platform:all
@@ -158,42 +213,49 @@ If Cursor auth or Crabbox resources are unavailable, report blocked for smoke �
 
 ## Out of scope
 
-- Reusing Cursor Agent CLI / Desktop OAuth login (explicitly not supported; keys only)
+- Reusing Cursor Agent CLI / Desktop OAuth login (keys only)
 - Changing pi `/login` UX beyond our remapped messages
-- Cloud agent resume / cloud-specific auth recovery (unless the same local pool path is proven to apply)
+- Cloud agent auth recovery without local-pool evidence
 - Broad retry of all provider errors
+- Background pool timers (deferred hygiene)
+- Public idle-budget CLI/env/config (deferred)
 
 ## Risks
 
 | Risk | Mitigation |
 |------|------------|
-| Retry hides a truly bad key for one extra round-trip | Only retry once; second failure shows hard key message |
-| Retry doubles token/cost on rare failures | Acceptable; failures are infrequent and recover manually today |
-| Hooking retry too late double-emits stream errors | Gate terminal emission until retry decision; test both paths |
-| Over-matching auth classifier on unrelated errors | Tighten matcher; contract tests for false positives |
+| 10m budget causes extra create/resume churn for power users who idle ~11m between turns | Acceptable vs auth hard-fail; budget under observed floor; resume keeps Cursor continuity |
+| 10m still misses rare sub-10m auth death | Phase B one-shot retry |
+| Resume after idle dispose still hits stale SDK store auth | Safety-net retry + existing resume-failure → create+bootstrap; treat surprising resume auth-fail as evidence to revisit force-create |
+| Retry hides a truly bad key for one extra round-trip | Only once; second failure shows hard key |
+| Over-matching auth classifier | Tighten matcher; contract tests |
+| Hooking retry too late double-emits stream errors | Gate terminal emission; test both paths |
 
-## Open questions (defaults if you approve “as written”)
+## Open questions (defaults if you approve “proper fix”)
 
-| # | Question | Default if Approve as written |
-|---|----------|-------------------------------|
-| 1 | Include idle TTL dispose in this PR? | **No** — Phase 1+2 only |
-| 2 | Show a transient “reconnecting…” notice on successful silent recovery? | **No** — silent success; only change messages when something still fails |
-| 3 | Apply recovery to cloud runtime too? | **No** — local pooled agents only |
-| 4 | Change public error wording? | **Yes** — separate stale-session vs hard key copy |
+| # | Question | Default |
+|---|----------|---------|
+| 1 | Idle budget | **10 minutes** |
+| 2 | Background timer dispose too? | **No** — acquire-time only |
+| 3 | Show “reconnecting…” on successful silent recovery? | **No** |
+| 4 | Apply to cloud runtime too? | **No** — local pool only |
+| 5 | Change public error wording? | **Yes** — stale-session vs hard key |
+| 6 | After idle dispose, prefer resume when enabled? | **Yes** |
 
 ## Evidence appendix (diagnosis)
 
 - Message constant: `AUTH_CURSOR_SDK_ERROR_MESSAGE` in `src/cursor-provider-errors.ts`
 - Remap site: `sanitizeCursorProviderError`
-- Pool reset already happens on failure; missing piece is automatic one-shot recreate+retry in the same turn
+- Pool reset already happens on failure; missing pieces are (1) not leasing long-idle ready agents and (2) automatic one-shot recreate+retry in the same turn when prevent misses
 - Local session scan (2026-07-11 diagnosis): 11 exact auth-error occurrences; idle before user prompt min ~13.3m, median ~166m; all recovered on later retry with same key
 - Controlled SDK probe: 90s idle did not reproduce; longer idle was not required once session evidence confirmed the pattern
+- Existing related pattern: live-run idle dispose timers in `src/cursor-live-run-coordinator.ts` / `DEFAULT_CURSOR_NATIVE_REPLAY_IDLE_DISPOSE_MS` — different object lifecycle; do not conflate with session agent pooling
 
 ## Approval signature
 
-- [ ] Approved as written (Phase 1+2)
-- [ ] Approved with idle TTL included (Phase 1+2+3)
-- [ ] Needs revisions (comment below)
+- [ ] Approved proper fix (Phase A+B+C, 10m idle)
+- [ ] Approved with different idle budget: _____ minutes
+- [ ] Needs more revisions (comment below)
 
 Approver: __________________  
 Date: __________________

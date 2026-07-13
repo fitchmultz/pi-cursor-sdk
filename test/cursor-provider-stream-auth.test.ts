@@ -194,6 +194,141 @@ describe("streamCursor auth and abort", () => {
 		expect(error.error.errorMessage).toContain("CURSOR_API_KEY");
 	});
 
+	it("recreates a reused pooled agent once after idle unauthenticated wait failure", async () => {
+		const mockDispose = vi.fn().mockResolvedValue(undefined);
+		const finishedWait = vi.fn().mockResolvedValue({ id: "run-ok", status: "finished", result: "ok" });
+		const failingWait = vi.fn().mockRejectedValue(makeUnauthenticatedConnectError());
+		const mockSend = vi
+			.fn()
+			.mockResolvedValueOnce(
+				asMockCursorRun({
+					id: "run-bootstrap",
+					agentId: "agent-1",
+					status: "finished",
+					wait: finishedWait,
+				}),
+			)
+			.mockResolvedValueOnce(
+				asMockCursorRun({
+					id: "run-stale",
+					agentId: "agent-1",
+					status: "running",
+					wait: failingWait,
+				}),
+			)
+			.mockResolvedValueOnce(
+				asMockCursorRun({
+					id: "run-recovered",
+					agentId: "agent-2",
+					status: "finished",
+					wait: finishedWait,
+				}),
+			);
+		mockedCreate.mockImplementation(async () =>
+			asMockSdkAgent({
+				agentId: `agent-${mockedCreate.mock.calls.length + 1}`,
+				send: mockSend,
+				[Symbol.asyncDispose]: mockDispose,
+			}),
+		);
+
+		await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+
+		const followUp = makeContext();
+		followUp.messages = [
+			...makeContext().messages,
+			{
+				role: "assistant",
+				content: [{ type: "text", text: "Hi." }],
+				api: "cursor-sdk",
+				provider: "cursor",
+				model: "test-model",
+				usage: {
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 0,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+				stopReason: "stop",
+				timestamp: 2,
+			},
+			{ role: "user", content: "Follow up", timestamp: 3 },
+		];
+		const events = await collectEvents(streamCursor(makeModel(), followUp, { apiKey: "test-key" }));
+
+		expect(hasEventType(events, "done")).toBe(true);
+		expect(hasEventType(events, "error")).toBe(false);
+		expect(mockedCreate).toHaveBeenCalledTimes(2);
+		expect(mockSend).toHaveBeenCalledTimes(3);
+		expect(mockDispose).toHaveBeenCalled();
+	});
+
+	it("shows stale-session guidance when recreate after idle auth still fails", async () => {
+		const mockDispose = vi.fn().mockResolvedValue(undefined);
+		const finishedWait = vi.fn().mockResolvedValue({ id: "run-ok", status: "finished", result: "ok" });
+		const failingWait = vi.fn().mockRejectedValue(makeUnauthenticatedConnectError());
+		const mockSend = vi
+			.fn()
+			.mockResolvedValueOnce(
+				asMockCursorRun({
+					id: "run-bootstrap",
+					agentId: "agent-1",
+					status: "finished",
+					wait: finishedWait,
+				}),
+			)
+			.mockResolvedValue(
+				asMockCursorRun({
+					id: "run-stale",
+					agentId: "agent-stale",
+					status: "running",
+					wait: failingWait,
+				}),
+			);
+		mockedCreate.mockImplementation(async () =>
+			asMockSdkAgent({
+				agentId: `agent-${mockedCreate.mock.calls.length + 1}`,
+				send: mockSend,
+				[Symbol.asyncDispose]: mockDispose,
+			}),
+		);
+
+		await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+
+		const followUp = makeContext();
+		followUp.messages = [
+			...makeContext().messages,
+			{
+				role: "assistant",
+				content: [{ type: "text", text: "Hi." }],
+				api: "cursor-sdk",
+				provider: "cursor",
+				model: "test-model",
+				usage: {
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 0,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+				stopReason: "stop",
+				timestamp: 2,
+			},
+			{ role: "user", content: "Follow up", timestamp: 3 },
+		];
+		const events = await collectEvents(streamCursor(makeModel(), followUp, { apiKey: "test-key" }));
+		const error = getErrorEvent(events);
+
+		expect(error.reason).toBe("error");
+		expect(error.error.errorMessage).toContain("expired after idle");
+		expect(error.error.errorMessage).toContain("CURSOR_API_KEY");
+		expect(mockedCreate).toHaveBeenCalledTimes(2);
+		expect(mockSend).toHaveBeenCalledTimes(3);
+	});
+
 	it("suppresses duplicate process-level unauthenticated ConnectError during an active provider turn", async () => {
 		const connectError = makeUnauthenticatedConnectError();
 		let processListenerCalled = false;

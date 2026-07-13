@@ -54,6 +54,8 @@ export interface CursorLiveRun {
 	disposed: boolean;
 	errorMessage?: string;
 	abortMessage?: string;
+	/** When set, drain throws so the turn runner can one-shot recreate+retry before emitting auth failure. */
+	staleAuthRetryError?: unknown;
 	chainUserInputAfterCompletion: boolean;
 	debugRecorder?: CursorSdkEventDebugRecorder;
 }
@@ -82,6 +84,7 @@ export interface CursorLiveRunCoordinator {
 	markFinished(run: CursorLiveRun, finalText: string): void;
 	markCancelled(run: CursorLiveRun, abortMessage?: string): void;
 	markError(run: CursorLiveRun, errorMessage: string): void;
+	markStaleAuthRetry(run: CursorLiveRun, error: unknown): void;
 	recordSdkTurnEnded(run: CursorLiveRun, usage?: CursorSdkTurnUsage): void;
 	ignoreFutureSdkTurnUsage(run: CursorLiveRun): void;
 	hasSdkTurnEnded(run: CursorLiveRun): boolean;
@@ -335,6 +338,13 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 			run.done = true;
 			notifyProgress(run);
 			coordinator.requestIdleDispose(run);
+		},
+
+		markStaleAuthRetry(run, error): void {
+			if (run.disposed) return;
+			run.staleAuthRetryError = error;
+			run.done = true;
+			notifyProgress(run);
 		},
 
 		recordSdkTurnEnded(run, usage): void {

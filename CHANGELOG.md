@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Dispose local pooled Cursor SDK agents after 10 minutes of idle before the next acquire, and one-shot recreate+retry when a still-reused agent fails with post-idle `ConnectError` / `[unauthenticated]`, so long-idle turns do not surface a misleading invalid-API-key error while the key remains valid.
+
 ## 0.1.57 - 2026-07-10
 
 ### Changed

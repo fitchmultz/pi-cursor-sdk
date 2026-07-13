@@ -19,9 +19,10 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `src/cursor-provider-run-finalizer.ts` owns live-run wait completion, outcome application, debug finalization, and SDK abort-suppression disposal.
 - `src/cursor-run-final-text.ts` owns final assistant text selection for run outcomes and live-run drain.
 - `src/cursor-provider-errors.ts` owns scrubbed Cursor SDK run failure detail, abort reason formatting, and provider error sanitization.
+- `src/cursor-provider-stale-auth-retry.ts` owns local pooled-agent idle auth retry gating (`CursorStaleSessionAuthRetryError`) used by the turn runner and live-run drain.
 - `src/cursor-provider-lazy.ts` owns the lazy `streamSimple` wrapper that defers Cursor provider runtime imports until the provider is invoked.
 - `src/cursor-session-scope.ts` owns pi session cwd, session file/id/name/generation scope keys, and `session_start` / `session_info_changed` registration for session-agent pooling, cloud agent names, and debug grouping.
-- `src/cursor-session-agent.ts` owns session-scoped SDK agent pooling, send-state commits, busy tracking for in-flight SDK `run.wait()` work, and scoped acquire/dispose state.
+- `src/cursor-session-agent.ts` owns session-scoped SDK agent pooling (including acquire-time idle disposal of ready agents), send-state commits, busy tracking for in-flight SDK `run.wait()` work, and scoped acquire/dispose state.
 - `src/cursor-session-agent-lifecycle.ts` owns lazy session-agent lifecycle invalidation on model select, compaction, tree navigation, shutdown, and scope changes.
 - `src/cursor-session-compaction-prep.ts` owns `prepareCursorSessionForCompaction()` (release scoped live runs, reset pooled agent) wired from `session_before_compact` in `src/index.ts`.
 - `src/cursor-session-send-policy.ts` owns session send planning (`bootstrap` vs `incremental`), periodic agent rebootstrap threshold, and prompt mode selection.

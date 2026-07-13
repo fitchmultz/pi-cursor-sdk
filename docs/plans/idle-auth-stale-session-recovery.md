@@ -1,12 +1,13 @@
 # Plan: Idle auth stale-session recovery
 
-**Status:** Awaiting approval — do not implement until this document is approved.  
+**Status:** Approved 2026-07-13 — implement Phase A+B+C (10m acquire-time idle + retry safety net + classifier/messages).  
 **Branch:** `fix/idle-auth-stale-session`  
 **Fork:** https://github.com/tejasghutukade/pi-cursor-sdk  
 **Upstream:** https://github.com/fitchmultz/pi-cursor-sdk  
 **Worktree:** `/Users/tejasghutukade/Projects/pi-cursor-sdk-idle-auth`  
 **Base:** `origin/main` @ `922723a` (v0.1.57 prep)  
-**Revised:** 2026-07-13 — primary fix flipped from reactive retry to durable pool idle invalidation.
+**Revised:** 2026-07-13 — primary fix flipped from reactive retry to durable pool idle invalidation.  
+**Approval:** Proper fix (10m idle + retry safety net).
 
 ## Decision needed from you
 

@@ -25,6 +25,7 @@ import { CursorPartialContentEmitter } from "./cursor-partial-content-emitter.js
 import { emitDisplayOnlyTraceBlock } from "./cursor-display-only-trace.js";
 import { trimCurrentTurnAlreadyEmittedCursorText } from "./cursor-run-final-text.js";
 import { formatCursorSdkAbortMessage, resolveCursorSdkAbortCause } from "./cursor-provider-errors.js";
+import { CursorStaleSessionAuthRetryError } from "./cursor-provider-stale-auth-retry.js";
 import { formatInactiveCursorReplayTrace } from "./cursor-native-replay-trace.js";
 import { partitionNativeToolsByActiveContext } from "./cursor-native-replay-routing.js";
 import type { CursorSdkEventDebugRecorder } from "./cursor-sdk-event-debug.js";
@@ -356,6 +357,13 @@ export async function drainCursorLiveRunTurn(
 				outcome = "aborted";
 				outcomeDetails = { reason: "cancelled" };
 				return outcome;
+			}
+			if (run.staleAuthRetryError !== undefined) {
+				const retryError = run.staleAuthRetryError;
+				await cursorLiveRuns.release(run);
+				outcome = "error";
+				outcomeDetails = { reason: "stale_auth_retry" };
+				throw new CursorStaleSessionAuthRetryError(retryError);
 			}
 			if (run.errorMessage) {
 				partial.stopReason = "error";

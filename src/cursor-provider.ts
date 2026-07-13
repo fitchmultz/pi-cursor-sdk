@@ -16,7 +16,7 @@ import {
 	resetCursorNativeReplayIdleDisposeMs,
 	setCursorNativeReplayIdleDisposeMs,
 } from "./cursor-provider-live-run-drain.js";
-import { disposeAllSessionCursorAgents } from "./cursor-session-agent.js";
+import { disposeAllSessionCursorAgents, resetSessionCursorAgentIdleMs } from "./cursor-session-agent.js";
 import { attachCursorSdkEventDebugPiStreamTap, type CursorSdkEventDebugSink } from "./cursor-sdk-event-debug.js";
 import { installCursorSdkProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
 import { sanitizeCursorProviderError } from "./cursor-provider-errors.js";
@@ -99,5 +99,6 @@ export const __testUtils = {
 	resetCursorNativeReplayIdleDisposeMs,
 	releaseAllPendingCursorLiveRunsForTests,
 	resetSessionCursorAgents: () => disposeAllSessionCursorAgents(),
+	resetSessionCursorAgentIdleMs,
 	resetSessionTurnQueue: cursorSessionTurnQueueTestUtils.reset,
 };

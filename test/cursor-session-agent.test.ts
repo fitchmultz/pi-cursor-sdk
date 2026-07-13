@@ -13,6 +13,7 @@ describe("cursor-session-agent", () => {
 	beforeEach(async () => {
 		cursorSessionScopeTestUtils.reset();
 		resumeTestUtils.reset();
+		sessionAgentTestUtils.resetSessionCursorAgentIdleMs();
 		await sessionAgentTestUtils.disposeAllSessionCursorAgents();
 		vi.clearAllMocks();
 	});
@@ -41,6 +42,66 @@ describe("cursor-session-agent", () => {
 		expect(first.agent).toBe(second.agent);
 		expect(createAgent).toHaveBeenCalledTimes(1);
 		expect(createAgent).toHaveBeenCalledWith(expect.objectContaining({ mode: "agent" }));
+		expect(mockDispose).not.toHaveBeenCalled();
+	});
+
+	it("disposes ready pooled agents that exceed the idle budget before reuse", async () => {
+		const mockDispose = vi.fn().mockResolvedValue(undefined);
+		const createAgent = vi
+			.fn()
+			.mockResolvedValueOnce({
+				agentId: "agent-1",
+				[Symbol.asyncDispose]: mockDispose,
+			})
+			.mockResolvedValueOnce({
+				agentId: "agent-2",
+				[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+			});
+
+		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/test.jsonl");
+		sessionAgentTestUtils.setSessionCursorAgentIdleMs(1);
+		const params = {
+			apiKey: "test-key",
+			agentMode: "agent" as const,
+			cwd: "/tmp/project",
+			modelSelection: { id: "composer-2.5" },
+			createAgent,
+		};
+
+		const first = await acquireSessionCursorAgent(params);
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		const second = await acquireSessionCursorAgent(params);
+
+		expect(first.created).toBe(true);
+		expect(second.created).toBe(true);
+		expect(second.agent).not.toBe(first.agent);
+		expect(createAgent).toHaveBeenCalledTimes(2);
+		expect(mockDispose).toHaveBeenCalledTimes(1);
+	});
+
+	it("reuses ready pooled agents younger than the idle budget", async () => {
+		const mockDispose = vi.fn().mockResolvedValue(undefined);
+		const createAgent = vi.fn().mockResolvedValue({
+			agentId: "agent-1",
+			[Symbol.asyncDispose]: mockDispose,
+		});
+
+		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/test.jsonl");
+		sessionAgentTestUtils.setSessionCursorAgentIdleMs(60_000);
+		const params = {
+			apiKey: "test-key",
+			agentMode: "agent" as const,
+			cwd: "/tmp/project",
+			modelSelection: { id: "composer-2.5" },
+			createAgent,
+		};
+
+		const first = await acquireSessionCursorAgent(params);
+		const second = await acquireSessionCursorAgent(params);
+
+		expect(second.created).toBe(false);
+		expect(second.agent).toBe(first.agent);
+		expect(createAgent).toHaveBeenCalledTimes(1);
 		expect(mockDispose).not.toHaveBeenCalled();
 	});
 

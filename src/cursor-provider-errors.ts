@@ -6,8 +6,10 @@ export const MISSING_CURSOR_API_KEY_MESSAGE =
 	"Cursor SDK runs require a Cursor SDK API key. Cursor Agent CLI/Desktop login is not reused. Run /login -> Use an API key -> Cursor, set CURSOR_API_KEY before starting pi, or restart pi with --api-key.";
 const GENERIC_CURSOR_SDK_ERROR_MESSAGE =
 	"Cursor SDK request failed. The Cursor SDK API key may be missing, invalid, or unauthorized. Cursor Agent CLI/Desktop login is not reused. Run /login -> Use an API key -> Cursor, verify CURSOR_API_KEY, or pass --api-key, then retry.";
-const AUTH_CURSOR_SDK_ERROR_MESSAGE =
+export const AUTH_CURSOR_SDK_ERROR_MESSAGE =
 	"Cursor SDK request failed because the Cursor SDK API key may be invalid or unauthorized. Cursor Agent CLI/Desktop login is not reused. Run /login -> Use an API key -> Cursor, verify CURSOR_API_KEY, or pass --api-key, then retry.";
+export const STALE_CURSOR_SESSION_AUTH_ERROR_MESSAGE =
+	"Cursor session auth expired after idle and could not reconnect. Verify CURSOR_API_KEY / /login (Use an API key -> Cursor), then retry.";
 // Keep "Network error" aligned with pi's agent-level retry classifier.
 const NETWORK_CURSOR_SDK_ERROR_MESSAGE =
 	"Network error: Cursor SDK request failed during network or service I/O. Check your connection; pi will retry automatically when auto-retry is enabled.";
@@ -31,8 +33,13 @@ function isKnownGenericRunFailureText(message: string): boolean {
 	return normalized === "" || isGenericCursorRunFailureMessage(message) || isGenericErrorMessage(normalized);
 }
 
+/** Narrow auth wording; avoid hyphen compounds such as `allow-unauthenticated`. */
 function isLikelyAuthError(message: string): boolean {
-	return /\b(unauthenticated|unauthorized|unauthorised|forbidden|invalid api key|invalid key|authentication|auth|401|403)\b/i.test(message);
+	return (
+		/\b(unauthorized|unauthorised|forbidden|invalid api key|invalid key|authentication|401|403)\b/i.test(message) ||
+		/\[unauthenticated\]/i.test(message) ||
+		/(?<![\w-])unauthenticated(?![\w-])/i.test(message)
+	);
 }
 
 function getErrorStringField(record: Record<string, unknown> | undefined, key: string): string | undefined {
@@ -191,6 +198,30 @@ export function isUnauthenticatedConnectError(error: unknown): boolean {
 	return classifyCursorConnectError(error)?.kind === "unauthenticated";
 }
 
+/**
+ * True when a reused local pooled agent likely hit idle-session auth death
+ * (Connect unauthenticated / narrow auth wording), not a proven bad API key.
+ */
+export function isRetryableStaleCursorSessionAuthError(error: unknown): boolean {
+	if (isUnauthenticatedConnectError(error)) return true;
+	const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+	return isLikelyAuthError(message);
+}
+
+export function shouldRetryStaleCursorSessionAuth(options: {
+	error: unknown;
+	reusedPooledAgent: boolean;
+	alreadyRetried: boolean;
+	runtimeTarget: "local" | "cloud";
+	signalAborted?: boolean;
+}): boolean {
+	if (options.alreadyRetried) return false;
+	if (options.runtimeTarget !== "local") return false;
+	if (options.signalAborted) return false;
+	if (!options.reusedPooledAgent) return false;
+	return isRetryableStaleCursorSessionAuthError(options.error);
+}
+
 function isLikelyNetworkTimeout(message: string): boolean {
 	return (
 		/\b(ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENETUNREACH|EAI_AGAIN|NGHTTP2_ENHANCE_YOUR_CALM|ERR_HTTP2_STREAM_ERROR|ERR_HTTP2_SESSION_ERROR)\b/i.test(
@@ -278,12 +309,21 @@ export function resolveCursorSdkAbortCause(options: {
 	return "unknown";
 }
 
-export function sanitizeCursorProviderError(error: unknown, apiKey?: string): string {
+export function sanitizeCursorProviderError(
+	error: unknown,
+	apiKey?: string,
+	options?: { staleSessionAuthExhausted?: boolean },
+): string {
 	const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
 	if (message === MISSING_CURSOR_API_KEY_MESSAGE) return MISSING_CURSOR_API_KEY_MESSAGE;
+	if (message === STALE_CURSOR_SESSION_AUTH_ERROR_MESSAGE) return STALE_CURSOR_SESSION_AUTH_ERROR_MESSAGE;
+	if (message === AUTH_CURSOR_SDK_ERROR_MESSAGE) return AUTH_CURSOR_SDK_ERROR_MESSAGE;
 	const scrubbed = scrubSensitiveText(message, apiKey).trim();
 	const connectClassification = classifyCursorConnectError(error);
-	if (connectClassification?.kind === "unauthenticated" || isLikelyAuthError(scrubbed)) return AUTH_CURSOR_SDK_ERROR_MESSAGE;
+	const authLike = connectClassification?.kind === "unauthenticated" || isLikelyAuthError(scrubbed);
+	if (authLike) {
+		return options?.staleSessionAuthExhausted ? STALE_CURSOR_SESSION_AUTH_ERROR_MESSAGE : AUTH_CURSOR_SDK_ERROR_MESSAGE;
+	}
 	if (connectClassification?.kind === "network" || isLikelyNetworkTimeout(scrubbed)) return NETWORK_CURSOR_SDK_ERROR_MESSAGE;
 	if (isGenericCursorRunFailureMessage(scrubbed)) return RETRYABLE_CURSOR_RUN_FAILURE_PREFIX;
 	if (isGenericErrorMessage(scrubbed)) return GENERIC_CURSOR_SDK_ERROR_MESSAGE;

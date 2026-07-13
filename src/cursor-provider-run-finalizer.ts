@@ -12,6 +12,10 @@ import {
 } from "./cursor-provider-errors.js";
 import { CursorLiveRunAbortError } from "./cursor-live-run-coordinator.js";
 import {
+	formatExhaustedStaleSessionAuthError,
+	shouldMarkLiveRunStaleAuthRetry,
+} from "./cursor-provider-stale-auth-retry.js";
+import {
 	buildIncompleteCursorToolRunOutcome,
 	type IncompleteCursorToolRunOutcomeInput,
 } from "./cursor-incomplete-tool-visibility.js";
@@ -35,13 +39,21 @@ export type CursorTurnTerminalEvent =
 			prepared: CursorProviderTurnPrepareResult;
 			outcome: CursorRunOutcome;
 			displayOnlyTraceBlock?: string;
+			staleSessionAuthExhausted?: boolean;
 	  }
-	| { kind: "error"; prepared: CursorProviderTurnPrepareResult | undefined; error: unknown };
+	| {
+			kind: "error";
+			prepared: CursorProviderTurnPrepareResult | undefined;
+			error: unknown;
+			staleSessionAuthExhausted?: boolean;
+	  };
 
 function applyLiveRunOutcome(
 	outcome: CursorRunOutcome,
 	prepared: LocalCursorProviderTurnPrepareResult & { runtime: LiveCursorProviderTurnRuntime },
 	context: CursorProviderTurnRunnerParams["context"],
+	allowStaleAuthRetry: boolean,
+	signalAborted: boolean | undefined,
 ): void {
 	if (prepared.runtime.liveRun.disposed) return;
 	const { liveRun } = prepared.runtime;
@@ -54,9 +66,24 @@ function applyLiveRunOutcome(
 		case "cancelled":
 			cursorLiveRuns.markCancelled(liveRun, getCursorRunAbortMessage(outcome));
 			break;
-		case "failed":
-			cursorLiveRuns.markError(liveRun, outcome.kind === "error" ? outcome.errorMessage : "Cursor SDK run failed.");
+		case "failed": {
+			const errorMessage = outcome.kind === "error" ? outcome.errorMessage : "Cursor SDK run failed.";
+			if (
+				allowStaleAuthRetry &&
+				shouldMarkLiveRunStaleAuthRetry({
+					error: errorMessage,
+					lease: prepared.sessionAgentLease,
+					liveRun,
+					alreadyRetried: false,
+					signalAborted,
+				})
+			) {
+				cursorLiveRuns.markStaleAuthRetry(liveRun, errorMessage);
+			} else {
+				cursorLiveRuns.markError(liveRun, errorMessage);
+			}
 			break;
+		}
 	}
 }
 
@@ -77,6 +104,7 @@ export interface StartCursorLiveRunCompletionParams {
 	prepared: LocalCursorProviderTurnPrepareResult & { runtime: LiveCursorProviderTurnRuntime };
 	modelId: string;
 	discardIncompleteTools: (outcome: IncompleteCursorToolRunOutcomeInput) => void;
+	allowStaleAuthRetry?: boolean;
 }
 
 export class CursorRunFinalizer {
@@ -88,6 +116,7 @@ export class CursorRunFinalizer {
 		const { runnerParams } = this.params;
 		const sdkEventDebug = this.params.sdkEventDebug();
 		const { send, prepared, modelId, discardIncompleteTools } = startParams;
+		const allowStaleAuthRetry = startParams.allowStaleAuthRetry === true;
 		const { run, cursorAgentMessageOffset } = send;
 		const { liveRun } = prepared.runtime;
 		const waitCompletion = awaitFinalizeCursorRunOutcome({
@@ -105,15 +134,34 @@ export class CursorRunFinalizer {
 			contextWindowAgentId: liveRun.agent.agentId,
 		})
 			.then(async (finalized) => {
-				applyLiveRunOutcome(finalized.outcome, prepared, runnerParams.context);
+				applyLiveRunOutcome(
+					finalized.outcome,
+					prepared,
+					runnerParams.context,
+					allowStaleAuthRetry,
+					runnerParams.options?.signal?.aborted,
+				);
 			})
 			.catch((error: unknown) => {
 				this.safeCleanup(() => discardIncompleteTools({ status: "error" }));
 				if (!liveRun.disposed) {
-					cursorLiveRuns.markError(
-						liveRun,
-						sanitizeCursorProviderError(error, this.params.resolvedApiKey() ?? runnerParams.options?.apiKey),
-					);
+					if (
+						allowStaleAuthRetry &&
+						shouldMarkLiveRunStaleAuthRetry({
+							error,
+							lease: prepared.sessionAgentLease,
+							liveRun,
+							alreadyRetried: false,
+							signalAborted: runnerParams.options?.signal?.aborted,
+						})
+					) {
+						cursorLiveRuns.markStaleAuthRetry(liveRun, error);
+					} else {
+						cursorLiveRuns.markError(
+							liveRun,
+							sanitizeCursorProviderError(error, this.params.resolvedApiKey() ?? runnerParams.options?.apiKey),
+						);
+					}
 				}
 				this.safeCleanup(() => sdkEventDebug?.recordWaitResult({ status: "error", error: String(error) }));
 				this.safeCleanup(() => sdkEventDebug?.recordError("run_wait", error));
@@ -131,7 +179,7 @@ export class CursorRunFinalizer {
 			this.terminalApplied = true;
 			return;
 		}
-		await this.applyErrorOutcome(event.prepared, event.error);
+		await this.applyErrorOutcome(event.prepared, event.error, event.staleSessionAuthExhausted === true);
 		this.terminalApplied = true;
 	}
 
@@ -191,7 +239,11 @@ export class CursorRunFinalizer {
 		}
 	}
 
-	private async applyErrorOutcome(prepared: CursorProviderTurnPrepareResult | undefined, error: unknown): Promise<void> {
+	private async applyErrorOutcome(
+		prepared: CursorProviderTurnPrepareResult | undefined,
+		error: unknown,
+		staleSessionAuthExhausted: boolean,
+	): Promise<void> {
 		this.safeCleanup(() => prepared?.runtime.turnCoordinator.discardIncompleteStartedToolCalls(
 			buildIncompleteCursorToolRunOutcome({
 				status: error instanceof CursorLiveRunAbortError ? "cancelled" : "error",
@@ -209,10 +261,13 @@ export class CursorRunFinalizer {
 			this.params.sdkProcessErrorGuard.suppressAbortErrors();
 			this.pushTerminalError(this.params.runnerParams.partial, "aborted", this.abortMessage());
 		} else {
+			const apiKey = this.params.resolvedApiKey() ?? this.params.runnerParams.options?.apiKey;
 			this.pushTerminalError(
 				this.params.runnerParams.partial,
 				"error",
-				sanitizeCursorProviderError(error, this.params.resolvedApiKey() ?? this.params.runnerParams.options?.apiKey),
+				staleSessionAuthExhausted
+					? formatExhaustedStaleSessionAuthError(error, apiKey)
+					: sanitizeCursorProviderError(error, apiKey),
 			);
 		}
 	}

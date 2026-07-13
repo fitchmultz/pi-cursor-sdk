@@ -378,6 +378,7 @@ export async function resetCursorProviderTestState(): Promise<void> {
 	process.env.PI_CURSOR_TOOL_MANIFEST = "0";
 	expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
 	cursorProviderTestUtils.resetCursorNativeReplayIdleDisposeMs();
+	cursorProviderTestUtils.resetSessionCursorAgentIdleMs();
 	await cursorProviderTestUtils.resetSessionCursorAgents();
 	cursorProviderTestUtils.resetSessionTurnQueue();
 	cursorSessionScopeTestUtils.reset();

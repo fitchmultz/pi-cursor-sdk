@@ -3,9 +3,12 @@ import {
 	classifyCursorConnectError,
 	formatCursorSdkAbortMessage,
 	formatCursorSdkRunFailureDetail,
+	isRetryableStaleCursorSessionAuthError,
 	isUnauthenticatedConnectError,
 	resolveCursorSdkAbortCause,
 	sanitizeCursorProviderError,
+	STALE_CURSOR_SESSION_AUTH_ERROR_MESSAGE,
+	shouldRetryStaleCursorSessionAuth,
 } from "../src/cursor-provider-errors.js";
 
 function makeUnauthenticatedConnectError(): Error & { rawMessage: string; code: number; metadata: Headers } {
@@ -233,11 +236,64 @@ describe("cursor-provider-errors", () => {
 		const message = sanitizeCursorProviderError(error, "secret-key");
 
 		expect(isUnauthenticatedConnectError(error)).toBe(true);
+		expect(isRetryableStaleCursorSessionAuthError(error)).toBe(true);
 		expect(message).toContain("invalid or unauthorized");
 		expect(message).toContain("/login");
 		expect(message).toContain("CURSOR_API_KEY");
 		expect(message).not.toContain("secret-key");
 		expect(message).not.toContain("Bearer");
+	});
+
+	it("maps exhausted stale-session auth to idle reconnect guidance", () => {
+		const error = makeUnauthenticatedConnectError();
+		const message = sanitizeCursorProviderError(error, "secret-key", { staleSessionAuthExhausted: true });
+
+		expect(message).toBe(STALE_CURSOR_SESSION_AUTH_ERROR_MESSAGE);
+		expect(message).toContain("expired after idle");
+		expect(message).not.toContain("secret-key");
+	});
+
+	it("does not treat bare auth tokens in allow-unauthenticated as auth failures", () => {
+		expect(sanitizeCursorProviderError(new Error("allow-unauthenticated policy"), "test-key")).toBe(
+			"allow-unauthenticated policy",
+		);
+		expect(isRetryableStaleCursorSessionAuthError(new Error("allow-unauthenticated policy"))).toBe(false);
+	});
+
+	it("only retries stale auth for reused local pooled agents once", () => {
+		const error = makeUnauthenticatedConnectError();
+		expect(
+			shouldRetryStaleCursorSessionAuth({
+				error,
+				reusedPooledAgent: true,
+				alreadyRetried: false,
+				runtimeTarget: "local",
+			}),
+		).toBe(true);
+		expect(
+			shouldRetryStaleCursorSessionAuth({
+				error,
+				reusedPooledAgent: true,
+				alreadyRetried: true,
+				runtimeTarget: "local",
+			}),
+		).toBe(false);
+		expect(
+			shouldRetryStaleCursorSessionAuth({
+				error,
+				reusedPooledAgent: false,
+				alreadyRetried: false,
+				runtimeTarget: "local",
+			}),
+		).toBe(false);
+		expect(
+			shouldRetryStaleCursorSessionAuth({
+				error,
+				reusedPooledAgent: true,
+				alreadyRetried: false,
+				runtimeTarget: "cloud",
+			}),
+		).toBe(false);
 	});
 
 	it("maps connect-layer network failures to actionable retry guidance", () => {

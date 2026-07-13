@@ -55,6 +55,7 @@ interface SessionCursorAgentReadyEntry extends SessionCursorAgentPoolEntryBase {
 	resumeEnabled: boolean;
 	resumed: boolean;
 	resumeNotice?: string;
+	lastUsedAtMs: number;
 }
 
 interface SessionCursorAgentBusyEntry extends SessionCursorAgentPoolEntryBase {
@@ -64,6 +65,7 @@ interface SessionCursorAgentBusyEntry extends SessionCursorAgentPoolEntryBase {
 	resumeEnabled: boolean;
 	resumed: boolean;
 	resumeNotice?: string;
+	lastUsedAtMs: number;
 	completionSettled: Promise<void>;
 	pendingCompletion: Promise<void>;
 	releaseBusyWait: () => void;
@@ -130,6 +132,22 @@ const terminalDisposedScopeGenerations = new Map<string, number>();
 const scopeCreationGenerations = new Map<string, number>();
 const EMPTY_POOL_STATE: SessionCursorAgentPoolState = { status: "empty" };
 let nextSessionAgentInstanceId = 1;
+
+/** Under observed ~13m idle auth-floor; dispose pooled ready agents before lease when idle this long. */
+export const DEFAULT_SESSION_CURSOR_AGENT_IDLE_MS = 10 * 60 * 1000;
+let sessionCursorAgentIdleMs = DEFAULT_SESSION_CURSOR_AGENT_IDLE_MS;
+
+export function setSessionCursorAgentIdleMs(value: number): void {
+	sessionCursorAgentIdleMs = value;
+}
+
+export function resetSessionCursorAgentIdleMs(): void {
+	sessionCursorAgentIdleMs = DEFAULT_SESSION_CURSOR_AGENT_IDLE_MS;
+}
+
+function isReadyPoolEntryIdleExpired(entry: SessionCursorAgentReadyEntry, nowMs: number = Date.now()): boolean {
+	return sessionCursorAgentIdleMs > 0 && nowMs - entry.lastUsedAtMs >= sessionCursorAgentIdleMs;
+}
 
 export interface CursorLocalSafetyOptions {
 	autoReview?: boolean;
@@ -307,7 +325,11 @@ function buildBusyPoolEntry(
 			current.instanceId === entry.instanceId &&
 			current.pendingCompletion === pendingCompletion
 		) {
-			sessionAgentsByScope.set(entry.scopeKey, { ...current, status: "ready" });
+			sessionAgentsByScope.set(entry.scopeKey, {
+				...current,
+				status: "ready",
+				lastUsedAtMs: Date.now(),
+			});
 		}
 	});
 
@@ -397,6 +419,10 @@ async function tryLeaseReadyEntry(
 	}
 	const readyEntry = getCurrentReadyPoolEntry(scopeKey, poolKey);
 	if (!readyEntry) return undefined;
+	if (isReadyPoolEntryIdleExpired(readyEntry)) {
+		await disposePoolEntryForScope(scopeKey);
+		return undefined;
+	}
 	return leaseFromEntry(readyEntry, scopeKey, params, created);
 }
 
@@ -478,6 +504,7 @@ async function createSessionAgentEntry(
 		sendState: effectiveSendState,
 		resumeEnabled: params.localResume === true,
 		resumed,
+		lastUsedAtMs: Date.now(),
 		...(resumeNotice ? { resumeNotice } : {}),
 	};
 }
@@ -511,6 +538,10 @@ export async function acquireSessionCursorAgent(params: SessionCursorAgentCreate
 		}
 
 		if (state.status === "ready") {
+			if (isReadyPoolEntryIdleExpired(state)) {
+				await disposePoolEntryForScope(scopeKey);
+				continue;
+			}
 			return leaseFromEntry(state, scopeKey, params, false);
 		}
 
@@ -624,6 +655,9 @@ export const __testUtils = {
 	disposeAllSessionCursorAgents,
 	buildApiKeyPoolKeyFingerprint,
 	buildSessionAgentPoolKey,
+	setSessionCursorAgentIdleMs,
+	resetSessionCursorAgentIdleMs,
+	DEFAULT_SESSION_CURSOR_AGENT_IDLE_MS,
 	SessionCursorAgentCreationSupersededError,
 	SessionCursorAgentScopeClosedError,
 };

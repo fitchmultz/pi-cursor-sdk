@@ -207,6 +207,8 @@ export interface PiHarness extends EventHarness {
 	sendMessage: MockFn<ExtensionAPI["sendMessage"]>;
 	getFlag: MockFn<ExtensionAPI["getFlag"]>;
 	appendEntry: MockFn<ExtensionAPI["appendEntry"]>;
+	events: ExtensionAPI["events"];
+	_eventsEmitted: Array<{ channel: string; data: unknown }>;
 	runCommand: (
 		name: string,
 		args?: string,

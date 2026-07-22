@@ -64,6 +64,14 @@ export function createPiHarness(options: PiHarnessOptions = {}): PiHarness {
 		tools.push(tool as RegisteredTool);
 	}) as PiHarness["registerTool"];
 
+	const eventsEmitted: Array<{ channel: string; data: unknown }> = [];
+	const events: ExtensionAPI["events"] = {
+		emit: vi.fn((channel: string, data: unknown) => {
+			eventsEmitted.push({ channel, data });
+		}),
+		on: vi.fn(() => () => {}),
+	};
+
 	return {
 		...eventApi,
 		registerProvider: vi.fn<ExtensionAPI["registerProvider"]>((name: string, config: ProviderConfig) => {
@@ -94,6 +102,8 @@ export function createPiHarness(options: PiHarnessOptions = {}): PiHarness {
 		sendMessage: vi.fn<ExtensionAPI["sendMessage"]>(),
 		getFlag: vi.fn<ExtensionAPI["getFlag"]>((name: string) => resolveFlagValue(name)),
 		appendEntry: vi.fn<ExtensionAPI["appendEntry"]>(),
+		events,
+		_eventsEmitted: eventsEmitted,
 		runCommand,
 		_registered: registered,
 		_commands: commands,

@@ -37,7 +37,9 @@ interface CursorQuestionDetails {
 	cancelled: boolean;
 }
 
-interface CursorQuestionToolExtensionApi extends Pick<ExtensionAPI, "getActiveTools" | "registerTool" | "setActiveTools">, CursorModelLifecycleExtensionApi {}
+interface CursorQuestionToolExtensionApi
+	extends Pick<ExtensionAPI, "getActiveTools" | "registerTool" | "setActiveTools" | "events">,
+		CursorModelLifecycleExtensionApi {}
 
 type RawQuestionOption = string | { label?: string; value?: string; description?: string };
 
@@ -210,17 +212,24 @@ export function registerCursorQuestionTool(pi: CursorQuestionToolExtensionApi): 
 				);
 			}
 
-			const answers: CursorQuestionAnswer[] = [];
-			for (const question of questions) {
-				const answer = await askOneQuestion(question, ctx);
-				answers.push(answer);
-				if (answer.cancelled) break;
-			}
+			// Herdr's Pi integration listens for herdr:blocked and reports pane
+			// state as blocked (notification) while the questionnaire awaits input.
+			pi.events.emit("herdr:blocked", { active: true, label: "Waiting for user response" });
+			try {
+				const answers: CursorQuestionAnswer[] = [];
+				for (const question of questions) {
+					const answer = await askOneQuestion(question, ctx);
+					answers.push(answer);
+					if (answer.cancelled) break;
+				}
 
-			return {
-				content: [{ type: "text" as const, text: summarizeAnswers(answers) }],
-				details: buildDetails(questions, answers, true),
-			};
+				return {
+					content: [{ type: "text" as const, text: summarizeAnswers(answers) }],
+					details: buildDetails(questions, answers, true),
+				};
+			} finally {
+				pi.events.emit("herdr:blocked", { active: false });
+			}
 		},
 		renderCall(args, theme) {
 			const questions = normalizeQuestions(args as CursorAskQuestionParams);

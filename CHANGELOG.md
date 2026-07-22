@@ -4,6 +4,7 @@
 
 ### Added
 
+- Emit `herdr:blocked` while `cursor_ask_question` awaits pi UI input, and clear it in `finally`, so Herdr can report `blocked` / notifications instead of `working`.
 - Add strictly opt-in Cursor Cloud pull-request controls: `--cursor-cloud-auto-create-pr` / `PI_CURSOR_CLOUD_AUTO_CREATE_PR` / `cloud.autoCreatePR` and `--cursor-cloud-skip-reviewer-request` / `PI_CURSOR_CLOUD_SKIP_REVIEWER_REQUEST` / `cloud.skipReviewerRequest`. Unset controls remain omitted from SDK options, project config is excluded, and local runtime behavior is unchanged.
 - Add strictly opt-in local-agent HTTP/1.1/SSE compatibility through `PI_CURSOR_HTTP_1_1`, `/cursor-http [on|off|toggle]`, and user `cursor-sdk.json` `local.useHttp1ForAgent`, resolved as session > environment > user > unset. Explicit values configure the Cursor SDK before local agent creation, session shutdown clears extension-owned SDK transport state before module reload, transport choices split the pooled agent key, and enabled local status shows `http1`; cloud and unset/default behavior remain unchanged. The pool-key shape change makes pre-upgrade local resume handles rebootstrap once; superseded handles remain eligible for explicit `/cursor-local-resume-cleanup`.
 

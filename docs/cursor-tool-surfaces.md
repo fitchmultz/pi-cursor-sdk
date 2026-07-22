@@ -30,11 +30,14 @@ Default behavior:
 - The pi bridge exposes **active pi tools** as `pi__*` MCP names when `PI_CURSOR_PI_TOOL_BRIDGE` is enabled (default on).
 - Overlapping pi builtins (`read`, `bash`, `write`, `edit`, `grep`, `find`, `ls`) are **hidden** from the bridge unless `PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1`.
 
-`pi-cursor-sdk` always registers `cursor_ask_question` for Cursor models when the bridge is on; Cursor sees `pi__cursor_ask_question`. When pi has visible Agent Skills loaded, the extension also rewrites pi's skill catalog for Cursor and activates `cursor_activate_skill`; Cursor sees `pi__cursor_activate_skill` and should call it with a listed skill name before applying that skill. The activation result returns the full `SKILL.md`, the skill directory for relative paths, and a bounded list of bundled `scripts/`, `references/`, and `assets/` files without eagerly reading those resources.
+`pi-cursor-sdk` always registers `cursor_ask_question` for Cursor models, but it stays inactive by default. The tool is active and bridged only when `PI_CURSOR_ASK_QUESTION=1` (plus the usual bridge/model gates); Cursor then sees `pi__cursor_ask_question`. When pi has visible Agent Skills loaded, the extension also rewrites pi's skill catalog for Cursor and activates `cursor_activate_skill`; Cursor sees `pi__cursor_activate_skill` and should call it with a listed skill name before applying that skill. The activation result returns the full `SKILL.md`, the skill directory for relative paths, and a bounded list of bundled `scripts/`, `references/`, and `assets/` files without eagerly reading those resources.
 
 ```bash
 # Disable pi bridge entirely
 PI_CURSOR_PI_TOOL_BRIDGE=0 pi --model cursor/composer-2-5
+
+# Opt in to cursor_ask_question / pi__cursor_ask_question (off by default)
+PI_CURSOR_ASK_QUESTION=1 pi --model cursor/composer-2-5
 
 # Expose overlapping pi builtins through the bridge
 PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1 pi --model cursor/composer-2-5

@@ -309,6 +309,32 @@ describe("extension registration and discovery", () => {
 		expect(pi._activeToolNames()).toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
 	});
 
+	it("keeps cursor_ask_question inactive on late-model resync when PI_CURSOR_ASK_QUESTION is unset", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		delete process.env.PI_CURSOR_ASK_QUESTION;
+		mockedDiscover.mockResolvedValueOnce([]);
+		const pi = createExtensionPi();
+		await extensionFactory(pi);
+		await pi.runSessionStart({ model: undefined });
+
+		expect(pi._tools.map((tool) => tool.name)).toEqual([CURSOR_ASK_QUESTION_TOOL_NAME, CURSOR_ACTIVATE_SKILL_TOOL_NAME]);
+		expect(pi._activeToolNames()).not.toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
+
+		await pi.runBeforeAgentStart({ model: makeModel("composer-2.5") });
+
+		expect(pi._tools.map((tool) => tool.name)).toContain("cursor");
+		expect(pi._activeToolNames()).toContain("cursor");
+		expect(pi._activeToolNames()).not.toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
+		expect(buildCursorPiToolBridgeSnapshot(pi).piToolNameToMcpToolName.has(CURSOR_ASK_QUESTION_TOOL_NAME)).toBe(false);
+
+		pi.setActiveTools(["read", "bash", "edit", "write"]);
+		await pi.runTurnStart({ model: makeModel("composer-2.5") });
+
+		expect(pi._activeToolNames()).toContain("cursor");
+		expect(pi._activeToolNames()).not.toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
+		expect(buildCursorPiToolBridgeSnapshot(pi).piToolNameToMcpToolName.has(CURSOR_ASK_QUESTION_TOOL_NAME)).toBe(false);
+	});
+
 	it("does not reactivate Cursor-only tools when pi tools are disabled", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		mockedDiscover.mockResolvedValueOnce([]);

@@ -8,8 +8,8 @@ import { resolveCursorPiToolBridgeEnabled } from "./cursor-pi-tool-bridge-env.js
 
 export const CURSOR_ASK_QUESTION_TOOL_NAME = "cursor_ask_question";
 
-/** Producer-namespaced event while `cursor_ask_question` awaits pi UI input. */
-export const CURSOR_ASK_QUESTION_BLOCKED_EVENT = "cursor:ask-question:blocked";
+/** Package-namespaced event while `cursor_ask_question` awaits pi UI input. */
+export const CURSOR_ASK_QUESTION_BLOCKED_EVENT = "pi-cursor-sdk:ask-question:blocked";
 
 export interface CursorAskQuestionBlockedEventPayload {
 	active: boolean;
@@ -226,7 +226,7 @@ export function registerCursorQuestionTool(pi: CursorQuestionToolExtensionApi): 
 				);
 			}
 
-			// Emit a producer-namespaced blocked signal while the questionnaire
+			// Emit a package-namespaced blocked signal while the questionnaire
 			// awaits input so consumers (e.g. Herdr) can map it to blocked/working.
 			emitCursorAskQuestionBlockedEvent(pi, { active: true });
 			try {

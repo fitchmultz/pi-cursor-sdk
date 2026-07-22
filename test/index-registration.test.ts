@@ -413,7 +413,7 @@ describe("extension registration and discovery", () => {
 		]);
 	});
 
-	it("clears cursor:ask-question:blocked when the Cursor question UI is cancelled", async () => {
+	it("clears pi-cursor-sdk:ask-question:blocked when the Cursor question UI is cancelled", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
 		mockedDiscover.mockResolvedValueOnce([]);
 		const pi = createExtensionPi();
@@ -441,7 +441,7 @@ describe("extension registration and discovery", () => {
 		]);
 	});
 
-	it("clears cursor:ask-question:blocked when the Cursor question UI rejects", async () => {
+	it("clears pi-cursor-sdk:ask-question:blocked when the Cursor question UI rejects", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
 		mockedDiscover.mockResolvedValueOnce([]);
 		const pi = createExtensionPi();

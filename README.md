@@ -464,6 +464,9 @@ Bridge controls:
 # Roll back to Cursor SDK tools/settings/MCP only; do not expose active pi tools through the bridge.
 PI_CURSOR_PI_TOOL_BRIDGE=0 pi --model cursor/composer-2-5
 
+# Opt in to cursor_ask_question / pi__cursor_ask_question (off by default in this fork)
+PI_CURSOR_ASK_QUESTION=1 pi --model cursor/...
+
 # Opt in to also expose overlapping pi tool names through the bridge.
 PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1 pi --model cursor/composer-2-5
 

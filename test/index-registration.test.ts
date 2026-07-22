@@ -32,7 +32,11 @@ import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-sessio
 import { streamCursor } from "../src/cursor-provider.js";
 import { streamCursorLazy } from "../src/cursor-provider-lazy.js";
 import { buildCursorPiToolBridgeSnapshot } from "../src/cursor-pi-tool-bridge.js";
-import { CURSOR_ASK_QUESTION_TOOL_NAME } from "../src/cursor-question-tool.js";
+import {
+	CURSOR_ASK_QUESTION_ENV,
+	CURSOR_ASK_QUESTION_TOOL_NAME,
+	resolveCursorAskQuestionEnabled,
+} from "../src/cursor-question-tool.js";
 import { CURSOR_ACTIVATE_SKILL_TOOL_NAME } from "../src/cursor-skill-tool.js";
 import { __testUtils as cursorSdkProcessErrorGuardTestUtils } from "../src/cursor-sdk-process-error-guard.js";
 
@@ -211,8 +215,9 @@ describe("extension registration and discovery", () => {
 			"find",
 			"ls",
 			"cursor",
-			CURSOR_ASK_QUESTION_TOOL_NAME,
 		]);
+		expect(pi._activeToolNames()).not.toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
+		expect(buildCursorPiToolBridgeSnapshot(pi).piToolNameToMcpToolName.has(CURSOR_ASK_QUESTION_TOOL_NAME)).toBe(false);
 		expect(pi.on).toHaveBeenCalledWith("session_start", expect.any(Function));
 		expect(pi.on).toHaveBeenCalledWith("before_agent_start", expect.any(Function));
 		expect(pi.on).toHaveBeenCalledWith("turn_start", expect.any(Function));
@@ -256,7 +261,7 @@ describe("extension registration and discovery", () => {
 		await pi.runSessionStart();
 
 		expect(pi._activeToolNames()).toContain("cursor");
-		expect(pi._activeToolNames()).toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
+		expect(pi._activeToolNames()).not.toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
 
 		await pi.runModelSelect(makeHarnessModel("openai-codex", "openai-codex-responses", "gpt-5.5"));
 		expect(pi._activeToolNames()).not.toContain("cursor");
@@ -267,11 +272,12 @@ describe("extension registration and discovery", () => {
 
 		await pi.runModelSelect(makeModel("composer-2.5"));
 		expect(pi._activeToolNames()).toContain("cursor");
-		expect(pi._activeToolNames()).toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
+		expect(pi._activeToolNames()).not.toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
 	});
 
 	it("registers and resyncs Cursor-only tools before a turn when session startup did not know the model", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		process.env.PI_CURSOR_ASK_QUESTION = "1";
 		mockedDiscover.mockResolvedValueOnce([]);
 		const pi = createExtensionPi();
 		await extensionFactory(pi);
@@ -328,7 +334,7 @@ describe("extension registration and discovery", () => {
 
 		expect(pi._tools.map((tool) => tool.name)).toContain("cursor");
 		expect(pi._tools.map((tool) => tool.name)).toContain("grep");
-		expect(pi._activeToolNames()).toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
+		expect(pi._activeToolNames()).not.toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
 		expect(pi._activeToolNames()).toContain("cursor");
 		expect(pi._activeToolNames()).toContain("grep");
 	});
@@ -343,7 +349,7 @@ describe("extension registration and discovery", () => {
 		await pi.runTurnStart({ mode: "print", hasUI: false, model: makeModel("composer-2.5") });
 
 		expect(pi._tools.map((tool) => tool.name)).toEqual([CURSOR_ASK_QUESTION_TOOL_NAME, CURSOR_ACTIVATE_SKILL_TOOL_NAME]);
-		expect(pi._activeToolNames()).toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
+		expect(pi._activeToolNames()).not.toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
 		expect(pi._activeToolNames()).not.toContain("cursor");
 		expect(pi._activeToolNames()).not.toContain("grep");
 	});
@@ -361,7 +367,7 @@ describe("extension registration and discovery", () => {
 
 		await pi.runTurnStart({ mode: "print", hasUI: false, model: makeModel("composer-2.5") });
 
-		expect(pi._activeToolNames()).toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
+		expect(pi._activeToolNames()).not.toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
 		expect(pi._activeToolNames()).not.toContain("cursor");
 		expect(pi._activeToolNames()).not.toContain("grep");
 
@@ -406,7 +412,7 @@ describe("extension registration and discovery", () => {
 		});
 	});
 
-	it("registers Cursor pi tool bridge state and activates the Cursor question tool", async () => {
+	it("registers cursor_ask_question but leaves it inactive by default", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
 		mockedDiscover.mockResolvedValueOnce([]);
 		const pi = createExtensionPi();
@@ -416,11 +422,37 @@ describe("extension registration and discovery", () => {
 
 		expect(cursorPiToolBridgeTestUtils.getRegisteredBridgeForTests()?.isEnabled()).toBe(true);
 		expect(pi.on).toHaveBeenCalledWith("session_shutdown", expect.any(Function));
+		expect(pi._tools.map((tool) => tool.name)).toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
+		expect(pi._activeToolNames()).not.toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
+		expect(buildCursorPiToolBridgeSnapshot(pi).piToolNameToMcpToolName.has(CURSOR_ASK_QUESTION_TOOL_NAME)).toBe(false);
+	});
+
+	it("activates the Cursor question tool and bridge exposure when PI_CURSOR_ASK_QUESTION=1", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
+		process.env.PI_CURSOR_ASK_QUESTION = "1";
+		mockedDiscover.mockResolvedValueOnce([]);
+		const pi = createExtensionPi();
+
+		await extensionFactory(pi);
+		await pi.runSessionStart();
+
+		expect(cursorPiToolBridgeTestUtils.getRegisteredBridgeForTests()?.isEnabled()).toBe(true);
 		expect(pi._activeToolNames()).toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
 
 		const snapshot = buildCursorPiToolBridgeSnapshot(pi);
 		expect(snapshot.piToolNameToMcpToolName.get(CURSOR_ASK_QUESTION_TOOL_NAME)).toBe("pi__cursor_ask_question");
 		expect(snapshot.tools.find((tool) => tool.piToolName === CURSOR_ASK_QUESTION_TOOL_NAME)?.description).toContain("Ask the user");
+	});
+
+	it("parses PI_CURSOR_ASK_QUESTION with default off", () => {
+		expect(CURSOR_ASK_QUESTION_ENV).toBe("PI_CURSOR_ASK_QUESTION");
+		expect(resolveCursorAskQuestionEnabled({})).toBe(false);
+		expect(resolveCursorAskQuestionEnabled({ PI_CURSOR_ASK_QUESTION: "0" })).toBe(false);
+		expect(resolveCursorAskQuestionEnabled({ PI_CURSOR_ASK_QUESTION: "false" })).toBe(false);
+		expect(resolveCursorAskQuestionEnabled({ PI_CURSOR_ASK_QUESTION: "off" })).toBe(false);
+		expect(resolveCursorAskQuestionEnabled({ PI_CURSOR_ASK_QUESTION: "unexpected" })).toBe(false);
+		expect(resolveCursorAskQuestionEnabled({ PI_CURSOR_ASK_QUESTION: "1" })).toBe(true);
+		expect(resolveCursorAskQuestionEnabled({ PI_CURSOR_ASK_QUESTION: "true" })).toBe(true);
 	});
 
 	it("honors PI_CURSOR_PI_TOOL_BRIDGE=0 at the extension registration path", async () => {

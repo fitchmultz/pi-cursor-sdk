@@ -32,7 +32,10 @@ import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-sessio
 import { streamCursor } from "../src/cursor-provider.js";
 import { streamCursorLazy } from "../src/cursor-provider-lazy.js";
 import { buildCursorPiToolBridgeSnapshot } from "../src/cursor-pi-tool-bridge.js";
-import { CURSOR_ASK_QUESTION_TOOL_NAME } from "../src/cursor-question-tool.js";
+import {
+	CURSOR_ASK_QUESTION_BLOCKED_EVENT,
+	CURSOR_ASK_QUESTION_TOOL_NAME,
+} from "../src/cursor-question-tool.js";
 import { CURSOR_ACTIVATE_SKILL_TOOL_NAME } from "../src/cursor-skill-tool.js";
 import { __testUtils as cursorSdkProcessErrorGuardTestUtils } from "../src/cursor-sdk-process-error-guard.js";
 
@@ -404,13 +407,13 @@ describe("extension registration and discovery", () => {
 			cancelled: false,
 			answers: [{ id: "question_1", answer: "Web app", value: "web", cancelled: false }],
 		});
-		expect(pi._eventsEmitted.filter((entry) => entry.channel === "herdr:blocked")).toEqual([
-			{ channel: "herdr:blocked", data: { active: true, label: "Waiting for user response" } },
-			{ channel: "herdr:blocked", data: { active: false } },
+		expect(pi._eventsEmitted.filter((entry) => entry.channel === CURSOR_ASK_QUESTION_BLOCKED_EVENT)).toEqual([
+			{ channel: CURSOR_ASK_QUESTION_BLOCKED_EVENT, data: { active: true } },
+			{ channel: CURSOR_ASK_QUESTION_BLOCKED_EVENT, data: { active: false } },
 		]);
 	});
 
-	it("clears herdr:blocked when the Cursor question UI is cancelled", async () => {
+	it("clears cursor:ask-question:blocked when the Cursor question UI is cancelled", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
 		mockedDiscover.mockResolvedValueOnce([]);
 		const pi = createExtensionPi();
@@ -432,13 +435,13 @@ describe("extension registration and discovery", () => {
 		);
 
 		expect(result.details).toMatchObject({ cancelled: true });
-		expect(pi._eventsEmitted.filter((entry) => entry.channel === "herdr:blocked")).toEqual([
-			{ channel: "herdr:blocked", data: { active: true, label: "Waiting for user response" } },
-			{ channel: "herdr:blocked", data: { active: false } },
+		expect(pi._eventsEmitted.filter((entry) => entry.channel === CURSOR_ASK_QUESTION_BLOCKED_EVENT)).toEqual([
+			{ channel: CURSOR_ASK_QUESTION_BLOCKED_EVENT, data: { active: true } },
+			{ channel: CURSOR_ASK_QUESTION_BLOCKED_EVENT, data: { active: false } },
 		]);
 	});
 
-	it("clears herdr:blocked when the Cursor question UI rejects", async () => {
+	it("clears cursor:ask-question:blocked when the Cursor question UI rejects", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
 		mockedDiscover.mockResolvedValueOnce([]);
 		const pi = createExtensionPi();
@@ -461,9 +464,9 @@ describe("extension registration and discovery", () => {
 			),
 		).rejects.toThrow("UI failed");
 
-		expect(pi._eventsEmitted.filter((entry) => entry.channel === "herdr:blocked")).toEqual([
-			{ channel: "herdr:blocked", data: { active: true, label: "Waiting for user response" } },
-			{ channel: "herdr:blocked", data: { active: false } },
+		expect(pi._eventsEmitted.filter((entry) => entry.channel === CURSOR_ASK_QUESTION_BLOCKED_EVENT)).toEqual([
+			{ channel: CURSOR_ASK_QUESTION_BLOCKED_EVENT, data: { active: true } },
+			{ channel: CURSOR_ASK_QUESTION_BLOCKED_EVENT, data: { active: false } },
 		]);
 	});
 

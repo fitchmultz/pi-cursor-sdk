@@ -8,6 +8,13 @@ import { resolveCursorPiToolBridgeEnabled } from "./cursor-pi-tool-bridge-env.js
 
 export const CURSOR_ASK_QUESTION_TOOL_NAME = "cursor_ask_question";
 
+/** Producer-namespaced event while `cursor_ask_question` awaits pi UI input. */
+export const CURSOR_ASK_QUESTION_BLOCKED_EVENT = "cursor:ask-question:blocked";
+
+export interface CursorAskQuestionBlockedEventPayload {
+	active: boolean;
+}
+
 interface CursorQuestionOption {
 	label: string;
 	value: string;
@@ -189,6 +196,13 @@ function syncCursorQuestionToolForModel(pi: Pick<ExtensionAPI, "getActiveTools" 
 	pi.setActiveTools([...activeToolNames]);
 }
 
+function emitCursorAskQuestionBlockedEvent(
+	pi: Pick<ExtensionAPI, "events">,
+	payload: CursorAskQuestionBlockedEventPayload,
+): void {
+	pi.events.emit(CURSOR_ASK_QUESTION_BLOCKED_EVENT, payload);
+}
+
 export function registerCursorQuestionTool(pi: CursorQuestionToolExtensionApi): void {
 	pi.registerTool({
 		name: CURSOR_ASK_QUESTION_TOOL_NAME,
@@ -212,9 +226,9 @@ export function registerCursorQuestionTool(pi: CursorQuestionToolExtensionApi): 
 				);
 			}
 
-			// Herdr's Pi integration listens for herdr:blocked and reports pane
-			// state as blocked (notification) while the questionnaire awaits input.
-			pi.events.emit("herdr:blocked", { active: true, label: "Waiting for user response" });
+			// Emit a producer-namespaced blocked signal while the questionnaire
+			// awaits input so consumers (e.g. Herdr) can map it to blocked/working.
+			emitCursorAskQuestionBlockedEvent(pi, { active: true });
 			try {
 				const answers: CursorQuestionAnswer[] = [];
 				for (const question of questions) {
@@ -228,7 +242,7 @@ export function registerCursorQuestionTool(pi: CursorQuestionToolExtensionApi): 
 					details: buildDetails(questions, answers, true),
 				};
 			} finally {
-				pi.events.emit("herdr:blocked", { active: false });
+				emitCursorAskQuestionBlockedEvent(pi, { active: false });
 			}
 		},
 		renderCall(args, theme) {

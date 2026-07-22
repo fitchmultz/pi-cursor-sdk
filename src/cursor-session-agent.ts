@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { AgentModeOption, LocalAgentOptions, ModelSelection, SDKAgent, SettingSource } from "@cursor/sdk";
+import type { AgentModeOption, LocalAgentOptions, LocalAgentStore, ModelSelection, SDKAgent, SettingSource } from "@cursor/sdk";
 import type { Context } from "@earendil-works/pi-ai/compat";
 import {
 	getRegisteredCursorPiToolBridge,
@@ -7,13 +7,21 @@ import {
 	type CursorPiToolBridgeRun,
 } from "./cursor-pi-tool-bridge.js";
 import { computeCursorContextFingerprint } from "./context.js";
-import { getCursorSessionScopeGeneration, getCursorSessionScopeKey } from "./cursor-session-scope.js";
+import { getCursorSessionFile, getCursorSessionScopeGeneration, getCursorSessionScopeKey } from "./cursor-session-scope.js";
 import {
 	getMatchingCursorSessionAgentResumeHandle,
 	persistCursorSessionAgentResumeHandle,
 } from "./cursor-session-agent-resume.js";
 import type { CursorSdkEventDebugRecorder } from "./cursor-sdk-event-debug.js";
 import { loadCursorSdk, type CursorSdkModule } from "./cursor-sdk-runtime.js";
+import {
+	claimCursorTemporarySessionStore,
+	cursorSessionStoreIdentitiesEqual,
+	getCursorSessionStoreIdentities,
+	openCursorSessionStore,
+	type CursorSessionStoreIdentity,
+	type OpenCursorSessionStore,
+} from "./cursor-session-store.js";
 
 export interface SessionCursorAgentSendState {
 	bootstrapped: boolean;
@@ -27,6 +35,8 @@ export interface SessionCursorAgentLease {
 	instanceId: number;
 	agent: SDKAgent;
 	bridgeRun?: CursorPiToolBridgeRun;
+	store: LocalAgentStore;
+	storeIdentity: CursorSessionStoreIdentity;
 	sendState: SessionCursorAgentSendState;
 	created: boolean;
 	resumed?: boolean;
@@ -52,6 +62,7 @@ interface SessionCursorAgentReadyEntry extends SessionCursorAgentPoolEntryBase {
 	status: "ready";
 	agent: SDKAgent;
 	bridgeRun?: CursorPiToolBridgeRun;
+	sessionStore: OpenCursorSessionStore;
 	resumeEnabled: boolean;
 	resumed: boolean;
 	resumeNotice?: string;
@@ -61,6 +72,7 @@ interface SessionCursorAgentBusyEntry extends SessionCursorAgentPoolEntryBase {
 	status: "busy";
 	agent: SDKAgent;
 	bridgeRun?: CursorPiToolBridgeRun;
+	sessionStore: OpenCursorSessionStore;
 	resumeEnabled: boolean;
 	resumed: boolean;
 	resumeNotice?: string;
@@ -132,6 +144,7 @@ let deadTransportAgentDisposeTimeoutMs = 3000;
 const terminalDisposedScopeGenerations = new Map<string, number>();
 const scopeCreationGenerations = new Map<string, number>();
 const EMPTY_POOL_STATE: SessionCursorAgentPoolState = { status: "empty" };
+const LOCAL_RESUME_FALLBACK_NOTICE = "Could not resume prior Cursor agent; continuing from current pi transcript in a new Cursor agent.";
 let nextSessionAgentInstanceId = 1;
 
 export interface CursorLocalSafetyOptions {
@@ -143,9 +156,11 @@ export function buildCursorLocalAgentOptions(options: {
 	cwd: string;
 	settingSources?: SettingSource[];
 	localSafety?: CursorLocalSafetyOptions;
+	store?: LocalAgentStore;
 }): LocalAgentOptions {
 	return {
 		cwd: options.cwd,
+		...(options.store ? { store: options.store } : {}),
 		...(options.settingSources ? { settingSources: options.settingSources } : {}),
 		...(options.localSafety?.autoReview === true ? { autoReview: true } : {}),
 		...(options.localSafety?.sandboxEnabled === true ? { sandboxOptions: { enabled: true } } : {}),
@@ -235,6 +250,7 @@ async function disposePoolEntry(entry: SessionCursorAgentPoolEntry, options?: { 
 	} catch {
 		// disposal failure should not block session replacement
 	}
+	await entry.sessionStore.dispose().catch(() => undefined);
 }
 
 async function disposePoolEntryForScope(scopeKey: string, options?: { terminal?: boolean }): Promise<void> {
@@ -293,6 +309,7 @@ function commitSessionAgentSendForLease(
 			agentId: entry.agent.agentId,
 			poolKey: entry.poolKey,
 			sendState: entry.sendState,
+			storeIdentity: entry.sessionStore.identity,
 		});
 	}
 }
@@ -377,6 +394,8 @@ function leaseFromEntry(
 		instanceId: entry.instanceId,
 		agent: entry.agent,
 		bridgeRun: entry.bridgeRun,
+		store: entry.sessionStore.store,
+		storeIdentity: entry.sessionStore.identity,
 		sendState: entry.sendState,
 		created,
 		resumed: entry.resumed,
@@ -419,84 +438,112 @@ async function tryLeaseReadyEntry(
 
 async function createSessionAgentEntry(
 	scopeKey: string,
+	persistentStore: boolean,
 	instanceId: number,
 	sendState: SessionCursorAgentSendState,
 	params: SessionCursorAgentCreateParams,
 ): Promise<SessionCursorAgentReadyEntry> {
-	const registeredBridge = getRegisteredCursorPiToolBridge();
 	let bridgeRun: CursorPiToolBridgeRun | undefined;
-	if (registeredBridge) {
-		bridgeRun = await registeredBridge.createRun({
-			onToolRequest: params.onBridgeToolRequest,
-			debugRecorder: params.debugRecorder,
-		});
-		if (!bridgeRun.enabled || !bridgeRun.mcpServers) {
-			await bridgeRun.dispose();
-			bridgeRun = undefined;
-		}
-	}
-
-	const resolvedPoolKey = buildSessionAgentPoolKey(scopeKey, params);
-	const resumeEligible = params.localResume === true && !params.forceCreate;
-	let createAgent = params.createAgent;
-	let resumeAgent = params.resumeAgent;
-	if (!createAgent || (resumeEligible && !resumeAgent)) {
-		const sdk = await loadCursorSdk();
-		createAgent ??= sdk.Agent.create;
-		resumeAgent ??= sdk.Agent.resume;
-	}
-	const agentOptions = {
-		apiKey: params.apiKey,
-		model: params.modelSelection,
-		mode: params.agentMode,
-		local: buildCursorLocalAgentOptions({
-			cwd: params.cwd,
-			settingSources: params.settingSources,
-			localSafety: params.localSafety,
-		}),
-		...(bridgeRun?.mcpServers ? { mcpServers: bridgeRun.mcpServers } : {}),
-	};
-	let agent: SDKAgent | undefined;
-	let effectiveSendState = sendState;
-	let resumed = false;
-	let resumeNotice: string | undefined;
-	const resumeHandle = resumeEligible ? getMatchingCursorSessionAgentResumeHandle(resolvedPoolKey) : undefined;
-	if (resumeHandle && resumeAgent) {
-		try {
-			agent = await resumeAgent(resumeHandle.agentId, agentOptions);
-			effectiveSendState = { ...resumeHandle.sendState };
-			resumed = true;
-		} catch {
-			resumeNotice = "Could not resume prior Cursor agent; continuing from current pi transcript in a new Cursor agent.";
-		}
-	}
+	let sessionStore: OpenCursorSessionStore | undefined;
 	try {
-		agent ??= await createAgent(agentOptions);
-	} catch (error) {
-		if (bridgeRun) {
-			bridgeRun.cancel("Cursor session agent create failed");
-			try {
+		const registeredBridge = getRegisteredCursorPiToolBridge();
+		if (registeredBridge) {
+			bridgeRun = await registeredBridge.createRun({
+				onToolRequest: params.onBridgeToolRequest,
+				debugRecorder: params.debugRecorder,
+			});
+			if (!bridgeRun.enabled || !bridgeRun.mcpServers) {
 				await bridgeRun.dispose();
-			} catch {
-				// bridge disposal failure should not mask agent create failure
+				bridgeRun = undefined;
 			}
 		}
+
+		const resolvedPoolKey = buildSessionAgentPoolKey(scopeKey, params);
+		const resumeEligible = params.localResume === true && !params.forceCreate;
+		let createAgent = params.createAgent;
+		let resumeAgent = params.resumeAgent;
+		if (!createAgent || (resumeEligible && !resumeAgent)) {
+			const sdk = await loadCursorSdk();
+			createAgent ??= sdk.Agent.create;
+			resumeAgent ??= sdk.Agent.resume;
+		}
+		const identities = await getCursorSessionStoreIdentities(params.cwd, scopeKey, persistentStore);
+		const openSessionStore = (identity: CursorSessionStoreIdentity) => {
+			if (!persistentStore) claimCursorTemporarySessionStore(identity);
+			return openCursorSessionStore(params.cwd, identity, !persistentStore);
+		};
+		const resumeHandle = resumeEligible ? getMatchingCursorSessionAgentResumeHandle(resolvedPoolKey) : undefined;
+		const recordedStoreIdentity = resumeHandle?.storeIdentity;
+		const resumableStoreIdentities = persistentStore
+			? [identities.defaultStore, identities.sessionStore]
+			: [identities.sessionStore];
+		const resumeStoreIdentity = resumeHandle
+			? recordedStoreIdentity === undefined
+				? persistentStore ? identities.defaultStore : undefined
+				: resumableStoreIdentities.find((identity) =>
+					cursorSessionStoreIdentitiesEqual(identity, recordedStoreIdentity),
+				)
+			: undefined;
+		let resumeAttemptAllowed = resumeHandle !== undefined && resumeStoreIdentity !== undefined;
+		let resumeNotice = persistentStore && resumeHandle && !resumeStoreIdentity ? LOCAL_RESUME_FALLBACK_NOTICE : undefined;
+		try {
+			sessionStore = await openSessionStore(resumeStoreIdentity ?? identities.sessionStore);
+		} catch (error) {
+			if (!resumeStoreIdentity || cursorSessionStoreIdentitiesEqual(resumeStoreIdentity, identities.sessionStore)) throw error;
+			resumeAttemptAllowed = false;
+			if (persistentStore) resumeNotice = LOCAL_RESUME_FALLBACK_NOTICE;
+			sessionStore = await openSessionStore(identities.sessionStore);
+		}
+		const buildAgentOptions = () => ({
+			apiKey: params.apiKey,
+			model: params.modelSelection,
+			mode: params.agentMode,
+			local: buildCursorLocalAgentOptions({
+				cwd: params.cwd,
+				settingSources: params.settingSources,
+				localSafety: params.localSafety,
+				store: sessionStore!.store,
+			}),
+			...(bridgeRun?.mcpServers ? { mcpServers: bridgeRun.mcpServers } : {}),
+		});
+		let agent: SDKAgent | undefined;
+		let effectiveSendState = sendState;
+		let resumed = false;
+		if (resumeHandle && resumeAttemptAllowed && resumeAgent) {
+			try {
+				agent = await resumeAgent(resumeHandle.agentId, buildAgentOptions());
+				effectiveSendState = { ...resumeHandle.sendState };
+				resumed = true;
+			} catch {
+				if (persistentStore) resumeNotice = LOCAL_RESUME_FALLBACK_NOTICE;
+				if (!cursorSessionStoreIdentitiesEqual(sessionStore.identity, identities.sessionStore)) {
+					await sessionStore.dispose().catch(() => undefined);
+					sessionStore = await openSessionStore(identities.sessionStore);
+				}
+			}
+		}
+		agent ??= await createAgent(buildAgentOptions());
+		if (!agent) throw new Error("Cursor SDK agent creation returned no agent");
+
+		return {
+			status: "ready",
+			poolKey: resolvedPoolKey,
+			instanceId,
+			scopeKey,
+			agent,
+			bridgeRun,
+			sessionStore,
+			sendState: effectiveSendState,
+			resumeEnabled: params.localResume === true,
+			resumed,
+			...(resumeNotice ? { resumeNotice } : {}),
+		};
+	} catch (error) {
+		bridgeRun?.cancel("Cursor session agent create failed");
+		await bridgeRun?.dispose().catch(() => undefined);
+		await sessionStore?.dispose().catch(() => undefined);
 		throw error;
 	}
-	if (!agent) throw new Error("Cursor SDK agent creation returned no agent");
-
-	return {
-		status: "ready",
-		poolKey: resolvedPoolKey,
-		instanceId,
-		scopeKey,
-		agent,
-		bridgeRun,
-		sendState: effectiveSendState,
-		resumeEnabled: params.localResume === true,
-		resumed,
-		...(resumeNotice ? { resumeNotice } : {}),
-	};
 }
 
 export {
@@ -516,6 +563,7 @@ export function invalidateSessionAgent(
 
 export async function acquireSessionCursorAgent(params: SessionCursorAgentCreateParams): Promise<SessionCursorAgentLease> {
 	const scopeKey = getCursorSessionScopeKey();
+	const persistentStore = getCursorSessionFile() !== undefined;
 
 	while (true) {
 		assertScopeAcceptsAcquire(scopeKey);
@@ -565,7 +613,7 @@ export async function acquireSessionCursorAgent(params: SessionCursorAgentCreate
 		const instanceId = allocateSessionAgentInstanceId();
 		const sendState = createInitialSendState();
 		let placeholder: SessionCursorAgentCreatingEntry;
-		const creating = createSessionAgentEntry(scopeKey, instanceId, sendState, params).then(async (createdEntry) => {
+		const creating = createSessionAgentEntry(scopeKey, persistentStore, instanceId, sendState, params).then(async (createdEntry) => {
 			const stillCurrent =
 				sessionAgentsByScope.get(scopeKey) === placeholder &&
 				getScopeCreationGeneration(scopeKey) === placeholder.creationGeneration;

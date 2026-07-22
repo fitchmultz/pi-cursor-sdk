@@ -222,7 +222,11 @@ describe("streamCursor bridge MCP", () => {
 		await collectEvents(streamCursor(makeModel("composer-2"), makeContext(), { apiKey: "test-key" }));
 
 		const createOptions = getCreatedAgentOptions();
-		expect(createOptions.local).toEqual({ cwd: process.cwd(), settingSources: ["all"] });
+		expect(createOptions.local).toMatchObject({
+			cwd: process.cwd(),
+			settingSources: ["all"],
+			store: expect.any(Object),
+		});
 		expect(createOptions.mcpServers?.pi_tools?.type).toBe("http");
 		const url = new URL(getPiToolsMcpUrlFromAgentCreateOptions(createOptions));
 		expect(url.hostname).toBe("127.0.0.1");

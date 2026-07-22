@@ -61,6 +61,16 @@ describe("cursor-session-agent-resume", () => {
 		};
 
 		expect(parseCursorSessionAgentResumeEntryData(valid)?.agentId).toBe("agent-local-1");
+		const current = {
+			...valid,
+			version: 2,
+			storeIdentity: { version: 1, stateRoot: "/tmp/session-store" },
+		};
+		expect(parseCursorSessionAgentResumeEntryData(current)).toMatchObject({
+			version: 2,
+			storeIdentity: { version: 1, stateRoot: "/tmp/session-store" },
+		});
+		expect(parseCursorSessionAgentResumeEntryData({ ...current, storeIdentity: undefined })).toBeUndefined();
 		expect(parseCursorSessionAgentResumeEntryData({ ...valid, agentId: `agent-${"a".repeat(250)}` })?.agentId).toHaveLength(256);
 		for (const agentId of [
 			"bc-cloud-1",
@@ -201,7 +211,7 @@ describe("cursor-session-agent-resume", () => {
 		} finally {
 			rmSync(tempDir, { recursive: true, force: true });
 		}
-	});
+	}, process.platform === "win32" ? 20_000 : 5_000);
 
 	it("defers resume handle persistence until turn end so it records the completed assistant path", async () => {
 		const pi = createPiHarness();
@@ -233,6 +243,7 @@ describe("cursor-session-agent-resume", () => {
 			agentId: "agent-1",
 			poolKey: "pool-1",
 			sendState: { bootstrapped: true, contextFingerprint: "fp", incrementalSendCount: 0 },
+			storeIdentity: { version: 1, stateRoot: "/tmp/store" },
 		});
 
 		expect(pi.appendEntry).not.toHaveBeenCalled();
@@ -291,7 +302,7 @@ describe("cursor-session-agent-resume", () => {
 		expect(getMatchingCursorSessionAgentResumeHandle("pool-1")).toBeUndefined();
 	});
 
-	it("uses append order to reject a superseded handle when the newer handle has an earlier timestamp", async () => {
+	it("uses append order to supersede a legacy handle with its versioned successor", async () => {
 		const pi = createPiHarness();
 		registerCursorSessionScope(pi);
 		registerCursorSessionAgentResume(pi);
@@ -321,9 +332,11 @@ describe("cursor-session-agent-resume", () => {
 		const futureHash = resumeTestUtils.hashBranchStep(resumeTestUtils.hashBranchStep(baseHash, futureUser), futureAssistant);
 		const newerHandle: CursorSessionAgentResumeEntryData = {
 			...oldHandle,
+			version: 2,
 			branchPathHash: futureHash,
 			sendState: { bootstrapped: true, contextFingerprint: "fp-new", incrementalSendCount: 1 },
 			createdAt: "2026-07-07T00:00:00.000Z",
+			storeIdentity: { version: 1, stateRoot: "/tmp/cursor-sdk-state" },
 		};
 		const newerResume = resumeEntry("r2", "a2", newerHandle);
 		const treeUser = messageEntry("u3", "r1");
@@ -436,13 +449,16 @@ describe("cursor-session-agent-resume", () => {
 			agentId: "agent-new",
 			poolKey: "pool-new",
 			sendState: { bootstrapped: true, contextFingerprint: "fp-new", incrementalSendCount: 0 },
+			storeIdentity: { version: 1, stateRoot: "/tmp/store-new" },
 		});
 
 		await pi.runTurnEnd({}, { sessionManager: { getBranch: vi.fn(() => branch) } });
 
 		expect(pi.appendEntry).toHaveBeenCalledWith(CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE, expect.objectContaining({
+			version: 2,
 			agentId: "agent-new",
-			cleanupCandidateAgentIds: ["agent-old"],
+			storeIdentity: { version: 1, stateRoot: "/tmp/store-new" },
+			cleanupCandidates: [{ agentId: "agent-old" }],
 		}));
 	});
 

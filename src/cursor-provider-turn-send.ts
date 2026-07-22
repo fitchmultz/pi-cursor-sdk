@@ -76,7 +76,7 @@ export async function sendCursorProviderTurn(sendParams: SendCursorProviderTurnP
 		let cursorAgentMessageOffset: number | undefined;
 		if (prepared.runtimeTarget === "local") {
 			try {
-				cursorAgentMessageOffset = await countCursorAgentMessages(agent.agentId, cwd);
+				cursorAgentMessageOffset = await countCursorAgentMessages(agent.agentId, cwd, prepared.sessionAgentLease.store);
 			} catch (error) {
 				recordDebug(() => sdkEventDebug?.recordError("cursor_agent_message_count", error));
 			}

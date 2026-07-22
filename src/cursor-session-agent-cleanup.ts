@@ -1,3 +1,4 @@
+import type { LocalAgentStore } from "@cursor/sdk";
 import type { ExtensionAPI, ExtensionCommandContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { asRecord, getString } from "./cursor-record-utils.js";
 import { fsyncExistingRegularFile } from "./cursor-durable-fs.js";
@@ -10,9 +11,15 @@ import {
 	parseCursorSessionAgentResumeEntryData,
 	readResumableCursorSessionAgentIds,
 	resolveCursorSessionRepoRoot,
+	type CursorSessionAgentCleanupCandidate,
 	type CursorSessionAgentResumeEntryData,
 	type CursorSessionAgentResumeScope,
 } from "./cursor-session-agent-resume.js";
+import {
+	cursorSessionStoreIdentitiesEqual,
+	getCursorSessionStoreIdentities,
+	openCursorSessionStore,
+} from "./cursor-session-store.js";
 
 export const CURSOR_SESSION_AGENT_CLEANUP_ENTRY_TYPE = "cursor-sdk-agent-cleanup";
 
@@ -22,6 +29,7 @@ type CleanupPhase = "intent" | "result";
 export interface CursorSessionAgentCleanupFailure {
 	agentId: string;
 	error: string;
+	retryable?: boolean;
 }
 
 export interface CursorSessionAgentCleanupEntryData {
@@ -48,8 +56,10 @@ type LocalResumeCleanupCommandContext = Pick<ExtensionCommandContext, "cwd"> & {
 	ui: Pick<ExtensionCommandContext["ui"], "notify">;
 };
 type LocalResumeCleanupSdkOperations = {
-	delete(agentId: string, options?: { cwd?: string }): Promise<void>;
+	delete(agentId: string, options?: { cwd?: string; store?: LocalAgentStore }): Promise<void>;
 };
+
+class InvalidCursorSessionStoreIdentityError extends Error {}
 
 // ponytail: grows for the process lifetime, but its ceiling is the exact agent IDs this process
 // attempted to delete (never global) — it only fills the gap until this process exits; the durable
@@ -106,7 +116,9 @@ function parseCleanupEntryData(value: unknown): CursorSessionAgentCleanupEntryDa
 	const failedAgentIds = Array.isArray(record.failedAgentIds)
 		? record.failedAgentIds.flatMap((item): CursorSessionAgentCleanupFailure[] => {
 			const failure = asRecord(item);
-			return isCursorLocalAgentId(failure?.agentId) && typeof failure.error === "string" ? [{ agentId: failure.agentId, error: failure.error }] : [];
+			return isCursorLocalAgentId(failure?.agentId) && typeof failure.error === "string"
+				? [{ agentId: failure.agentId, error: failure.error, ...(failure.retryable === false ? { retryable: false } : {}) }]
+				: [];
 		})
 		: undefined;
 	return {
@@ -124,6 +136,7 @@ function parseCleanupEntryData(value: unknown): CursorSessionAgentCleanupEntryDa
 function readUnavailableAgentIds(entries: readonly SessionEntry[]): Set<string> {
 	const deleted = new Set<string>();
 	const pending = new Set<string>();
+	const permanentlyFailed = new Set<string>();
 	for (const entry of entries) {
 		if (entry.type !== "custom" || entry.customType !== CURSOR_SESSION_AGENT_CLEANUP_ENTRY_TYPE) continue;
 		const data = parseCleanupEntryData(entry.data);
@@ -139,14 +152,46 @@ function readUnavailableAgentIds(entries: readonly SessionEntry[]): Set<string> 
 			pending.delete(agentId);
 		}
 		if (data.phase === "result") {
-			for (const { agentId } of data.failedAgentIds ?? []) pending.delete(agentId);
+			for (const failure of data.failedAgentIds ?? []) {
+				pending.delete(failure.agentId);
+				if (failure.retryable === false) permanentlyFailed.add(failure.agentId);
+			}
 		}
 	}
-	return new Set([...deleted, ...pending, ...nondurableCleanupResultAgentIds]);
+	return new Set([...deleted, ...pending, ...permanentlyFailed, ...nondurableCleanupResultAgentIds]);
 }
 
 function readLatestBranchAgentId(branch: readonly SessionEntry[], scope: CursorSessionAgentCleanupScope): string | undefined {
 	return readResumeEntries(branch).filter((entry) => resumeEntryMatchesCleanupScope(entry, scope)).at(-1)?.agentId;
+}
+
+function readCursorSessionAgentCleanupPlanDetails(
+	entries: readonly SessionEntry[],
+	branch: readonly SessionEntry[],
+	scope: CursorSessionAgentCleanupScope,
+): CursorSessionAgentCleanupPlan & { candidates: CursorSessionAgentCleanupCandidate[] } {
+	const unavailable = readUnavailableAgentIds(entries);
+	const latestBranchAgentId = readLatestBranchAgentId(branch, scope);
+	const protectedAgentIds = new Set(readResumableCursorSessionAgentIds(entries, scope));
+	if (latestBranchAgentId && isCursorLocalAgentId(latestBranchAgentId)) protectedAgentIds.add(latestBranchAgentId);
+	const candidates = new Map<string, CursorSessionAgentCleanupCandidate>();
+	for (const resume of readResumeEntries(entries)) {
+		if (!resumeEntryMatchesCleanupScope(resume, scope)) continue;
+		const recordedCandidates: CursorSessionAgentCleanupCandidate[] = [
+			...(resume.cleanupCandidateAgentIds ?? []).map((agentId) => ({ agentId })),
+			...(resume.cleanupCandidates ?? []),
+		];
+		for (const candidate of recordedCandidates) {
+			if (!isCursorLocalAgentId(candidate.agentId) || protectedAgentIds.has(candidate.agentId) || unavailable.has(candidate.agentId)) continue;
+			const existing = candidates.get(candidate.agentId);
+			if (!existing?.storeIdentity || candidate.storeIdentity) candidates.set(candidate.agentId, candidate);
+		}
+	}
+	return {
+		candidates: [...candidates.values()].sort((left, right) => left.agentId.localeCompare(right.agentId)),
+		candidateAgentIds: uniqueSorted([...candidates.values()].map((candidate) => candidate.agentId)),
+		protectedAgentIds: uniqueSorted(protectedAgentIds),
+	};
 }
 
 export function readCursorSessionAgentCleanupPlan(
@@ -154,22 +199,8 @@ export function readCursorSessionAgentCleanupPlan(
 	branch: readonly SessionEntry[],
 	scope: CursorSessionAgentCleanupScope,
 ): CursorSessionAgentCleanupPlan {
-	const unavailable = readUnavailableAgentIds(entries);
-	const latestBranchAgentId = readLatestBranchAgentId(branch, scope);
-	const protectedAgentIds = new Set(readResumableCursorSessionAgentIds(entries, scope));
-	if (latestBranchAgentId && isCursorLocalAgentId(latestBranchAgentId)) protectedAgentIds.add(latestBranchAgentId);
-	const candidates = new Set<string>();
-	for (const resume of readResumeEntries(entries)) {
-		if (!resumeEntryMatchesCleanupScope(resume, scope)) continue;
-		for (const agentId of resume.cleanupCandidateAgentIds ?? []) {
-			if (!isCursorLocalAgentId(agentId) || protectedAgentIds.has(agentId) || unavailable.has(agentId)) continue;
-			candidates.add(agentId);
-		}
-	}
-	return {
-		candidateAgentIds: uniqueSorted(candidates),
-		protectedAgentIds: uniqueSorted(protectedAgentIds),
-	};
+	const { candidates: _, ...plan } = readCursorSessionAgentCleanupPlanDetails(entries, branch, scope);
+	return plan;
 }
 
 function formatCleanupPlan(plan: CursorSessionAgentCleanupPlan): string {
@@ -245,7 +276,8 @@ export async function runCursorSessionAgentCleanupCommand(pi: LocalResumeCleanup
 
 	const entries = ctx.sessionManager.getEntries();
 	const branch = ctx.sessionManager.getBranch();
-	const plan = readCursorSessionAgentCleanupPlan(entries, branch, getCurrentCleanupScope(ctx));
+	const scope = getCurrentCleanupScope(ctx);
+	const plan = readCursorSessionAgentCleanupPlanDetails(entries, branch, scope);
 	const baseEntry = {
 		runtime: "local" as const,
 		timestamp: new Date().toISOString(),
@@ -274,19 +306,38 @@ export async function runCursorSessionAgentCleanupCommand(pi: LocalResumeCleanup
 
 	const deletedAgentIds: string[] = [];
 	const failedAgentIds: CursorSessionAgentCleanupFailure[] = [];
+	const openedStores = new Map<string, Awaited<ReturnType<typeof openCursorSessionStore>>>();
 	try {
 		const operations = await getSdkOperations();
-		for (const agentId of plan.candidateAgentIds) {
+		const identities = await getCursorSessionStoreIdentities(ctx.cwd, scope.scopeKey, scope.sessionFile !== undefined);
+		for (const candidate of plan.candidates) {
+			const { agentId } = candidate;
 			try {
-				await operations.delete(agentId, { cwd: ctx.cwd });
+				const identity = candidate.storeIdentity ?? identities.defaultStore;
+				if (
+					!cursorSessionStoreIdentitiesEqual(identity, identities.defaultStore) &&
+					!cursorSessionStoreIdentitiesEqual(identity, identities.sessionStore)
+				) throw new InvalidCursorSessionStoreIdentityError("Recorded Cursor local store identity is not valid for this pi session");
+				let openedStore = openedStores.get(identity.stateRoot);
+				if (!openedStore) {
+					openedStore = await openCursorSessionStore(ctx.cwd, identity);
+					openedStores.set(identity.stateRoot, openedStore);
+				}
+				await operations.delete(agentId, { cwd: ctx.cwd, store: openedStore.store });
 				deletedAgentIds.push(agentId);
 			} catch (error) {
-				failedAgentIds.push({ agentId, error: scrubSensitiveText(getString(asRecord(error), "message") ?? String(error)) });
+				failedAgentIds.push({
+					agentId,
+					error: scrubSensitiveText(getString(asRecord(error), "message") ?? String(error)),
+					...(error instanceof InvalidCursorSessionStoreIdentityError ? { retryable: false } : {}),
+				});
 			}
 		}
 	} catch (error) {
 		const message = scrubSensitiveText(getString(asRecord(error), "message") ?? String(error));
 		failedAgentIds.push(...plan.candidateAgentIds.map((agentId) => ({ agentId, error: message })));
+	} finally {
+		await Promise.all([...openedStores.values()].map((store) => store.dispose().catch(() => undefined)));
 	}
 	if (!appendDurableCleanupEntry(pi, ctx, {
 		action: "delete",

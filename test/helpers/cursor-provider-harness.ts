@@ -58,6 +58,7 @@ import type { CursorNativeToolDisplayExtensionApi } from "../../src/cursor-nativ
 import type { ModelListItem, Run, SDKAgent, SendOptions } from "@cursor/sdk";
 import type { AssistantMessage, AssistantMessageEvent, TextContent, ImageContent, ToolCall } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ToolInfo } from "@earendil-works/pi-coding-agent";
+import { installCursorSessionStoreMock } from "./cursor-session-store.js";
 import {
 	collectAssistantEvents,
 	createBridgePiHarness,
@@ -357,6 +358,7 @@ export const cursorModelItems: ModelListItem[] = [
 
 export async function resetCursorProviderTestState(): Promise<void> {
 	vi.useRealTimers();
+	installCursorSessionStoreMock();
 	cloudLifecycleTestUtils.reset();
 	cloudLifecycleTestUtils.setDurableWriter(() => true);
 	registerCursorCloudLifecycleLedger(createPiHarness());

@@ -7,10 +7,11 @@ import {
 } from "./cursor-pi-tool-bridge-diagnostics.js";
 import {
 	CURSOR_PI_TOOL_BRIDGE_BUILTINS_ENV,
+	CURSOR_PI_TOOL_BRIDGE_CALL_TIMEOUT_MS_ENV,
 	CURSOR_PI_TOOL_BRIDGE_ENV,
 } from "./cursor-pi-tool-bridge-env.js";
 import { bridgeToolExecutionAbortTracker } from "./cursor-pi-tool-bridge-abort.js";
-import { MCP_SERVER_NAME } from "./cursor-pi-tool-bridge-constants.js";
+import { isCursorPiBridgeToolCallId, MCP_SERVER_NAME } from "./cursor-pi-tool-bridge-constants.js";
 import { LOOPBACK_HOST, CursorPiToolBridgeRegistry } from "./cursor-pi-tool-bridge-server.js";
 import type {
 	CursorPiToolBridge,
@@ -34,8 +35,10 @@ export type { CursorPiToolBridgeDiagnosticEvent } from "./cursor-pi-tool-bridge-
 export { resolveCursorPiToolBridgeDebugEnabled } from "./cursor-pi-tool-bridge-diagnostics.js";
 export {
 	CURSOR_PI_TOOL_BRIDGE_BUILTINS_ENV,
+	CURSOR_PI_TOOL_BRIDGE_CALL_TIMEOUT_MS_ENV,
 	CURSOR_PI_TOOL_BRIDGE_ENV,
 	resolveCursorPiToolBridgeBuiltinsEnabled,
+	resolveCursorPiToolBridgeCallTimeoutMs,
 	resolveCursorPiToolBridgeEnabled,
 } from "./cursor-pi-tool-bridge-env.js";
 export {
@@ -91,7 +94,12 @@ export function registerCursorPiToolBridge(pi: CursorPiToolBridgeExtensionApi): 
 	const bridge = new CursorPiToolBridgeRegistry(pi);
 	registeredCursorPiToolBridge = bridge;
 	pi.on("tool_call", (event, ctx) => {
-		if (!bridge.hasPendingPiToolCallId(event.toolCallId)) return undefined;
+		if (registeredCursorPiToolBridge !== bridge) return undefined;
+		if (!bridge.hasPendingPiToolCallId(event.toolCallId)) {
+			return isCursorPiBridgeToolCallId(event.toolCallId)
+				? { block: true, reason: "Cursor pi bridge tool call is no longer pending" }
+				: undefined;
+		}
 		const windowsAbortMarker = installWindowsBridgeBashAbortMarker(event);
 		const trackingStarted = bridgeToolExecutionAbortTracker.track(event.toolCallId, {
 			signal: ctx.signal,
@@ -124,6 +132,7 @@ export function getRegisteredCursorPiToolBridge(): CursorPiToolBridge | undefine
 export const __testUtils = {
 	CURSOR_PI_TOOL_BRIDGE_ENV,
 	CURSOR_PI_TOOL_BRIDGE_BUILTINS_ENV,
+	CURSOR_PI_TOOL_BRIDGE_CALL_TIMEOUT_MS_ENV,
 	CURSOR_PI_TOOL_BRIDGE_DEBUG_ENV,
 	CURSOR_PI_TOOL_BRIDGE_DIAGNOSTIC_PREFIX,
 	LOOPBACK_HOST,

@@ -25,6 +25,7 @@ export async function runCleanupSmoke() {
 	let oldAgentId;
 	let newAgentId;
 	let oldResumeEntryId;
+	let oldStoreIdentity;
 	console.error(scrubSmokeText(`[local-resume-smoke] artifacts: ${artifactRoot}`));
 	try {
 		await withRpc({ artifactDir: artifactRoot, sessionDir, sessionId }, async (rpc) => {
@@ -37,8 +38,13 @@ export async function runCleanupSmoke() {
 			});
 			assertTurnMetadata("cleanup baseline", baseline, { resumedAgent: false });
 			oldAgentId = baseline.metadata.run.agentId;
-			oldResumeEntryId = resumeEntries(await getEntries(rpc)).at(-1)?.id;
+			const baselineHandle = resumeEntries(await getEntries(rpc)).at(-1);
+			oldResumeEntryId = baselineHandle?.id;
+			oldStoreIdentity = baselineHandle?.data?.storeIdentity;
 			if (!oldResumeEntryId) fail("cleanup baseline did not persist a resume entry");
+			if (baselineHandle?.data?.version !== 2 || !oldStoreIdentity?.stateRoot?.includes("pi-sessions")) {
+				fail("cleanup baseline did not persist a per-session store identity", JSON.stringify(baselineHandle?.data, null, 2));
+			}
 		});
 
 		await withRpc({ artifactDir: artifactRoot, sessionDir, sessionId, bridge: true, exposeBuiltinTools: true }, async (rpc) => {
@@ -52,7 +58,10 @@ export async function runCleanupSmoke() {
 			assertNotResumedFrom("cleanup changed tool surface", changedSurface, oldAgentId);
 			newAgentId = changedSurface.metadata.run.agentId;
 			const changedHandle = latestResumeEntry(await getEntries(rpc));
-			if (!changedHandle?.cleanupCandidateAgentIds?.includes(oldAgentId)) fail("changed tool surface did not record old agent cleanup candidate", JSON.stringify({ oldAgentId, changedHandle }, null, 2));
+			const cleanupCandidate = changedHandle?.cleanupCandidates?.find((candidate) => candidate.agentId === oldAgentId);
+			if (!cleanupCandidate || JSON.stringify(cleanupCandidate.storeIdentity) !== JSON.stringify(oldStoreIdentity)) {
+				fail("changed tool surface did not record old agent cleanup candidate with its store identity", JSON.stringify({ oldAgentId, oldStoreIdentity, changedHandle }, null, 2));
+			}
 
 			await rpcData(rpc, "prompt", { message: "/cursor-local-resume-cleanup --dry-run" }, timeoutMs);
 			let latestCleanup = (await waitForCleanupEntryCount(rpc, 1, timeoutMs)).at(-1)?.data;

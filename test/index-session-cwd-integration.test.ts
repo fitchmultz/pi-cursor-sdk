@@ -57,6 +57,7 @@ import { streamCursorLazy } from "../src/cursor-provider-lazy.js";
 import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
 import { __testUtils as cursorPiToolBridgeTestUtils } from "../src/cursor-pi-tool-bridge.js";
 import { __testUtils as cursorHttp1TestUtils } from "../src/cursor-http1.js";
+import { installCursorSessionStoreMock } from "./helpers/cursor-session-store.js";
 import {
 	collectEvents,
 	createExtensionRegistrationPi,
@@ -71,6 +72,7 @@ const mockedCursorConfigure = vi.mocked(Cursor.configure);
 
 describe("extension session cwd integration", () => {
 	beforeEach(async () => {
+		installCursorSessionStoreMock();
 		await cursorPiToolBridgeTestUtils.resetRegisteredBridgeForTests();
 		vi.clearAllMocks();
 		delete process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY;
@@ -106,7 +108,11 @@ describe("extension session cwd integration", () => {
 
 			expect(mockedAgentCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
-					local: { cwd: sessionDir, settingSources: ["all"] },
+					local: expect.objectContaining({
+						cwd: sessionDir,
+						settingSources: ["all"],
+						store: expect.any(Object),
+					}),
 				}),
 			);
 			expect(mockedCursorConfigure).not.toHaveBeenCalled();

@@ -1,3 +1,4 @@
+import { toNamespacedPath } from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { computeCursorContextFingerprint } from "../src/context.js";
 import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
@@ -7,17 +8,22 @@ import {
 	__testUtils as sessionAgentTestUtils,
 } from "../src/cursor-session-agent.js";
 import { makeContext } from "./helpers/pi-harness.js";
+import { installCursorSessionStoreMock } from "./helpers/cursor-session-store.js";
+import { buildCursorSessionStateRoot } from "../src/cursor-session-store.js";
 
 describe("cursor-session-agent local resume", () => {
 	beforeEach(async () => {
+		installCursorSessionStoreMock();
 		cursorSessionScopeTestUtils.reset();
 		resumeTestUtils.reset();
 		await sessionAgentTestUtils.disposeAllSessionCursorAgents();
 		vi.clearAllMocks();
 	});
 
-	it("resumes a recorded local SDK agent when branch identity and pool key match", async () => {
+	it("resumes a recorded local SDK agent from its versioned session store", async () => {
+		const storeMock = installCursorSessionStoreMock();
 		const scopeKey = "/tmp/sessions/test.jsonl";
+		const stateRoot = buildCursorSessionStateRoot("/tmp/cursor-sdk-state", scopeKey, true);
 		const sendState = {
 			bootstrapped: true,
 			contextFingerprint: computeCursorContextFingerprint(makeContext()),
@@ -45,7 +51,7 @@ describe("cursor-session-agent local resume", () => {
 			branchPathHash: resumeTestUtils.EMPTY_BRANCH_HASH,
 			compactionGeneration: 0,
 			activeHandle: {
-				version: 1,
+				version: 2,
 				runtime: "local",
 				agentId: "agent-recorded",
 				scopeKey,
@@ -56,6 +62,7 @@ describe("cursor-session-agent local resume", () => {
 				compactionGeneration: 0,
 				sendState,
 				createdAt: "2026-07-07T00:00:00.000Z",
+				storeIdentity: { version: 1, stateRoot },
 			},
 		});
 
@@ -65,19 +72,21 @@ describe("cursor-session-agent local resume", () => {
 		expect(lease.resumed).toBe(true);
 		expect(lease.agent).toBe(resumedAgent);
 		expect(lease.sendState).toEqual(sendState);
+		expect(storeMock.openSqliteStore).toHaveBeenCalledWith({ workspaceRef: "/tmp/project", stateRoot: toNamespacedPath(stateRoot) });
 		expect(resumeAgent).toHaveBeenCalledWith(
 			"agent-recorded",
 			expect.objectContaining({
 				apiKey: "test-key",
 				model: { id: "composer-2.5" },
 				mode: "agent",
-				local: expect.objectContaining({ cwd: "/tmp/project" }),
+				local: expect.objectContaining({ cwd: "/tmp/project", store: storeMock.stores[0] }),
 			}),
 		);
 		expect(createAgent).not.toHaveBeenCalled();
 	});
 
-	it("force-creates once while keeping replacement resume persistence enabled", async () => {
+	it("resumes a legacy default-store agent before force-creating its session-store replacement", async () => {
+		const storeMock = installCursorSessionStoreMock();
 		const scopeKey = "/tmp/sessions/test.jsonl";
 		const context = makeContext([{ role: "user", content: "Replacement", timestamp: 1 }]);
 		const createAgent = vi.fn().mockResolvedValue({ agentId: "agent-new", [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined) });
@@ -113,11 +122,24 @@ describe("cursor-session-agent local resume", () => {
 			},
 		});
 
+		const legacyLease = await acquireSessionCursorAgent(params);
+		expect(legacyLease.resumed).toBe(true);
+		expect(legacyLease.storeIdentity).toEqual({ version: 1, stateRoot: "/tmp/cursor-sdk-state" });
+		expect(resumeAgent.mock.calls[0][1]?.local?.store).toBe(storeMock.stores[0]);
+
+		sessionAgentTestUtils.invalidateSessionAgent(scopeKey);
 		const lease = await acquireSessionCursorAgent({ ...params, forceCreate: true });
 		lease.commitSend(context, true);
 
-		expect(resumeAgent).not.toHaveBeenCalled();
 		expect(createAgent).toHaveBeenCalledTimes(1);
+		expect(createAgent.mock.calls[0][0].local?.store).toBe(storeMock.stores[1]);
+		expect(storeMock.openedOptions).toEqual([
+			{ workspaceRef: "/tmp/project", stateRoot: toNamespacedPath("/tmp/cursor-sdk-state") },
+			{
+				workspaceRef: "/tmp/project",
+				stateRoot: toNamespacedPath(buildCursorSessionStateRoot("/tmp/cursor-sdk-state", scopeKey, true)),
+			},
+		]);
 		expect(lease.resumed).toBe(false);
 		expect(lease.sendState).toMatchObject({ bootstrapped: true, incrementalSendCount: 0 });
 		expect(resumeTestUtils.state.pendingHandle).toMatchObject({
@@ -168,10 +190,120 @@ describe("cursor-session-agent local resume", () => {
 		expect(createAgent).toHaveBeenCalledTimes(1);
 	});
 
-	it("falls back to create and bootstrap when Agent.resume fails", async () => {
+	it.each(["store open", "Agent.resume"] as const)(
+		"falls back from a legacy default store to the per-session store when %s fails",
+		async (failure) => {
+			const storeMock = installCursorSessionStoreMock();
+			if (failure === "store open") storeMock.openSqliteStore.mockRejectedValueOnce(new Error("legacy index.db is locked"));
+			const scopeKey = "/tmp/sessions/test.jsonl";
+			const createAgent = vi.fn().mockResolvedValue({ agentId: "agent-new", [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined) });
+			const resumeAgent = vi.fn().mockRejectedValue(new Error("Agent agent-recorded not found"));
+			cursorSessionScopeTestUtils.set("/tmp/project", scopeKey);
+			const params = {
+				apiKey: "test-key",
+				agentMode: "agent" as const,
+				cwd: "/tmp/project",
+				modelSelection: { id: "composer-2.5" },
+				localResume: true,
+				createAgent,
+				resumeAgent,
+			};
+			resumeTestUtils.set({
+				scopeKey,
+				sessionFile: scopeKey,
+				cwd: "/tmp/project",
+				branchPathHash: resumeTestUtils.EMPTY_BRANCH_HASH,
+				compactionGeneration: 0,
+				activeHandle: {
+					version: 1,
+					runtime: "local",
+					agentId: "agent-recorded",
+					scopeKey,
+					sessionFile: scopeKey,
+					cwd: "/tmp/project",
+					poolKey: sessionAgentTestUtils.buildSessionAgentPoolKey(scopeKey, params),
+					branchPathHash: resumeTestUtils.EMPTY_BRANCH_HASH,
+					compactionGeneration: 0,
+					sendState: { bootstrapped: true, contextFingerprint: computeCursorContextFingerprint(makeContext()), incrementalSendCount: 0 },
+					createdAt: "2026-07-07T00:00:00.000Z",
+				},
+			});
+
+			const lease = await acquireSessionCursorAgent(params);
+
+			expect(storeMock.openSqliteStore).toHaveBeenNthCalledWith(1, {
+				workspaceRef: "/tmp/project",
+				stateRoot: toNamespacedPath("/tmp/cursor-sdk-state"),
+			});
+			expect(storeMock.openSqliteStore).toHaveBeenNthCalledWith(2, {
+				workspaceRef: "/tmp/project",
+				stateRoot: toNamespacedPath(buildCursorSessionStateRoot("/tmp/cursor-sdk-state", scopeKey, true)),
+			});
+			if (failure === "Agent.resume") {
+				expect(resumeAgent.mock.calls[0][1]?.local?.store).toBe(storeMock.stores[0]);
+			} else {
+				expect(resumeAgent).not.toHaveBeenCalled();
+			}
+			const createdStore = storeMock.stores[failure === "Agent.resume" ? 1 : 0];
+			expect(createAgent.mock.calls[0][0].local?.store).toBe(createdStore);
+			expect(lease.store).toBe(createdStore);
+			expect(lease.resumed).toBe(false);
+			expect(lease.resumeNotice).toContain("Could not resume prior Cursor agent");
+			expect(lease.sendState.bootstrapped).toBe(false);
+		},
+	);
+
+	it("never opens a legacy shared store with fileless removal ownership", async () => {
+		const storeMock = installCursorSessionStoreMock();
+		const sessionId = "ephemeral";
+		const scopeKey = `${cursorSessionScopeTestUtils.EPHEMERAL_SESSION_SCOPE_PREFIX}${sessionId}`;
+		const createAgent = vi.fn().mockResolvedValue({ agentId: "agent-new", [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined) });
+		const resumeAgent = vi.fn();
+		cursorSessionScopeTestUtils.set("/tmp/project", undefined, sessionId);
+		const params = {
+			apiKey: "test-key",
+			agentMode: "agent" as const,
+			cwd: "/tmp/project",
+			modelSelection: { id: "composer-2.5" },
+			localResume: true,
+			createAgent,
+			resumeAgent,
+		};
+		resumeTestUtils.set({
+			scopeKey,
+			sessionId,
+			cwd: "/tmp/project",
+			branchPathHash: resumeTestUtils.EMPTY_BRANCH_HASH,
+			compactionGeneration: 0,
+			activeHandle: {
+				version: 1,
+				runtime: "local",
+				agentId: "agent-recorded",
+				scopeKey,
+				sessionId,
+				cwd: "/tmp/project",
+				poolKey: sessionAgentTestUtils.buildSessionAgentPoolKey(scopeKey, params),
+				branchPathHash: resumeTestUtils.EMPTY_BRANCH_HASH,
+				compactionGeneration: 0,
+				sendState: { bootstrapped: true, contextFingerprint: "old", incrementalSendCount: 1 },
+				createdAt: "2026-07-07T00:00:00.000Z",
+			},
+		});
+
+		const lease = await acquireSessionCursorAgent(params);
+
+		expect(storeMock.openSqliteStore).toHaveBeenCalledTimes(1);
+		expect(storeMock.openedOptions[0].stateRoot).toContain("pi-sessions");
+		expect(storeMock.openedOptions[0].stateRoot).not.toBe(toNamespacedPath("/tmp/cursor-sdk-state"));
+		expect(resumeAgent).not.toHaveBeenCalled();
+		expect(createAgent.mock.calls[0][0].local?.store).toBe(storeMock.stores[0]);
+		expect(lease.resumeNotice).toBeUndefined();
+	});
+
+	it("creates in the current session store and reports continuity when a recorded store identity is stale", async () => {
 		const scopeKey = "/tmp/sessions/test.jsonl";
 		const createAgent = vi.fn().mockResolvedValue({ agentId: "agent-new", [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined) });
-		const resumeAgent = vi.fn().mockRejectedValue(new Error("Agent agent-recorded not found"));
+		const resumeAgent = vi.fn().mockResolvedValue({ agentId: "agent-recorded", [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined) });
 		cursorSessionScopeTestUtils.set("/tmp/project", scopeKey);
 		const params = {
 			apiKey: "test-key",
@@ -189,7 +321,7 @@ describe("cursor-session-agent local resume", () => {
 			branchPathHash: resumeTestUtils.EMPTY_BRANCH_HASH,
 			compactionGeneration: 0,
 			activeHandle: {
-				version: 1,
+				version: 2,
 				runtime: "local",
 				agentId: "agent-recorded",
 				scopeKey,
@@ -200,56 +332,14 @@ describe("cursor-session-agent local resume", () => {
 				compactionGeneration: 0,
 				sendState: { bootstrapped: true, contextFingerprint: computeCursorContextFingerprint(makeContext()), incrementalSendCount: 0 },
 				createdAt: "2026-07-07T00:00:00.000Z",
+				storeIdentity: { version: 1, stateRoot: "/tmp/stale-sdk-root" },
 			},
 		});
 
 		const lease = await acquireSessionCursorAgent(params);
 
-		expect(resumeAgent).toHaveBeenCalledTimes(1);
-		expect(createAgent).toHaveBeenCalledTimes(1);
 		expect(lease.resumed).toBe(false);
 		expect(lease.resumeNotice).toContain("Could not resume prior Cursor agent");
-		expect(lease.sendState.bootstrapped).toBe(false);
-	});
-
-	it("does not resume when the recorded identity no longer matches", async () => {
-		const scopeKey = "/tmp/sessions/test.jsonl";
-		const createAgent = vi.fn().mockResolvedValue({ agentId: "agent-new", [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined) });
-		const resumeAgent = vi.fn().mockResolvedValue({ agentId: "agent-recorded", [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined) });
-		cursorSessionScopeTestUtils.set("/tmp/project", scopeKey);
-		const params = {
-			apiKey: "new-key",
-			agentMode: "agent" as const,
-			cwd: "/tmp/project",
-			modelSelection: { id: "composer-2.5" },
-			localResume: true,
-			createAgent,
-			resumeAgent,
-		};
-		resumeTestUtils.set({
-			scopeKey,
-			sessionFile: scopeKey,
-			cwd: "/tmp/project",
-			branchPathHash: resumeTestUtils.EMPTY_BRANCH_HASH,
-			compactionGeneration: 1,
-			activeHandle: {
-				version: 1,
-				runtime: "local",
-				agentId: "agent-recorded",
-				scopeKey,
-				sessionFile: scopeKey,
-				cwd: "/tmp/project",
-				poolKey: "old-pool-key",
-				branchPathHash: resumeTestUtils.EMPTY_BRANCH_HASH,
-				compactionGeneration: 0,
-				sendState: { bootstrapped: true, contextFingerprint: computeCursorContextFingerprint(makeContext()), incrementalSendCount: 0 },
-				createdAt: "2026-07-07T00:00:00.000Z",
-			},
-		});
-
-		const lease = await acquireSessionCursorAgent(params);
-
-		expect(lease.resumed).toBe(false);
 		expect(resumeAgent).not.toHaveBeenCalled();
 		expect(createAgent).toHaveBeenCalledTimes(1);
 	});

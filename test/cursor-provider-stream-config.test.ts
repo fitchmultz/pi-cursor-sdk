@@ -29,7 +29,7 @@ import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-sessio
 import type { Context } from "@earendil-works/pi-ai/compat";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 async function setCursorModeForProviderTest(mode: "agent" | "plan"): Promise<void> {
 	const pi = createPiHarness({ flagValues: { "cursor-mode": mode } });
@@ -55,7 +55,37 @@ describe("streamCursor prompt and model config", () => {
 
 		await collectEvents(streamCursor(makeModel("gpt-5.5@1m"), makeContext(), { apiKey: "test-key" }));
 
-		expect(mockedCreate.mock.calls[0][0].local).toEqual({ cwd: process.cwd(), settingSources: ["all"] });
+		expect(mockedCreate.mock.calls[0][0].local).toMatchObject({
+			cwd: process.cwd(),
+			settingSources: ["all"],
+			store: expect.any(Object),
+		});
+	});
+
+	it("sets absolute CURSOR_RIPGREP_PATH before local Agent.create", async () => {
+		delete process.env.CURSOR_RIPGREP_PATH;
+		let pathAtCreate: string | undefined;
+		mockedCreate.mockImplementation(async () => {
+			pathAtCreate = process.env.CURSOR_RIPGREP_PATH;
+			return asMockSdkAgent({
+				send: vi.fn().mockResolvedValue({
+					id: "run-1",
+					agentId: "agent-1",
+					status: "finished",
+					wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
+					cancel: vi.fn(),
+					supports: () => true,
+					unsupportedReason: () => undefined,
+				}),
+			});
+		});
+
+		await collectEvents(streamCursor(makeModel("gpt-5.5@1m"), makeContext(), { apiKey: "test-key" }));
+
+		expect(mockedCreate).toHaveBeenCalledTimes(1);
+		expect(pathAtCreate).toBeTruthy();
+		expect(isAbsolute(pathAtCreate!)).toBe(true);
+		expect(pathAtCreate!.replaceAll("\\", "/")).toContain(`@cursor/sdk-${process.platform}-${process.arch}`);
 	});
 
 	it("passes enabled local safety controls from env into Agent.create", async () => {

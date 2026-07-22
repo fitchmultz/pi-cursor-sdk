@@ -105,6 +105,11 @@ export interface CursorLiveRunCoordinator {
 
 type CursorLiveBridgeMatcher = Pick<CursorPiToolBridgeRun, "hasPendingPiToolCallId">;
 
+function isPendingBridgeToolRequest(run: CursorLiveRun, request: CursorPiBridgeToolRequest): boolean {
+	const bridgeRun = [run.bridgeRun, run.sessionBridgeRun].find((candidate) => candidate?.id === request.runId);
+	return bridgeRun?.hasPendingPiToolCallId(request.piToolCallId) === true;
+}
+
 export interface CursorLiveRunRecord {
 	id: string;
 	disposed: boolean;
@@ -384,7 +389,9 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 			const requests: CursorPiBridgeToolRequest[] = [];
 			while (run.pendingEvents[0]?.type === "bridge-tool") {
 				const event = run.pendingEvents.shift();
-				if (event?.type === "bridge-tool") requests.push(event.request);
+				if (event?.type === "bridge-tool" && isPendingBridgeToolRequest(run, event.request)) {
+					requests.push(event.request);
+				}
 			}
 			return requests;
 		},

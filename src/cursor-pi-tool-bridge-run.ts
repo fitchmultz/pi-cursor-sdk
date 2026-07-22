@@ -9,6 +9,7 @@ import {
 	ListToolsRequestSchema,
 	type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
+import { bridgeToolExecutionAbortTracker } from "./cursor-pi-tool-bridge-abort.js";
 import { MCP_ENDPOINT_ROOT, MCP_SERVER_NAME } from "./cursor-pi-tool-bridge-constants.js";
 import {
 	type CursorPiToolBridgeDiagnosticEvent,
@@ -17,6 +18,7 @@ import {
 	type CursorPiToolBridgeRequestDiagnosticFields,
 	writeCursorPiToolBridgeDiagnostic,
 } from "./cursor-pi-tool-bridge-diagnostics.js";
+import { resolveCursorPiToolBridgeCallTimeoutMs } from "./cursor-pi-tool-bridge-env.js";
 import type {
 	CursorPiBridgeToolRequest,
 	CursorPiToolBridgeRun,
@@ -46,6 +48,7 @@ interface PendingBridgeCall {
 	reject: (error: Error) => void;
 	signal?: AbortSignal;
 	onAbort?: () => void;
+	timeout?: ReturnType<typeof setTimeout>;
 	settled: boolean;
 }
 
@@ -58,6 +61,7 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 	private readonly registry: CursorPiToolBridgeRunHost;
 	private readonly env: Record<string, string | undefined>;
 	private readonly endpointPath: string;
+	private readonly callTimeoutMs: number;
 	private readonly knownMcpToolNames: ReadonlySet<string>;
 	private readonly knownCursorMcpCallIds = new Set<string>();
 	private readonly queuedRequests: CursorPiBridgeToolRequest[] = [];
@@ -87,6 +91,7 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 		this.debugRecorder = options.debugRecorder;
 		this.id = `cursor-pi-bridge-run-${randomUUID()}`;
 		this.endpointPath = `${MCP_ENDPOINT_ROOT}/${randomUUID()}/mcp`;
+		this.callTimeoutMs = resolveCursorPiToolBridgeCallTimeoutMs(env);
 		this.knownMcpToolNames = new Set(snapshot.tools.map((tool) => tool.mcpToolName));
 	}
 
@@ -218,7 +223,7 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 		}
 		this.queuedRequests.splice(0);
 		for (const pending of [...this.pendingByBridgeCallId.values()]) {
-			this.rejectPending(pending, error, "cancelled");
+			this.rejectAndAbortPending(pending, error, "cancelled");
 		}
 	}
 
@@ -290,7 +295,7 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 				settled: false,
 			};
 			pending.onAbort = () => {
-				this.rejectPending(pending, new Error("Cursor MCP bridge tool request was aborted"), "cancelled");
+				this.rejectAndAbortPending(pending, new Error("Cursor MCP bridge tool request was aborted"), "cancelled");
 			};
 			if (signal?.aborted) {
 				pending.onAbort();
@@ -301,6 +306,11 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 			this.pendingByBridgeCallId.set(request.bridgeCallId, pending);
 			this.pendingByCursorMcpCallId.set(cursorMcpCallId, pending);
 			this.knownCursorMcpCallIds.add(cursorMcpCallId);
+			pending.timeout = setTimeout(() => {
+				const reason = `Cursor pi bridge CallTool timed out after ${this.callTimeoutMs} ms`;
+				this.rejectAndAbortPending(pending, new Error(reason));
+			}, this.callTimeoutMs);
+			pending.timeout.unref?.();
 			if (!this.onToolRequest) {
 				if (this.liveRunHandlerDetached) {
 					this.rejectPending(pending, new Error("Cursor pi tool bridge has no active live run"), "cancelled");
@@ -345,8 +355,8 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 		pending.resolve(result);
 	}
 
-	private rejectPending(pending: PendingBridgeCall, error: Error, kind: "cancelled" | "error" = "error"): void {
-		if (pending.settled) return;
+	private rejectPending(pending: PendingBridgeCall, error: Error, kind: "cancelled" | "error" = "error"): boolean {
+		if (pending.settled) return false;
 		pending.settled = true;
 		this.removePending(pending);
 		this.emitRequestRejectedDiagnostic(pending.request, kind);
@@ -357,6 +367,17 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 			rejectionKind: kind,
 		});
 		pending.reject(error);
+		return true;
+	}
+
+	private rejectAndAbortPending(
+		pending: PendingBridgeCall,
+		error: Error,
+		kind: "cancelled" | "error" = "error",
+	): void {
+		if (this.rejectPending(pending, error, kind)) {
+			bridgeToolExecutionAbortTracker.abort(pending.request.piToolCallId, error.message);
+		}
 	}
 
 	private lifecycleDiagnosticFields(pendingCount = this.pendingCount()): CursorPiToolBridgeLifecycleDiagnosticFields {
@@ -401,7 +422,8 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 	}
 
 	private removePending(pending: PendingBridgeCall): void {
-		pending.signal?.removeEventListener("abort", pending.onAbort ?? (() => undefined));
+		if (pending.onAbort) pending.signal?.removeEventListener("abort", pending.onAbort);
+		if (pending.timeout) clearTimeout(pending.timeout);
 		this.pendingByPiToolCallId.delete(pending.request.piToolCallId);
 		this.pendingByBridgeCallId.delete(pending.request.bridgeCallId);
 		if (pending.request.cursorMcpCallId) this.pendingByCursorMcpCallId.delete(pending.request.cursorMcpCallId);

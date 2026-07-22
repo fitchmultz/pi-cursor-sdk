@@ -1,5 +1,6 @@
 import type { SDKAgent } from "@cursor/sdk";
-import { makeContext } from "./helpers/pi-harness.js";
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/compat";
+import { makeAssistantMessage, makeContext, makeModel } from "./helpers/pi-harness.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	createCursorLiveRunCoordinator,
@@ -8,6 +9,10 @@ import {
 } from "../src/cursor-live-run-coordinator.js";
 import type { CursorNativeToolDisplayItem } from "../src/cursor-native-tool-display-state.js";
 import type { CursorPiToolBridgeRun } from "../src/cursor-pi-tool-bridge.js";
+import {
+	cursorLiveRuns,
+	drainCursorLiveRunTurn,
+} from "../src/cursor-provider-live-run-drain.js";
 import { __testUtils as cursorSdkProcessGuardTestUtils } from "../src/cursor-sdk-process-error-guard.js";
 
 function makeAgent(agentId = "agent-1"): SDKAgent {
@@ -107,6 +112,67 @@ describe("cursor live run coordinator", () => {
 		await coordinator.release(run);
 
 		expect(coordinator.getPendingFromContext(context, replayIdFromToolCallId)).toBeUndefined();
+	});
+
+	it("drops bridge events whose pending call expired before tool emission", () => {
+		const { coordinator } = makeCoordinator();
+		const bridgeRun = makeBridgeRun("bridge-1", ["tool-live"]);
+		const run = startRun(coordinator, { bridgeRun });
+		for (const piToolCallId of ["tool-expired", "tool-live"]) {
+			coordinator.queueEvent(run, {
+				type: "bridge-tool",
+				request: {
+					runId: bridgeRun.id,
+					bridgeCallId: `call-${piToolCallId}`,
+					piToolCallId,
+					piToolName: "read",
+					mcpToolName: "pi__read",
+					args: {},
+				},
+			});
+		}
+
+		expect(coordinator.collectBridgeToolBatch(run).map((request) => request.piToolCallId)).toEqual(["tool-live"]);
+		expect(run.pendingEvents).toEqual([]);
+	});
+
+	it("does not emit an empty tool-use turn when every queued bridge call expired", async () => {
+		const bridgeRun = makeBridgeRun("bridge-expired");
+		const run = cursorLiveRuns.start({
+			id: "expired-bridge-drain",
+			agent: makeAgent(),
+			bridgeRun,
+			sessionAgentScopeKey: "expired-bridge-drain-scope",
+			promptInputTokens: 1,
+		});
+		cursorLiveRuns.queueEvent(run, {
+			type: "bridge-tool",
+			request: {
+				runId: bridgeRun.id,
+				bridgeCallId: "expired-call",
+				piToolCallId: "expired-tool",
+				piToolName: "read",
+				mcpToolName: "pi__read",
+				args: {},
+			},
+		});
+		cursorLiveRuns.markFinished(run, "done");
+		const stream = createAssistantMessageEventStream();
+		const push = vi.spyOn(stream, "push");
+
+		const outcome = await drainCursorLiveRunTurn(
+			stream,
+			makeAssistantMessage(""),
+			makeModel(),
+			makeContext(),
+			run,
+			0,
+			{ mode: "emit" },
+		);
+
+		expect(outcome).toBe("stop");
+		expect(push.mock.calls.map(([event]) => event.type)).not.toContain("toolcall_start");
+		expect(push.mock.calls.some(([event]) => event.type === "done" && event.reason === "toolUse")).toBe(false);
 	});
 
 	it("indexes active runs per scope without letting an older release clear a newer run", async () => {

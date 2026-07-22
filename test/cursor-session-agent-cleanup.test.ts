@@ -1,6 +1,6 @@
 import { mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, toNamespacedPath } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionManager, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import {
@@ -17,6 +17,8 @@ import {
 } from "../src/cursor-session-agent-resume.js";
 import { makeAssistantMessage } from "./helpers/pi-harness.js";
 import { __testUtils as scopeTestUtils } from "../src/cursor-session-scope.js";
+import { installCursorSessionStoreMock } from "./helpers/cursor-session-store.js";
+import { buildCursorSessionStateRoot } from "../src/cursor-session-store.js";
 
 function resumeData(agentId: string, extra: Partial<CursorSessionAgentResumeEntryData> = {}): CursorSessionAgentResumeEntryData {
 	return {
@@ -100,6 +102,7 @@ function makeContext(entries: SessionEntry[], branch: SessionEntry[] = entries) 
 
 describe("cursor-session-agent-cleanup", () => {
 	beforeEach(() => {
+		installCursorSessionStoreMock();
 		cleanupTestUtils.reset();
 		cleanupTestUtils.setAppendDurability(() => true);
 		scopeTestUtils.set("/tmp/project", "/tmp/session.jsonl", "session-1");
@@ -205,7 +208,7 @@ describe("cursor-session-agent-cleanup", () => {
 	it("reconciles durable intents, successful results, failed results, and legacy delete entries", () => {
 		const oldEntry = resumeEntry("r1", resumeData("agent-old"));
 		const activeEntry = resumeEntry("r2", resumeData("agent-active", {
-			cleanupCandidateAgentIds: ["agent-old", "agent-pending", "agent-deleted", "agent-failed"],
+			cleanupCandidateAgentIds: ["agent-old", "agent-pending", "agent-deleted", "agent-failed", "agent-invalid"],
 		}));
 		const legacyDeleted = cleanupEntry("c1", {
 			action: "delete",
@@ -219,16 +222,19 @@ describe("cursor-session-agent-cleanup", () => {
 			phase: "intent",
 			runtime: "local",
 			timestamp: "2026-07-08T00:02:00.000Z",
-			candidateAgentIds: ["agent-pending", "agent-deleted", "agent-failed"],
+			candidateAgentIds: ["agent-pending", "agent-deleted", "agent-failed", "agent-invalid"],
 		});
 		const result = cleanupEntry("c3", {
 			action: "delete",
 			phase: "result",
 			runtime: "local",
 			timestamp: "2026-07-08T00:03:00.000Z",
-			candidateAgentIds: ["agent-deleted", "agent-failed"],
+			candidateAgentIds: ["agent-deleted", "agent-failed", "agent-invalid"],
 			deletedAgentIds: ["agent-deleted"],
-			failedAgentIds: [{ agentId: "agent-failed", error: "failed" }],
+			failedAgentIds: [
+				{ agentId: "agent-failed", error: "failed" },
+				{ agentId: "agent-invalid", error: "invalid store", retryable: false },
+			],
 		});
 
 		const entries = linearEntries([oldEntry, activeEntry, legacyDeleted, intent, result]);
@@ -290,7 +296,10 @@ describe("cursor-session-agent-cleanup", () => {
 		await runCursorSessionAgentCleanupCommand({ appendEntry }, "--yes", makeContext(entries));
 
 		expect(callOrder).toEqual(["append:intent", "delete:agent-old", "append:result"]);
-		expect(deleteAgent).toHaveBeenCalledWith("agent-old", { cwd: "/tmp/project" });
+		expect(deleteAgent).toHaveBeenCalledWith("agent-old", {
+			cwd: "/tmp/project",
+			store: expect.any(Object),
+		});
 		expect(appendEntry).toHaveBeenNthCalledWith(1, CURSOR_SESSION_AGENT_CLEANUP_ENTRY_TYPE, expect.objectContaining({
 			action: "delete",
 			phase: "intent",
@@ -302,6 +311,57 @@ describe("cursor-session-agent-cleanup", () => {
 			candidateAgentIds: ["agent-old"],
 			deletedAgentIds: ["agent-old"],
 		}));
+	});
+
+	it("deletes a versioned cleanup candidate from its recorded per-session store", async () => {
+		const storeMock = installCursorSessionStoreMock();
+		const stateRoot = buildCursorSessionStateRoot("/tmp/cursor-sdk-state", cleanupScope.scopeKey, true);
+		const storeIdentity = { version: 1 as const, stateRoot };
+		const entries = linearEntries([
+			resumeEntry("r1", resumeData("agent-old", { version: 2, storeIdentity })),
+			resumeEntry("r2", resumeData("agent-active", {
+				version: 2,
+				storeIdentity,
+				cleanupCandidates: [{ agentId: "agent-old", storeIdentity }],
+			})),
+		]);
+		const deleteAgent = vi.fn().mockResolvedValue(undefined);
+		cleanupTestUtils.setSdkOperations({ delete: deleteAgent });
+
+		await runCursorSessionAgentCleanupCommand({ appendEntry: vi.fn() }, "--yes", makeContext(entries));
+
+		expect(storeMock.openSqliteStore).toHaveBeenCalledWith({ workspaceRef: "/tmp/project", stateRoot: toNamespacedPath(stateRoot) });
+		expect(deleteAgent).toHaveBeenCalledWith("agent-old", {
+			cwd: "/tmp/project",
+			store: storeMock.stores[0],
+		});
+		expect(storeMock.stores[0].dispose).toHaveBeenCalledTimes(1);
+	});
+
+	it("rejects a recorded store root outside the current session identities before SDK delete", async () => {
+		const entries = linearEntries([
+			resumeEntry("r1", resumeData("agent-old")),
+			resumeEntry("r2", resumeData("agent-active", {
+				version: 2,
+				storeIdentity: { version: 1, stateRoot: buildCursorSessionStateRoot("/tmp/cursor-sdk-state", cleanupScope.scopeKey, true) },
+				cleanupCandidates: [{
+					agentId: "agent-old",
+					storeIdentity: { version: 1, stateRoot: "/tmp/untrusted-store" },
+				}],
+			})),
+		]);
+		const deleteAgent = vi.fn();
+		const appendEntry = vi.fn();
+		const ctx = makeContext(entries);
+		cleanupTestUtils.setSdkOperations({ delete: deleteAgent });
+
+		await runCursorSessionAgentCleanupCommand({ appendEntry }, "--yes", ctx);
+
+		expect(deleteAgent).not.toHaveBeenCalled();
+		expect(appendEntry).toHaveBeenLastCalledWith(CURSOR_SESSION_AGENT_CLEANUP_ENTRY_TYPE, expect.objectContaining({
+			failedAgentIds: [expect.objectContaining({ agentId: "agent-old", retryable: false })],
+		}));
+		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("1 failed"), "error");
 	});
 
 	it("persists and fsyncs real SessionManager intent before delete and result afterward", async () => {
@@ -448,7 +508,10 @@ describe("cursor-session-agent-cleanup", () => {
 
 		await runCursorSessionAgentCleanupCommand({ appendEntry }, "--yes", ctx);
 
-		expect(deleteAgent).toHaveBeenCalledWith("agent-old", { cwd: "/tmp/project" });
+		expect(deleteAgent).toHaveBeenCalledWith("agent-old", {
+			cwd: "/tmp/project",
+			store: expect.any(Object),
+		});
 		expect(readCursorSessionAgentCleanupPlan(entries, entries.slice(0, 2), cleanupScope).candidateAgentIds).toEqual([]);
 		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("durable intent blocks automatic retries"), "error");
 	});

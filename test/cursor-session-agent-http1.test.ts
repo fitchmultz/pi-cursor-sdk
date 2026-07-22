@@ -12,9 +12,11 @@ import {
 } from "../src/cursor-http1.js";
 import { registerCursorSessionAgentLifecycle } from "../src/cursor-session-agent-lifecycle.js";
 import { createEventHarness } from "./helpers/pi-harness.js";
+import { installCursorSessionStoreMock } from "./helpers/cursor-session-store.js";
 
 describe("Cursor session agent HTTP/1.1 pooling", () => {
 	beforeEach(async () => {
+		installCursorSessionStoreMock();
 		cursorSessionScopeTestUtils.reset();
 		resumeTestUtils.reset();
 		await sessionAgentTestUtils.disposeAllSessionCursorAgents();

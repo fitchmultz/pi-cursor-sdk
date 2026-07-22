@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/compat";
-import type { SDKAgent } from "@cursor/sdk";
+import type { LocalAgentStore, SDKAgent } from "@cursor/sdk";
 import { buildIncompleteCursorToolRunOutcome } from "../src/cursor-incomplete-tool-visibility.js";
 import { CursorRunFinalizer } from "../src/cursor-provider-run-finalizer.js";
 import { CursorSdkTurnCoordinator } from "../src/cursor-provider-turn-coordinator.js";
@@ -51,6 +51,8 @@ describe("CursorRunFinalizer", () => {
 				poolKey: "pool-1",
 				instanceId: 1,
 				agent: { agentId: "agent-1" } as SDKAgent,
+				store: {} as LocalAgentStore,
+				storeIdentity: { version: 1, stateRoot: "/tmp/store" },
 				sendState: { bootstrapped: false, contextFingerprint: "", incrementalSendCount: 0 },
 				created: false,
 				commitSend: () => {},
@@ -172,6 +174,8 @@ describe("CursorRunFinalizer", () => {
 				poolKey: "pool-1",
 				instanceId: 1,
 				agent: { agentId: "agent-1" } as SDKAgent,
+				store: {} as LocalAgentStore,
+				storeIdentity: { version: 1, stateRoot: "/tmp/store" },
 				sendState: { bootstrapped: false, contextFingerprint: "", incrementalSendCount: 0 },
 				created: true,
 				commitSend: () => {
@@ -278,6 +282,8 @@ describe("CursorRunFinalizer", () => {
 				poolKey: "pool-1",
 				instanceId: 1,
 				agent: { agentId: "agent-1" } as SDKAgent,
+				store: {} as LocalAgentStore,
+				storeIdentity: { version: 1, stateRoot: "/tmp/store" },
 				sendState: { bootstrapped: false, contextFingerprint: "", incrementalSendCount: 0 },
 				created: true,
 				commitSend: () => {},

@@ -4,6 +4,7 @@ import {
 	createExtensionCommandContext,
 	createExtensionRegistrationPi,
 	createExtensionTestContext,
+	createTestToolInfo,
 	makeAssistantMessage,
 	makeContext,
 	makeHarnessModel,
@@ -35,6 +36,7 @@ import { buildCursorPiToolBridgeSnapshot } from "../src/cursor-pi-tool-bridge.js
 import {
 	CURSOR_ASK_QUESTION_BLOCKED_EVENT,
 	CURSOR_ASK_QUESTION_TOOL_NAME,
+	resolveCursorAskQuestionEnabled,
 } from "../src/cursor-question-tool.js";
 import { CURSOR_ACTIVATE_SKILL_TOOL_NAME } from "../src/cursor-skill-tool.js";
 import { __testUtils as cursorSdkProcessErrorGuardTestUtils } from "../src/cursor-sdk-process-error-guard.js";
@@ -485,6 +487,32 @@ describe("extension registration and discovery", () => {
 		const snapshot = buildCursorPiToolBridgeSnapshot(pi);
 		expect(snapshot.piToolNameToMcpToolName.get(CURSOR_ASK_QUESTION_TOOL_NAME)).toBe("pi__cursor_ask_question");
 		expect(snapshot.tools.find((tool) => tool.piToolName === CURSOR_ASK_QUESTION_TOOL_NAME)?.description).toContain("Ask the user");
+	});
+
+	it("disables only the Cursor question tool with PI_CURSOR_ASK_QUESTION=0", async () => {
+		expect(resolveCursorAskQuestionEnabled({})).toBe(true);
+		for (const value of ["0", "false", "off", "none", "no", "disabled"]) {
+			expect(resolveCursorAskQuestionEnabled({ PI_CURSOR_ASK_QUESTION: value })).toBe(false);
+		}
+
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
+		process.env.PI_CURSOR_ASK_QUESTION = "0";
+		mockedDiscover.mockResolvedValueOnce([]);
+		const bridgeToolName = "sem_reindex";
+		const pi = createExtensionRegistrationPi({
+			initialTools: [createTestToolInfo(bridgeToolName)],
+			activeTools: [bridgeToolName],
+		});
+
+		await extensionFactory(pi);
+		await pi.runSessionStart();
+
+		expect(cursorPiToolBridgeTestUtils.getRegisteredBridgeForTests()?.isEnabled()).toBe(true);
+		expect(pi._tools.map((tool) => tool.name)).not.toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
+		expect(pi._activeToolNames()).not.toContain(CURSOR_ASK_QUESTION_TOOL_NAME);
+		const snapshot = buildCursorPiToolBridgeSnapshot(pi);
+		expect(snapshot.piToolNameToMcpToolName.has(CURSOR_ASK_QUESTION_TOOL_NAME)).toBe(false);
+		expect(snapshot.piToolNameToMcpToolName.get(bridgeToolName)).toBe(`pi__${bridgeToolName}`);
 	});
 
 	it("honors PI_CURSOR_PI_TOOL_BRIDGE=0 at the extension registration path", async () => {

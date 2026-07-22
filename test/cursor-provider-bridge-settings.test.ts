@@ -68,7 +68,7 @@ describe("streamCursor bridge settings", () => {
 
 		expect(mockedCreate).toHaveBeenCalledWith(
 			expect.objectContaining({
-				local: { cwd: process.cwd(), settingSources: ["all"] },
+				local: expect.objectContaining({ cwd: process.cwd(), settingSources: ["all"], store: expect.any(Object) }),
 			}),
 		);
 	});
@@ -94,7 +94,7 @@ describe("streamCursor bridge settings", () => {
 
 		expect(mockedCreate).toHaveBeenCalledWith(
 			expect.objectContaining({
-				local: { cwd: process.cwd() },
+				local: expect.objectContaining({ cwd: process.cwd(), store: expect.any(Object) }),
 			}),
 		);
 	});
@@ -120,7 +120,7 @@ describe("streamCursor bridge settings", () => {
 
 		expect(mockedCreate).toHaveBeenCalledWith(
 			expect.objectContaining({
-				local: { cwd: process.cwd(), settingSources: ["all"] },
+				local: expect.objectContaining({ cwd: process.cwd(), settingSources: ["all"], store: expect.any(Object) }),
 			}),
 		);
 	});
@@ -242,7 +242,7 @@ describe("streamCursor bridge settings", () => {
 
 		expect(mockedCreate).toHaveBeenCalledWith(
 			expect.objectContaining({
-				local: { cwd: process.cwd(), settingSources: ["project", "user"] },
+				local: expect.objectContaining({ cwd: process.cwd(), settingSources: ["project", "user"], store: expect.any(Object) }),
 			}),
 		);
 	});

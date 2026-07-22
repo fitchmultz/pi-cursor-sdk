@@ -1,3 +1,4 @@
+import { toNamespacedPath } from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { computeCursorContextFingerprint, shouldBootstrapCursorContext } from "../src/context.js";
 import { createEventHarness, createExtensionTestContext, makeContext } from "./helpers/pi-harness.js";
@@ -8,9 +9,12 @@ import {
 	__testUtils as sessionAgentTestUtils,
 } from "../src/cursor-session-agent.js";
 import { registerCursorSessionAgentLifecycle } from "../src/cursor-session-agent-lifecycle.js";
+import { installCursorSessionStoreMock } from "./helpers/cursor-session-store.js";
+import { buildCursorSessionStateRoot } from "../src/cursor-session-store.js";
 
 describe("cursor-session-agent", () => {
 	beforeEach(async () => {
+		installCursorSessionStoreMock();
 		cursorSessionScopeTestUtils.reset();
 		resumeTestUtils.reset();
 		await sessionAgentTestUtils.disposeAllSessionCursorAgents();
@@ -42,6 +46,34 @@ describe("cursor-session-agent", () => {
 		expect(createAgent).toHaveBeenCalledTimes(1);
 		expect(createAgent).toHaveBeenCalledWith(expect.objectContaining({ mode: "agent" }));
 		expect(mockDispose).not.toHaveBeenCalled();
+	});
+
+	it("passes one session-scoped store through Agent.create and disposes it with the pooled agent", async () => {
+		const storeMock = installCursorSessionStoreMock();
+		const scopeKey = "/tmp/sessions/store-session.jsonl";
+		const createAgent = vi.fn().mockResolvedValue({
+			agentId: "agent-store",
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+		cursorSessionScopeTestUtils.set("/tmp/project", scopeKey);
+
+		const lease = await acquireSessionCursorAgent({
+			apiKey: "test-key",
+			agentMode: "agent",
+			cwd: "/tmp/project",
+			modelSelection: { id: "composer-2.5" },
+			createAgent,
+		});
+
+		expect(storeMock.openSqliteStore).toHaveBeenCalledWith({
+			workspaceRef: "/tmp/project",
+			stateRoot: toNamespacedPath(buildCursorSessionStateRoot("/tmp/cursor-sdk-state", scopeKey, true)),
+		});
+		expect(createAgent.mock.calls[0][0].local?.store).toBe(storeMock.stores[0]);
+		expect(lease.store).toBe(storeMock.stores[0]);
+
+		await sessionAgentTestUtils.resetSessionCursorAgent(scopeKey);
+		expect(storeMock.stores[0].dispose).toHaveBeenCalledTimes(1);
 	});
 
 	it("passes the desired Cursor SDK mode to Agent.create", async () => {
@@ -413,7 +445,8 @@ describe("cursor-session-agent", () => {
 		await expect(acquireSessionCursorAgent(params)).rejects.toBeInstanceOf(sessionAgentTestUtils.SessionCursorAgentScopeClosedError);
 	});
 
-	it("does not retry a superseded in-flight acquire when replaced by a different pool key", async () => {
+	it("does not retry a superseded fileless acquire or remove its replacement store", async () => {
+		const storeMock = installCursorSessionStoreMock();
 		const mockDisposeLate = vi.fn().mockResolvedValue(undefined);
 		const mockDisposeReplacement = vi.fn().mockResolvedValue(undefined);
 		let resolveLateCreate: (agent: unknown) => void = () => {};
@@ -431,7 +464,7 @@ describe("cursor-session-agent", () => {
 			};
 		});
 
-		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/test.jsonl");
+		cursorSessionScopeTestUtils.set("/tmp/project", undefined, "ephemeral");
 		const baseParams = {
 			agentMode: "agent" as const,
 			cwd: "/tmp/project",
@@ -455,6 +488,37 @@ describe("cursor-session-agent", () => {
 		expect(mockDisposeReplacement).not.toHaveBeenCalled();
 		expect(secondLease.agent).toMatchObject({ agentId: "agent-replacement" });
 		expect(createAgent).toHaveBeenCalledTimes(2);
+		expect(storeMock.openedOptions[0].stateRoot).not.toBe(storeMock.openedOptions[1].stateRoot);
+		expect(storeMock.stores[0].dispose).toHaveBeenCalledTimes(1);
+		expect(storeMock.stores[1].dispose).not.toHaveBeenCalled();
+	});
+
+	it("keeps a delayed fileless acquisition temporary after session scope becomes persisted", async () => {
+		let resolveDefaultStateRoot: (stateRoot: string) => void = () => {};
+		const getDefaultStateRoot = vi.fn(() => new Promise<string>((resolve) => {
+			resolveDefaultStateRoot = resolve;
+		}));
+		const storeMock = installCursorSessionStoreMock(getDefaultStateRoot);
+		const createAgent = vi.fn().mockResolvedValue({
+			agentId: "agent-fileless",
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+		cursorSessionScopeTestUtils.set("/tmp/project", undefined, "ephemeral");
+
+		const acquire = acquireSessionCursorAgent({
+			apiKey: "test-key",
+			agentMode: "agent",
+			cwd: "/tmp/project",
+			modelSelection: { id: "composer-2.5" },
+			createAgent,
+		});
+		await vi.waitFor(() => expect(getDefaultStateRoot).toHaveBeenCalledTimes(1));
+		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/persisted.jsonl", "persisted");
+		resolveDefaultStateRoot("/tmp/cursor-sdk-state");
+
+		await acquire;
+		expect(storeMock.openedOptions[0].stateRoot).toContain("pi-cursor-sdk");
+		expect(storeMock.openedOptions[0].stateRoot).not.toContain("cursor-sdk-state");
 	});
 
 	it("clears invalidation before the first agent is created", async () => {
@@ -838,7 +902,13 @@ describe("cursor-session-agent", () => {
 		});
 
 		expect(createAgent).toHaveBeenCalledWith(expect.objectContaining({
-			local: { cwd: "/tmp/project", settingSources: ["all"], autoReview: true, sandboxOptions: { enabled: true } },
+			local: expect.objectContaining({
+				cwd: "/tmp/project",
+				settingSources: ["all"],
+				autoReview: true,
+				sandboxOptions: { enabled: true },
+				store: expect.any(Object),
+			}),
 		}));
 	});
 
@@ -858,7 +928,9 @@ describe("cursor-session-agent", () => {
 			createAgent,
 		});
 
-		expect(createAgent).toHaveBeenCalledWith(expect.objectContaining({ local: { cwd: "/tmp/project" } }));
+		expect(createAgent).toHaveBeenCalledWith(expect.objectContaining({
+			local: expect.objectContaining({ cwd: "/tmp/project", store: expect.any(Object) }),
+		}));
 		expect(createAgent.mock.calls[0][0].local).not.toHaveProperty("autoReview");
 		expect(createAgent.mock.calls[0][0].local).not.toHaveProperty("sandboxOptions");
 	});

@@ -54,11 +54,18 @@ class CursorPiToolBridgeToolExecutionAbortTracker {
 		for (const toolCallId of [...this.activeExecutions.keys()]) this.finish(toolCallId);
 	}
 
+	abort(toolCallId: string, reason: string): boolean {
+		const execution = this.activeExecutions.get(toolCallId);
+		if (!execution) return false;
+		this.cancelExecution(execution, reason);
+		this.abortExecution(execution);
+		this.finish(toolCallId);
+		return true;
+	}
+
 	abortAll(reason: string): void {
 		for (const execution of [...this.activeExecutions.values()]) {
-			this.cancelExecution(execution, reason);
-			this.abortExecution(execution);
-			this.finish(execution.toolCallId);
+			this.abort(execution.toolCallId, reason);
 		}
 	}
 

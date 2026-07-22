@@ -1,4 +1,4 @@
-import type { RunError, SDKAgent } from "@cursor/sdk";
+import type { LocalAgentStore, RunError, SDKAgent } from "@cursor/sdk";
 import { loadCursorTranscriptWebToolCallsAfterOffset } from "./cursor-agent-message-web-tools.js";
 import {
 	collectCursorCloudRunReport,
@@ -18,11 +18,21 @@ import {
 import type { CursorProviderTurnPrepareResult } from "./cursor-provider-turn-types.js";
 import { loadCursorSdk } from "./cursor-sdk-runtime.js";
 
-export async function cacheSdkContextWindow(agentId: string, modelId: string, cwd?: string): Promise<void> {
+export async function cacheSdkContextWindow(
+	agentId: string,
+	modelId: string,
+	cwd?: string,
+	store?: LocalAgentStore,
+): Promise<void> {
 	try {
 		const { createAgentPlatform } = await loadCursorSdk();
 		const platform = await createAgentPlatform(
-			cwd ? { workspaceRef: cwd, scopedWorkspaceRef: cwd } : undefined,
+			cwd || store
+				? {
+						...(cwd ? { workspaceRef: cwd, scopedWorkspaceRef: cwd } : {}),
+						...(store ? { localStore: store } : {}),
+					}
+				: undefined,
 		);
 		const checkpoint = await platform.checkpointStore.loadLatest(agentId);
 		const contextWindow = getCheckpointContextWindow(checkpoint);
@@ -65,6 +75,7 @@ async function replayCursorTranscriptWebToolCalls(
 	agentId: string,
 	cwd: string,
 	messageOffset: number | undefined,
+	turnStore: LocalAgentStore,
 	turnCoordinator: CursorSdkTurnCoordinator,
 	sdkEventDebug: CursorSdkEventDebugSink | undefined,
 ): Promise<void> {
@@ -73,6 +84,7 @@ async function replayCursorTranscriptWebToolCalls(
 			agentId,
 			cwd,
 			offset: messageOffset,
+			store: turnStore,
 		});
 		if (transcriptToolCalls.length === 0) return;
 		sdkEventDebug?.recordCoordinatorEvent("cursor-transcript-web-tools", {
@@ -176,6 +188,7 @@ export async function awaitFinalizeCursorRunOutcome(params: AwaitFinalizeCursorR
 			params.run.agentId,
 			params.prepared.cwd,
 			params.cursorAgentMessageOffset,
+			params.prepared.sessionAgentLease.store,
 			params.prepared.runtime.turnCoordinator,
 			params.sdkEventDebug,
 		);
@@ -187,7 +200,12 @@ export async function awaitFinalizeCursorRunOutcome(params: AwaitFinalizeCursorR
 		// Debug artifact failures must never affect provider execution.
 	}
 	if (params.prepared.runtimeTarget === "local" && params.cacheContextWindow !== false) {
-		await cacheSdkContextWindow(params.contextWindowAgentId ?? params.run.agentId, params.modelId, params.prepared.cwd);
+		await cacheSdkContextWindow(
+			params.contextWindowAgentId ?? params.run.agentId,
+			params.modelId,
+			params.prepared.cwd,
+			params.prepared.sessionAgentLease.store,
+		);
 	}
 	return { outcome, displayOnlyTraceBlock };
 }

@@ -55,9 +55,10 @@ describe("Cursor provider HTTP/1.1 transport", () => {
 		await collectEvents(streamCursor(makeModel("gpt-5.5@1m"), makeContext(), { apiKey: "test-key" }));
 
 		expect(mockedConfigureCursor).not.toHaveBeenCalled();
-		expect(mockedCreate.mock.calls[0][0].local).toEqual({
+		expect(mockedCreate.mock.calls[0][0].local).toMatchObject({
 			cwd: process.cwd(),
 			settingSources: ["all"],
+			store: expect.any(Object),
 		});
 	});
 

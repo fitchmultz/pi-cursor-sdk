@@ -7,9 +7,11 @@ import {
 } from "../src/cursor-session-agent.js";
 import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
 import { makeNodeClosedPipeWriteError } from "./helpers/cursor-sdk-process-error-fixtures.js";
+import { installCursorSessionStoreMock } from "./helpers/cursor-session-store.js";
 
 describe("cursor-session-agent dead transport", () => {
 	beforeEach(async () => {
+		installCursorSessionStoreMock();
 		cursorSessionScopeTestUtils.reset();
 		resumeTestUtils.reset();
 		await sessionAgentTestUtils.disposeAllSessionCursorAgents();

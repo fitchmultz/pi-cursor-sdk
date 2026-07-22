@@ -10,6 +10,7 @@ import { __testUtils as cursorPiToolBridgeTestUtils } from "../../src/cursor-pi-
 import { __testUtils as cursorSessionScopeTestUtils } from "../../src/cursor-session-scope.js";
 import { __testUtils as cursorSessionResumeTestUtils } from "../../src/cursor-session-agent-resume.js";
 import { __testUtils as cursorSdkProcessErrorGuardTestUtils } from "../../src/cursor-sdk-process-error-guard.js";
+import { installCursorSessionStoreMock } from "./cursor-session-store.js";
 
 export {
 	nativeToolDisplayTestUtils,
@@ -26,9 +27,11 @@ export function createExtensionPi(
 
 export async function resetIndexExtensionTestState(): Promise<void> {
 	vi.clearAllMocks();
+	installCursorSessionStoreMock();
 	delete process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY;
 	delete process.env.PI_CURSOR_REGISTER_NATIVE_TOOLS;
 	delete process.env.PI_CURSOR_PI_TOOL_BRIDGE;
+	delete process.env.PI_CURSOR_ASK_QUESTION;
 	delete process.env.PI_CURSOR_AUTO_REVIEW;
 	delete process.env.PI_CURSOR_SANDBOX;
 	await cursorPiToolBridgeTestUtils.resetRegisteredBridgeForTests();

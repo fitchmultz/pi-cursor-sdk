@@ -1,4 +1,4 @@
-import type { AgentMessage } from "@cursor/sdk";
+import type { AgentMessage, LocalAgentStore } from "@cursor/sdk";
 import { asRecord, getArray, getString } from "./cursor-record-utils.js";
 import { stringifyUnknown } from "./cursor-transcript-utils.js";
 import { loadCursorSdk } from "./cursor-sdk-runtime.js";
@@ -22,22 +22,28 @@ function getOneofCaseValue(value: unknown, caseName: string): unknown {
 	return record[caseName];
 }
 
-async function hasCursorAgentMessageAt(agentId: string, cwd: string, offset: number): Promise<boolean> {
+async function hasCursorAgentMessageAt(agentId: string, cwd: string, offset: number, store?: LocalAgentStore): Promise<boolean> {
 	const { Agent } = await loadCursorSdk();
-	const messages = await Agent.messages.list(agentId, { runtime: "local", cwd, limit: 1, offset });
+	const messages = await Agent.messages.list(agentId, {
+		runtime: "local",
+		cwd,
+		...(store ? { store } : {}),
+		limit: 1,
+		offset,
+	});
 	return messages.length > 0;
 }
 
-export async function countCursorAgentMessages(agentId: string, cwd: string): Promise<number> {
+export async function countCursorAgentMessages(agentId: string, cwd: string, store?: LocalAgentStore): Promise<number> {
 	let high = 1;
-	while (await hasCursorAgentMessageAt(agentId, cwd, high)) {
+	while (await hasCursorAgentMessageAt(agentId, cwd, high, store)) {
 		high *= 2;
 	}
 
 	let low = 0;
 	while (low < high) {
 		const mid = Math.floor((low + high) / 2);
-		if (await hasCursorAgentMessageAt(agentId, cwd, mid)) low = mid + 1;
+		if (await hasCursorAgentMessageAt(agentId, cwd, mid, store)) low = mid + 1;
 		else high = mid;
 	}
 	return low;
@@ -47,12 +53,14 @@ export async function loadCursorTranscriptWebToolCallsAfterOffset(options: {
 	agentId: string;
 	cwd: string;
 	offset: number | undefined;
+	store?: LocalAgentStore;
 }): Promise<CursorTranscriptCompletedToolCall[]> {
 	if (options.offset === undefined) return [];
 	const { Agent } = await loadCursorSdk();
 	const messages = await Agent.messages.list(options.agentId, {
 		runtime: "local",
 		cwd: options.cwd,
+		...(options.store ? { store: options.store } : {}),
 		limit: CURSOR_AGENT_MESSAGE_PAGE_LIMIT,
 		offset: options.offset,
 	});

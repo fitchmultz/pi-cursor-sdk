@@ -4,10 +4,12 @@ import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent
 import type { SessionCursorAgentSendState } from "./cursor-session-agent.js";
 import { asRecord } from "./cursor-record-utils.js";
 import { getCursorSessionScopeKey } from "./cursor-session-scope.js";
+import type { CursorSessionStoreIdentity } from "./cursor-session-store.js";
 
 export const CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE = "cursor-sdk-agent-resume";
 
-const RESUME_ENTRY_VERSION = 1;
+const LEGACY_RESUME_ENTRY_VERSION = 1;
+const RESUME_ENTRY_VERSION = 2;
 const MAX_LOCAL_AGENT_ID_LENGTH = 256;
 const EMPTY_BRANCH_HASH = hashParts(["cursor-sdk-agent-resume-branch", "v1"]);
 
@@ -24,8 +26,13 @@ export interface CursorSessionAgentResumeScope {
 	repoRoot?: string;
 }
 
+export interface CursorSessionAgentCleanupCandidate {
+	agentId: string;
+	storeIdentity?: CursorSessionStoreIdentity;
+}
+
 export interface CursorSessionAgentResumeEntryData {
-	version: 1;
+	version: 1 | 2;
 	runtime: "local";
 	agentId: string;
 	scopeKey: string;
@@ -38,7 +45,9 @@ export interface CursorSessionAgentResumeEntryData {
 	compactionGeneration: number;
 	sendState: SessionCursorAgentSendState;
 	createdAt: string;
+	storeIdentity?: CursorSessionStoreIdentity;
 	cleanupCandidateAgentIds?: string[];
+	cleanupCandidates?: CursorSessionAgentCleanupCandidate[];
 }
 
 interface PendingCursorSessionAgentResumeHandle {
@@ -46,6 +55,7 @@ interface PendingCursorSessionAgentResumeHandle {
 	agentId: string;
 	poolKey: string;
 	sendState: SessionCursorAgentSendState;
+	storeIdentity: CursorSessionStoreIdentity;
 }
 
 interface CursorSessionResumeState {
@@ -109,10 +119,31 @@ function isSendState(value: unknown): value is SessionCursorAgentSendState {
 		typeof record.incrementalSendCount === "number";
 }
 
+function parseStoreIdentity(value: unknown): CursorSessionStoreIdentity | undefined {
+	const record = asRecord(value);
+	if (record?.version !== 1 || typeof record.stateRoot !== "string" || !record.stateRoot) return undefined;
+	return { version: 1, stateRoot: record.stateRoot };
+}
+
+function parseCleanupCandidates(value: unknown): CursorSessionAgentCleanupCandidate[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	const candidates = value.flatMap((item): CursorSessionAgentCleanupCandidate[] => {
+		const record = asRecord(item);
+		if (!isCursorLocalAgentId(record?.agentId)) return [];
+		const storeIdentity = record.storeIdentity === undefined ? undefined : parseStoreIdentity(record.storeIdentity);
+		if (record.storeIdentity !== undefined && !storeIdentity) return [];
+		return [{ agentId: record.agentId, ...(storeIdentity ? { storeIdentity } : {}) }];
+	});
+	return candidates.length ? candidates : undefined;
+}
+
 export function parseCursorSessionAgentResumeEntryData(value: unknown): CursorSessionAgentResumeEntryData | undefined {
 	const record = asRecord(value);
 	if (!record) return undefined;
-	if (record.version !== RESUME_ENTRY_VERSION || record.runtime !== "local") return undefined;
+	if (
+		(record.version !== LEGACY_RESUME_ENTRY_VERSION && record.version !== RESUME_ENTRY_VERSION) ||
+		record.runtime !== "local"
+	) return undefined;
 	if (
 		!isCursorLocalAgentId(record.agentId) ||
 		typeof record.scopeKey !== "string" ||
@@ -126,11 +157,14 @@ export function parseCursorSessionAgentResumeEntryData(value: unknown): CursorSe
 	if (record.sessionFile !== undefined && typeof record.sessionFile !== "string") return undefined;
 	if (record.sessionId !== undefined && typeof record.sessionId !== "string") return undefined;
 	if (record.repoRoot !== undefined && typeof record.repoRoot !== "string") return undefined;
+	const storeIdentity = parseStoreIdentity(record.storeIdentity);
+	if (record.version === RESUME_ENTRY_VERSION && !storeIdentity) return undefined;
 	const cleanupCandidateAgentIds = Array.isArray(record.cleanupCandidateAgentIds)
 		? record.cleanupCandidateAgentIds.filter(isCursorLocalAgentId)
 		: undefined;
+	const cleanupCandidates = parseCleanupCandidates(record.cleanupCandidates);
 	return {
-		version: RESUME_ENTRY_VERSION,
+		version: record.version,
 		runtime: "local",
 		agentId: record.agentId,
 		scopeKey: record.scopeKey,
@@ -147,7 +181,9 @@ export function parseCursorSessionAgentResumeEntryData(value: unknown): CursorSe
 			incrementalSendCount: record.sendState.incrementalSendCount,
 		},
 		createdAt: record.createdAt,
+		...(storeIdentity ? { storeIdentity } : {}),
 		...(cleanupCandidateAgentIds?.length ? { cleanupCandidateAgentIds: [...new Set(cleanupCandidateAgentIds)] } : {}),
+		...(cleanupCandidates ? { cleanupCandidates } : {}),
 	};
 }
 
@@ -330,6 +366,7 @@ export function persistCursorSessionAgentResumeHandle(input: PendingCursorSessio
 		agentId: input.agentId,
 		poolKey: input.poolKey,
 		sendState: { ...input.sendState },
+		storeIdentity: { ...input.storeIdentity },
 	};
 }
 
@@ -338,8 +375,13 @@ function flushPendingCursorSessionAgentResumeHandle(branch: readonly SessionEntr
 	const pending = state.pendingHandle;
 	state.pendingHandle = undefined;
 	if (!pending || !state.appendEntry) return;
-	const previousAgentId = state.activeHandle?.agentId ?? state.lastBranchHandle?.agentId;
-	const cleanupCandidateAgentIds = previousAgentId && previousAgentId !== pending.agentId ? [previousAgentId] : undefined;
+	const previousHandle = state.activeHandle ?? state.lastBranchHandle;
+	const cleanupCandidates = state.sessionFile && previousHandle && previousHandle.agentId !== pending.agentId
+		? [{
+				agentId: previousHandle.agentId,
+				...(previousHandle.storeIdentity ? { storeIdentity: { ...previousHandle.storeIdentity } } : {}),
+			}]
+		: undefined;
 	const data: CursorSessionAgentResumeEntryData = {
 		version: RESUME_ENTRY_VERSION,
 		runtime: pending.runtime,
@@ -354,7 +396,8 @@ function flushPendingCursorSessionAgentResumeHandle(branch: readonly SessionEntr
 		compactionGeneration: state.compactionGeneration,
 		sendState: { ...pending.sendState },
 		createdAt: new Date().toISOString(),
-		...(cleanupCandidateAgentIds ? { cleanupCandidateAgentIds } : {}),
+		storeIdentity: { ...pending.storeIdentity },
+		...(cleanupCandidates ? { cleanupCandidates } : {}),
 	};
 	try {
 		state.appendEntry<CursorSessionAgentResumeEntryData>(CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE, data);

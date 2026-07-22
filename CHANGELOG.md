@@ -5,8 +5,15 @@
 ### Added
 
 - Emit `pi-cursor-sdk:ask-question:blocked` (`{ active: boolean }`) while `cursor_ask_question` awaits pi UI input, and clear it in `finally`. Consumers (e.g. Herdr) can subscribe and map it to blocked/working; listening is out of scope for this package.
+- Add default-on `PI_CURSOR_ASK_QUESTION`; set it to `0` to remove `cursor_ask_question` without disabling the rest of the pi tool bridge.
 - Add strictly opt-in Cursor Cloud pull-request controls: `--cursor-cloud-auto-create-pr` / `PI_CURSOR_CLOUD_AUTO_CREATE_PR` / `cloud.autoCreatePR` and `--cursor-cloud-skip-reviewer-request` / `PI_CURSOR_CLOUD_SKIP_REVIEWER_REQUEST` / `cloud.skipReviewerRequest`. Unset controls remain omitted from SDK options, project config is excluded, and local runtime behavior is unchanged.
 - Add strictly opt-in local-agent HTTP/1.1/SSE compatibility through `PI_CURSOR_HTTP_1_1`, `/cursor-http [on|off|toggle]`, and user `cursor-sdk.json` `local.useHttp1ForAgent`, resolved as session > environment > user > unset. Explicit values configure the Cursor SDK before local agent creation, session shutdown clears extension-owned SDK transport state before module reload, transport choices split the pooled agent key, and enabled local status shows `http1`; cloud and unset/default behavior remain unchanged. The pool-key shape change makes pre-upgrade local resume handles rebootstrap once; superseded handles remain eligible for explicit `/cursor-local-resume-cleanup`.
+
+### Fixed
+
+- Give each persisted pi session its own Cursor SDK SQLite store under the workspace SDK state root and thread that exact store through local create/resume, message reads, checkpoint lookup, delete, and explicit cleanup paths, preventing parallel pi sessions from contending on one workspace `index.db`. Fileless acquisitions use unique OS-temporary stores with guarded graceful removal and start a fresh agent after in-process invalidation instead of reopening a disposed temporary store. Resume entries now version their store identity; legacy entries keep the default workspace store for resume and migrate to the per-session store after fallback or replacement. Older extension versions ignore the new version-2 resume entries after a downgrade.
+- Initialize `CURSOR_RIPGREP_PATH` from the installed Cursor SDK platform package before local agent creation, including nested npm dependency layouts, so Cursor-native Grep/Glob can use the bundled executable.
+- Bound pending pi bridge `CallTool` waits to the effective MCP tool timeout, with a lower-only `PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS` override; expiry and cancellation remove stale calls and abort active pi execution when available.
 
 ### Changed
 

@@ -438,6 +438,35 @@ describe("extension registration and discovery", () => {
 		]);
 	});
 
+	it("clears herdr:blocked when the Cursor question UI rejects", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
+		mockedDiscover.mockResolvedValueOnce([]);
+		const pi = createExtensionPi();
+		await extensionFactory(pi);
+		await pi.runSessionStart();
+
+		const select = vi.fn().mockRejectedValue(new Error("UI failed"));
+		const tool = pi._tools.find((candidate) => candidate.name === CURSOR_ASK_QUESTION_TOOL_NAME);
+		await expect(
+			tool!.execute(
+				"question-reject",
+				{
+					question: "Proceed?",
+					options: ["Yes", "No"],
+					allowCustom: false,
+				},
+				undefined,
+				undefined,
+				createExtensionTestContext({ ui: { notify: vi.fn(), setStatus: vi.fn(), select, input: vi.fn() } }),
+			),
+		).rejects.toThrow("UI failed");
+
+		expect(pi._eventsEmitted.filter((entry) => entry.channel === "herdr:blocked")).toEqual([
+			{ channel: "herdr:blocked", data: { active: true, label: "Waiting for user response" } },
+			{ channel: "herdr:blocked", data: { active: false } },
+		]);
+	});
+
 	it("registers Cursor pi tool bridge state and activates the Cursor question tool", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
 		mockedDiscover.mockResolvedValueOnce([]);

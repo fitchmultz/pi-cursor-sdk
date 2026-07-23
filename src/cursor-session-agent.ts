@@ -8,7 +8,6 @@ import {
 } from "./cursor-pi-tool-bridge.js";
 import { computeCursorContextFingerprint } from "./context.js";
 import { getCursorSessionFile, getCursorSessionScopeGeneration, getCursorSessionScopeKey } from "./cursor-session-scope.js";
-import { queueCursorSessionAgentLineage } from "./cursor-session-agent-lineage.js";
 import {
 	getMatchingCursorSessionAgentResumeHandle,
 	persistCursorSessionAgentResumeHandle,
@@ -303,7 +302,6 @@ function commitSessionAgentSendForLease(
 	} else {
 		entry.sendState.incrementalSendCount += 1;
 	}
-	queueCursorSessionAgentLineage(entry.agent.agentId);
 	if (entry.resumeEnabled) {
 		persistCursorSessionAgentResumeHandle({
 			runtime: "local",

@@ -7,6 +7,7 @@ import {
 import { CursorLiveRunAbortError } from "./cursor-live-run-coordinator.js";
 import { cursorLiveRuns } from "./cursor-provider-live-run-drain.js";
 import { consumeCursorLocalForceOverride } from "./cursor-runtime-state.js";
+import { queueCursorSessionAgentLineage } from "./cursor-session-agent-lineage.js";
 import type { installCursorSdkProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
 import type {
 	CursorProviderTurnRunnerParams,
@@ -112,6 +113,9 @@ export async function sendCursorProviderTurn(sendParams: SendCursorProviderTurnP
 		throwIfAborted();
 		if (prepared.runtimeTarget === "local" && consumeCursorLocalForceOverride(prepared.localForce)) {
 			sendOptions.local = { force: true };
+		}
+		if (prepared.runtimeTarget === "local") {
+			queueCursorSessionAgentLineage(agent.agentId);
 		}
 		const run = await agent.send(payload, sendOptions);
 		sdkRun = run;

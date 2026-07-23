@@ -309,7 +309,7 @@ pi --model cursor/composer-2-5 --cursor-local-force
 
 This maps to the next actual `agent.send(..., { local: { force: true } })` only. SDK load, agent acquire, prompt preparation, or a pre-send abort does not consume it. A consumed CLI flag is not rearmed by session reload/tree lifecycle events; the environment override remains once per process. It is not a retry loop and does not cancel another live process's existing run handle; use it only when you know the persisted local run is wedged.
 
-Branch-scoped local resume reattaches to recorded local SDK agents after a pi restart. It is on by default for local runtime and records agent IDs plus their SDK store identity only in pi session custom entries, never user/project config. Independently of resume, each successful local agent is also recorded once per native pi session as a non-resumable `cursor-sdk-agent-lineage` custom entry for forensic lineage; cloned sessions record their own lineage under their new pi session ID. Disable resume per run with CLI/env, or persist an opt-out in config:
+Branch-scoped local resume reattaches to recorded local SDK agents after a pi restart. It is on by default for local runtime and records agent IDs plus their SDK store identity only in pi session custom entries, never user/project config. Independently of resume, each local agent whose send is initiated is also recorded once per native pi session as a non-resumable `cursor-sdk-agent-lineage` custom entry for forensic lineage; cloned sessions record their own lineage under their new pi session ID. Disable resume per run with CLI/env, or persist an opt-out in config:
 
 ```bash
 pi --model cursor/composer-2-5 --cursor-no-local-resume

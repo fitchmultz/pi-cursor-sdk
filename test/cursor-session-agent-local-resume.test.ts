@@ -2,6 +2,7 @@ import { toNamespacedPath } from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { computeCursorContextFingerprint } from "../src/context.js";
 import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
+import { __testUtils as lineageTestUtils } from "../src/cursor-session-agent-lineage.js";
 import { __testUtils as resumeTestUtils } from "../src/cursor-session-agent-resume.js";
 import {
 	acquireSessionCursorAgent,
@@ -15,6 +16,7 @@ describe("cursor-session-agent local resume", () => {
 	beforeEach(async () => {
 		installCursorSessionStoreMock();
 		cursorSessionScopeTestUtils.reset();
+		lineageTestUtils.reset();
 		resumeTestUtils.reset();
 		await sessionAgentTestUtils.disposeAllSessionCursorAgents();
 		vi.clearAllMocks();
@@ -356,6 +358,12 @@ describe("cursor-session-agent local resume", () => {
 			compactionGeneration: 0,
 		});
 		const context = makeContext([{ role: "user", content: "Hello", timestamp: 1 }]);
+		lineageTestUtils.set({
+			sessionId: "session-1",
+			sessionFile: scopeKey,
+			scopeKey,
+			cwd: "/tmp/project",
+		});
 		const params = {
 			apiKey: "test-key",
 			agentMode: "agent" as const,
@@ -367,6 +375,7 @@ describe("cursor-session-agent local resume", () => {
 		const disabled = await acquireSessionCursorAgent({ ...params, localResume: false });
 		disabled.commitSend(context, true);
 		expect(resumeTestUtils.state.pendingHandle).toBeUndefined();
+		expect(lineageTestUtils.state.pendingAgentIds).toEqual(new Set(["agent-1"]));
 
 		const enabled = await acquireSessionCursorAgent({ ...params, localResume: true });
 		enabled.commitSend(context, false);

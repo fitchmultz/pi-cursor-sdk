@@ -4,6 +4,7 @@
 
 ### Added
 
+- Record each distinct successfully used local Cursor agent once per native pi session in a non-resumable `cursor-sdk-agent-lineage` custom entry, including when local resume is disabled.
 - Add default-on `PI_CURSOR_ASK_QUESTION`; set it to `0` to remove `cursor_ask_question` without disabling the rest of the pi tool bridge.
 - Add strictly opt-in Cursor Cloud pull-request controls: `--cursor-cloud-auto-create-pr` / `PI_CURSOR_CLOUD_AUTO_CREATE_PR` / `cloud.autoCreatePR` and `--cursor-cloud-skip-reviewer-request` / `PI_CURSOR_CLOUD_SKIP_REVIEWER_REQUEST` / `cloud.skipReviewerRequest`. Unset controls remain omitted from SDK options, project config is excluded, and local runtime behavior is unchanged.
 - Add strictly opt-in local-agent HTTP/1.1/SSE compatibility through `PI_CURSOR_HTTP_1_1`, `/cursor-http [on|off|toggle]`, and user `cursor-sdk.json` `local.useHttp1ForAgent`, resolved as session > environment > user > unset. Explicit values configure the Cursor SDK before local agent creation, session shutdown clears extension-owned SDK transport state before module reload, transport choices split the pooled agent key, and enabled local status shows `http1`; cloud and unset/default behavior remain unchanged. The pool-key shape change makes pre-upgrade local resume handles rebootstrap once; superseded handles remain eligible for explicit `/cursor-local-resume-cleanup`.

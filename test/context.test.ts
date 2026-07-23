@@ -655,6 +655,8 @@ describe("cursor session prompt assembly", () => {
 		expect(prompt.text).toContain("Continue the conversation using Cursor SDK capabilities only");
 		expect(prompt.text).toContain("User: Follow up");
 		expect(prompt.text).not.toContain("Cursor SDK tool boundary:");
+		expect(prompt.text).not.toContain("System instructions from pi:");
+		expect(prompt.text).not.toContain("Be helpful.");
 		expect(prompt.text).not.toContain("User: Hello");
 	});
 
@@ -694,12 +696,36 @@ describe("cursor session prompt assembly", () => {
 		expect(planCursorSessionSend(sendState, editedContext).mode).toBe("bootstrap");
 	});
 
-	it("omits the full tool boundary block from incremental prompts", () => {
+	it("rebootstraps with current system instructions when the system context diverges", () => {
+		const priorContext: Context = {
+			systemPrompt: "Previous invariant instruction.",
+			messages: [{ role: "user", content: "Hello", timestamp: 1 }],
+		};
+		const context: Context = {
+			systemPrompt: "Current invariant instruction.",
+			messages: priorContext.messages,
+		};
+		const sendState = {
+			bootstrapped: true,
+			contextFingerprint: computeCursorContextFingerprint(priorContext),
+			incrementalSendCount: 0,
+		};
+		const plan = planCursorSessionSend(sendState, context);
+		const prompt = buildCursorSessionSendPrompt(context, {}, plan);
+
+		expect(plan).toMatchObject({ mode: "bootstrap", reason: "context_divergence" });
+		expect(prompt.text).toContain("System instructions from pi:\nCurrent invariant instruction.");
+		expect(prompt.text).not.toContain("Previous invariant instruction.");
+	});
+
+	it("omits invariant bootstrap instructions from incremental prompts", () => {
 		const incremental = buildCursorIncrementalPrompt({
 			systemPrompt: "Be helpful.",
 			messages: [{ role: "user", content: "Follow up", timestamp: 3 }],
 		});
 		expect(incremental.text).not.toContain("Cursor SDK tool boundary:");
+		expect(incremental.text).not.toContain("System instructions from pi:");
+		expect(incremental.text).not.toContain("Be helpful.");
 		expect(incremental.text).toContain("Continue the conversation using Cursor SDK capabilities only");
 		expect(incremental.text).toContain(getCursorToolTailGuardText());
 	});
@@ -726,6 +752,7 @@ describe("cursor session prompt assembly", () => {
 			{ maxInputTokens: 80, charsPerToken: 1 },
 		);
 
+		expect(incremental.text).not.toContain("Long pi system prompt.");
 		expect(incremental.text).toContain("User: Keep this exact follow-up request");
 		expect(incremental.text).toContain(getCursorToolTailGuardText());
 	});

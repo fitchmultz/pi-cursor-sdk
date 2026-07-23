@@ -80,6 +80,32 @@ interface CursorSessionAgentLineageExtensionApi {
 	on: ExtensionAPI["on"];
 }
 
+function flushPendingCursorSessionAgentLineage(pi: Pick<CursorSessionAgentLineageExtensionApi, "appendEntry">): void {
+	const { sessionId, sessionFile, scopeKey, cwd } = state;
+	const pendingAgentIds = [...state.pendingAgentIds];
+	state.pendingAgentIds.clear();
+	if (!sessionId || !scopeKey || !cwd) return;
+	for (const agentId of pendingAgentIds) {
+		if (state.recordedAgentIds.has(agentId)) continue;
+		const data: CursorSessionAgentLineageEntryData = {
+			version: LINEAGE_ENTRY_VERSION,
+			runtime: "local",
+			agentId,
+			sessionId,
+			...(sessionFile ? { sessionFile } : {}),
+			scopeKey,
+			cwd,
+			timestamp: new Date().toISOString(),
+		};
+		try {
+			pi.appendEntry<CursorSessionAgentLineageEntryData>(CURSOR_SESSION_AGENT_LINEAGE_ENTRY_TYPE, data);
+			state.recordedAgentIds.add(agentId);
+		} catch {
+			// Lineage is forensic metadata; a failed stock pi append must not affect the session.
+		}
+	}
+}
+
 export function registerCursorSessionAgentLineage(pi: CursorSessionAgentLineageExtensionApi): void {
 	pi.on("session_start", (_event, ctx) => {
 		state.sessionId = ctx.sessionManager.getSessionId();
@@ -89,31 +115,12 @@ export function registerCursorSessionAgentLineage(pi: CursorSessionAgentLineageE
 		state.pendingAgentIds.clear();
 		state.recordedAgentIds = readRecordedAgentIds(ctx.sessionManager.getEntries(), state.sessionId);
 	});
-	pi.on("turn_end", () => {
-		const { sessionId, sessionFile, scopeKey, cwd } = state;
-		const pendingAgentIds = [...state.pendingAgentIds];
-		state.pendingAgentIds.clear();
-		if (!sessionId || !scopeKey || !cwd) return;
-		for (const agentId of pendingAgentIds) {
-			if (state.recordedAgentIds.has(agentId)) continue;
-			const data: CursorSessionAgentLineageEntryData = {
-				version: LINEAGE_ENTRY_VERSION,
-				runtime: "local",
-				agentId,
-				sessionId,
-				...(sessionFile ? { sessionFile } : {}),
-				scopeKey,
-				cwd,
-				timestamp: new Date().toISOString(),
-			};
-			try {
-				pi.appendEntry<CursorSessionAgentLineageEntryData>(CURSOR_SESSION_AGENT_LINEAGE_ENTRY_TYPE, data);
-				state.recordedAgentIds.add(agentId);
-			} catch {
-				// Lineage is forensic metadata; a failed stock pi append must not affect the session.
-			}
-		}
-	});
+	const flushPending = () => flushPendingCursorSessionAgentLineage(pi);
+	pi.on("turn_end", flushPending);
+	// Pi calls the provider directly for compaction and tree summaries, outside an agent turn.
+	pi.on("session_compact", flushPending);
+	pi.on("session_tree", flushPending);
+	pi.on("session_shutdown", flushPending);
 }
 
 function resetStateForTests(): void {

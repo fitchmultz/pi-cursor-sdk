@@ -113,7 +113,9 @@ function shouldSuppressProcessError(event: string | symbol, args: readonly unkno
 		return containLocalTransportClosedPipeError();
 	}
 	if (isCursorSdkWriteIterableClosedError(error)) return activeSessions.size > 0;
-	if (isCursorSdkAbortError(error)) return hasActiveAbortSuppression();
+	if (isCursorSdkAbortError(error)) {
+		return activeProviderTurns.size > 0 || activeSessions.size > 0;
+	}
 	const classification = classifyCursorConnectError(error);
 	if (!classification) return false;
 	if (classification.kind === "abort") return hasActiveAbortSuppression();

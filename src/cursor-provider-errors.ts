@@ -165,6 +165,22 @@ function isCursorSdkStallAbortNetworkError(code: unknown, evidence: string, stac
 	);
 }
 
+/**
+ * Check if a ConnectError from @cursor/sdk's ConnectRPC retry logic indicates a stream
+ * that stalled repeatedly. Unlike isCursorSdkStallAbortNetworkError, this matches the
+ * "Connection stalled repeatedly" error message directly (not an AbortError wrapper).
+ * The SDK throws this when the retry count exceeds the limit in its fetchWithRetry
+ * wrapper (357.js function `fe`), typically after the stall detector failed to recover.
+ */
+function isCursorSdkStalledRepeatedlyNetworkError(code: unknown, evidence: string, stackEvidence: string): boolean {
+	return (
+		(code === 2 || (typeof code === "string" && /^(?:2|unknown)$/i.test(code))) &&
+		/\bstalled\b/i.test(evidence) &&
+		stackEvidence.includes("@cursor/sdk") &&
+		stackEvidence.includes("@connectrpc/connect-node")
+	);
+}
+
 function isCursorExtensionConnectStack(stack: string): boolean {
 	// pi runs Cursor SDK in Node, where the SDK dynamically imports connect-node.
 	// connect-web is the SDK's Bun/Deno path and is intentionally not classified for supported pi runs.
@@ -220,6 +236,10 @@ export function classifyCursorConnectError(error: unknown): CursorConnectErrorCl
 	}
 
 	if (isCursorSdkStallAbortNetworkError(code, evidence, stackEvidence)) {
+		return { kind: "network", source: getCursorConnectSource(error, record) };
+	}
+
+	if (isCursorSdkStalledRepeatedlyNetworkError(code, evidence, stackEvidence)) {
 		return { kind: "network", source: getCursorConnectSource(error, record) };
 	}
 

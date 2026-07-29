@@ -10,6 +10,7 @@ export const CURSOR_SDK_STARTUP_NOISE_PATTERNS = [
 	"AgentSkillsCursorRulesService load completed",
 	"Error initializing ignore mapping for",
 	"Ripgrep path not configured. Call configureRipgrepPath() at startup.",
+	"[shell-exec]",
 ];
 
 export function isCursorSdkOutputSuppressed() {

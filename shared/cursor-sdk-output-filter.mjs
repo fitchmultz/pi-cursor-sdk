@@ -85,3 +85,13 @@ export function installCursorSdkOutputFilter() {
 		outputFilterOriginals = undefined;
 	};
 }
+
+// Permanent [shell-exec] suppression: the SDK timer fires 5000ms after the
+// child exits, by which the per-turn output filter may have been restored.
+// This wrapper stays in place for the lifetime of the process.
+const __origConsoleWarn = console.warn;
+console.warn = (...args) => {
+	const text = args.map((a) => (typeof a === "string" ? a : String(a))).join(" ");
+	if (text.includes("[shell-exec]")) return;
+	return __origConsoleWarn.apply(console, args);
+};

@@ -45,4 +45,26 @@ describe("CursorToolCompletionLedger", () => {
 		expect(ledger.takeBridgeStartedCallId("bridge-1")).toBe("bridge-1");
 		expect(ledger.takeBridgeStartedCallId("bridge-1")).toBeUndefined();
 	});
+
+	it("tracks completed tool names for narration cross-checks and keeps them across started-call clear", () => {
+		const ledger = new CursorToolCompletionLedger();
+		const fingerprint = getToolFingerprint({ toolName: "Shell", args: { command: "pwd" }, result: {} });
+		ledger.recordCompletedTool({
+			identity: "cursor-tool:call-9",
+			source: "started",
+			fingerprint,
+			toolName: "Shell",
+		});
+		expect(ledger.completedToolCount()).toBe(1);
+		expect(ledger.hasAnyCompletedTool()).toBe(true);
+		expect([...ledger.getCompletedToolNames()]).toEqual(["Shell"]);
+		ledger.registerStartedToolCall("pending", { toolName: "read" });
+		ledger.clearStartedToolCalls();
+		expect(ledger.hasStartedToolCall("pending")).toBe(false);
+		expect(ledger.completedToolCount()).toBe(1);
+		expect([...ledger.getCompletedToolNames()]).toEqual(["Shell"]);
+		ledger.clear();
+		expect(ledger.completedToolCount()).toBe(0);
+		expect(ledger.hasAnyCompletedTool()).toBe(false);
+	});
 });

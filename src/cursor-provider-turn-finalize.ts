@@ -15,6 +15,7 @@ import {
 	resolveCursorRunOutcome,
 	type CursorRunOutcome,
 } from "./cursor-provider-run-outcome.js";
+import { maybeRepairNarratedToolTurn } from "./cursor-narrated-tool-repair.js";
 import type { CursorProviderTurnPrepareResult } from "./cursor-provider-turn-types.js";
 import { loadCursorSdk } from "./cursor-sdk-runtime.js";
 
@@ -207,5 +208,18 @@ export async function awaitFinalizeCursorRunOutcome(params: AwaitFinalizeCursorR
 			params.prepared.sessionAgentLease.store,
 		);
 	}
-	return { outcome, displayOnlyTraceBlock };
+	// Bounded in-turn repair when the model narrated tools and the ledger shows zero completions.
+	// Max one attempt; never loops; skipped on cancel/error via shouldRepairNarratedToolTurn.
+	const repairedOutcome = await maybeRepairNarratedToolTurn({
+		prepared: params.prepared,
+		outcome,
+		signal: params.signal,
+		sdkEventDebug: params.sdkEventDebug,
+		resolvedApiKey: params.resolvedApiKey,
+		optionsApiKey: params.optionsApiKey,
+	});
+	if (repairedOutcome !== outcome && isCursorRunFinishedSuccessfully(repairedOutcome)) {
+		params.prepared.runtime.turnCoordinator.discardIncompleteStartedToolCalls(repairedOutcome.incompleteTools);
+	}
+	return { outcome: repairedOutcome, displayOnlyTraceBlock };
 }

@@ -6,6 +6,8 @@ export interface ToolCompletionDedupeInput {
 	identity?: string;
 	source?: CursorToolDisplaySource;
 	fingerprint: string;
+	/** Normalized/display tool name for narration cross-checks. */
+	toolName?: string;
 }
 
 export type ToolCompletionDedupeReason =
@@ -19,6 +21,7 @@ export class CursorToolCompletionLedger {
 	private readonly completedToolIdentities = new Set<string>();
 	private readonly completedStartedToolFingerprints = new Set<string>();
 	private readonly completedFallbackToolFingerprints = new Set<string>();
+	private readonly completedToolNames = new Set<string>();
 
 	getStartedToolCall(callId: string): unknown | undefined {
 		return this.startedToolCalls.get(callId);
@@ -91,6 +94,21 @@ export class CursorToolCompletionLedger {
 		} else {
 			this.completedFallbackToolFingerprints.add(input.fingerprint);
 		}
+		const toolName = input.toolName?.trim();
+		if (toolName) this.completedToolNames.add(toolName);
+	}
+
+	getCompletedToolNames(): ReadonlySet<string> {
+		return this.completedToolNames;
+	}
+
+	hasAnyCompletedTool(): boolean {
+		return this.completedToolNames.size > 0 || this.completedToolIdentities.size > 0;
+	}
+
+	completedToolCount(): number {
+		// Prefer named completions; fall back to identities when names were omitted.
+		return Math.max(this.completedToolNames.size, this.completedToolIdentities.size);
 	}
 
 	clear(): void {
@@ -99,6 +117,7 @@ export class CursorToolCompletionLedger {
 		this.completedToolIdentities.clear();
 		this.completedStartedToolFingerprints.clear();
 		this.completedFallbackToolFingerprints.clear();
+		this.completedToolNames.clear();
 	}
 
 	/** Exposed for incomplete-tool discard iteration. */
@@ -107,6 +126,7 @@ export class CursorToolCompletionLedger {
 	}
 
 	clearStartedToolCalls(): void {
+		// Keep completedToolNames / identities — started-call cleanup must not erase turn history.
 		this.startedToolCalls.clear();
 		this.bridgeStartedToolCallIds.clear();
 	}

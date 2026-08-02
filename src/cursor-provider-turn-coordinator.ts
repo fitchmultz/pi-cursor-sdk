@@ -110,6 +110,18 @@ export class CursorSdkTurnCoordinator {
 		return this.sdkTurnUsage;
 	}
 
+	completedToolCount(): number {
+		return this.ledger.completedToolCount();
+	}
+
+	getCompletedToolNames(): ReadonlySet<string> {
+		return this.ledger.getCompletedToolNames();
+	}
+
+	hasAnyCompletedTool(): boolean {
+		return this.ledger.hasAnyCompletedTool();
+	}
+
 	discardIncompleteStartedToolCalls(
 		outcome: IncompleteCursorToolRunOutcome = buildIncompleteCursorToolRunOutcome(),
 	): void {
@@ -312,6 +324,7 @@ export class CursorSdkTurnCoordinator {
 			identity: options.identity,
 			source: options.source,
 			fingerprint,
+			toolName: display.toolName,
 		});
 
 		const action = this.displayRouter.routeCompletedToolCall(toolCall, options);

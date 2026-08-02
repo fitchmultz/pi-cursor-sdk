@@ -49,6 +49,7 @@ export function getCursorToolTailGuardText(
 			: getCursorPlanModeToolGuidanceText(options.agentMode, { includePiBridgeGuidance: options.includePiBridgeGuidance }),
 		"Exact-output requests: output exactly the requested text; no preamble or checks unless asked.",
 		"Tools: call available Cursor SDK/MCP tools; never print tool cards as assistant text.",
+		"Do not emit Tool call(...), CallMcpTool(...), or transcript-style tool cards as assistant text; those lines are not executed. Use real Cursor SDK/MCP tool calls only.",
 		options.includePiBridgeGuidance === false ? undefined : CURSOR_PI_BRIDGE_PREFERENCE_TEXT,
 	].filter((line): line is string => line !== undefined).join("\n");
 }
@@ -130,9 +131,49 @@ function formatContentBlocks(content: string | { type: string; text?: string; da
 		.join("\n");
 }
 
+/** Lines that look like narrated/mimicked tool cards rather than real SDK tool_use. */
+const NARRATED_TOOL_LINE_RE =
+	/^\s*(?:Tool call\s*\(|CallMcpTool\s*\(|Tool result\s*\(|Tool error\s*\()/i;
+
+const NARRATED_TOOL_TEXT_RE =
+	/(?:^|\n)\s*(?:Tool call\s*\(|CallMcpTool\s*\(|Tool result\s*\(|Tool error\s*\()/i;
+
+const NARRATED_TOOL_OMIT_NOTE =
+	"[Prior narrated tool-call text omitted from prompt history. Invoke tools via real Cursor SDK/MCP tool calls; do not print tool cards as assistant text.]";
+
+const NARRATED_TOOL_RECOVERY_TEXT =
+	"Recovery: the latest user message contains narrated tool-call text that was NOT executed. Call the real Cursor SDK/MCP tools now; do not re-print tool cards as assistant text.";
+
+export function containsNarratedToolText(text: string): boolean {
+	return NARRATED_TOOL_TEXT_RE.test(text);
+}
+
+/** Strip mimickable Tool call(...)/CallMcpTool(...) narration; keep surrounding prose. */
+export function scrubNarratedToolText(text: string): string {
+	if (!containsNarratedToolText(text)) return text;
+	const kept: string[] = [];
+	let removed = 0;
+	for (const line of text.split("\n")) {
+		if (NARRATED_TOOL_LINE_RE.test(line)) {
+			removed += 1;
+			continue;
+		}
+		kept.push(line);
+	}
+	if (removed === 0) return text;
+	const prose = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+	return prose ? `${prose}\n${NARRATED_TOOL_OMIT_NOTE}` : NARRATED_TOOL_OMIT_NOTE;
+}
+
 function formatToolCall(toolCall: ToolCall): string {
 	const args = JSON.stringify(toolCall.arguments) ?? "";
-	return `Tool call (${getCursorReplayPromptLabel(toolCall.name)}, call ${toolCall.id}): ${args}`;
+	return `[prior-tool name=${getCursorReplayPromptLabel(toolCall.name)} id=${toolCall.id}] ${args}`;
+}
+
+function formatToolResultMessage(msg: Extract<Message, { role: "toolResult" }>): string {
+	const text = formatContentBlocks(msg.content);
+	const kind = msg.isError ? "prior-tool-error" : "prior-tool-result";
+	return `[${kind} name=${getCursorReplayPromptLabel(msg.toolName)} id=${msg.toolCallId}] ${text}`;
 }
 
 function sanitizeSystemPromptForCursor(systemPrompt: string): string {
@@ -162,7 +203,7 @@ function formatMessage(msg: Message): string | undefined {
 			const textParts: string[] = [];
 			for (const block of blocks) {
 				if (isTextBlock(block)) {
-					textParts.push(block.text);
+					textParts.push(scrubNarratedToolText(block.text));
 				} else if (isToolCallBlock(block)) {
 					textParts.push(formatToolCall(block));
 				}
@@ -171,9 +212,7 @@ function formatMessage(msg: Message): string | undefined {
 			return textParts.length > 0 ? `Assistant: ${textParts.join("\n")}` : undefined;
 		}
 		case "toolResult": {
-			const text = formatContentBlocks(msg.content);
-			const label = msg.isError ? "Tool error" : "Tool result";
-			return `${label} (${getCursorReplayPromptLabel(msg.toolName)}, call ${msg.toolCallId}): ${text}`;
+			return formatToolResultMessage(msg);
 		}
 	}
 }
@@ -380,11 +419,16 @@ export function buildCursorIncrementalPrompt(context: Context, options: CursorPr
 	const latestUserMessageIndex = getLatestUserMessageIndex(messages);
 	const latestUserMessage = latestUserMessageIndex >= 0 ? messages[latestUserMessageIndex] : undefined;
 	const latestUserText = latestUserMessage ? formatMessage(latestUserMessage) : undefined;
+	const latestUserRawText = latestUserMessage ? formatContentBlocks(latestUserMessage.content) : "";
 	const sectionsBeforeMessages = [
 		"Continue the conversation using Cursor SDK capabilities only. Do not list, promise, or call pi-only tools from earlier context as if they were available.",
 	];
 	const latestUserMessageSections =
 		latestUserText && latestUserMessageIndex >= 0 ? [{ index: latestUserMessageIndex, text: latestUserText }] : [];
+	const sectionsAfterMessages = [
+		...(containsNarratedToolText(latestUserRawText) ? [NARRATED_TOOL_RECOVERY_TEXT] : []),
+		getCursorToolTailGuardText(options),
+	];
 	const images = extractLatestImages(messages);
 	const imageTokenReserve = images.length * (options.imageTokenEstimate ?? 0);
 	const budgetOptions =
@@ -394,7 +438,7 @@ export function buildCursorIncrementalPrompt(context: Context, options: CursorPr
 	const parts = applyPromptBudget(
 		sectionsBeforeMessages,
 		latestUserMessageSections,
-		[getCursorToolTailGuardText(options)],
+		sectionsAfterMessages,
 		latestUserMessageIndex,
 		budgetOptions,
 	);

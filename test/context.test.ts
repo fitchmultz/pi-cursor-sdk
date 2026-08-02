@@ -9,6 +9,8 @@ import {
 	estimateCursorContextTokens,
 	estimateCursorPromptMessageTokens,
 	getCursorToolTailGuardText,
+	scrubNarratedToolText,
+	containsNarratedToolText,
 } from "../src/context.js";
 import {
 	buildCursorSessionSendPrompt,
@@ -139,7 +141,8 @@ describe("buildCursorPrompt", () => {
 			],
 		};
 		const result = buildCursorPrompt(ctx);
-		expect(result.text).toContain("Tool result (bash, call tc1): output here");
+		expect(result.text).toContain("[prior-tool-result name=bash id=tc1] output here");
+		expect(result.text).not.toContain("Tool result (");
 	});
 
 	it("formats tool errors", () => {
@@ -157,7 +160,8 @@ describe("buildCursorPrompt", () => {
 			],
 		};
 		const result = buildCursorPrompt(ctx);
-		expect(result.text).toContain("Tool error (bash, call tc1): command failed");
+		expect(result.text).toContain("[prior-tool-error name=bash id=tc1] command failed");
+		expect(result.text).not.toContain("Tool error (");
 	});
 
 	it("preserves real pi edit and write tool names in Cursor prompt labels", () => {
@@ -198,14 +202,14 @@ describe("buildCursorPrompt", () => {
 
 		const result = buildCursorPrompt(ctx);
 
-		expect(result.text).toContain('Tool call (edit, call edit-call): {"path":"src/a.ts"}');
-		expect(result.text).toContain('Tool call (write, call write-call): {"path":"src/b.ts"}');
-		expect(result.text).toContain("Tool result (edit, call edit-call): edit ok");
-		expect(result.text).toContain("Tool result (write, call write-call): write ok");
-		expect(result.text).not.toContain("Tool call (Cursor edit");
-		expect(result.text).not.toContain("Tool call (Cursor write");
-		expect(result.text).not.toContain("Tool result (Cursor edit");
-		expect(result.text).not.toContain("Tool result (Cursor write");
+		expect(result.text).toContain('[prior-tool name=edit id=edit-call] {"path":"src/a.ts"}');
+		expect(result.text).toContain('[prior-tool name=write id=write-call] {"path":"src/b.ts"}');
+		expect(result.text).toContain("[prior-tool-result name=edit id=edit-call] edit ok");
+		expect(result.text).toContain("[prior-tool-result name=write id=write-call] write ok");
+		expect(result.text).not.toContain("Tool call (");
+		expect(result.text).not.toContain("Tool result (");
+		expect(result.text).not.toContain("[prior-tool name=Cursor edit");
+		expect(result.text).not.toContain("[prior-tool name=Cursor write");
 	});
 
 	it("labels canonical neutral Cursor replay activity without rewriting literal transcript text", () => {
@@ -245,10 +249,11 @@ describe("buildCursorPrompt", () => {
 
 		expect(result.text).toContain("User: Please search for the literal string replay_marker.");
 		expect(result.text).toContain("Assistant: I will preserve literal activity_marker text.");
-		expect(result.text).toContain("Tool call (Cursor activity, call activity-call)");
+		expect(result.text).toContain("[prior-tool name=Cursor activity id=activity-call]");
 		expect(result.text).toContain('{"activityTitle":"Cursor MCP","note":"result_marker"}');
-		expect(result.text).toContain('Tool call (bash, call bash-call): {"command":"echo mcp_marker"}');
-		expect(result.text).toContain("Tool result (Cursor activity, call activity-call): recorded replay_marker result");
+		expect(result.text).toContain('[prior-tool name=bash id=bash-call] {"command":"echo mcp_marker"}');
+		expect(result.text).toContain("[prior-tool-result name=Cursor activity id=activity-call] recorded replay_marker result");
+		expect(result.text).not.toContain("Tool call (");
 	});
 
 	it("estimates assistant prompt-message tokens from replayed text and tool calls but not thinking", () => {
@@ -267,7 +272,7 @@ describe("buildCursorPrompt", () => {
 			timestamp: 2,
 		} satisfies AssistantMessage;
 
-		const expected = 'Assistant: I will inspect the directory.\nTool call (bash, call tc1): {"command":"ls"}';
+		const expected = 'Assistant: I will inspect the directory.\n[prior-tool name=bash id=tc1] {"command":"ls"}';
 		expect(estimateCursorPromptMessageTokens(assistant, { charsPerToken: 1 })).toBe(expected.length);
 		expect(expected).not.toContain("hidden reasoning");
 	});
@@ -282,7 +287,9 @@ describe("buildCursorPrompt", () => {
 			timestamp: 3,
 		} satisfies ToolResultMessage;
 
-		expect(estimateCursorPromptMessageTokens(toolResult, { charsPerToken: 1 })).toBe("Tool result (bash, call tc1): README.md".length);
+		expect(estimateCursorPromptMessageTokens(toolResult, { charsPerToken: 1 })).toBe(
+			"[prior-tool-result name=bash id=tc1] README.md".length,
+		);
 	});
 
 	it("estimates tool-result image prompt content as the replay placeholder text", () => {
@@ -296,7 +303,7 @@ describe("buildCursorPrompt", () => {
 		} satisfies ToolResultMessage;
 
 		expect(estimateCursorPromptMessageTokens(toolResult, { charsPerToken: 1 })).toBe(
-			"Tool result (read_image, call tc1): [image omitted from transcript]".length,
+			"[prior-tool-result name=read_image id=tc1] [image omitted from transcript]".length,
 		);
 	});
 
@@ -350,8 +357,72 @@ describe("buildCursorPrompt", () => {
 			],
 		};
 		const result = buildCursorPrompt(ctx);
-		expect(result.text).toContain("Assistant: I will inspect the directory.\nTool call (bash, call tc1): {\"command\":\"ls\"}");
-		expect(result.text).toContain("Tool result (bash, call tc1): README.md");
+		expect(result.text).toContain(
+			'Assistant: I will inspect the directory.\n[prior-tool name=bash id=tc1] {"command":"ls"}',
+		);
+		expect(result.text).toContain("[prior-tool-result name=bash id=tc1] README.md");
+		expect(result.text).not.toContain("Tool call (");
+		expect(result.text).not.toContain("Tool result (");
+	});
+
+	it("scrubs narrated Tool call/CallMcpTool text from assistant history while keeping prose", () => {
+		const narrated = [
+			"Didn't stop on purpose — tool calls failed mid-check.",
+			'Tool call(command=cd /tmp && echo hi, description=Verify state)',
+			"CallMcpTool(server=pi_tools, toolName=pi__intercom, arguments={})",
+			"Tool call (bash, call tc1): {\"command\":\"ls\"}",
+		].join("\n");
+		expect(containsNarratedToolText(narrated)).toBe(true);
+		const scrubbed = scrubNarratedToolText(narrated);
+		expect(scrubbed).toContain("Didn't stop on purpose");
+		expect(scrubbed).toContain("Prior narrated tool-call text omitted");
+		expect(scrubbed).not.toContain("Tool call(");
+		expect(scrubbed).not.toContain("CallMcpTool(");
+		expect(scrubbed).not.toContain("Tool call (");
+
+		const ctx: Context = {
+			messages: [
+				{ role: "user", content: "continue", timestamp: 1 } satisfies UserMessage,
+				{
+					role: "assistant",
+					content: [{ type: "text", text: narrated }],
+					api: "cursor-sdk",
+					provider: "cursor",
+					model: "test",
+					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+					stopReason: "stop",
+					timestamp: 2,
+				} satisfies AssistantMessage,
+			],
+		};
+		const result = buildCursorPrompt(ctx);
+		expect(result.text).toContain("Didn't stop on purpose");
+		expect(result.text).toContain("Prior narrated tool-call text omitted");
+		expect(result.text).not.toContain("description=Verify state");
+		expect(result.text).not.toContain("toolName=pi__intercom");
+		expect(result.text).not.toContain('{"command":"ls"}');
+	});
+
+	it("adds incremental recovery when the latest user message contains narrated tool text", () => {
+		const userText = [
+			"Retrying checks with proper tool calls, then deploy.",
+			'Tool call(command=cd /tmp && pwd, description=Verify lidar and mcap change state)',
+			"CallMcpTool(server=pi_tools, toolName=pi__intercom, arguments={})",
+		].join("\n");
+		const ctx: Context = {
+			messages: [{ role: "user", content: userText, timestamp: 1 } satisfies UserMessage],
+		};
+		const incremental = buildCursorIncrementalPrompt(ctx);
+		expect(incremental.text).toContain("User: Retrying checks");
+		expect(incremental.text).toContain("Recovery: the latest user message contains narrated tool-call text");
+		expect(incremental.text).toContain("was NOT executed");
+		expect(incremental.text).toContain("Do not emit Tool call(...), CallMcpTool(...)");
+		expect(incremental.text.endsWith(getCursorToolTailGuardText())).toBe(true);
+
+		const normal = buildCursorIncrementalPrompt({
+			messages: [{ role: "user", content: "plain follow-up", timestamp: 1 }],
+		});
+		expect(normal.text).not.toContain("Recovery: the latest user message contains narrated tool-call text");
 	});
 
 	it("extracts images from latest user message only", () => {
@@ -459,7 +530,7 @@ describe("buildCursorPrompt", () => {
 
 		expect(result.text).toContain("User: latest request");
 		expect(result.text).toContain("User: recent request");
-		expect(result.text).toContain("Tool result (bash, call tc1): recent tool output");
+		expect(result.text).toContain("[prior-tool-result name=bash id=tc1] recent tool output");
 		expect(result.text).not.toContain("old request");
 	});
 
@@ -596,11 +667,13 @@ describe("buildCursorPrompt", () => {
 		expect(tail).toContain("explicit `cd`");
 		expect(tail).toContain("session cwd may differ from tool args");
 		expect(tail).toContain("Exact-output requests");
+		expect(tail).toContain("Do not emit Tool call(...), CallMcpTool(...)");
 		const bootstrap = buildCursorPrompt({ messages: [{ role: "user", content: "test", timestamp: 1 }] });
 		const incremental = buildCursorIncrementalPrompt({ messages: [{ role: "user", content: "test", timestamp: 1 }] });
 		expect(bootstrap.text).toContain("explicit `cd`");
 		expect(incremental.text).toContain("explicit `cd`");
 		expect(incremental.text).toContain("prefer pi__mcp for MCP work and pi__subagent for delegation");
+		expect(bootstrap.text).toContain("Do not emit Tool call(...), CallMcpTool(...)");
 	});
 
 	it("adds plan-mode guidance without disabling inspection tools", () => {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.63 - Unreleased
+
+### Fixed
+
+- Stop feeding mimickable `Tool call (` / `Tool result (` transcript cards into Cursor prompts (#40). History now uses `[prior-tool …]` / `[prior-tool-result …]`, assistant text that narrates `Tool call(` / `CallMcpTool(` is scrubbed, the tool tail guard forbids those forms, and incremental continues recover when the latest user message still contains narrated tool text.
+
 ## 0.1.62 - 2026-07-29
 
 ### Added

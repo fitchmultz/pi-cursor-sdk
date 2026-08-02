@@ -425,6 +425,43 @@ describe("buildCursorPrompt", () => {
 		expect(normal.text).not.toContain("Recovery: the latest user message contains narrated tool-call text");
 	});
 
+	it("scrubs wrapped multi-line and prefixed narrated tool cards from assistant history", () => {
+		const narrated = [
+			"Verifying both repos now.",
+			"- Tool call(command=cd /tmp && echo hi",
+			"&& rg -n range_image messages/lidar_data.proto, description=Verify lidar and mcap change state)",
+			"Then: CallMcpTool(server=pi_tools, toolName=pi__intercom, arguments={})",
+		].join("\n");
+		const scrubbed = scrubNarratedToolText(narrated);
+		expect(scrubbed).toContain("Verifying both repos now.");
+		expect(scrubbed).toContain("Prior narrated tool-call text omitted");
+		expect(scrubbed).not.toContain("messages/lidar_data.proto");
+		expect(scrubbed).not.toContain("description=Verify lidar and mcap change state");
+		expect(scrubbed).not.toContain("toolName=pi__intercom");
+
+		const ctx: Context = {
+			messages: [
+				{ role: "user", content: "continue", timestamp: 1 } satisfies UserMessage,
+				{
+					role: "assistant",
+					content: [{ type: "text", text: narrated }],
+					api: "cursor-sdk",
+					provider: "cursor",
+					model: "test",
+					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+					stopReason: "stop",
+					timestamp: 2,
+				} satisfies AssistantMessage,
+			],
+		};
+		const result = buildCursorPrompt(ctx);
+		expect(result.text).toContain("Verifying both repos now.");
+		expect(result.text).not.toContain("messages/lidar_data.proto");
+		expect(result.text).not.toContain("toolName=pi__intercom");
+		// Tail guard still mentions CallMcpTool(...) as a forbidden form; assert history scrub via scrubbed helper above.
+		expect(scrubbed).not.toContain("CallMcpTool(");
+	});
+
 	it("extracts images from latest user message only", () => {
 		const ctx: Context = {
 			messages: [

@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { getCursorToolTailGuardText } from "../src/context.js";
 import {
 	classifyNarratedToolTurn,
 	findBalancedParenEnd,
@@ -8,8 +9,11 @@ import {
 } from "../src/cursor-narrated-tool-detection.js";
 import {
 	buildNarratedToolRepairPrompt,
+	maybeRepairNarratedToolTurn,
 	shouldRepairNarratedToolTurn,
 } from "../src/cursor-narrated-tool-repair.js";
+import type { CursorRunOutcome } from "../src/cursor-provider-run-outcome.js";
+import type { CursorProviderTurnPrepareResult } from "../src/cursor-provider-turn-types.js";
 
 /** Real incident payload: wrapped multi-line Tool call + CallMcpTool (from #40 repro). */
 const REAL_WRAPPED_INCIDENT = [
@@ -79,6 +83,25 @@ describe("cursor-narrated-tool-detection", () => {
 		const prose = "The bug: model prints Tool call cards as plain text instead of executing.";
 		expect(isNarratedToolText(prose)).toBe(false);
 		expect(stripNarratedToolInvocations(prose).text).toBe(prose);
+	});
+
+	it("does not treat the tool tail guard itself as narrated tool text", () => {
+		const tail = getCursorToolTailGuardText();
+		expect(isNarratedToolText(tail)).toBe(false);
+		expect(tail).not.toContain("Tool call(");
+		expect(tail).not.toContain("CallMcpTool(");
+	});
+
+	it("does not treat bare write/read/ls calls as narration without knownToolNames", () => {
+		for (const line of [
+			"Please write(path) carefully.",
+			"Use read(file) to inspect.",
+			"Then ls(dir) for listing.",
+			'const x = write({"path":"a.ts"});',
+			'await read({"path":"/etc/hosts"});',
+		]) {
+			expect(isNarratedToolText(line), line).toBe(false);
+		}
 	});
 
 	it("balanced-paren matcher respects quotes and nesting", () => {
@@ -152,5 +175,38 @@ describe("shouldRepairNarratedToolTurn", () => {
 		expect(prompt).toContain("Tool call");
 		expect(prompt).toContain("CallMcpTool");
 		expect(prompt).toContain("Call the real Cursor SDK/MCP tools");
+	});
+
+	it("maybeRepair skips when coordinator lacks completedToolCount without throwing or sending", async () => {
+		const send = vi.fn();
+		const outcome = {
+			kind: "finished",
+			waitResult: { id: "run-1", status: "finished" },
+			finalText: REAL_WRAPPED_INCIDENT,
+			incompleteTools: { reason: "no-completion-at-run-end", assistantTextProduced: true },
+			assistantTextProduced: true,
+		} as unknown as CursorRunOutcome;
+		const prepared = {
+			runtime: {
+				kind: "direct",
+				turnCoordinator: {
+					planTextCandidate: undefined,
+					discardIncompleteStartedToolCalls: vi.fn(),
+				},
+			},
+			meta: { agentMode: "agent", modelSelection: "test", bootstrap: false },
+			agent: { send },
+			textDeltas: [],
+			runtimeTarget: "local",
+		} as unknown as CursorProviderTurnPrepareResult;
+
+		await expect(
+			maybeRepairNarratedToolTurn({
+				prepared,
+				outcome,
+				repairEnabled: true,
+			}),
+		).resolves.toBe(outcome);
+		expect(send).not.toHaveBeenCalled();
 	});
 });

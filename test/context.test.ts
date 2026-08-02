@@ -416,7 +416,9 @@ describe("buildCursorPrompt", () => {
 		expect(incremental.text).toContain("User: Retrying checks");
 		expect(incremental.text).toContain("Recovery: the latest user message contains narrated tool-call text");
 		expect(incremental.text).toContain("was NOT executed");
-		expect(incremental.text).toContain("Do not emit Tool call(...), CallMcpTool(...)");
+		expect(incremental.text).toContain(
+			"Never print tool cards, tool-call transcripts, or simulated tool invocations",
+		);
 		expect(incremental.text.endsWith(getCursorToolTailGuardText())).toBe(true);
 
 		const normal = buildCursorIncrementalPrompt({
@@ -458,7 +460,7 @@ describe("buildCursorPrompt", () => {
 		expect(result.text).toContain("Verifying both repos now.");
 		expect(result.text).not.toContain("messages/lidar_data.proto");
 		expect(result.text).not.toContain("toolName=pi__intercom");
-		// Tail guard still mentions CallMcpTool(...) as a forbidden form; assert history scrub via scrubbed helper above.
+		// Tail guard must not embed invocable Tool call/CallMcpTool literals; scrub coverage is asserted above.
 		expect(scrubbed).not.toContain("CallMcpTool(");
 	});
 
@@ -704,13 +706,19 @@ describe("buildCursorPrompt", () => {
 		expect(tail).toContain("explicit `cd`");
 		expect(tail).toContain("session cwd may differ from tool args");
 		expect(tail).toContain("Exact-output requests");
-		expect(tail).toContain("Do not emit Tool call(...), CallMcpTool(...)");
+		expect(tail).toContain(
+			"Never print tool cards, tool-call transcripts, or simulated tool invocations",
+		);
+		expect(tail).not.toContain("Tool call(");
+		expect(tail).not.toContain("CallMcpTool(");
 		const bootstrap = buildCursorPrompt({ messages: [{ role: "user", content: "test", timestamp: 1 }] });
 		const incremental = buildCursorIncrementalPrompt({ messages: [{ role: "user", content: "test", timestamp: 1 }] });
 		expect(bootstrap.text).toContain("explicit `cd`");
 		expect(incremental.text).toContain("explicit `cd`");
 		expect(incremental.text).toContain("prefer pi__mcp for MCP work and pi__subagent for delegation");
-		expect(bootstrap.text).toContain("Do not emit Tool call(...), CallMcpTool(...)");
+		expect(bootstrap.text).toContain(
+			"Never print tool cards, tool-call transcripts, or simulated tool invocations",
+		);
 	});
 
 	it("adds plan-mode guidance without disabling inspection tools", () => {

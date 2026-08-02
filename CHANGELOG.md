@@ -4,8 +4,9 @@
 
 ### Fixed
 
-- Stop feeding mimickable `Tool call (` / `Tool result (` transcript cards into Cursor prompts (#40). History now uses `[prior-tool …]` / `[prior-tool-result …]`, assistant text that narrates `Tool call(` / `CallMcpTool(` is scrubbed, the tool tail guard forbids those forms, and incremental continues recover when the latest user message still contains narrated tool text.
+- Stop feeding mimickable `Tool call (` / `Tool result (` transcript cards into Cursor prompts (#40). History now uses `[prior-tool …]` / `[prior-tool-result …]`, assistant text that narrates `Tool call(` / `CallMcpTool(` is scrubbed, and incremental continues recover when the latest user message still contains narrated tool text.
 - Narration detection is now ledger-backed and span-based (#40): a balanced-paren scanner (not a line regex) removes wrapped/prefixed tool cards, and narration is only asserted when the turn ledger shows zero completed tools. Finished turns that narrate tools with no executions get one bounded corrective continuation (`PI_CURSOR_NARRATED_TOOL_REPAIR=0` disables; debug phase `narrated-tool-turn-repair`).
+- Repair is fail-safe when the turn coordinator lacks ledger methods, and the tool tail guard no longer embeds invocable `Tool call(`/`CallMcpTool(` literals (those primed false-positive repair loops when mocks/models echoed the guard). Builtin narration names are transcript-shaped only; generic host tools match via `knownToolNames`.
 
 ## 0.1.62 - 2026-07-29
 

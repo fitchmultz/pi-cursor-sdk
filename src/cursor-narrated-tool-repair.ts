@@ -58,6 +58,23 @@ export interface MaybeRepairNarratedToolTurnParams {
 	repairEnabled?: boolean;
 }
 
+type RepairCapableCoordinator = {
+	completedToolCount: () => number;
+	activeToolNames?: ReadonlySet<string>;
+	handleDelta: (update: unknown) => void;
+	handleStep: (step: unknown) => void;
+	planTextCandidate?: string;
+};
+
+function asRepairCapableCoordinator(value: unknown): RepairCapableCoordinator | undefined {
+	if (!value || typeof value !== "object") return undefined;
+	const coordinator = value as Record<string, unknown>;
+	if (typeof coordinator.completedToolCount !== "function") return undefined;
+	if (typeof coordinator.handleDelta !== "function") return undefined;
+	if (typeof coordinator.handleStep !== "function") return undefined;
+	return coordinator as RepairCapableCoordinator;
+}
+
 function recordRepairDebug(
 	sdkEventDebug: CursorSdkEventDebugSink | undefined,
 	classification: NarratedToolTurnClassification,
@@ -77,6 +94,7 @@ function recordRepairDebug(
 /**
  * At most one bounded corrective continuation when the finished turn narrated tools
  * and the ledger shows zero completions. Never loops; never runs on cancel/error.
+ * Fail-safe: missing ledger methods or any unexpected error returns the original outcome.
  */
 export async function maybeRepairNarratedToolTurn(
 	params: MaybeRepairNarratedToolTurnParams,
@@ -84,66 +102,75 @@ export async function maybeRepairNarratedToolTurn(
 	const { prepared, outcome } = params;
 	if (outcome.kind !== "finished") return outcome;
 
-	const coordinator = prepared.runtime.turnCoordinator;
-	const completedToolCount = coordinator.completedToolCount();
-	const knownToolNames = coordinator.activeToolNames;
-	const classification = classifyNarratedToolTurn({
-		finalText: outcome.finalText,
-		knownToolNames,
-		completedToolCount,
-	});
-	const repairEnabled = params.repairEnabled ?? isNarratedToolRepairEnabled();
-	if (
-		!shouldRepairNarratedToolTurn({
-			outcomeKind: outcome.kind,
-			finalText: outcome.finalText,
-			completedToolCount,
-			knownToolNames,
-			signalAborted: params.signal?.aborted,
-			repairEnabled,
-		})
-	) {
-		return outcome;
-	}
-
-	const apiKey = params.resolvedApiKey ?? params.optionsApiKey;
-	recordRepairDebug(params.sdkEventDebug, classification, apiKey);
-
-	const sendOptions: SendOptions = {
-		mode: prepared.meta.agentMode,
-		model: prepared.meta.modelSelection,
-		onDelta: (args) => {
-			coordinator.handleDelta(args.update);
-		},
-		onStep: (args) => {
-			coordinator.handleStep(args.step);
-		},
-	};
-
-	let run: Awaited<ReturnType<typeof prepared.agent.send>>;
 	try {
-		run = await prepared.agent.send({ text: buildNarratedToolRepairPrompt(classification.names) }, sendOptions);
+		const coordinator = asRepairCapableCoordinator(prepared.runtime?.turnCoordinator);
+		if (!coordinator) return outcome;
+
+		const completedToolCount = coordinator.completedToolCount();
+		const knownToolNames = coordinator.activeToolNames;
+		const classification = classifyNarratedToolTurn({
+			finalText: outcome.finalText,
+			knownToolNames,
+			completedToolCount,
+		});
+		const repairEnabled = params.repairEnabled ?? isNarratedToolRepairEnabled();
+		if (
+			!shouldRepairNarratedToolTurn({
+				outcomeKind: outcome.kind,
+				finalText: outcome.finalText,
+				completedToolCount,
+				knownToolNames,
+				signalAborted: params.signal?.aborted,
+				repairEnabled,
+			})
+		) {
+			return outcome;
+		}
+
+		const apiKey = params.resolvedApiKey ?? params.optionsApiKey;
+		recordRepairDebug(params.sdkEventDebug, classification, apiKey);
+
+		const sendOptions: SendOptions = {
+			mode: prepared.meta.agentMode,
+			model: prepared.meta.modelSelection,
+			onDelta: (args) => {
+				coordinator.handleDelta(args.update);
+			},
+			onStep: (args) => {
+				coordinator.handleStep(args.step);
+			},
+		};
+
+		let run: Awaited<ReturnType<typeof prepared.agent.send>>;
+		try {
+			run = await prepared.agent.send(
+				{ text: buildNarratedToolRepairPrompt(classification.names) },
+				sendOptions,
+			);
+		} catch {
+			return outcome;
+		}
+
+		if (params.signal?.aborted) {
+			await run.cancel().catch(() => {});
+			return outcome;
+		}
+
+		const waitResult = await run.wait();
+		const { liveRun } = prepared.runtime;
+		const { textDeltas } = prepared;
+		return resolveCursorRunOutcome({
+			waitResult,
+			signalAborted: params.signal?.aborted,
+			textDeltas: liveRun?.textDeltas ?? textDeltas,
+			emittedText: liveRun?.emittedText ?? textDeltas.join(""),
+			planTextCandidate: coordinator.planTextCandidate,
+			selectFinalTextOptions: liveRun ? undefined : { allowPartialPrefix: true },
+			resolvedApiKey: params.resolvedApiKey,
+			optionsApiKey: params.optionsApiKey,
+			runtimeTarget: prepared.runtimeTarget,
+		});
 	} catch {
 		return outcome;
 	}
-
-	if (params.signal?.aborted) {
-		await run.cancel().catch(() => {});
-		return outcome;
-	}
-
-	const waitResult = await run.wait();
-	const { turnCoordinator, liveRun } = prepared.runtime;
-	const { textDeltas } = prepared;
-	return resolveCursorRunOutcome({
-		waitResult,
-		signalAborted: params.signal?.aborted,
-		textDeltas: liveRun?.textDeltas ?? textDeltas,
-		emittedText: liveRun?.emittedText ?? textDeltas.join(""),
-		planTextCandidate: turnCoordinator.planTextCandidate,
-		selectFinalTextOptions: liveRun ? undefined : { allowPartialPrefix: true },
-		resolvedApiKey: params.resolvedApiKey,
-		optionsApiKey: params.optionsApiKey,
-		runtimeTarget: prepared.runtimeTarget,
-	});
 }

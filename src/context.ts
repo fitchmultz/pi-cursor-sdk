@@ -54,7 +54,7 @@ export function getCursorToolTailGuardText(
 			: getCursorPlanModeToolGuidanceText(options.agentMode, { includePiBridgeGuidance: options.includePiBridgeGuidance }),
 		"Exact-output requests: output exactly the requested text; no preamble or checks unless asked.",
 		"Tools: call available Cursor SDK/MCP tools; never print tool cards as assistant text.",
-		"Do not emit Tool call(...), CallMcpTool(...), or transcript-style tool cards as assistant text; those lines are not executed. Use real Cursor SDK/MCP tool calls only.",
+		"Never print tool cards, tool-call transcripts, or simulated tool invocations as assistant text — always invoke real Cursor SDK/MCP tools.",
 		options.includePiBridgeGuidance === false ? undefined : CURSOR_PI_BRIDGE_PREFERENCE_TEXT,
 	].filter((line): line is string => line !== undefined).join("\n");
 }

@@ -12,24 +12,14 @@ export interface NarratedToolTurnClassification {
 	reason: NarratedToolTurnReason;
 }
 
-/** Built-in transcript / Cursor host shapes that models commonly echo as text. */
+/**
+ * Transcript-shaped names only. Generic host tools (Shell, read, write, …) match
+ * solely via knownToolNames from the live active-tool set — never from this fallback.
+ */
 const BUILTIN_NARRATION_NAMES = new Set(
-	[
-		"tool call",
-		"callmcptool",
-		"tool result",
-		"tool error",
-		"shell",
-		"getmcptools",
-		"read",
-		"grep",
-		"glob",
-		"ls",
-		"write",
-		"edit",
-		"webfetch",
-		"websearch",
-	].map((name) => name.toLowerCase()),
+	["tool call", "tool result", "tool error", "callmcptool", "getmcptools"].map((name) =>
+		name.toLowerCase(),
+	),
 );
 
 const MULTI_WORD_BUILTIN_RE = /\b(Tool\s+call|Tool\s+result|Tool\s+error|CallMcpTool|GetMcpTools)\s*\(/gi;

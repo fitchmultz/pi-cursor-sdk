@@ -4,6 +4,7 @@
 
 ### Added
 
+- Support configured Cursor custom subagents through `subagents` in the Cursor SDK config file, mapping each named entry onto SDK `AgentOptions.agents` with its own pi Cursor model id, thinking level, and fast variant, so delegated tasks can run on a model other than the ones Cursor's built-in `task` subagent types allow. Definitions participate in the local session-agent pool key and are passed to both local and cloud runtimes. The installed SDK narrows local runs to `RuntimeCustomSubagentDefinition` and keeps only `model.id`, so thinking/fast/context params apply on cloud runtime and are dropped by the SDK on local runtime.
 - Add a dated, hash-verified evidence bundle for Cursor's persisted system messages and reconstructed tool guidance for Grok 4.5, Claude Opus/Fable 5, and GPT-5.6 Sol/Terra/Luna.
 
 ### Changed

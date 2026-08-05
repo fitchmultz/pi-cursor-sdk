@@ -515,6 +515,40 @@ Use `npm run debug:provider-events` to capture the same `onDelta`/`onStep` paylo
 
 See [Cursor testing lessons](docs/cursor-testing-lessons.md#cursor-sdk-event-capture-probe) for usage, artifact layout, and safety notes.
 
+## Custom subagents
+
+Cursor's built-in `task` subagent types accept only the models Cursor's own registry allows, so a delegated task cannot be pointed at an arbitrary Cursor model through that tool. The installed Cursor SDK exposes `AgentOptions.agents`, where each named custom subagent carries its own `model`. Declare those subagents under `subagents` in `~/.pi/agent/cursor-sdk.json` (user) or `.pi/cursor-sdk.json` in a trusted project, and Cursor gains one named subagent type per entry, each pinned to the model you chose:
+
+```json
+{
+  "subagents": {
+    "explore": {
+      "description": "Low-complexity exploration and code search.",
+      "prompt": "You explore the repository and report findings concisely.",
+      "model": "composer-2-5"
+    },
+    "implement": {
+      "description": "Medium-complexity implementation work.",
+      "prompt": "You implement scoped changes and report what you changed.",
+      "model": "grok-4.5",
+      "thinking": "high"
+    },
+    "architect": {
+      "description": "High-complexity design and multi-file reasoning.",
+      "prompt": "You design and justify multi-file changes.",
+      "model": "claude-opus-5@300k",
+      "thinking": "high"
+    }
+  }
+}
+```
+
+`model` takes a pi Cursor model id exactly as `pi --list-models cursor` prints it, including `-`/`.` aliases such as `composer-2-5` and context variants such as `claude-opus-5@300k`. `thinking` accepts pi thinking levels (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`) and maps to the model's Cursor reasoning/effort/thinking parameter the same way session thinking does; it defaults to `off`. Optional `fast` selects the Cursor fast/slow variant for models that support it; subagents read it only from this config, so `/cursor-fast` and `fastDefaults` stay scoped to the session model and never leak into a subagent. Set `"model": "inherit"` to run a subagent on the parent session's model, and omit `model` to leave the choice to the Cursor SDK default. An id with no registered Cursor metadata is passed through unchanged, so a typo surfaces as a Cursor delegation error rather than being silently rewritten.
+
+**Model parameters apply on cloud runtime only.** The installed Cursor SDK narrows custom subagents to `RuntimeCustomSubagentDefinition` for local runs, whose `model` is a plain string, and its local converter keeps only `model.id`. So on the default local runtime a subagent runs on the model you named, but `thinking`, `fast`, and the context part of a variant such as `@300k` are dropped by the SDK and the model's own defaults apply. Cloud runs pass the full selection. This is an SDK-side limitation, not a pi override; `test/cursor-custom-subagents.test.ts` pins both SDK shapes so the behavior change is caught if a future SDK preserves local params.
+
+Delegation happens by subagent name rather than by model argument, so instructions in `AGENTS.md` should reference the names you declared (for example "use `implement` for medium-complexity subtasks"). Entries whose name is unusable or whose `description`/`prompt` is missing are skipped so one bad entry cannot discard the rest of the config; an unrecognized `thinking` value is dropped and the subagent still runs. A block with no usable entry at all is treated as absent rather than as an empty set, so it cannot shadow a lower-precedence layer. Precedence is trusted project config, then user config, with the winning layer replacing the whole set rather than merging per name; there is no CLI flag or environment variable for subagent definitions. Changing a definition splits the local agent pool so the next turn creates a Cursor agent with the new subagents instead of reusing the old one. Per-subagent `mcpServers` is not exposed by this config shape; SDK custom subagents inherit the parent agent's MCP configuration.
+
 ## Fallback models
 
 If startup has no stored `/login` key or `CURSOR_API_KEY`, model discovery fails, or discovery returns no models, the extension registers a bundled fallback snapshot of the latest reviewed Cursor SDK model catalog and notifies interactive users when possible. Pi CLI `--api-key` remains available to provider turns but is not parsed independently during startup discovery.

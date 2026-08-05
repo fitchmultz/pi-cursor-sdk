@@ -400,6 +400,24 @@ cursor:local · fast:on
 cursor:local · fast:on · http1
 ```
 
+## Custom Subagent Model Behavior
+
+Cursor's built-in `task` subagent types resolve models through Cursor's own registry, so a delegated task cannot select an arbitrary Cursor model there. The installed SDK's `AgentOptions.agents` accepts named definitions whose `model` is `ModelSelection | "inherit"`, which is the seam pi uses for per-subagent model choice.
+
+Rules:
+
+- Users declare subagents under `subagents` in the Cursor SDK config file (user or trusted project), keyed by a Cursor-addressable name.
+- A subagent's `model` is a pi Cursor model id, so aliases and context variants such as `@300k` resolve through the same metadata as session model selection; `inherit` passes through verbatim and an omitted `model` leaves the SDK default. An unregistered id is passed through unchanged so Cursor reports it instead of pi rewriting it.
+- `thinking` reuses pi thinking levels and the model's `thinkingLevelMap`, defaulting to `off`; optional `fast` reuses fast-capability metadata. Neither invents model-specific parameter names.
+- `fast` comes only from a subagent's own config. Session fast state (`/cursor-fast`, `fastDefaults`) is user state for the selected session model, and the cloud parent path omits `fast` entirely, so inheriting it would make a subagent's model depend on unrelated session toggles.
+- Built selections are complete, but the installed SDK narrows local runs to `RuntimeCustomSubagentDefinition` (`model: string`) and keeps only `model.id`, so on local runtime the model id applies and thinking/fast/context params are dropped by the SDK. Cloud runs receive the full `ModelSelection`. Contract tests pin both SDK shapes rather than asserting pi-side intent alone.
+- Definitions participate in the local session-agent pool key so a changed definition creates a new Cursor agent instead of reusing one built with stale subagents.
+- Local and cloud runtimes pass the same definitions; nothing is duplicated into the prompt.
+
+Reason:
+
+- Per-subagent models belong to Cursor's agent loop, so pi supplies definitions rather than reimplementing delegation, and keeps model ids/params sourced from Cursor SDK metadata.
+
 ## Cursor SDK Mode Behavior
 
 Current Cursor SDK exposes SDK-native conversation mode:

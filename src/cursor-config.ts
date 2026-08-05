@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { parseCursorCustomSubagents, type CursorCustomSubagents } from "./cursor-custom-subagents.js";
 import { parseOptionalEnvBoolean } from "./cursor-env-boolean.js";
 import { asRecord } from "./cursor-record-utils.js";
 
@@ -51,6 +52,7 @@ export interface CursorCloudEnvironmentConfig {
 export interface CursorSdkConfig {
 	fastDefaults?: Record<string, boolean>;
 	runtime?: CursorRuntime;
+	subagents?: CursorCustomSubagents;
 	cloud?: {
 		repo?: string;
 		branch?: string;
@@ -94,6 +96,7 @@ export interface CursorResolvedSetting<T> {
 
 export interface CursorResolvedSdkConfig {
 	runtime: CursorResolvedSetting<CursorRuntime>;
+	subagents: CursorResolvedSetting<CursorCustomSubagents>;
 	cloud: {
 		repo: CursorResolvedSetting<string | undefined>;
 		branch: CursorResolvedSetting<string | undefined>;
@@ -243,6 +246,9 @@ export function parseCursorSdkConfig(value: unknown): CursorSdkConfig | undefine
 	const config: CursorSdkConfig = {};
 
 	if (isCursorRuntime(record.runtime)) config.runtime = record.runtime;
+
+	const subagents = parseCursorCustomSubagents(record.subagents);
+	if (subagents) config.subagents = subagents;
 
 	const fastDefaults = asRecord(record.fastDefaults);
 	if (fastDefaults) {
@@ -531,6 +537,9 @@ type CursorFieldValues<T> = Partial<Record<CursorFieldSource, T>>;
 const RUNTIME_ORDER: CursorFieldSource[] = ["cli", "environment", "session", "project", "user", "builtin"];
 const CLOUD_ORDER: CursorFieldSource[] = ["cli", "environment", "session", "user", "builtin"];
 const LOCAL_ORDER: CursorFieldSource[] = ["cli", "environment", "project", "user", "builtin"];
+// Subagent definitions are prompt/model records, so they come from config files rather than CLI flags
+// or environment strings, and a trusted project layer replaces the user layer whole.
+const SUBAGENTS_ORDER: CursorFieldSource[] = ["project", "user", "builtin"];
 const LOCAL_FORCE_ORDER: CursorFieldSource[] = ["cli", "environment", "builtin"];
 const HTTP1_ORDER: CursorFieldSource[] = ["session", "environment", "user", "builtin"];
 
@@ -648,6 +657,11 @@ export function resolveCursorSdkConfig(options: ResolveCursorSdkConfigOptions = 
 			},
 			(value) => (value === "cloud" ? 1 : 0),
 		),
+		subagents: resolveOrdinaryField(SUBAGENTS_ORDER, {
+			project: project?.subagents,
+			user: user?.subagents,
+			builtin: builtIn.subagents ?? {},
+		}),
 		cloud: {
 			repo: resolveOrdinaryField(CLOUD_ORDER, {
 				cli: cli?.cloud?.repo,

@@ -136,6 +136,72 @@ describe("streamCursor prompt and model config", () => {
 		expect(mockedCreate.mock.calls[0][0].local).toMatchObject({ cwd, autoReview: true, sandboxOptions: { enabled: true } });
 	});
 
+	it("passes trusted project custom subagents into Agent.create", async () => {
+		const root = mkdtempSync(join(tmpdir(), "pi-cursor-subagents-"));
+		const cwd = join(root, "repo");
+		mkdirSync(join(cwd, ".pi"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "settings.json"), "{}\n");
+		writeFileSync(
+			join(cwd, ".pi", "cursor-sdk.json"),
+			JSON.stringify({
+				subagents: {
+					reviewer: { description: "Reviews diffs.", prompt: "You review diffs.", model: "gpt-5.5@272k", thinking: "high" },
+					"bad name": { description: "Unusable.", prompt: "Unusable." },
+				},
+			}),
+		);
+		cursorSessionScopeTestUtils.set(cwd, "/tmp/session-subagents.jsonl", "test-session", true);
+		mockCreatedAgent({
+			send: vi.fn().mockResolvedValue({
+				id: "run-1",
+				agentId: "agent-1",
+				status: "finished",
+				wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
+				cancel: vi.fn(),
+				supports: () => true,
+				unsupportedReason: () => undefined,
+			}),
+		});
+
+		try {
+			await collectEvents(streamCursor(makeModel("gpt-5.5@1m"), makeContext(), { apiKey: "test-key" }));
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+
+		expect(mockedCreate.mock.calls[0][0].agents).toEqual({
+			reviewer: {
+				description: "Reviews diffs.",
+				prompt: "You review diffs.",
+				model: {
+					id: "gpt-5.5",
+					params: expect.arrayContaining([
+						{ id: "context", value: "272k" },
+						{ id: "reasoning", value: "high" },
+					]),
+				},
+			},
+		});
+	});
+
+	it("omits agents from Agent.create when no subagents are configured", async () => {
+		mockCreatedAgent({
+			send: vi.fn().mockResolvedValue({
+				id: "run-1",
+				agentId: "agent-1",
+				status: "finished",
+				wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
+				cancel: vi.fn(),
+				supports: () => true,
+				unsupportedReason: () => undefined,
+			}),
+		});
+
+		await collectEvents(streamCursor(makeModel("gpt-5.5@1m"), makeContext(), { apiKey: "test-key" }));
+
+		expect(mockedCreate.mock.calls[0][0]).not.toHaveProperty("agents");
+	});
+
 	it("lets CLI local safety flags override disabled env/config", async () => {
 		process.env.PI_CURSOR_AUTO_REVIEW = "0";
 		process.env.PI_CURSOR_SANDBOX = "0";

@@ -65,7 +65,9 @@ function getCursorToolBoundaryText(
 			? "For exposed pi bridge tools, call pi__* MCP names, not pi card/history names."
 			: undefined,
 		"Do not claim pi-side or WebSearch/WebFetch tools unless Cursor ran an equivalent tool.",
-		includePiAskQuestionGuidance ? "Use pi__cursor_ask_question for material choices if exposed." : undefined,
+		includePiAskQuestionGuidance
+			? "Rarely use pi__cursor_ask_question. Prefer a reasonable default and state it; ask only when the wrong choice is costly or hard to undo."
+			: undefined,
 		getCursorPlanModeToolGuidanceText(options.agentMode, { includePiBridgeGuidance }),
 		"Images: only latest user images are sent; ask to reattach prior images.",
 	].filter((line): line is string => line !== undefined);

@@ -287,7 +287,7 @@ Maintainers can run `/cursor-tools` in a Cursor model session to print the curre
 
 When a new local Cursor SDK agent is created, the extension seeds the mode through `Agent.create({ mode })`. The extension also sends the effective Cursor mode on every `agent.send(..., { mode })` call so `/cursor-mode` and `--cursor-mode` remain the source of truth even when a pooled SDK agent is reused.
 
-Cursor SDK `plan` mode can produce plan-oriented output and Cursor todo/plan activity, but those replay cards remain display-only. They do not drive pi's plan-mode extension, pi todos, or active tool state.
+Cursor SDK `plan` mode can produce plan-oriented output and Cursor todo/plan activity. Replay cards stay display-only for plan mode and createPlan. Live `updateTodos` / `task` completions can optionally mirror into `@juicesharp/rpiv-todo` when that package is installed (`PI_CURSOR_TODO_MIRROR`, default on): todos replace the Cursor-sourced list, and finished Cursor tasks append a completed note. This never re-spawns a Pi subagent.
 
 ## Cursor local agent config and safety controls
 

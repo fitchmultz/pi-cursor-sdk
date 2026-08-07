@@ -19,7 +19,7 @@ This document is about replay. Replay is not execution and is not the local pi b
 
 Replay labels, replay cards, and transcript tool names are display-only/context-only. Bridge MCP names are also not pi tool names: Cursor must call the exposed `pi__*` MCP name, while pi history and cards use the real pi tool name.
 
-Cursor SDK `plan` mode (`--cursor-mode plan` or `/cursor-mode plan`) can make Cursor produce plan-oriented text and plan/todo activity. Replay still treats Cursor `createPlan`, `updateTodos`, task/mode, and related workflow activity as display-only Cursor activity. It does not switch pi into plan mode, mutate pi todos, or change pi active tools.
+Cursor SDK `plan` mode (`--cursor-mode plan` or `/cursor-mode plan`) can make Cursor produce plan-oriented text and plan/todo activity. Replay still treats Cursor `createPlan`, task/mode cards as display-only Cursor activity for plan-mode switching. Live `updateTodos` / `task` completions may mirror into `@juicesharp/rpiv-todo` when installed (`PI_CURSOR_TODO_MIRROR`, default on); that path never re-runs Cursor work or spawns Pi subagents.
 
 ## Local pi bridge summary
 
@@ -89,7 +89,7 @@ This matrix covers **Cursor native tool replay only**. It does not describe the 
 | `write` | native replay or neutral activity | `write` or `cursor` | Native `write` only when recorded content/path args satisfy pi's `write` schema; otherwise neutral **Cursor write** activity |
 | `delete` | neutral activity | `cursor` | Collapsed label **Cursor delete** |
 | `readLints` | neutral activity | `cursor` | Collapsed label **Cursor diagnostics** |
-| `updateTodos` | neutral activity | `cursor` | Collapsed label **Cursor todos**; display-only, does not drive pi todos, including in Cursor SDK `plan` mode |
+| `updateTodos` | neutral activity | `cursor` | Collapsed label **Cursor todos**; live completions may mirror into `@juicesharp/rpiv-todo` when installed (`PI_CURSOR_TODO_MIRROR`) |
 | `createPlan` | neutral activity | `cursor` | Collapsed label **Cursor plan**; display-only, does not drive pi plan mode, including in Cursor SDK `plan` mode |
 | `task` | neutral activity | `cursor` | Collapsed label **Cursor subagent** by default; summary includes description plus subagent kind/model/short ID when Cursor reports them; `PI_CURSOR_TASK_PRESENTATION=task` restores **Cursor task** wording |
 | `generateImage` | neutral activity | `cursor` | Collapsed label **Cursor image generation** |
@@ -132,7 +132,7 @@ These behaviors are by design. They are not pi replay execution bugs:
 - **`shell` → `bash`:** Cursor shell completions render as native pi `bash` cards, including aliases normalized to `shell`.
 - **`edit` / `StrReplace` / notebook edits:** native pi `edit` cards only when recorded replay args truthfully satisfy pi's `edit` schema; otherwise neutral **Cursor edit** activity so pi validation does not reject the replay before recorded-result handling.
 - **`write`:** native pi `write` cards only when recorded content/path args satisfy pi's schema; otherwise neutral **Cursor write** activity.
-- **Plan/todo tools:** `createPlan` and `updateTodos` replay is display-only and does not drive pi plan mode or pi todo state, even when Cursor SDK mode is `plan` (see [What replay does not do](#what-replay-does-not-do)).
+- **Plan/todo tools:** `createPlan` replay is display-only and does not drive pi plan mode. Live `updateTodos` / `task` may mirror into `@juicesharp/rpiv-todo` when installed (`PI_CURSOR_TODO_MIRROR`); see [What replay does not do](#what-replay-does-not-do).
 - **`semSearch`:** semantic codebase search activity, not web search.
 - **Web search/fetch:** visible **Cursor web search** / **Cursor web fetch** activity when the SDK reports completed replayable tool data (SDK `mcp` with web `toolName`, host aliases above, or local transcript `webSearchToolCall` / `webFetchToolCall` records). These cards are display-only; pi does not expose executable web search/fetch tools through replay.
 - **Unknown/future SDK tools:** neutral Cursor activity cards titled with the SDK tool name (for example **Cursor futureSemSearchWidget**) and bounded scrubbed args/result/error text until an explicit spec is added.

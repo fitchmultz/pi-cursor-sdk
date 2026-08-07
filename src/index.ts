@@ -6,6 +6,7 @@ import { registerCursorPiToolBridge } from "./cursor-pi-tool-bridge.js";
 import { registerCursorQuestionTool } from "./cursor-question-tool.js";
 import { registerCursorSkillTool } from "./cursor-skill-tool.js";
 import { registerCursorSessionScope } from "./cursor-session-scope.js";
+import { registerCursorTodoMirror } from "./cursor-todo-mirror.js";
 import { registerCursorSessionAgentLifecycle } from "./cursor-session-agent-lifecycle.js";
 import { registerCursorSessionAgentLineage } from "./cursor-session-agent-lineage.js";
 import { registerCursorSessionAgentResume } from "./cursor-session-agent-resume.js";
@@ -27,6 +28,7 @@ type CursorExtensionApi =
 	& Parameters<typeof registerCursorQuestionTool>[0]
 	& Parameters<typeof registerCursorSkillTool>[0]
 	& Parameters<typeof registerCursorPiToolBridge>[0]
+	& Parameters<typeof registerCursorTodoMirror>[0]
 	& Parameters<typeof registerCursorFallbackIssueWarning>[0]
 	& Parameters<typeof registerCursorAgentsContextDedup>[0]
 	& Parameters<typeof registerCursorOverflowNormalization>[0]
@@ -61,6 +63,7 @@ export default async function (pi: CursorExtensionApi) {
 	registerCursorNativeToolDisplay(pi);
 	registerCursorQuestionTool(pi);
 	registerCursorSkillTool(pi);
+	registerCursorTodoMirror(pi);
 	registerCursorPiToolBridge(pi);
 	registerCursorAgentsContextDedup(pi);
 	registerCursorOverflowNormalization(pi);

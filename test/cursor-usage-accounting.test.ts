@@ -255,17 +255,9 @@ describe("cursor usage accounting", () => {
 		expect(partial.usage.totalTokens).toBeGreaterThan(partial.usage.input + partial.usage.output);
 	});
 
-	it("floors approximate totalTokens at the last accepted assistant occupancy", () => {
+	it("floors approximate totalTokens to last accepted occupancy for split-tool stability", () => {
 		const model = makeModel();
 		const prior = makeAssistantMessage([{ type: "text", text: "Prior." }]);
-		prior.usage = {
-			input: 10_000,
-			output: 50,
-			cacheRead: 40_000,
-			cacheWrite: 100,
-			totalTokens: 50_150,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		};
 		const context: Context = {
 			systemPrompt: "Be helpful.",
 			messages: [
@@ -275,9 +267,97 @@ describe("cursor usage accounting", () => {
 			],
 		};
 		const partial = makeAssistantMessage([{ type: "text", text: "Hi." }]);
+		const estimate = estimateCursorContextTotalTokens(partial, model, context);
+		const nearbyFloor = Math.ceil(estimate * 1.1);
+		prior.usage = {
+			input: nearbyFloor - 50,
+			output: 50,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: nearbyFloor,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
 		applyCursorUsage(partial, model, context, 7);
 		expect(partial.usage.cacheRead).toBe(0);
-		expect(partial.usage.totalTokens).toBeGreaterThanOrEqual(50_150);
+		expect(partial.usage.totalTokens).toBe(nearbyFloor);
+	});
+
+	it("does not floor approximate totalTokens to stale pre-compaction assistant occupancy", () => {
+		const model = makeModel();
+		const stalePreCompactionOccupancy = 100_000;
+		const keptAfterCompact = makeAssistantMessage([{ type: "text", text: "Kept recent reply." }]);
+		keptAfterCompact.usage = {
+			input: 34,
+			output: 80,
+			cacheRead: 0,
+			cacheWrite: 0,
+			// Kept assistants can still carry the pre-compaction high-water mark.
+			totalTokens: stalePreCompactionOccupancy,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+		const context: Context = {
+			systemPrompt: "Be helpful.",
+			messages: [
+				{
+					role: "compactionSummary",
+					summary: "Earlier work was compacted.",
+					tokensBefore: stalePreCompactionOccupancy,
+					timestamp: 1,
+				} as unknown as Context["messages"][number],
+				{ role: "user", content: "Continue", timestamp: 2 },
+				keptAfterCompact,
+				{ role: "user", content: "Next", timestamp: 4 },
+			],
+		};
+		const partial = makeAssistantMessage([{ type: "text", text: "Okay." }]);
+		const estimate = estimateCursorContextTotalTokens(partial, model, context);
+		expect(stalePreCompactionOccupancy).toBeLessThanOrEqual(model.contextWindow);
+		expect(estimate).toBeLessThan(stalePreCompactionOccupancy / 2);
+
+		applyCursorUsage(partial, model, context, 7);
+
+		expect(partial.usage.cacheRead).toBe(0);
+		expect(partial.usage.totalTokens).toBe(estimate);
+		expect(partial.usage.totalTokens).not.toBe(stalePreCompactionOccupancy);
+	});
+
+	it("keeps post-compaction SDK occupancy as approximate floor when pi estimate is much smaller", () => {
+		// Soft-bounding by estimate ratio rejects this legitimate post-compact SDK floor and collapses the footer.
+		const model = makeModel();
+		const tokensBefore = 252_631;
+		const postCompactSdkOccupancy = 71_058;
+		const prior = makeAssistantMessage([{ type: "text", text: "Post-compact SDK turn." }]);
+		prior.usage = {
+			input: 3_318,
+			output: 1_436,
+			cacheRead: 66_304,
+			cacheWrite: 0,
+			totalTokens: postCompactSdkOccupancy,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+		const context: Context = {
+			systemPrompt: "Be helpful.",
+			messages: [
+				{
+					role: "compactionSummary",
+					summary: "Compacted earlier work.",
+					tokensBefore,
+					timestamp: 1,
+				} as unknown as Context["messages"][number],
+				{ role: "user", content: "Continue", timestamp: 2 },
+				prior,
+				{ role: "user", content: "Short follow-up", timestamp: 4 },
+			],
+		};
+		const partial = makeAssistantMessage([{ type: "text", text: "Working." }]);
+		const estimate = estimateCursorContextTotalTokens(partial, model, context);
+		expect(postCompactSdkOccupancy).toBeLessThan(tokensBefore);
+		expect(estimate).toBeLessThan(postCompactSdkOccupancy / 2);
+
+		applyCursorUsage(partial, model, context, 7);
+
+		expect(partial.usage.totalTokens).toBe(postCompactSdkOccupancy);
+		expect(partial.usage.totalTokens).toBeGreaterThan(estimate);
 	});
 
 	it("rejects over-window prior assistant occupancy from the compaction poison fixture", () => {

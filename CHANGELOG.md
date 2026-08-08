@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Fix local Cursor context occupancy after compaction: approximate fallback floors at the last post-compaction accepted measurement and drops split-turn keep that still carries the pre-compaction `tokensBefore` high-water mark (#204), so the footer can fall after compact without collapsing when a later turn lacks SDK usage.
+
 ## 0.2.0 - 2026-08-06
 
 ### Added

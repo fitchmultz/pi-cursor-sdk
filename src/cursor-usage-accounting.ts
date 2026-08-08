@@ -117,17 +117,43 @@ function isCompatibleCursorAssistantMeasurement(assistant: AssistantMessage, mod
 	return assistant.api === model.api && assistant.provider === model.provider && assistant.model === model.id;
 }
 
+function readAssistantOccupancy(assistant: AssistantMessage, model: Model<Api>): number | undefined {
+	if (assistant.stopReason === "aborted" || assistant.stopReason === "error" || !assistant.usage) return undefined;
+	if (!isCompatibleCursorAssistantMeasurement(assistant, model)) return undefined;
+	const { usage } = assistant;
+	const total = usage.totalTokens || usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+	if (!(Number.isFinite(total) && total > 0 && total <= model.contextWindow)) return undefined;
+	return total;
+}
+
+/**
+ * Last accepted occupancy for approximate flooring.
+ *
+ * Only assistants after the latest `compactionSummary` are eligible. Split-turn keep can retain
+ * pre-compaction `totalTokens` on those assistants (#204); drop any measurement at or above that
+ * summary's `tokensBefore` high-water mark so the footer can fall after compact without using a
+ * ratio that also rejects legitimate post-compact SDK occupancy when the pi estimate is smaller.
+ */
 function getLastAcceptedContextOccupancy(context: Context, model: Model<Api>): number {
+	let latestCompactionIndex = -1;
+	let compactionTokensBefore: number | undefined;
 	for (let index = context.messages.length - 1; index >= 0; index -= 1) {
 		const message = context.messages[index];
-		if (message.role !== "assistant" || !("usage" in message)) continue;
-		const assistant = message as AssistantMessage;
-		if (assistant.stopReason === "aborted" || assistant.stopReason === "error" || !assistant.usage) continue;
-		if (!isCompatibleCursorAssistantMeasurement(assistant, model)) continue;
-		const { usage } = assistant;
-		const total =
-			usage.totalTokens || usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
-		if (Number.isFinite(total) && total > 0 && total <= model.contextWindow) return total;
+		const record = asRecord(message);
+		if (record?.role !== "compactionSummary") continue;
+		latestCompactionIndex = index;
+		const tokensBefore = getNonNegativeTokenCount(record, "tokensBefore");
+		if (tokensBefore !== undefined) compactionTokensBefore = tokensBefore;
+		break;
+	}
+
+	for (let index = context.messages.length - 1; index > latestCompactionIndex; index -= 1) {
+		const message = context.messages[index];
+		if (!message || typeof message !== "object" || !("role" in message) || message.role !== "assistant") continue;
+		const total = readAssistantOccupancy(message as AssistantMessage, model);
+		if (total === undefined) continue;
+		if (compactionTokensBefore !== undefined && total >= compactionTokensBefore) continue;
+		return total;
 	}
 	return 0;
 }
@@ -138,12 +164,9 @@ export function applyCursorApproximateUsage(partial: AssistantMessage, model: Mo
 	partial.usage.output = outputTokens;
 	partial.usage.cacheRead = 0;
 	partial.usage.cacheWrite = 0;
-	// Never report less occupancy than the last compatible same-model in-window assistant measurement.
-	partial.usage.totalTokens = Math.max(
-		partial.usage.input + partial.usage.output,
-		estimateCursorContextTotalTokens(partial, model, context),
-		getLastAcceptedContextOccupancy(context, model),
-	);
+	const estimate = estimateCursorContextTotalTokens(partial, model, context);
+	const occupancyFloor = getLastAcceptedContextOccupancy(context, model);
+	partial.usage.totalTokens = Math.max(partial.usage.input + partial.usage.output, estimate, occupancyFloor);
 }
 
 export function applyCursorUsage(

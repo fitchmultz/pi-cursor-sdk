@@ -18,13 +18,6 @@ import { Cursor } from "@cursor/sdk";
 
 const mockedList = vi.mocked(Cursor.models.list);
 
-function writeStoredCursorApiKey(apiKey: string): void {
-	writeFileSync(
-		join(process.env.PI_CODING_AGENT_DIR!, "auth.json"),
-		JSON.stringify({ cursor: { type: "api_key", key: apiKey } }, null, 2),
-	);
-}
-
 describe("discoverModels model-list cache", () => {
 	const originalEnv = process.env;
 	const originalArgv = process.argv;
@@ -95,33 +88,30 @@ describe("discoverModels model-list cache", () => {
 	});
 
 	it("serves a warm catalog from cache without a second network call", async () => {
-		writeStoredCursorApiKey("cache-key");
 		mockedList.mockResolvedValueOnce([MODEL]);
 
-		const first = await discoverModels();
-		const second = await discoverModels();
+		const first = await discoverModels({ apiKey: "cache-key" });
+		const second = await discoverModels({ apiKey: "cache-key" });
 
 		expect(mockedList).toHaveBeenCalledTimes(1);
 		expect(second.map((model) => model.id)).toEqual(first.map((model) => model.id));
 	});
 
 	it("bypasses the cache when forceRefresh is set", async () => {
-		writeStoredCursorApiKey("cache-key");
 		mockedList.mockResolvedValue([MODEL]);
 
-		await discoverModels();
-		await discoverModels({ forceRefresh: true });
+		await discoverModels({ apiKey: "cache-key" });
+		await discoverModels({ apiKey: "cache-key", forceRefresh: true });
 
 		expect(mockedList).toHaveBeenCalledTimes(2);
 	});
 
 	it("does not read the cache when disabled via env", async () => {
 		process.env.PI_CURSOR_SDK_DISABLE_MODEL_CACHE = "1";
-		writeStoredCursorApiKey("cache-key");
 		mockedList.mockResolvedValue([MODEL]);
 
-		await discoverModels();
-		await discoverModels();
+		await discoverModels({ apiKey: "cache-key" });
+		await discoverModels({ apiKey: "cache-key" });
 
 		expect(mockedList).toHaveBeenCalledTimes(2);
 	});
@@ -141,13 +131,12 @@ describe("discoverModels model-list cache", () => {
 	});
 
 	it("falls back to the cached catalog with a warning when a forced refresh fails", async () => {
-		writeStoredCursorApiKey("cache-key");
 		mockedList.mockResolvedValueOnce([MODEL]);
-		await discoverModels();
+		await discoverModels({ apiKey: "cache-key" });
 
 		mockedList.mockRejectedValueOnce(new Error("network down"));
 		const issues: CursorModelFallbackIssue[] = [];
-		const refreshed = await discoverModels({ forceRefresh: true, onFallback: (issue) => issues.push(issue) });
+		const refreshed = await discoverModels({ apiKey: "cache-key", forceRefresh: true, onFallback: (issue) => issues.push(issue) });
 
 		expect(refreshed.map((model) => model.id)).toEqual(["composer-2"]);
 		expect(issues).toHaveLength(1);
@@ -157,13 +146,12 @@ describe("discoverModels model-list cache", () => {
 	});
 
 	it("omits an empty cached-catalog error detail", async () => {
-		writeStoredCursorApiKey("cache-key");
 		mockedList.mockResolvedValueOnce([MODEL]);
-		await discoverModels();
+		await discoverModels({ apiKey: "cache-key" });
 
 		mockedList.mockRejectedValueOnce({});
 		const issues: CursorModelFallbackIssue[] = [];
-		await discoverModels({ forceRefresh: true, onFallback: (issue) => issues.push(issue) });
+		await discoverModels({ apiKey: "cache-key", forceRefresh: true, onFallback: (issue) => issues.push(issue) });
 
 		expect(issues).toHaveLength(1);
 		expect(issues[0].reason).toBe("cached-after-error");

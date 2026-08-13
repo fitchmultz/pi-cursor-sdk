@@ -70,7 +70,7 @@ describe("extension registration and discovery", () => {
 
 	it("registers Cursor runtime controls and one provider with correct fields", async () => {
 		const mockModels = [makeProviderModelConfig("composer-2", { name: "Cursor Composer 2" })];
-		mockedDiscover.mockResolvedValueOnce(mockModels);
+		mockedDiscover.mockResolvedValueOnce(mockModels).mockResolvedValue(mockModels);
 
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		const pi = createExtensionPi();
@@ -222,8 +222,8 @@ describe("extension registration and discovery", () => {
 		expect(pi.on).toHaveBeenCalledWith("before_agent_start", expect.any(Function));
 		expect(pi.on).toHaveBeenCalledWith("turn_start", expect.any(Function));
 		expect(pi.on).toHaveBeenCalledWith("model_select", expect.any(Function));
-		expect(mockedDiscover).toHaveBeenCalledOnce();
-		expect(pi.registerProvider).toHaveBeenCalledOnce();
+		expect(mockedDiscover).toHaveBeenCalledTimes(2);
+		expect(pi.registerProvider).toHaveBeenCalledTimes(2);
 
 		const [call] = pi._registered;
 		expect(call.name).toBe("cursor");
@@ -569,6 +569,32 @@ describe("extension registration and discovery", () => {
 		expect(call.config.models).toHaveLength(2);
 	});
 
+	it("refreshes Cursor models from the host registry on session_start", async () => {
+		const startupModels = [makeProviderModelConfig("composer-2", { name: "Cursor Composer 2" })];
+		const sessionModels = [
+			makeProviderModelConfig("gpt-5.5@1m", {
+				name: "GPT-5.5 @ 1m",
+				reasoning: true,
+				contextWindow: 1_000_000,
+			}),
+		];
+		mockedDiscover.mockResolvedValueOnce(startupModels).mockResolvedValueOnce(sessionModels);
+		const pi = createExtensionPi();
+		await extensionFactory(pi);
+		const getApiKeyForProvider = vi.fn().mockResolvedValue(" host-registry-key ");
+
+		await pi.runSessionStart({
+			modelRegistry: { getApiKeyForProvider } as never,
+		});
+
+		expect(getApiKeyForProvider).toHaveBeenCalledWith("cursor");
+		expect(mockedDiscover).toHaveBeenNthCalledWith(2, expect.objectContaining({ apiKey: "host-registry-key" }));
+		expect(mockedDiscover).toHaveBeenCalledTimes(2);
+		expect(pi.registerProvider).toHaveBeenCalledTimes(2);
+		expect(pi._registered[0].config.models).toBe(startupModels);
+		expect(pi._registered[1].config.models).toBe(sessionModels);
+	});
+
 	it("refreshes Cursor models through a live command without reload", async () => {
 		const startupModels = [makeProviderModelConfig("composer-2", { name: "Cursor Composer 2" })];
 		const refreshedModels = [
@@ -687,7 +713,7 @@ describe("extension registration and discovery", () => {
 	});
 
 	it("notifies interactive users when fallback models are registered", async () => {
-		mockedDiscover.mockImplementationOnce(async (options: DiscoverOptions) => {
+		mockedDiscover.mockImplementation(async (options: DiscoverOptions) => {
 			options?.onFallback?.({
 				reason: "missing-api-key",
 				message:
@@ -714,7 +740,7 @@ describe("extension registration and discovery", () => {
 	});
 
 	it("does not notify fallback discovery issues for non-Cursor sessions", async () => {
-		mockedDiscover.mockImplementationOnce(async (options: DiscoverOptions) => {
+		mockedDiscover.mockImplementation(async (options: DiscoverOptions) => {
 			options?.onFallback?.({
 				reason: "empty-model-list",
 				message: "Cursor model discovery returned no models; using fallback Cursor model list.",
@@ -737,7 +763,7 @@ describe("extension registration and discovery", () => {
 	});
 
 	it("notifies fallback discovery issues after delayed Cursor model selection", async () => {
-		mockedDiscover.mockImplementationOnce(async (options: DiscoverOptions) => {
+		mockedDiscover.mockImplementation(async (options: DiscoverOptions) => {
 			options?.onFallback?.({
 				reason: "missing-api-key",
 				message: "missing key; using fallback models",
@@ -765,8 +791,53 @@ describe("extension registration and discovery", () => {
 		expect(notify).toHaveBeenCalledWith("missing key; using fallback models", "warning");
 	});
 
+	it("clears a pending session fallback warning after a successful live refresh", async () => {
+		const fallbackModels = [makeProviderModelConfig("composer-2", { name: "Cursor Composer 2" })];
+		const fallbackDiscovery = async (options: DiscoverOptions) => {
+			options?.onFallback?.({
+				reason: "missing-api-key",
+				message: "missing key; using fallback models",
+			});
+			return fallbackModels;
+		};
+		mockedDiscover
+			.mockImplementationOnce(fallbackDiscovery)
+			.mockImplementationOnce(fallbackDiscovery)
+			.mockResolvedValueOnce([makeProviderModelConfig("gpt-5.5@1m", { name: "GPT-5.5 @ 1m" })]);
+
+		const pi = createExtensionPi();
+		await extensionFactory(pi);
+
+		const notify = vi.fn();
+		await pi.runSessionStart({
+			hasUI: true,
+			model: makeHarnessModel("anthropic", "anthropic-messages", "claude-sonnet-4-5"),
+			ui: { notify, setStatus: vi.fn() },
+			sessionManager: { getBranch: vi.fn(() => []) },
+		});
+		expect(notify).not.toHaveBeenCalled();
+
+		await pi.runCommand(
+			"cursor-refresh-models",
+			"",
+			createExtensionCommandContext({
+				hasUI: true,
+				model: undefined,
+				ui: { notify },
+			}),
+		);
+		notify.mockClear();
+
+		await pi.runModelSelect(makeHarnessModel("cursor", "cursor-sdk", "gpt-5.5@1m"), {
+			hasUI: true,
+			ui: { notify, setStatus: vi.fn() },
+		});
+
+		expect(notify).not.toHaveBeenCalled();
+	});
+
 	it("notifies fallback discovery issues once per Cursor session scope", async () => {
-		mockedDiscover.mockImplementationOnce(async (options: DiscoverOptions) => {
+		mockedDiscover.mockImplementation(async (options: DiscoverOptions) => {
 			options?.onFallback?.({
 				reason: "missing-api-key",
 				message: "missing key; using fallback models",
@@ -804,7 +875,7 @@ describe("extension registration and discovery", () => {
 	});
 
 	it("does not notify fallback discovery issues without UI", async () => {
-		mockedDiscover.mockImplementationOnce(async (options: DiscoverOptions) => {
+		mockedDiscover.mockImplementation(async (options: DiscoverOptions) => {
 			options?.onFallback?.({
 				reason: "empty-model-list",
 				message: "Cursor model discovery returned no models; using fallback Cursor model list.",

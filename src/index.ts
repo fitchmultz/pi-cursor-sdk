@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ProviderConfig, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ProviderConfig, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import { discoverModels, type CursorModelFallbackIssue } from "./model-discovery.js";
 import { registerCursorRuntimeControls } from "./cursor-state.js";
 import { registerCursorNativeToolDisplay } from "./cursor-native-tool-display-registration.js";
@@ -64,16 +64,29 @@ export default async function (pi: CursorExtensionApi) {
 	registerCursorPiToolBridge(pi);
 	registerCursorAgentsContextDedup(pi);
 	registerCursorOverflowNormalization(pi);
-	let fallbackIssue: CursorModelFallbackIssue | undefined;
-	const models = await discoverModels({
-		onFallback: (issue) => {
-			fallbackIssue = issue;
-		},
+
+	const sessionFallbackIssueRef: { current: CursorModelFallbackIssue | undefined } = { current: undefined };
+
+	const syncSessionCatalog = async (ctx: ExtensionContext): Promise<void> => {
+		sessionFallbackIssueRef.current = undefined;
+		const apiKey = resolveCursorApiKey(await ctx.modelRegistry.getApiKeyForProvider("cursor"));
+		const sessionModels = await discoverModels({
+			apiKey,
+			onFallback: (issue) => {
+				sessionFallbackIssueRef.current = issue;
+			},
+		});
+		registerCursorProvider(pi, sessionModels);
+	};
+
+	pi.on("session_start", async (_event, ctx) => {
+		await syncSessionCatalog(ctx);
 	});
 
-	if (fallbackIssue) {
-		registerCursorFallbackIssueWarning(pi, fallbackIssue);
-	}
+	registerCursorFallbackIssueWarning(pi, () => sessionFallbackIssueRef.current);
+
+	const startupModels = await discoverModels();
+	registerCursorProvider(pi, startupModels);
 
 	pi.registerCommand("cursor-refresh-models", {
 		description: "Refresh the live Cursor model catalog without restarting pi",
@@ -87,6 +100,7 @@ export default async function (pi: CursorExtensionApi) {
 					refreshFallbackIssue = issue;
 				},
 			});
+			sessionFallbackIssueRef.current = refreshFallbackIssue;
 			registerCursorProvider(pi, refreshedModels);
 			if (!ctx.hasUI) return;
 			if (refreshFallbackIssue) {
@@ -97,7 +111,6 @@ export default async function (pi: CursorExtensionApi) {
 		},
 	});
 
-	registerCursorProvider(pi, models);
 	// Register last so session_shutdown cleanup remains protected until other Cursor handlers finish.
 	registerCursorSdkSessionProcessErrorGuard(pi);
 }

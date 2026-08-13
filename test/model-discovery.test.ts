@@ -30,13 +30,6 @@ function register(items: ModelListItem[]) {
 	return __testUtils.registerModelItems(items);
 }
 
-function writeStoredCursorApiKey(apiKey: string): void {
-	writeFileSync(
-		join(process.env.PI_CODING_AGENT_DIR!, "auth.json"),
-		JSON.stringify({ cursor: { type: "api_key", key: apiKey } }, null, 2),
-	);
-}
-
 describe("discoverModels", () => {
 	const originalEnv = process.env;
 	const originalArgv = process.argv;
@@ -127,24 +120,7 @@ describe("discoverModels", () => {
 		expect(models.map((model) => model.id)).toEqual(["composer-2"]);
 	});
 
-	it("uses stored pi auth for model discovery when env and CLI are absent", async () => {
-		writeStoredCursorApiKey("stored-key-123");
-		mockedList.mockResolvedValueOnce([
-			{
-				id: "composer-2",
-				displayName: "Composer 2",
-				variants: [{ params: [], displayName: "Composer 2", isDefault: true }],
-			},
-		]);
-
-		const models = await discoverModels();
-
-		expect(mockedList).toHaveBeenCalledWith({ apiKey: "stored-key-123" });
-		expect(models.map((model) => model.id)).toEqual(["composer-2"]);
-	});
-
-	it("prefers stored pi auth over CURSOR_API_KEY for model discovery", async () => {
-		writeStoredCursorApiKey("stored-key-123");
+	it("prefers an explicitly supplied host key over CURSOR_API_KEY for model discovery", async () => {
 		process.env.CURSOR_API_KEY = "env-key-123";
 		mockedList.mockResolvedValueOnce([
 			{
@@ -154,18 +130,17 @@ describe("discoverModels", () => {
 			},
 		]);
 
-		await discoverModels();
+		await discoverModels({ apiKey: "host-key-123" });
 
-		expect(mockedList).toHaveBeenCalledWith({ apiKey: "stored-key-123" });
+		expect(mockedList).toHaveBeenCalledWith({ apiKey: "host-key-123" });
 	});
 
 	it.each(["CURSOR_API_KEY", "$CURSOR_API_KEY", "${CURSOR_API_KEY}", "pi-cursor-sdk-cursor-api-key-placeholder"])(
-		"treats unresolved stored %s auth as missing when env is absent",
+		"treats unresolved host %s key as missing when env is absent",
 		async (placeholder) => {
-			writeStoredCursorApiKey(placeholder);
 			const issues: CursorModelFallbackIssue[] = [];
 
-			const models = await discoverModels({ onFallback: (issue) => issues.push(issue) });
+			const models = await discoverModels({ apiKey: placeholder, onFallback: (issue) => issues.push(issue) });
 
 			expect(models.some((model) => model.id === "composer-2.5")).toBe(true);
 			expect(issues).toEqual([expect.objectContaining({ reason: "missing-api-key" })]);
@@ -175,9 +150,8 @@ describe("discoverModels", () => {
 	);
 
 	it.each(["CURSOR_API_KEY", "$CURSOR_API_KEY", "${CURSOR_API_KEY}", "pi-cursor-sdk-cursor-api-key-placeholder"])(
-		"resolves stored %s auth through the env var when present",
+		"resolves host %s key through the env var when present",
 		async (placeholder) => {
-			writeStoredCursorApiKey(placeholder);
 			process.env.CURSOR_API_KEY = "env-key-123";
 			mockedList.mockResolvedValueOnce([
 				{
@@ -187,7 +161,7 @@ describe("discoverModels", () => {
 				},
 			]);
 
-			await discoverModels();
+			await discoverModels({ apiKey: placeholder });
 
 			expect(mockedList).toHaveBeenCalledWith({ apiKey: "env-key-123" });
 		},

@@ -100,8 +100,8 @@ describe("extension session cwd integration", () => {
 			await extensionFactory(pi);
 			await pi.runSessionStart({ cwd: sessionDir, hasUI: false });
 
-			expect(pi.registerProvider).toHaveBeenCalledOnce();
-			const streamSimple = pi._registered[0]?.config.streamSimple;
+			expect(pi.registerProvider).toHaveBeenCalledTimes(2);
+			const streamSimple = pi._registered.at(-1)?.config.streamSimple;
 			expect(streamSimple).toBe(streamCursorLazy);
 
 			await collectEvents(streamSimple!(makeModel("composer-2.5"), makeContext(), { apiKey: "test-key" }));

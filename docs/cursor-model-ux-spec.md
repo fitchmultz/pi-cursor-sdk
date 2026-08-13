@@ -1,5 +1,8 @@
 # Cursor Model UX Spec
 
+> 作成日時: 2026-08-13 11:43
+> 更新日時: 2026-08-13 11:43
+
 > Maintainer note: this is an internal design and behavior spec for pi-cursor-sdk. If you are trying to install or use the extension, start with the main [README](../README.md) instead.
 
 ## Status
@@ -16,7 +19,7 @@ Current implementation notes:
 - Installed `@cursor/sdk` user messages accept images, and Cursor models are treated as image-capable; registered input metadata is `text` plus `image`.
 - Image payload forwarding sends images only from the latest user message. If the latest user turn is plain text after an earlier image turn, the transcript keeps an `[image omitted from transcript]` placeholder but no image bytes are sent to Cursor. The prompt explicitly tells Cursor that prior image bytes are unavailable and to ask the user to reattach or describe a prior image when needed. Carrying images forward across turns remains a future product decision because it affects token cost, privacy, stale visual context, and expected multimodal follow-up behavior.
 - Exact `@cursor/sdk@1.0.23` is a package dependency of this extension; users should not need a global SDK install. Pi 0.84.0 is the minimum supported and current validation baseline, while optional published Pi core peer dependencies use `"*"` ranges per current Pi package guidance.
-- Startup discovery does not duplicate Pi CLI parsing: it uses stored `~/.pi/agent/auth.json` API-key auth from `/login`, then `CURSOR_API_KEY`, otherwise it registers the bundled fallback catalog. Provider turns keep Pi's resolved `options.apiKey`. `/cursor-refresh-models` and `/cursor-cloud` mutations resolve provider `cursor` through the command context's Pi ModelRegistry, then normalize placeholders through `CURSOR_API_KEY`. The extension config file stores only non-secret Cursor-only state such as fast defaults and the user-level local HTTP transport preference.
+- Startup discovery does not duplicate Pi CLI parsing or read auth storage directly: it first registers the bundled fallback catalog, then at `session_start` asks the host ModelRegistry for provider `cursor` and re-registers the discovered catalog. The explicit host key takes precedence over `CURSOR_API_KEY`. Provider turns keep Pi's resolved `options.apiKey`. `/cursor-refresh-models` and `/cursor-cloud` mutations also resolve provider `cursor` through the command context's Pi ModelRegistry, then normalize placeholders through `CURSOR_API_KEY`. The extension config file stores only non-secret Cursor-only state such as fast defaults and the user-level local HTTP transport preference.
 - Cursor Cloud repository overrides accept only HTTPS repository URLs without userinfo, query parameters, or fragments. Invalid values fail during preflight before `Agent.create()`, messages never echo the supplied URL, and shared provider/maintainer scrubbing removes URL/SCP-style userinfo defensively.
 - Cursor Cloud requires a persisted pi session. Immediately after remote `Agent.create()` returns, before debug work or abort checks, the provider appends a branch-local pi lifecycle entry, fsyncs the existing Pi session JSONL anchor through a read-write descriptor, and then fsyncs a newline-framed sidecar keyed by the stable pi session ID (POSIX mode `0600`; Windows inherits the user session directory ACL) in the session directory. Journal creation is exclusive, and existing append/read opens reject symlinks and require matching regular-file descriptor/path identity before using the descriptor. Existing session files use the exact lifecycle entry ID as anchor; fileless first turns use an orphan marker that a same-session-ID restart durably claims onto exactly one matching or replacement branch, surviving the timestamped path change and later JSONL creation without granting sibling access; returned run IDs are fsynced before abort/wait handling, readers skip malformed/truncated lines independently, and branch-only history events are reduced after deduplicated sidecar history, and tombstones are tracked before records exist. A durable sidecar result remains authoritative if its optional Pi mirror append fails; if the sidecar result itself fails, the prior durable intent remains pending and blocks retry rather than claiming success. `--no-session` and durable-ledger failures fail closed before send, while post-send ledger failure requests bounded cancellation. `/cursor-cloud` always validates the embedded session ID, accepts only null anchors while truly fileless, and reconciles each orphan to one branch before listing or mutation. Successive record events merge run/branch metadata monotonically even when mirrored sources arrive out of order. Archive/delete require resolved Cursor auth, fsync a durable intent before the SDK call, and fsync a durable success result afterward; unresolved intent blocks repeat mutation and requires dashboard inspection.
 - Local agents pass `settingSources: ["all"]` by default so Cursor MCP servers, plugin tools, project/user settings, and related Cursor-native capabilities are available. Users can narrow loading with a comma-separated list such as `PI_CURSOR_SETTING_SOURCES=project,user,plugins`, or disable ambient setting sources with `PI_CURSOR_SETTING_SOURCES=none`. `/cursor-refresh-config` calls the current pooled SDK agent's `agent.reload()` to refresh filesystem Cursor config without recreating the agent. The provider suppresses direct Cursor SDK bootstrap stdout/stderr/console noise (including late first-send workspace loading such as hook compatibility warnings) so it does not pollute pi's TUI.
@@ -77,18 +80,18 @@ Not building now:
 
 Cursor SDK is the source of truth for Cursor model IDs and Cursor-supported parameters.
 
-At startup, the extension calls:
+During extension loading, the extension registers a bundled fallback catalog without reading host auth storage directly. At `session_start`, it asks the host ModelRegistry for the `cursor` provider key, then discovers and re-registers the catalog by calling:
 
 ```ts
 Cursor.models.list({ apiKey });
 ```
 
-Startup discovery resolves `apiKey` in this order:
+Discovery resolves `apiKey` in this order:
 
-1. Stored pi auth for provider `cursor` from `readStoredCredential("cursor")`, accepting only an `api_key` credential.
+1. The key supplied by the host ModelRegistry, including stored `/login` auth.
 2. `CURSOR_API_KEY`.
 
-Startup never parses `process.argv`; Pi remains the sole owner of CLI model/provider/key parsing. Provider turns keep Pi's resolved `options.apiKey`. Users can persist the stored key through `/login` -> `Use an API key` -> `Cursor`. If auth is added after startup, fallback models can run once Pi resolves the saved key for provider requests, and `/cursor-refresh-models` asks the command context's ModelRegistry for provider `cursor` and passes that normalized key explicitly to a forced live refresh.
+Startup never parses `process.argv`; Pi remains the sole owner of CLI model/provider/key parsing. Provider turns keep Pi's resolved `options.apiKey`. Users can persist the stored key through `/login` -> `Use an API key` -> `Cursor`. If auth is added after `session_start`, fallback models can run once Pi resolves the saved key for provider requests, and `/cursor-refresh-models` asks the command context's ModelRegistry for provider `cursor` and passes that normalized key explicitly to a forced live refresh.
 
 For each model, use:
 

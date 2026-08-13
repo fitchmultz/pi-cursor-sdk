@@ -44,7 +44,7 @@ export interface DiscoverModelsOptions {
 }
 
 async function getDiscoveryApiKey(apiKey?: string): Promise<string | undefined> {
-	return resolveCursorApiKey(apiKey) ?? resolveCursorRuntimeApiKey();
+	return resolveCursorRuntimeApiKey(apiKey);
 }
 
 export interface CursorModelMetadata {

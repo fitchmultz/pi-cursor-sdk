@@ -1,6 +1,6 @@
 import type { ModelListItem } from "@cursor/sdk";
 
-// Generated with @cursor/sdk@1.0.23 from 34 Cursor models.
+// Generated with @cursor/sdk@1.0.23 from 35 Cursor models.
 // Refresh with: npm run refresh:cursor-snapshots -- --write
 // Do not add secrets; this file stores public model metadata only.
 export const FALLBACK_MODEL_ITEMS = [
@@ -3070,6 +3070,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "thinking",
 						value: "false"
 					},
@@ -3090,6 +3094,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			},
 			{
 				params: [
+					{
+						id: "cyber",
+						value: "false"
+					},
 					{
 						id: "thinking",
 						value: "false"
@@ -3111,6 +3119,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			},
 			{
 				params: [
+					{
+						id: "cyber",
+						value: "false"
+					},
 					{
 						id: "thinking",
 						value: "false"
@@ -3133,6 +3145,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "thinking",
 						value: "false"
 					},
@@ -3154,6 +3170,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "thinking",
 						value: "false"
 					},
@@ -3174,6 +3194,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			},
 			{
 				params: [
+					{
+						id: "cyber",
+						value: "false"
+					},
 					{
 						id: "thinking",
 						value: "false"
@@ -3195,6 +3219,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			},
 			{
 				params: [
+					{
+						id: "cyber",
+						value: "false"
+					},
 					{
 						id: "thinking",
 						value: "false"
@@ -3217,6 +3245,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "thinking",
 						value: "false"
 					},
@@ -3238,6 +3270,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "thinking",
 						value: "false"
 					},
@@ -3258,6 +3294,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			},
 			{
 				params: [
+					{
+						id: "cyber",
+						value: "false"
+					},
 					{
 						id: "thinking",
 						value: "false"
@@ -3280,6 +3320,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "thinking",
 						value: "false"
 					},
@@ -3300,6 +3344,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			},
 			{
 				params: [
+					{
+						id: "cyber",
+						value: "false"
+					},
 					{
 						id: "thinking",
 						value: "false"
@@ -3321,6 +3369,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			},
 			{
 				params: [
+					{
+						id: "cyber",
+						value: "false"
+					},
 					{
 						id: "thinking",
 						value: "true"
@@ -3343,6 +3395,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "thinking",
 						value: "true"
 					},
@@ -3364,6 +3420,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "thinking",
 						value: "true"
 					},
@@ -3385,6 +3445,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "thinking",
 						value: "true"
 					},
@@ -3405,6 +3469,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			},
 			{
 				params: [
+					{
+						id: "cyber",
+						value: "false"
+					},
 					{
 						id: "thinking",
 						value: "true"
@@ -3427,6 +3495,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "thinking",
 						value: "true"
 					},
@@ -3447,6 +3519,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			},
 			{
 				params: [
+					{
+						id: "cyber",
+						value: "false"
+					},
 					{
 						id: "thinking",
 						value: "true"
@@ -3469,6 +3545,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "thinking",
 						value: "true"
 					},
@@ -3490,6 +3570,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "thinking",
 						value: "true"
 					},
@@ -3511,6 +3595,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "thinking",
 						value: "true"
 					},
@@ -3531,6 +3619,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			},
 			{
 				params: [
+					{
+						id: "cyber",
+						value: "false"
+					},
 					{
 						id: "thinking",
 						value: "true"
@@ -3553,6 +3645,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "thinking",
 						value: "true"
 					},
@@ -3573,6 +3669,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			},
 			{
 				params: [
+					{
+						id: "cyber",
+						value: "false"
+					},
 					{
 						id: "thinking",
 						value: "true"
@@ -3595,6 +3695,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "thinking",
 						value: "true"
 					},
@@ -3615,6 +3719,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			},
 			{
 				params: [
+					{
+						id: "cyber",
+						value: "false"
+					},
 					{
 						id: "thinking",
 						value: "true"
@@ -3638,6 +3746,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "thinking",
 						value: "true"
 					},
@@ -3659,6 +3771,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "thinking",
 						value: "true"
 					},
@@ -3680,6 +3796,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "thinking",
 						value: "true"
 					},
@@ -3700,6 +3820,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			},
 			{
 				params: [
+					{
+						id: "cyber",
+						value: "false"
+					},
 					{
 						id: "thinking",
 						value: "true"
@@ -3721,6 +3845,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			},
 			{
 				params: [
+					{
+						id: "cyber",
+						value: "false"
+					},
 					{
 						id: "thinking",
 						value: "true"
@@ -7299,6 +7427,154 @@ export const FALLBACK_MODEL_ITEMS = [
 				],
 				displayName: "Cursor Grok 4.5",
 				isDefault: true
+			}
+		]
+	},
+	{
+		id: "grok-4.6",
+		displayName: "Cursor Grok 4.6",
+		parameters: [
+			{
+				id: "effort",
+				displayName: "Effort",
+				values: [
+					{
+						value: "low",
+						displayName: "Low"
+					},
+					{
+						value: "medium",
+						displayName: "Medium"
+					},
+					{
+						value: "high",
+						displayName: "High"
+					},
+					{
+						value: "xhigh",
+						displayName: "Extra High"
+					}
+				]
+			},
+			{
+				id: "fast",
+				displayName: "Fast",
+				values: [
+					{
+						value: "false"
+					},
+					{
+						value: "true",
+						displayName: "Fast​​"
+					}
+				]
+			}
+		],
+		variants: [
+			{
+				params: [
+					{
+						id: "effort",
+						value: "low"
+					},
+					{
+						id: "fast",
+						value: "false"
+					}
+				],
+				displayName: "Cursor Grok 4.6"
+			},
+			{
+				params: [
+					{
+						id: "effort",
+						value: "low"
+					},
+					{
+						id: "fast",
+						value: "true"
+					}
+				],
+				displayName: "Cursor Grok 4.6"
+			},
+			{
+				params: [
+					{
+						id: "effort",
+						value: "medium"
+					},
+					{
+						id: "fast",
+						value: "false"
+					}
+				],
+				displayName: "Cursor Grok 4.6"
+			},
+			{
+				params: [
+					{
+						id: "effort",
+						value: "medium"
+					},
+					{
+						id: "fast",
+						value: "true"
+					}
+				],
+				displayName: "Cursor Grok 4.6"
+			},
+			{
+				params: [
+					{
+						id: "effort",
+						value: "high"
+					},
+					{
+						id: "fast",
+						value: "false"
+					}
+				],
+				displayName: "Cursor Grok 4.6"
+			},
+			{
+				params: [
+					{
+						id: "effort",
+						value: "high"
+					},
+					{
+						id: "fast",
+						value: "true"
+					}
+				],
+				displayName: "Cursor Grok 4.6",
+				isDefault: true
+			},
+			{
+				params: [
+					{
+						id: "effort",
+						value: "xhigh"
+					},
+					{
+						id: "fast",
+						value: "false"
+					}
+				],
+				displayName: "Cursor Grok 4.6"
+			},
+			{
+				params: [
+					{
+						id: "effort",
+						value: "xhigh"
+					},
+					{
+						id: "fast",
+						value: "true"
+					}
+				],
+				displayName: "Cursor Grok 4.6"
 			}
 		]
 	},

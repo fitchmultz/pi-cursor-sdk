@@ -698,6 +698,18 @@ Fast toggle maps to the Cursor `fast` parameter.
 
 `shift+tab` maps the available low, medium, and high levels to Cursor `effort`; levels without a catalog value do not invent one.
 
+### `grok-4.6`
+
+Supports `effort=low|medium|high|xhigh` and `fast=false|true`; it does not advertise context variants. The catalog default is `effort=high` and `fast=true`.
+
+```text
+cursor/grok-4.6
+```
+
+Fast toggle maps to the Cursor `fast` parameter.
+
+`shift+tab` maps the available low, medium, high, and xhigh levels to Cursor `effort`; levels without a catalog value do not invent one.
+
 ## Validation Plan
 
 Before calling done:

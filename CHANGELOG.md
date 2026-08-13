@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Refresh the Cursor fallback catalog to 35 models from the live `@cursor/sdk` 1.0.23 list, adding Grok 4.6 (`grok-4.6`) with catalog `effort=low|medium|high|xhigh` and `fast`, plus a conservative 200k bundled context window until a checkpoint override exists.
+
 ## 0.2.0 - 2026-08-06
 
 ### Added

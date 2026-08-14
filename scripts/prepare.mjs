@@ -54,10 +54,14 @@ async function main() {
 		await runNpm(["install", "--include=dev", "--ignore-scripts"]);
 	}
 	try {
-		await execFile(process.execPath, [join(process.cwd(), "scripts", "build.mjs")], {
+		const { stderr, stdout } = await execFile(process.execPath, [join(process.cwd(), "scripts", "build.mjs")], {
 			cwd: process.cwd(),
 			maxBuffer: 20 * 1024 * 1024,
 		});
+		// Forward build output on success too: install-time diagnostics such as the
+		// concurrent-swap race-loss warning are otherwise swallowed.
+		if (stdout) process.stdout.write(stdout);
+		if (stderr) process.stderr.write(stderr);
 	} finally {
 		if (devDependenciesWereMissing) {
 			// Return node_modules to the runtime-only set (even when the build fails) so

@@ -1,6 +1,6 @@
 {
   "name": "pi-cursor-sdk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "pi provider extension backed by @cursor/sdk local and cloud agents",
   "author": "Mitch Fultz (https://github.com/fitchmultz)",
   "license": "MIT",
@@ -22,8 +22,13 @@
   },
   "homepage": "https://github.com/fitchmultz/pi-cursor-sdk#readme",
   "files": [
+    "dist",
     "shared",
     "src",
+    "scripts/build.mjs",
+    "scripts/prepare.mjs",
+    "tsconfig.build.json",
+    "tsconfig.json",
     "scripts/refresh-cursor-model-snapshots.mjs",
     "scripts/steering-rpc-smoke.mjs",
     "scripts/tmux-live-smoke.sh",
@@ -114,6 +119,8 @@
     "node": ">=22.19.0"
   },
   "scripts": {
+    "build": "node ./scripts/build.mjs",
+    "prepare": "node ./scripts/prepare.mjs",
     "typecheck": "npm run typecheck:src && npm run typecheck:tests && npm run typecheck:replay-compile",
     "typecheck:src": "tsc --noEmit",
     "typecheck:tests": "tsc -p tsconfig.test.json --noEmit",
@@ -179,7 +186,7 @@
   },
   "pi": {
     "extensions": [
-      "./src/index.ts"
+      "./dist/index.js"
     ]
   },
   "allowScripts": {

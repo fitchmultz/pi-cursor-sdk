@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0 - 2026-08-13
+
+### Changed
+
+- The Pi extension manifest now loads precompiled `dist/index.js` instead of transpiling `src/index.ts` at startup. A `prepare` lifecycle script builds `dist/` on install and update (including Pi's `npm install --omit=dev`), removing the jiti startup tax for the ~28kloc extension graph.
+
 ## 0.2.0 - 2026-08-06
 
 ### Added

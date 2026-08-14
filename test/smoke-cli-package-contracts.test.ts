@@ -378,6 +378,10 @@ if (!windows.includes("for($i=0;$i -lt 10") || !windows.includes("$w=$e.Replace(
 		expect(paths.has("CHANGELOG.md")).toBe(true);
 		expect(paths.has("README.md")).toBe(true);
 		expect(paths.has("docs/platform-smoke.md")).toBe(true);
-		expect([...paths].some((path) => path.startsWith("dist/") || path.startsWith("coverage/") || path.startsWith(".pi/") || path.includes("smoke-dir"))).toBe(false);
+		expect(paths.has("dist/index.js")).toBe(true);
+		expect(paths.has("tsconfig.build.json")).toBe(true);
+		expect(paths.has("scripts/build.mjs")).toBe(true);
+		expect(paths.has("scripts/prepare.mjs")).toBe(true);
+		expect([...paths].some((path) => path.startsWith("coverage/") || path.startsWith(".pi/") || path.includes("smoke-dir"))).toBe(false);
 	}, 90_000);
 });

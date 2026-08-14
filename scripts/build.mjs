@@ -2,7 +2,7 @@
 /**
  * Purpose: Produce the compiled runtime files that the Pi extension manifest loads.
  * Responsibilities: Run TypeScript emit into a staging directory, then atomically swap it
- * into dist/ so a failed build never destroys a previously working dist.
+ * into dist/ so a failed TypeScript emit never destroys a previously working dist.
  * Usage: `npm run build`; also invoked by scripts/prepare.mjs during install lifecycles.
  * Invariants/Assumptions: `node_modules` provides `typescript`; deleting `dist/` is safe generated output.
  */
@@ -16,93 +16,108 @@ import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
+const RM_OPTIONS = { force: true, maxRetries: 5, recursive: true, retryDelay: 100 };
+const RENAME_RETRY_LIMIT = 50;
+const RENAME_RETRY_MS = 50;
 // Run tsc's JS entrypoint directly through the current node binary: no .cmd shim,
 // no shell, safe for install paths containing spaces on every platform.
 const tscPath = join(process.cwd(), "node_modules", "typescript", "bin", "tsc");
 
-async function main() {
-	if (!existsSync(tscPath)) {
-		throw new Error(`typescript is not installed at ${tscPath}; run npm install first.`);
+async function discardStaging(path) {
+	try {
+		await rm(path, RM_OPTIONS);
+	} catch (error) {
+		// Cleanup is always best-effort: it must not turn a successful race loss
+		// into failure or replace the compiler/publish error that matters.
+		console.warn(`could not remove staging ${path}: ${error?.message ?? error}`);
 	}
-	// Reap staging dirs stranded by dead builds (SIGKILL or crash mid-emit).
-	// Signal 0 probes liveness; only ESRCH proves the owning process was gone at
-	// probe time, so live concurrent builds (and pid-reused strangers) are left
-	// alone. Pid reuse between the probe and the rm is inherent to pid-based
-	// reaping and astronomically unlikely; the storm tests cover the live case.
-	for (const entry of await readdir(process.cwd(), { withFileTypes: true })) {
-		const staleMatch = /^dist\.staging\.(\d+)$/.exec(entry.name);
-		if (!staleMatch || !entry.isDirectory()) continue;
-		const ownerPid = Number(staleMatch[1]);
-		if (ownerPid === process.pid) continue;
-		try {
-			process.kill(ownerPid, 0);
-		} catch (error) {
-			if (error?.code !== "ESRCH") continue;
-			try {
-				await rm(join(process.cwd(), entry.name), { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
-			} catch (reapError) {
-				// Best-effort: an unreapable strand (foreign-owned, locked) must not
-				// fail the build that merely tried to tidy it.
-				console.warn(`could not remove stale ${entry.name}: ${reapError?.message ?? reapError}`);
-			}
-		}
+}
+
+function isOwnerGone(pid) {
+	try {
+		process.kill(pid, 0);
+		return false;
+	} catch (error) {
+		return error?.code === "ESRCH";
 	}
-	// Pid-scoped so concurrent builds (pack-triggered prepare, smoke lanes) cannot
-	// clobber each other's staging tree or swap a partial emit into dist/.
-	const stagingDir = join(process.cwd(), `dist.staging.${process.pid}`);
-	await rm(stagingDir, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
+}
+
+async function hasPublishedDist(path) {
+	try {
+		return (await readdir(path)).length > 0;
+	} catch {
+		return false;
+	}
+}
+
+async function reapStrandedStaging(cwd) {
+	// Signal 0 proves only that the owner was gone at probe time. Pid reuse
+	// between this probe and removal is inherent to pid-based reaping.
+	for (const entry of await readdir(cwd, { withFileTypes: true })) {
+		const match = /^dist\.staging\.(\d+)$/.exec(entry.name);
+		if (!match || !entry.isDirectory()) continue;
+		const ownerPid = Number(match[1]);
+		if (ownerPid === process.pid || !isOwnerGone(ownerPid)) continue;
+		await discardStaging(join(cwd, entry.name));
+	}
+}
+
+async function compileToStaging(cwd, stagingDir) {
 	try {
 		const { stderr, stdout } = await execFile(
 			process.execPath,
 			[tscPath, "-p", "tsconfig.build.json", "--outDir", stagingDir],
-			{ cwd: process.cwd(), maxBuffer: 10 * 1024 * 1024 },
+			{ cwd, maxBuffer: 10 * 1024 * 1024 },
 		);
 		if (stdout) process.stdout.write(stdout);
 		if (stderr) process.stderr.write(stderr);
 	} catch (error) {
-		await rm(stagingDir, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
 		if (error?.stdout) process.stdout.write(error.stdout);
 		if (error?.stderr) process.stderr.write(error.stderr);
+		await discardStaging(stagingDir);
 		throw error;
 	}
-	const distDir = join(process.cwd(), "dist");
-	// A failed dist removal (for example a Windows file lock) must fail loudly.
-	// Keep this rm outside the loop so retries never delete a concurrent winner;
-	// the hard attempt cap below handles persistent filesystem errors.
+}
+
+async function publishStaging(stagingDir, distDir) {
 	try {
-		await rm(distDir, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
-	} catch (error) {
-		// Best-effort cleanup must not mask the dist-removal error.
-		await rm(stagingDir, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 }).catch(() => {});
-		throw error;
-	}
-	for (let attempt = 0; ; attempt++) {
-		try {
-			await rename(stagingDir, distDir);
-			return;
-		} catch (error) {
-			// Decide by existence, never by errno: rename onto an existing
-			// directory does not report the same code on every platform, so a
-			// code-gated branch would misclassify a race loss on Windows.
-			if (existsSync(distDir)) {
-				// A concurrent build published first. Its output is an equivalent
-				// fresh emit of the same tree, so discard ours and succeed.
-				await rm(stagingDir, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
-				console.warn("dist/ was published by a concurrent build; discarding this build's staging tree.");
+		// A failed dist removal must fail loudly; keep it outside the retry loop.
+		// Remove dist exactly once so retries never delete a concurrent winner.
+		await rm(distDir, RM_OPTIONS);
+		for (let retry = 0; ; retry++) {
+			try {
+				await rename(stagingDir, distDir);
 				return;
+			} catch (error) {
+				// A completed staged build is non-empty; a bare directory is not proof
+				// that a concurrent publisher won the race.
+				if (await hasPublishedDist(distDir)) {
+					console.warn("dist/ was published by a concurrent build; discarding this build's staging tree.");
+					return;
+				}
+				// At most 50 retries (~2.5s) keep persistent filesystem errors bounded.
+				if (existsSync(stagingDir) && retry < RENAME_RETRY_LIMIT) {
+					await delay(RENAME_RETRY_MS);
+					continue;
+				}
+				throw error;
 			}
-			// dist/ is absent, so nobody holds the slot. Our own staging tree is
-			// still intact and retrying our rename publishes it, which is why no
-			// build ever waits on another build's timing.
-			if (existsSync(stagingDir) && attempt < 50) {
-				await delay(50);
-				continue;
-			}
-			// Our emit vanished, or the slot never settled: fail loudly.
-			await rm(stagingDir, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
-			throw error;
 		}
+	} finally {
+		// Safe after success too: rename moved stagingDir, so force makes this a no-op.
+		await discardStaging(stagingDir);
 	}
+}
+
+async function main() {
+	const cwd = process.cwd();
+	if (!existsSync(tscPath)) throw new Error(`typescript is not installed at ${tscPath}; run npm install first.`);
+	await reapStrandedStaging(cwd);
+	// Pid-scoped staging isolates concurrent emits; only a complete tree publishes.
+	const stagingDir = join(cwd, `dist.staging.${process.pid}`);
+	await rm(stagingDir, RM_OPTIONS);
+	await compileToStaging(cwd, stagingDir);
+	await publishStaging(stagingDir, join(cwd, "dist"));
 }
 
 main().catch((error) => {

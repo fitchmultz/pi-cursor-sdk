@@ -48,43 +48,55 @@ async function runNpm(args) {
 	});
 }
 
-async function main() {
-	const devDependenciesWereMissing = !hasBuildDependencies();
-	if (devDependenciesWereMissing) {
-		await runNpm(["install", "--include=dev", "--ignore-scripts"]);
-	}
-	let buildFailed = false;
+async function runBuild() {
+	const { stderr, stdout } = await execFile(process.execPath, [join(process.cwd(), "scripts", "build.mjs")], {
+		cwd: process.cwd(),
+		maxBuffer: 20 * 1024 * 1024,
+	});
+	// Forward build output on success too: install-time diagnostics such as the
+	// concurrent-swap race-loss warning are otherwise swallowed.
+	if (stdout) process.stdout.write(stdout);
+	if (stderr) process.stderr.write(stderr);
+}
+
+async function pruneDevDependencies() {
+	await runNpm(["prune", "--omit=dev", "--ignore-scripts"]);
+}
+
+async function pruneQuietly() {
 	try {
-		const { stderr, stdout } = await execFile(process.execPath, [join(process.cwd(), "scripts", "build.mjs")], {
-			cwd: process.cwd(),
-			maxBuffer: 20 * 1024 * 1024,
-		});
-		// Forward build output on success too: install-time diagnostics such as the
-		// concurrent-swap race-loss warning are otherwise swallowed.
-		if (stdout) process.stdout.write(stdout);
-		if (stderr) process.stderr.write(stderr);
+		await pruneDevDependencies();
 	} catch (error) {
-		buildFailed = true;
-		throw error;
-	} finally {
-		if (devDependenciesWereMissing) {
-			try {
-				// Return node_modules to the runtime-only set (even when the build fails) so
-				// end-user installs never keep the full dev toolchain on disk.
-				await runNpm(["prune", "--omit=dev", "--ignore-scripts"]);
-			} catch (pruneError) {
-				// A prune failure alone still fails the install, but it must never
-				// mask the build error, which is the diagnostic that matters.
-				if (!buildFailed) throw pruneError;
-				console.warn(`npm prune failed after a failed build: ${pruneError?.message ?? pruneError}`);
-			}
-		}
+		console.warn(`npm prune failed after a failed build: ${error?.message ?? error}`);
 	}
 }
 
-main().catch((error) => {
+function reportError(error) {
 	if (error?.stdout) process.stdout.write(error.stdout);
 	if (error?.stderr) process.stderr.write(error.stderr);
 	console.error(error instanceof Error ? error.message : String(error));
+}
+
+async function main() {
+	if (hasBuildDependencies()) {
+		await runBuild();
+		return;
+	}
+	await runNpm(["install", "--include=dev", "--ignore-scripts"]);
+	try {
+		await runBuild();
+	} catch (buildError) {
+		// Report the build first; cleanup can warn afterward but never mask it.
+		reportError(buildError);
+		await pruneQuietly();
+		process.exitCode = 1;
+		return;
+	}
+	// A prune failure after a successful build still fails the install.
+	await pruneDevDependencies();
+}
+
+main().catch((error) => {
+	reportError(error);
 	process.exitCode = 1;
 });

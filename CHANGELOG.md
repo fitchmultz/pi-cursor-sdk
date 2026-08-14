@@ -4,7 +4,7 @@
 
 ### Changed
 
-- The Pi extension manifest now loads precompiled `dist/index.js` instead of transpiling `src/index.ts` at startup. A `prepare` lifecycle script builds `dist/` on install and update (including Pi's `npm install --omit=dev`), removing the jiti startup tax for the ~28kloc extension graph.
+- The Pi extension manifest now loads precompiled `dist/index.js` instead of transpiling `src/index.ts` through jiti. This reduces load cost on cold starts and after cache invalidation (fresh installs, `pi update`, cache eviction); warm starts with a hot jiti cache were already near parity. A `prepare` lifecycle script builds `dist/` on install and update (including Pi's `npm install --omit=dev` flow) and prunes the dev toolchain back out afterwards.
 
 ## 0.2.0 - 2026-08-06
 

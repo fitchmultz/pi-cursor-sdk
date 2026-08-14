@@ -49,18 +49,21 @@ async function runNpm(args) {
 }
 
 async function main() {
-	const installedDevDependencies = !hasBuildDependencies();
-	if (installedDevDependencies) {
+	const devDependenciesWereMissing = !hasBuildDependencies();
+	if (devDependenciesWereMissing) {
 		await runNpm(["install", "--include=dev", "--ignore-scripts"]);
 	}
-	await execFile(process.execPath, [join(process.cwd(), "scripts", "build.mjs")], {
-		cwd: process.cwd(),
-		maxBuffer: 20 * 1024 * 1024,
-	});
-	if (installedDevDependencies) {
-		// Return node_modules to the runtime-only set so end-user installs do not keep
-		// the full dev toolchain on disk after the one-time build.
-		await runNpm(["prune", "--omit=dev", "--ignore-scripts"]);
+	try {
+		await execFile(process.execPath, [join(process.cwd(), "scripts", "build.mjs")], {
+			cwd: process.cwd(),
+			maxBuffer: 20 * 1024 * 1024,
+		});
+	} finally {
+		if (devDependenciesWereMissing) {
+			// Return node_modules to the runtime-only set (even when the build fails) so
+			// end-user installs never keep the full dev toolchain on disk.
+			await runNpm(["prune", "--omit=dev", "--ignore-scripts"]);
+		}
 	}
 }
 

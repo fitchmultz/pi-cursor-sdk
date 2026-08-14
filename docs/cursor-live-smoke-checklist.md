@@ -8,6 +8,7 @@ Use this manual checklist during development and debugging of Cursor provider/ru
 
 ## Inner-loop rule
 
+- Build first: `npm run build` after any `src/` edit — the pi manifest loads compiled `dist/`, so unbuilt runs validate stale code. (`smoke:*` npm scripts build automatically; direct `pi -e .` invocations do not.)
 - Run from a clean working tree except for the intended branch diff.
 - Use the local extension under test: `pi --approve -e . --cursor-no-fast --model cursor/composer-2-5`.
 - Use a temporary `--session-dir` for every run.

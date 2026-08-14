@@ -112,7 +112,8 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 
 ## Setup and commands
 
-- Install dependencies: `npm install`
+- Install dependencies: `npm install` (runs `prepare`, which compiles `src/` into `dist/` — the manifest entry pi loads)
+- Build after editing `src/`: `npm run build` — required before any direct `pi -e .` run, or pi loads the previous build. The `smoke:*` and `debug:provider-events` npm scripts build first automatically.
 - Run tests: `npm test`
 - Typecheck (src + tests): `npm run typecheck`
 - Typecheck src only: `npm run typecheck:src`

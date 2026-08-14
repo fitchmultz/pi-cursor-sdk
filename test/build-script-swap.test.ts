@@ -27,19 +27,46 @@ if (process.env.TSC_STUB_SABOTAGE_STAGING === "1") {
 }
 `;
 
+// Fail the first rename, then publish a simulated winner after 2.2 seconds.
+// The old bounded poll discarded its own staging tree and exited 1 before this
+// timer fired; retry-rename keeps its emit and publishes it immediately.
+const LATE_WINNER_PRELOAD = `
+import { createRequire, syncBuiltinESMExports } from "node:module";
+import { join } from "node:path";
+const require = createRequire(import.meta.url);
+const fs = require("node:fs");
+const fsPromises = require("node:fs/promises");
+const originalRename = fsPromises.rename;
+let firstRename = true;
+fsPromises.rename = async (...args) => {
+	if (!firstRename) return originalRename(...args);
+	firstRename = false;
+	setTimeout(() => {
+		fs.mkdirSync(join(process.cwd(), "dist"), { recursive: true });
+		fs.writeFileSync(join(process.cwd(), "dist", "late-winner.txt"), "published");
+	}, 2_200);
+	throw new Error("synthetic late-winner race");
+};
+syncBuiltinESMExports();
+`;
+
 function makeFixture(): string {
 	const dir = mkdtempSync(join(tmpdir(), "build-swap-"));
 	mkdirSync(join(dir, "node_modules", "typescript", "bin"), { recursive: true });
 	writeFileSync(join(dir, "node_modules", "typescript", "bin", "tsc"), TSC_STUB);
+	writeFileSync(join(dir, "late-winner-preload.mjs"), LATE_WINNER_PRELOAD);
 	return dir;
 }
 
-async function runBuild(cwd: string, env: Record<string, string> = {}) {
+// Returns stderr alongside the exit code so a storm failure in CI reports the
+// build's own diagnostic instead of a bare "expected 1 to be 0".
+async function runBuild(cwd: string, env: Record<string, string> = {}, nodeArgs: string[] = []) {
 	try {
-		await execFile(process.execPath, [buildScript], { cwd, env: { ...process.env, ...env } });
-		return 0;
+		await execFile(process.execPath, [...nodeArgs, buildScript], { cwd, env: { ...process.env, ...env } });
+		return { code: 0, stderr: "" };
 	} catch (error) {
-		return (error as { code?: number }).code ?? 1;
+		const failure = error as { code?: number; stderr?: string };
+		return { code: failure.code ?? 1, stderr: failure.stderr ?? "" };
 	}
 }
 
@@ -59,7 +86,7 @@ describe("build.mjs staging swap", () => {
 		mkdirSync(join(dir, "dist"));
 		writeFileSync(join(dir, "dist", "sentinel.txt"), "previous build");
 
-		const exitCode = await runBuild(dir, { TSC_STUB_FAIL: "1" });
+		const { code: exitCode } = await runBuild(dir, { TSC_STUB_FAIL: "1" });
 
 		expect(exitCode).not.toBe(0);
 		expect(existsSync(join(dir, "dist", "sentinel.txt"))).toBe(true);
@@ -72,7 +99,7 @@ describe("build.mjs staging swap", () => {
 		mkdirSync(join(dir, "dist"));
 		writeFileSync(join(dir, "dist", "stale.txt"), "old output");
 
-		expect(await runBuild(dir)).toBe(0);
+		expect((await runBuild(dir)).code).toBe(0);
 
 		expect(existsSync(join(dir, "dist", "index.js"))).toBe(true);
 		expect(existsSync(join(dir, "dist", "stale.txt"))).toBe(false);
@@ -88,7 +115,7 @@ describe("build.mjs staging swap", () => {
 		const livePid = process.pid; // this test runner is alive for the whole build
 		mkdirSync(join(dir, `dist.staging.${livePid}`, "inflight"), { recursive: true });
 
-		expect(await runBuild(dir)).toBe(0);
+		expect((await runBuild(dir)).code).toBe(0);
 
 		expect(existsSync(join(dir, `dist.staging.${deadPid}`))).toBe(false);
 		expect(existsSync(join(dir, `dist.staging.${livePid}`))).toBe(true);
@@ -98,25 +125,38 @@ describe("build.mjs staging swap", () => {
 		const dir = makeFixture();
 		fixtures.push(dir);
 
-		// 12-wide x 3 rounds: wide enough to exercise the rename race and the
-		// mid-swap winner poll with useful probability on every run.
+		// 12-wide x 3 rounds: wide enough that the publish race fires on most runs.
 		for (let round = 0; round < 3; round++) {
-			const exitCodes = await Promise.all(Array.from({ length: 12 }, () => runBuild(dir)));
+			const results = await Promise.all(Array.from({ length: 12 }, () => runBuild(dir)));
 
-			expect(exitCodes).toEqual(Array.from({ length: 12 }, () => 0));
+			// Asserted first so a failure shows the build's own stderr, not just a code.
+			expect(results.flatMap((result) => (result.code === 0 ? [] : [result.stderr]))).toEqual([]);
+			expect(results.map((result) => result.code)).toEqual(Array.from({ length: 12 }, () => 0));
 			expect(existsSync(join(dir, "dist", "index.js"))).toBe(true);
 			expect(stagingDirs(dir)).toEqual([]);
 		}
 	}, 30_000);
 
+	it("publishes its retained staging tree instead of timing out on a slow winner", async () => {
+		const dir = makeFixture();
+		fixtures.push(dir);
+
+		const result = await runBuild(dir, {}, ["--import", join(dir, "late-winner-preload.mjs")]);
+
+		expect(result).toEqual({ code: 0, stderr: "" });
+		expect(existsSync(join(dir, "dist", "index.js"))).toBe(true);
+		expect(existsSync(join(dir, "dist", "late-winner.txt"))).toBe(true);
+		expect(stagingDirs(dir)).toEqual([]);
+	}, 10_000);
+
 	it("rethrows the rename failure when no concurrent winner exists", async () => {
 		const dir = makeFixture();
 		fixtures.push(dir);
 
-		// The sabotage stub deletes its own emit after compiling, so the build's
-		// rename fails (ENOENT) and no winner ever repopulates dist/: the poll
-		// must exhaust and rethrow instead of reporting a phantom race win.
-		const exitCode = await runBuild(dir, { TSC_STUB_SABOTAGE_STAGING: "1" });
+		// The sabotage stub deletes its own emit after compiling. The rename then
+		// fails with dist/ absent and no staging tree left to retry, which is the
+		// genuine-failure path: it must rethrow, never report a phantom race win.
+		const { code: exitCode } = await runBuild(dir, { TSC_STUB_SABOTAGE_STAGING: "1" });
 
 		expect(exitCode).not.toBe(0);
 		expect(existsSync(join(dir, "dist"))).toBe(false);

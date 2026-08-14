@@ -25,8 +25,10 @@ async function main() {
 		throw new Error(`typescript is not installed at ${tscPath}; run npm install first.`);
 	}
 	// Reap staging dirs stranded by dead builds (SIGKILL or crash mid-emit).
-	// Signal 0 probes liveness; only ESRCH proves the owning process is gone,
-	// so live concurrent builds (and pid-reused strangers) are never touched.
+	// Signal 0 probes liveness; only ESRCH proves the owning process was gone at
+	// probe time, so live concurrent builds (and pid-reused strangers) are left
+	// alone. Pid reuse between the probe and the rm is inherent to pid-based
+	// reaping and astronomically unlikely; the storm tests cover the live case.
 	for (const entry of await readdir(process.cwd(), { withFileTypes: true })) {
 		const staleMatch = /^dist\.staging\.(\d+)$/.exec(entry.name);
 		if (!staleMatch || !entry.isDirectory()) continue;
@@ -65,27 +67,36 @@ async function main() {
 	}
 	const distDir = join(process.cwd(), "dist");
 	// A failed dist removal (for example a Windows file lock) must fail loudly:
-	// it stays outside the race-loss handling below.
+	// it stays outside the publish handling below. This rm runs exactly once per
+	// build, which is what bounds the retry loop: a finite number of concurrent
+	// builds can steal the slot a finite number of times. Never move it inside.
 	await rm(distDir, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
-	try {
-		await rename(stagingDir, distDir);
-	} catch (error) {
-		await rm(stagingDir, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
-		// A concurrent build can repopulate dist/ between our rm and rename; its
-		// output is an equivalent fresh emit, so losing that race is a success.
-		// The winner may itself be mid-swap (between its rm and rename), so poll
-		// briefly before declaring a real failure: with concurrent builds of the
-		// same tree, some build's rename always lands.
-		// 21 checks around 20 delays: the final check runs after the last delay,
-		// so a winner landing late in the window is still observed.
-		for (let attempt = 0; attempt <= 20; attempt++) {
+	for (let attempt = 0; ; attempt++) {
+		try {
+			await rename(stagingDir, distDir);
+			return;
+		} catch (error) {
+			// Decide by existence, never by errno: rename onto an existing
+			// directory does not report the same code on every platform, so a
+			// code-gated branch would misclassify a race loss on Windows.
 			if (existsSync(distDir)) {
-				console.warn("dist/ was replaced by a concurrent build; keeping that output.");
+				// A concurrent build published first. Its output is an equivalent
+				// fresh emit of the same tree, so discard ours and succeed.
+				await rm(stagingDir, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
+				console.warn("dist/ was published by a concurrent build; discarding this build's staging tree.");
 				return;
 			}
-			if (attempt < 20) await delay(100);
+			// dist/ is absent, so nobody holds the slot. Our own staging tree is
+			// still intact and retrying our rename publishes it, which is why no
+			// build ever waits on another build's timing.
+			if (existsSync(stagingDir) && attempt < 50) {
+				await delay(50);
+				continue;
+			}
+			// Our emit vanished, or the slot never settled: fail loudly.
+			await rm(stagingDir, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
+			throw error;
 		}
-		throw error;
 	}
 }
 

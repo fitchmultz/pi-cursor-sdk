@@ -4,10 +4,10 @@
 
 ### Changed
 
-- `scripts/build.mjs` now reaps `dist.staging.<pid>` directories stranded by dead builds (SIGKILL or crash mid-emit) at the start of every build, using a signal-0 liveness probe so live concurrent builds are never touched. Reaping is best-effort: an unreapable strand warns instead of failing the build.
-- The race-loss check now polls briefly for a mid-swap concurrent winner before declaring failure, closing the review-identified window where a losing build could spuriously exit 1 while the winner was between its own `rm` and `rename`.
+- `scripts/build.mjs` now reaps `dist.staging.<pid>` directories stranded by dead builds (SIGKILL or crash mid-emit) at the start of every build. Only pids already gone at the signal-0 probe are eligible; pid reuse in the tiny probe-to-remove window remains an inherent limitation. Reaping is best-effort: an unreapable strand warns instead of failing the build.
+- `dist/` is now published by retrying this build's own `rename` instead of waiting on another build. A rename failure yields only when `dist/` already exists (an existence check, not an errno check, so platforms that report a different code for rename-onto-existing-directory still behave correctly); otherwise the staging tree is retained and the rename retried, so no build's success depends on another build's scheduling. This closes the review-identified windows where a losing build could exit 1 while a concurrent winner was mid-swap or descheduled.
 - `scripts/prepare.mjs` forwards build output on success too, so install-time diagnostics such as the concurrent-swap race-loss warning are no longer swallowed.
-- New automated coverage for the staging swap: failed builds preserve the previous `dist/`, successful builds purge stale files, dead-pid staging dirs are reaped while live ones survive, and concurrent builds all succeed.
+- New automated coverage for the staging swap: failed builds preserve the previous `dist/`, successful builds purge stale files, dead-pid staging dirs are reaped while live ones survive, concurrent builds all succeed, slow winners cannot time out another build, and genuine failures still fail loudly.
 
 ## 0.3.0 - 2026-08-13
 

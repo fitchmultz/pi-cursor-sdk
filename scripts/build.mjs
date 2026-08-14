@@ -66,11 +66,16 @@ async function main() {
 		throw error;
 	}
 	const distDir = join(process.cwd(), "dist");
-	// A failed dist removal (for example a Windows file lock) must fail loudly:
-	// it stays outside the publish handling below. This rm runs exactly once per
-	// build, which is what bounds the retry loop: a finite number of concurrent
-	// builds can steal the slot a finite number of times. Never move it inside.
-	await rm(distDir, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
+	// A failed dist removal (for example a Windows file lock) must fail loudly.
+	// Keep this rm outside the loop so retries never delete a concurrent winner;
+	// the hard attempt cap below handles persistent filesystem errors.
+	try {
+		await rm(distDir, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
+	} catch (error) {
+		// Best-effort cleanup must not mask the dist-removal error.
+		await rm(stagingDir, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 }).catch(() => {});
+		throw error;
+	}
 	for (let attempt = 0; ; attempt++) {
 		try {
 			await rename(stagingDir, distDir);

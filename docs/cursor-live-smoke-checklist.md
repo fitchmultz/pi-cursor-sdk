@@ -365,7 +365,7 @@ npm pack --dry-run
 Pass criteria:
 
 - All commands exit `0`.
-- `npm pack --dry-run` includes all new runtime source files and excludes local smoke artifacts, sessions, package tarballs, `.env*`, `.pi/`, `dist/`, and `coverage/`.
+- `npm pack --dry-run` includes all new runtime source files and the compiled `dist/` output, and excludes local smoke artifacts, sessions, package tarballs, `.env*`, `.pi/`, and `coverage/`.
 
 ## 12. Cleanup
 

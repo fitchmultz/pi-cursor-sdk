@@ -379,6 +379,12 @@ if (!windows.includes("for($i=0;$i -lt 10") || !windows.includes("$w=$e.Replace(
 		expect(paths.has("README.md")).toBe(true);
 		expect(paths.has("docs/platform-smoke.md")).toBe(true);
 		expect(paths.has("dist/index.js")).toBe(true);
+		// pi silently drops manifest entries whose file is missing; assert the
+		// manifest target exists on disk after the pack-triggered build.
+		const manifest = JSON.parse(readFileSync("package.json", "utf8")) as { pi?: { extensions?: string[] } };
+		for (const entry of manifest.pi?.extensions ?? []) {
+			expect(existsSync(entry), `pi.extensions entry missing on disk: ${entry}`).toBe(true);
+		}
 		expect(paths.has("tsconfig.build.json")).toBe(true);
 		expect(paths.has("scripts/build.mjs")).toBe(true);
 		expect(paths.has("scripts/prepare.mjs")).toBe(true);

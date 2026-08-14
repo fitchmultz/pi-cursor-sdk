@@ -7,21 +7,24 @@
  */
 
 import { execFile as execFileCallback } from "node:child_process";
+import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
-const binSuffix = process.platform === "win32" ? ".cmd" : "";
-const tscPath = join(process.cwd(), "node_modules", ".bin", `tsc${binSuffix}`);
+// Run tsc's JS entrypoint directly through the current node binary: no .cmd shim,
+// no shell, safe for install paths containing spaces on every platform.
+const tscPath = join(process.cwd(), "node_modules", "typescript", "bin", "tsc");
 
 async function main() {
+	if (!existsSync(tscPath)) {
+		throw new Error(`typescript is not installed at ${tscPath}; run npm install first.`);
+	}
 	await rm(join(process.cwd(), "dist"), { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
-	const options = process.platform === "win32" ? { shell: true } : {};
 	try {
-		const { stderr, stdout } = await execFile(tscPath, ["-p", "tsconfig.build.json"], {
-			...options,
+		const { stderr, stdout } = await execFile(process.execPath, [tscPath, "-p", "tsconfig.build.json"], {
 			cwd: process.cwd(),
 			maxBuffer: 10 * 1024 * 1024,
 		});

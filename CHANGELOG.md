@@ -4,7 +4,7 @@
 
 ### Changed
 
-- `scripts/build.mjs` now reaps `dist.staging.<pid>` directories stranded by dead builds (SIGKILL or crash mid-emit) at the start of every build, using a signal-0 liveness probe so live concurrent builds are never touched.
+- `scripts/build.mjs` now reaps `dist.staging.<pid>` directories stranded by dead builds (SIGKILL or crash mid-emit) at the start of every build, using a signal-0 liveness probe so live concurrent builds are never touched. Reaping is best-effort: an unreapable strand warns instead of failing the build.
 - The race-loss check now polls briefly for a mid-swap concurrent winner before declaring failure, closing the review-identified window where a losing build could spuriously exit 1 while the winner was between its own `rm` and `rename`.
 - `scripts/prepare.mjs` forwards build output on success too, so install-time diagnostics such as the concurrent-swap race-loss warning are no longer swallowed.
 - New automated coverage for the staging swap: failed builds preserve the previous `dist/`, successful builds purge stale files, dead-pid staging dirs are reaped while live ones survive, and concurrent builds all succeed.

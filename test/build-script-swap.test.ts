@@ -22,6 +22,9 @@ const path = require("node:path");
 const outDir = process.argv[process.argv.indexOf("--outDir") + 1];
 fs.mkdirSync(outDir, { recursive: true });
 fs.writeFileSync(path.join(outDir, "index.js"), "export const built = true;\\n");
+if (process.env.TSC_STUB_SABOTAGE_STAGING === "1") {
+	fs.rmSync(outDir, { recursive: true, force: true });
+}
 `;
 
 function makeFixture(): string {
@@ -80,6 +83,7 @@ describe("build.mjs staging swap", () => {
 		const dir = makeFixture();
 		fixtures.push(dir);
 		const deadPid = spawnSync(process.execPath, ["-e", ""]).pid;
+		expect(typeof deadPid).toBe("number");
 		mkdirSync(join(dir, `dist.staging.${deadPid}`, "partial"), { recursive: true });
 		const livePid = process.pid; // this test runner is alive for the whole build
 		mkdirSync(join(dir, `dist.staging.${livePid}`, "inflight"), { recursive: true });
@@ -90,14 +94,31 @@ describe("build.mjs staging swap", () => {
 		expect(existsSync(join(dir, `dist.staging.${livePid}`))).toBe(true);
 	});
 
-	it("concurrent builds all succeed and leave a valid dist", async () => {
+	it("concurrent build storms all succeed and leave a valid dist", async () => {
 		const dir = makeFixture();
 		fixtures.push(dir);
 
-		const exitCodes = await Promise.all(Array.from({ length: 6 }, () => runBuild(dir)));
+		// 12-wide x 3 rounds: wide enough to exercise the rename race and the
+		// mid-swap winner poll with useful probability on every run.
+		for (let round = 0; round < 3; round++) {
+			const exitCodes = await Promise.all(Array.from({ length: 12 }, () => runBuild(dir)));
 
-		expect(exitCodes).toEqual([0, 0, 0, 0, 0, 0]);
-		expect(existsSync(join(dir, "dist", "index.js"))).toBe(true);
-		expect(stagingDirs(dir)).toEqual([]);
-	});
+			expect(exitCodes).toEqual(Array.from({ length: 12 }, () => 0));
+			expect(existsSync(join(dir, "dist", "index.js"))).toBe(true);
+			expect(stagingDirs(dir)).toEqual([]);
+		}
+	}, 30_000);
+
+	it("rethrows the rename failure when no concurrent winner exists", async () => {
+		const dir = makeFixture();
+		fixtures.push(dir);
+
+		// The sabotage stub deletes its own emit after compiling, so the build's
+		// rename fails (ENOENT) and no winner ever repopulates dist/: the poll
+		// must exhaust and rethrow instead of reporting a phantom race win.
+		const exitCode = await runBuild(dir, { TSC_STUB_SABOTAGE_STAGING: "1" });
+
+		expect(exitCode).not.toBe(0);
+		expect(existsSync(join(dir, "dist"))).toBe(false);
+	}, 10_000);
 });

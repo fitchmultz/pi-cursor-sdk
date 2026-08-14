@@ -53,6 +53,7 @@ async function main() {
 	if (devDependenciesWereMissing) {
 		await runNpm(["install", "--include=dev", "--ignore-scripts"]);
 	}
+	let buildFailed = false;
 	try {
 		const { stderr, stdout } = await execFile(process.execPath, [join(process.cwd(), "scripts", "build.mjs")], {
 			cwd: process.cwd(),
@@ -62,11 +63,21 @@ async function main() {
 		// concurrent-swap race-loss warning are otherwise swallowed.
 		if (stdout) process.stdout.write(stdout);
 		if (stderr) process.stderr.write(stderr);
+	} catch (error) {
+		buildFailed = true;
+		throw error;
 	} finally {
 		if (devDependenciesWereMissing) {
-			// Return node_modules to the runtime-only set (even when the build fails) so
-			// end-user installs never keep the full dev toolchain on disk.
-			await runNpm(["prune", "--omit=dev", "--ignore-scripts"]);
+			try {
+				// Return node_modules to the runtime-only set (even when the build fails) so
+				// end-user installs never keep the full dev toolchain on disk.
+				await runNpm(["prune", "--omit=dev", "--ignore-scripts"]);
+			} catch (pruneError) {
+				// A prune failure alone still fails the install, but it must never
+				// mask the build error, which is the diagnostic that matters.
+				if (!buildFailed) throw pruneError;
+				console.warn(`npm prune failed after a failed build: ${pruneError?.message ?? pruneError}`);
+			}
 		}
 	}
 }

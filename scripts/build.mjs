@@ -9,10 +9,10 @@
 
 import { execFile as execFileCallback } from "node:child_process";
 import { existsSync } from "node:fs";
-import { setTimeout as delay } from "node:timers/promises";
 import { readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
+import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
@@ -36,7 +36,13 @@ async function main() {
 			process.kill(ownerPid, 0);
 		} catch (error) {
 			if (error?.code !== "ESRCH") continue;
-			await rm(join(process.cwd(), entry.name), { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
+			try {
+				await rm(join(process.cwd(), entry.name), { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
+			} catch (reapError) {
+				// Best-effort: an unreapable strand (foreign-owned, locked) must not
+				// fail the build that merely tried to tidy it.
+				console.warn(`could not remove stale ${entry.name}: ${reapError?.message ?? reapError}`);
+			}
 		}
 	}
 	// Pid-scoped so concurrent builds (pack-triggered prepare, smoke lanes) cannot
@@ -70,12 +76,14 @@ async function main() {
 		// The winner may itself be mid-swap (between its rm and rename), so poll
 		// briefly before declaring a real failure: with concurrent builds of the
 		// same tree, some build's rename always lands.
-		for (let attempt = 0; attempt < 20; attempt++) {
+		// 21 checks around 20 delays: the final check runs after the last delay,
+		// so a winner landing late in the window is still observed.
+		for (let attempt = 0; attempt <= 20; attempt++) {
 			if (existsSync(distDir)) {
 				console.warn("dist/ was replaced by a concurrent build; keeping that output.");
 				return;
 			}
-			await delay(100);
+			if (attempt < 20) await delay(100);
 		}
 		throw error;
 	}

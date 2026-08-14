@@ -1,6 +1,6 @@
 node_modules/
 dist/
-dist.staging/
+dist.staging*/
 coverage/
 .env
 .env.*

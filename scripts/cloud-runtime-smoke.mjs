@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { terminateChild } from "./lib/cursor-child-process.mjs";
+import { ensureBuilt } from "./lib/ensure-built.mjs";
 import { buildCursorSmokeEnv } from "./lib/cursor-smoke-env.mjs";
 import {
 	checkpointCloudSmokeShutdown,
@@ -614,6 +615,7 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+	ensureBuilt();
 	main().catch((error) => {
 		reportFailure(error);
 		process.exit(1);

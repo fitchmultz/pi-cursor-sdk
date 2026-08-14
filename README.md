@@ -91,9 +91,11 @@ Without `--approve`, the project-local extension still runs after Pi trusts the 
 For development from this repository:
 
 ```bash
-npm install
+npm install   # runs prepare, which compiles src/ into dist/ (the manifest entry pi loads)
 pi --approve -e . --model cursor/composer-2-5
 ```
+
+After editing `src/`, run `npm run build` before the next `pi -e .` run, or pi loads the previous build.
 
 ## Configure your Cursor SDK API key
 
@@ -705,6 +707,8 @@ Local development run:
 npm install
 CURSOR_API_KEY="your-key" pi --approve -e . --model cursor/composer-2-5
 ```
+
+After editing `src/`, run `npm run build` before the next `pi -e .` run, or pi loads the previous build.
 
 Maintainer design notes live in [`docs/cursor-model-ux-spec.md`](docs/cursor-model-ux-spec.md).
 

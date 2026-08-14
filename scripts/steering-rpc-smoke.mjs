@@ -16,6 +16,7 @@ import {
 } from "./lib/cursor-child-process.mjs";
 import { apiKeySecretsFromProcess } from "./lib/cursor-cli-args.mjs";
 import { buildCursorSmokeEnv, CURSOR_SDK_EVENT_DEBUG_ENV_NAMES } from "./lib/cursor-smoke-env.mjs";
+import { ensureBuilt } from "./lib/ensure-built.mjs";
 import { scrubSensitiveText } from "../shared/cursor-sensitive-text.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -328,6 +329,7 @@ async function runSelfTest() {
 }
 
 async function main() {
+	ensureBuilt();
 	if (process.argv.includes("-h") || process.argv.includes("--help")) {
 		printHelp();
 		return;

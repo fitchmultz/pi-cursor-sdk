@@ -26,6 +26,7 @@ import {
 	withRpc,
 	writeTreeCommandExtension,
 } from "./lib/local-resume-smoke-harness.mjs";
+import { ensureBuilt } from "./lib/ensure-built.mjs";
 import { runCleanupSmoke } from "./local-resume-cleanup-smoke.mjs";
 import { writePlatformArtifactBundle } from "./platform-smoke/artifacts.mjs";
 import { LOCAL_RESUME_SUITES } from "./platform-smoke/local-resume-suites.mjs";
@@ -627,6 +628,7 @@ function selectedRun() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+	ensureBuilt();
 	const run = selectedRun();
 	run()
 		.catch((error) => {

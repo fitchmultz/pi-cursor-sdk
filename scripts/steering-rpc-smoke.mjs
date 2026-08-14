@@ -329,11 +329,11 @@ async function runSelfTest() {
 }
 
 async function main() {
-	ensureBuilt();
 	if (process.argv.includes("-h") || process.argv.includes("--help")) {
 		printHelp();
 		return;
 	}
+	ensureBuilt();
 	if (process.argv.includes("--self-test")) {
 		await runSelfTest();
 		return;

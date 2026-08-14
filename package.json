@@ -101,6 +101,7 @@
     "scripts/lib/cursor-visual-render.d.mts",
     "scripts/lib/cursor-sdk-output-filter.mjs",
     "scripts/lib/cursor-sdk-output-filter.d.mts",
+    "scripts/lib/ensure-built.mjs",
     "README.md",
     "docs/cursor-model-ux-spec.md",
     "docs/cursor-tool-surfaces.md",

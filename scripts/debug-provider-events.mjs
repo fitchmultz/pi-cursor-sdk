@@ -297,12 +297,12 @@ function envFlag(raw, defaultValue) {
 }
 
 async function main(argv = process.argv.slice(2), env = process.env) {
-	ensureBuilt();
 	const args = parseDebugProviderEventsArgs(argv, env);
 	if (args.help) {
 		printHelp();
 		return;
 	}
+	ensureBuilt();
 	console.log(JSON.stringify(await runDebugProviderEvents(args, env)));
 }
 

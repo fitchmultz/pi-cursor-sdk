@@ -388,6 +388,8 @@ if (!windows.includes("for($i=0;$i -lt 10") || !windows.includes("$w=$e.Replace(
 		expect(paths.has("tsconfig.build.json")).toBe(true);
 		expect(paths.has("scripts/build.mjs")).toBe(true);
 		expect(paths.has("scripts/prepare.mjs")).toBe(true);
+		// Launchers import this helper; packed installs break without it.
+		expect(paths.has("scripts/lib/ensure-built.mjs")).toBe(true);
 		expect([...paths].some((path) => path.startsWith("coverage/") || path.startsWith(".pi/") || path.includes("smoke-dir"))).toBe(false);
 	}, 90_000);
 });

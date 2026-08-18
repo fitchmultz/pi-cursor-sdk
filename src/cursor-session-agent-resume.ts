@@ -387,7 +387,6 @@ export function persistCursorSessionAgentResumeHandle(input: PendingCursorSessio
 function flushPendingCursorSessionAgentResumeHandle(branch: readonly SessionEntry[]): void {
 	if (resumeHandlePersistSuppressed) {
 		state.pendingHandle = undefined;
-		resumeHandlePersistSuppressed = false;
 		restoreFromBranch(branch);
 		return;
 	}

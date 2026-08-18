@@ -280,6 +280,73 @@ describe("cursor usage accounting", () => {
 		expect(partial.usage.totalTokens).toBeGreaterThanOrEqual(50_150);
 	});
 
+	it("never uses billed spend as occupancy, including in-window cloud billed rows", () => {
+		const model = makeModel();
+		const context: Context = {
+			systemPrompt: "Be helpful.",
+			messages: [{ role: "user", content: "Hello", timestamp: 1 }],
+		};
+		const partial = makeAssistantMessage([{ type: "text", text: "Hello back." }]);
+		const billed = { inputTokens: 25, outputTokens: 6, cacheReadTokens: 24, cacheWriteTokens: 1 };
+		applyCursorUsage(partial, model, context, 7, { runtime: "cloud", billed });
+		expect(partial.usage.input).toBe(0);
+		expect(partial.usage.output).toBe(6);
+		expect(partial.usage.cacheRead).toBe(24);
+		expect(partial.usage.cacheWrite).toBe(1);
+		expect(partial.usage.totalTokens).toBe(estimateCursorContextTotalTokens(partial, model, context));
+		expect(partial.usage.totalTokens).not.toBe(31);
+	});
+
+	it("rejects local turn occupancy at or above the latest compaction tokensBefore", () => {
+		const model = makeModel();
+		const kept = makeAssistantMessage([{ type: "text", text: "Kept." }]);
+		kept.usage = {
+			input: 10_000,
+			output: 50,
+			cacheRead: 40_000,
+			cacheWrite: 100,
+			totalTokens: 50_150,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+		const context: Context = {
+			systemPrompt: "Be helpful.",
+			messages: [
+				{ role: "compactionSummary", summary: "compacted", tokensBefore: 50_150, timestamp: 2 } as unknown as Context["messages"][number],
+				kept,
+				{ role: "user", content: "Again", timestamp: 3 },
+			],
+		};
+		const partial = makeAssistantMessage([{ type: "text", text: "Hi." }]);
+		applyCursorUsage(partial, model, context, 7, {
+			runtime: "local",
+			turn: { inputTokens: 50_100, outputTokens: 50, cacheReadTokens: 40_000, cacheWriteTokens: 100 },
+			billed: { inputTokens: 80, outputTokens: 12, cacheReadTokens: 60, cacheWriteTokens: 1 },
+		});
+		expect(partial.usage.input).toBe(19);
+		expect(partial.usage.output).toBe(12);
+		expect(partial.usage.cacheRead).toBe(60);
+		expect(partial.usage.cacheWrite).toBe(1);
+		expect(partial.usage.totalTokens).toBeLessThan(50_150);
+		expect(partial.usage.totalTokens).toBe(estimateCursorContextTotalTokens(partial, model, context));
+	});
+
+	it("keeps post-compaction local turn occupancy when it is below tokensBefore", () => {
+		const model = makeModel();
+		const context: Context = {
+			systemPrompt: "Be helpful.",
+			messages: [
+				{ role: "compactionSummary", summary: "compacted", tokensBefore: 50_150, timestamp: 2 } as unknown as Context["messages"][number],
+				{ role: "user", content: "Again", timestamp: 3 },
+			],
+		};
+		const partial = makeAssistantMessage([{ type: "text", text: "Hi." }]);
+		applyCursorUsage(partial, model, context, 7, {
+			runtime: "local",
+			turn: { inputTokens: 12_000, outputTokens: 40, cacheReadTokens: 11_000, cacheWriteTokens: 20 },
+		});
+		expect(partial.usage.totalTokens).toBe(12_040);
+	});
+
 	it("prefers billed spend even when billed occupancy exceeds the context window", () => {
 		const model = makeModel();
 		const context: Context = {

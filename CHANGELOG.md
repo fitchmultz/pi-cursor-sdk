@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Keep billed `getUsage()` rows as spend only. Occupancy `totalTokens` uses local turn-ended usage only when it is below the latest compaction `tokensBefore`, so a stale or cumulative Cursor total cannot restick the footer or retrigger auto-compact (#204).
+- Leave local-resume persist suppressed across any `turn_end` that fires during compaction summarization; only `session_compact` clears the guard (#223).
+
 ## 0.3.4 - 2026-08-18
 
 ### Changed

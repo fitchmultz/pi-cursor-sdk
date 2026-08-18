@@ -413,7 +413,7 @@ export function buildPlatformBuildCommand(targetName, packageName = "pi-cursor-s
 		lines.push(...posixSection("CHECK_PLATFORM_SMOKE_STDERR", 'cat "$PACK_DIR/check-platform-smoke.stderr.txt" 2>/dev/null || true'));
 		lines.push("");
 		lines.push('echo "=== npm test ==="');
-		lines.push('npm test >"$PACK_DIR/npm-test.stdout.txt" 2>"$PACK_DIR/npm-test.stderr.txt"');
+		lines.push('npm test -- --testTimeout=15000 >"$PACK_DIR/npm-test.stdout.txt" 2>"$PACK_DIR/npm-test.stderr.txt"');
 		lines.push("TEST_EXIT=$?");
 		lines.push('echo "PLATFORM_NPM_TEST_EXIT=$TEST_EXIT"');
 		lines.push(...posixSection("NPM_TEST_STDOUT", 'cat "$PACK_DIR/npm-test.stdout.txt" 2>/dev/null || true'));

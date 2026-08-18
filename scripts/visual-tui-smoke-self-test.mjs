@@ -89,6 +89,9 @@ export function runVisualSmokeSelfTest(deps) {
 		assertSelfTest(defaults.get("PI_CURSOR_SETTING_SOURCES") === "none", "setting sources must default to none");
 		assertSelfTest(defaults.get("PI_CURSOR_PI_TOOL_BRIDGE") === "0", "bridge must default off");
 		assertSelfTest(defaults.get("PI_CURSOR_EXPOSE_BUILTIN_TOOLS") === "0", "built-in exposure must default off");
+		assertSelfTest(defaults.get("PI_CODING_AGENT_DIR") === join(tempDir, "pi-agent"), "agent dir must be isolated under out-dir");
+		assertSelfTest(defaults.get("PI_OFFLINE") === "1", "startup network operations must be off");
+		assertSelfTest(defaults.get("PI_SKIP_VERSION_CHECK") === "1", "pi.dev version check must be off");
 		for (const name of DEBUG_ENV_NAMES) {
 			assertSelfTest(plan.clearEnvNames.includes(name), `${name} must be cleared by default`);
 		}

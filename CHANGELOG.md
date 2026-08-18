@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.6 - 2026-08-18
+
+### Fixed
+
+- Isolate `smoke:visual` captures from the host: pi runs with `PI_CODING_AGENT_DIR=<out-dir>/pi-agent` (seeded `auth.json`, `quietStartup`, telemetry off), `PI_OFFLINE=1`, and `PI_SKIP_VERSION_CHECK=1`, so host extensions, skills, MCP config, update banners, and package-update notices no longer pollute visual evidence.
+- Start the visual-smoke tmux session in `--cwd` with a non-login shell, eliminating `shell-init: getcwd` noise from a stale tmux-server working directory.
+- Forward `--session-id` to pi only when explicitly provided, so fresh captures no longer show the new-session warning line; the HTML render labels pi-assigned sessions instead of failing.
+
 ## 0.3.5 - 2026-08-18
 
 ### Fixed

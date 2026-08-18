@@ -66,7 +66,7 @@ header code { color: #d8dee9; }
 <header>
 	<div><strong>pi-cursor-sdk visual smoke</strong> <code>${escapeHtml(options.label)}</code></div>
 	<div>model <code>${escapeHtml(options.model)}</code> · mode <code>${escapeHtml(options.mode)}</code> · cwd <code>${escapeHtml(options.cwd)}</code></div>
-	<div>session <code>${escapeHtml(options.sessionId)}</code> · captured ${new Date().toISOString()}</div>
+	<div>session <code>${escapeHtml(options.sessionId ?? "pi-assigned")}</code> · captured ${new Date().toISOString()}</div>
 </header>
 <div id="terminal"></div>
 <noscript><pre class="fallback">${escapeHtml(plain)}</pre></noscript>

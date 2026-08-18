@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { accessSync, constants, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, constants, copyFileSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { commonBooleanFlag, commonRepeatStringFlag, parseArgv } from "./lib/cursor-cli-args.mjs";
@@ -44,7 +45,7 @@ Common options:
   --model MODEL                 Cursor model. Default: ${DEFAULT_MODEL}.
   --mode agent|plan             Cursor SDK mode. Default: ${DEFAULT_MODE}.
   --session-dir PATH            pi session directory. Default: <out-dir>/<label>.session.
-  --session-id ID               pi session id. Default: visual-<label>-<timestamp>.
+  --session-id ID               pi session id; pass to resume a prior capture session. Default: pi-assigned, so fresh captures avoid the new-session warning line.
   --width N                     PTY columns. Default: ${DEFAULT_WIDTH}.
   --height N                    PTY rows. Default: ${DEFAULT_HEIGHT}.
   --history-lines N             tmux capture history lines. Default: ${DEFAULT_HISTORY_LINES}.
@@ -63,7 +64,11 @@ Native replay isolation defaults:
   PI_CURSOR_SETTING_SOURCES=none
   PI_CURSOR_PI_TOOL_BRIDGE=0
   PI_CURSOR_EXPOSE_BUILTIN_TOOLS=0
+  PI_CODING_AGENT_DIR=<out-dir>/pi-agent  (seeded auth.json + quietStartup; host extensions stay out)
+  PI_OFFLINE=1
+  PI_SKIP_VERSION_CHECK=1
   TERM=xterm-256color
+  tmux starts in --cwd with a non-login shell so a stale tmux-server cwd cannot print getcwd errors
   Debug artifact env is cleared before each run; --event-debug sets a deterministic debug dir.
 
 Artifacts written:
@@ -194,8 +199,24 @@ function parseArgs(argv) {
 	options.safeLabel = sanitizeLabel(options.label);
 	options.outDir ??= resolve(`/tmp/pi-cursor-sdk-visual-smoke-${timestamp()}`);
 	options.sessionDir ??= resolve(options.outDir, `${options.safeLabel}.session`);
-	options.sessionId ??= `visual-${options.safeLabel}-${Date.now()}`;
+	options.agentDir ??= resolve(options.outDir, "pi-agent");
 	return options;
+}
+
+function seedVisualAgentDir(agentDir) {
+	mkdirSync(agentDir, { recursive: true });
+	const srcAuth = join(homedir(), ".pi", "agent", "auth.json");
+	const destAuth = join(agentDir, "auth.json");
+	try {
+		copyFileSync(srcAuth, destAuth);
+		chmodSync(destAuth, 0o600);
+	} catch {
+		// CURSOR_API_KEY remains the fallback when host auth.json is absent.
+	}
+	writeFileSync(
+		join(agentDir, "settings.json"),
+		`${JSON.stringify({ quietStartup: true, enableInstallTelemetry: false })}\n`,
+	);
 }
 
 function sanitizeLabel(label) {
@@ -359,7 +380,13 @@ function buildLaunchPlan(options, commands, shell) {
 		eventDebugDir: options.eventDebug ? resolve(options.outDir, `${options.safeLabel ?? "visual-smoke"}.cursor-sdk-events`) : undefined,
 	});
 	const sealedPath = commands.sealedPath ?? smokeEnvPlan.sealedPath;
-	const envAssignments = smokeEnvPlan.envEntries;
+	const agentDir = options.agentDir ?? resolve(options.outDir, "pi-agent");
+	const envAssignments = [
+		...smokeEnvPlan.envEntries,
+		["PI_CODING_AGENT_DIR", agentDir],
+		["PI_OFFLINE", "1"],
+		["PI_SKIP_VERSION_CHECK", "1"],
+	];
 	const clearEnvNames = smokeEnvPlan.clearEnvNames;
 	const command = [
 		...envAssignments.map(([name, value]) => `${name}=${shellQuote(value)}`),
@@ -370,7 +397,7 @@ function buildLaunchPlan(options, commands, shell) {
 		"--cursor-no-fast",
 		"--cursor-mode", shellQuote(options.mode),
 		"--session-dir", shellQuote(options.sessionDir),
-		"--session-id", shellQuote(options.sessionId),
+		...(options.sessionId ? ["--session-id", shellQuote(options.sessionId)] : []),
 		"--model", shellQuote(options.model),
 	].join(" ");
 	const clearLines = clearEnvNames.map((name) => `unset ${name}`).join("\n");
@@ -397,6 +424,8 @@ function runVisualSmoke(options) {
 
 	mkdirSync(options.outDir, { recursive: true });
 	mkdirSync(options.sessionDir, { recursive: true });
+	options.agentDir ??= resolve(options.outDir, "pi-agent");
+	seedVisualAgentDir(options.agentDir);
 
 	const sessionName = `pi-visual-${options.safeLabel}-${process.pid}`;
 	const bufferName = `pi-visual-prompt-${process.pid}`;
@@ -418,7 +447,22 @@ function runVisualSmoke(options) {
 	const jsonlMtimesBeforeRun = snapshotJsonlMtimes(options.sessionDir);
 	const runStartedAtMs = Date.now();
 	try {
-		const start = run(commands.tmux, ["new-session", "-d", "-s", sessionName, "-x", String(options.width), "-y", String(options.height), "--", shell, "-lc", script]);
+		const start = run(commands.tmux, [
+			"new-session",
+			"-d",
+			"-s",
+			sessionName,
+			"-c",
+			options.cwd,
+			"-x",
+			String(options.width),
+			"-y",
+			String(options.height),
+			"--",
+			shell,
+			"-c",
+			script,
+		]);
 		if (start.status !== 0) throw new Error(`tmux new-session failed: ${start.stderr?.toString().trim() || start.status}`);
 		sessionStarted = true;
 

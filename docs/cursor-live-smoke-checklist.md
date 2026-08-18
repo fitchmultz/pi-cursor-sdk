@@ -10,7 +10,7 @@ Use this manual checklist during development and debugging of Cursor provider/ru
 
 - Build first: `npm run build` after any `src/` edit — the pi manifest loads compiled `dist/`, so unbuilt runs validate stale code. (the cloud/steering/local-resume/provider-debug launchers rebuild automatically even when run directly with `node scripts/...`; `smoke:live`/`smoke:visual`/`smoke:isolated` build via their npm scripts; direct `pi -e .` invocations do not build.)
 - Run from a clean working tree except for the intended branch diff.
-- Use the local extension under test: `pi --approve -e . --cursor-no-fast --model cursor/composer-2-5`.
+- Use the local extension under test: `pi --approve -e . --cursor-no-fast --model cursor/grok-4.6`.
 - Use a temporary `--session-dir` for every run.
 - Do not paste or commit Cursor API keys, raw session contents with secrets, endpoint URLs, or local private paths.
 - If an inner-loop check fails, stop and fix or use [docs/platform-smoke.md](./platform-smoke.md) as the release-blocking source of truth. Do not treat this checklist as a narrower replacement for the platform gate.
@@ -69,8 +69,8 @@ The replay scan flags only error `toolResult` / error assistant messages with `T
 Pass criteria:
 
 - `pi --version` reports Pi 0.84.0 for this cutover baseline.
-- `npm ls` shows `@cursor/sdk@1.0.23` and local `@earendil-works/*@0.84.0` packages.
-- `cursor/composer-2-5` appears in the model list.
+- `npm ls` shows `@cursor/sdk@1.0.27` and local `@earendil-works/*@0.84.0` packages.
+- `cursor/grok-4.6` appears in the model list.
 - No Cursor key or auth token is printed.
 - If neither `~/.pi/agent/auth.json` cursor auth nor `CURSOR_API_KEY` is available, stop and report the live smoke as blocked.
 
@@ -78,7 +78,7 @@ Pass criteria:
 
 ```bash
 PI_CURSOR_SETTING_SOURCES=none \
-pi --approve -e . --cursor-no-fast --model cursor/composer-2-5 \
+pi --approve -e . --cursor-no-fast --model cursor/grok-4.6 \
   --session-dir "$SMOKE_DIR/basic" \
   --no-tools \
   -p 'Live smoke. Reply exactly: PI_CURSOR_SMOKE_OK' \
@@ -96,7 +96,7 @@ Pass criteria:
 ## 2. Default setting-source startup noise check
 
 ```bash
-pi --approve -e . --cursor-no-fast --model cursor/composer-2-5 \
+pi --approve -e . --cursor-no-fast --model cursor/grok-4.6 \
   --session-dir "$SMOKE_DIR/default-settings" \
   --no-tools \
   -p 'Default settings smoke. Include PRODUCT=42 in the final answer.' \
@@ -118,7 +118,7 @@ Run a real interactive session under tmux:
 ```bash
 SESSION="pi-cursor-sdk-smoke-$(date +%s)"
 tmux new-session -d -s "$SESSION" -x 120 -y 40 -- zsh -lc \
-  "cd '$PWD' && PI_CURSOR_SETTING_SOURCES=none pi --approve -e . --cursor-no-fast --model cursor/composer-2-5 --session-dir '$SMOKE_DIR/tui' --session-id cursor-sdk-1016-tui --no-tools 'TUI smoke. Compute 19 + 23. Reply only with SUM=<number>.'"
+  "cd '$PWD' && PI_CURSOR_SETTING_SOURCES=none pi --approve -e . --cursor-no-fast --model cursor/grok-4.6 --session-dir '$SMOKE_DIR/tui' --session-id cursor-sdk-1016-tui --no-tools 'TUI smoke. Compute 19 + 23. Reply only with SUM=<number>.'"
 ```
 
 Observe with `tmux capture-pane -pt "$SESSION"` or attach manually.
@@ -134,7 +134,7 @@ Pass criteria:
 
 ## 4. Focused visual card/color rendering check
 
-This is the canonical inner-loop visual debug path for Cursor provider/runtime changes. It requires offscreen TUI visual inspection, not only JSONL or code review. Use Pi 0.84.0, `@cursor/sdk@1.0.23`, a fresh temporary session dir, Cursor SDK `plan` mode, native replay enabled, and the checked-in visual runner. The runner resolves `pi` by directly walking the parent `PATH`, uses `process.execPath` for Node, and prepends that Node directory for both prereq checks and tmux launches so `#!/usr/bin/env node` shims use the validated Node. The default matrix is native replay only: native replay registration is forced on, settings sources are `none`, the pi bridge is off, overlapping built-in pi tools are not exposed, and inherited Cursor SDK event-debug artifact env is cleared. With `--event-debug`, debug capture writes to a deterministic directory under `VISUAL_DIR`.
+This is the canonical inner-loop visual debug path for Cursor provider/runtime changes. It requires offscreen TUI visual inspection, not only JSONL or code review. Use Pi 0.84.0, `@cursor/sdk@1.0.27`, a fresh temporary session dir, Cursor SDK `plan` mode, native replay enabled, and the checked-in visual runner. The runner resolves `pi` by directly walking the parent `PATH`, uses `process.execPath` for Node, and prepends that Node directory for both prereq checks and tmux launches so `#!/usr/bin/env node` shims use the validated Node. The default matrix is native replay only: native replay registration is forced on, settings sources are `none`, the pi bridge is off, overlapping built-in pi tools are not exposed, and inherited Cursor SDK event-debug artifact env is cleared. With `--event-debug`, debug capture writes to a deterministic directory under `VISUAL_DIR`.
 
 ```bash
 VISUAL_DIR="$(mktemp -d /tmp/pi-cursor-sdk-1016-visual.XXXXXX)"
@@ -205,7 +205,7 @@ Pass criteria:
 
 ```bash
 PI_CURSOR_SETTING_SOURCES=none \
-pi --approve -e . --cursor-no-fast --cursor-mode plan --model cursor/composer-2-5 \
+pi --approve -e . --cursor-no-fast --cursor-mode plan --model cursor/grok-4.6 \
   --session-dir "$SMOKE_DIR/cursor-mode-plan" \
   --session-id cursor-sdk-1016-plan \
   --no-tools \
@@ -227,7 +227,7 @@ Pass criteria:
 PI_CURSOR_SETTING_SOURCES=none \
 PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1 \
 PI_CURSOR_PI_TOOL_BRIDGE_DEBUG=1 \
-pi --approve -e . --cursor-no-fast --model cursor/composer-2-5 \
+pi --approve -e . --cursor-no-fast --model cursor/grok-4.6 \
   --session-dir "$SMOKE_DIR/bridge" \
   -p 'Bridge smoke. Do exactly two tool calls before answering: first call pi__read on ./package.json; second call pi__read on ./definitely-missing-pi-cursor-sdk-smoke-file.txt. Then answer: OK_NAME=<package name>; MISSING_RESULT=<error or success>. Do not use shell.' \
   > "$SMOKE_DIR/bridge.stdout.txt" \
@@ -248,7 +248,7 @@ Pass criteria:
 PI_CURSOR_SETTING_SOURCES=none \
 PI_CURSOR_PI_TOOL_BRIDGE=0 \
 PI_CURSOR_NATIVE_TOOL_DISPLAY=1 \
-pi --approve -e . --cursor-no-fast --model cursor/composer-2-5 \
+pi --approve -e . --cursor-no-fast --model cursor/grok-4.6 \
   --session-dir "$SMOKE_DIR/native-replay" \
   -p 'Native replay smoke. Use your Cursor file-reading capability to read ./README.md, then answer README_SEEN=yes if it contains pi-cursor-sdk.' \
   > "$SMOKE_DIR/native-replay.stdout.txt" \
@@ -322,7 +322,7 @@ Use a harmless long-running command and interrupt it after the bridge request is
 PI_CURSOR_SETTING_SOURCES=none \
 PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1 \
 PI_CURSOR_PI_TOOL_BRIDGE_DEBUG=1 \
-pi --approve -e . --cursor-no-fast --model cursor/composer-2-5 \
+pi --approve -e . --cursor-no-fast --model cursor/grok-4.6 \
   --session-dir "$SMOKE_DIR/abort" \
   -p 'Abort smoke. Call pi__bash with command: sleep 30 && echo SHOULD_NOT_PRINT. Do not answer until the tool completes.'
 ```

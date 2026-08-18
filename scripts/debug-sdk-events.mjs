@@ -39,7 +39,7 @@ const ARTIFACTS = {
 	summary: "summary.json",
 };
 
-const DEFAULT_MODEL = "composer-2.5";
+const DEFAULT_MODEL = "grok-4.6";
 const RAW_ARTIFACT_WARNING =
 	"Raw artifact files may contain local paths, project text, tool args/results, or secrets from the workspace. Do not commit or share them.";
 

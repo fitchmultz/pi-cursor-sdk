@@ -42,19 +42,18 @@ describe("Cursor SDK HTTP/1.1 configuration", () => {
 		expect(sdkImplementation).toMatch(
 			/void 0!==([A-Za-z_$][\w$]*)\.local&&"useHttp1ForAgent"in \1\.local/,
 		);
-		expect(sdkImplementation).toContain("J=yield this.getExecutor()");
-		const httpVersionSelection = sdkImplementation.indexOf('httpVersion:i?"1.1":"2"');
+		expect(sdkImplementation).toContain("T=yield this.getExecutor()");
+		const httpVersionSelection = sdkImplementation.indexOf(
+			'httpVersion:(n=Oh,Hh(n)||(null!==(r=(0,bh.it)())&&void 0!==r?r:Yh())?"1.1":"2")',
+		);
 		expect(httpVersionSelection).toBeGreaterThan(-1);
-		expect(
-			sdkImplementation.slice(httpVersionSelection - 500, httpVersionSelection),
-		).toContain("const n=(0,cu.it)(),r=hu(t)||(null!=n?n:Su())");
-		const cacheKeyStart = sdkImplementation.indexOf("workingDirectory:t.workingDirectory");
-		const cacheKeyEnd = sdkImplementation.indexOf("JSON.stringify(Ot(e))", cacheKeyStart);
+		const cacheKeyStart = sdkImplementation.indexOf("workingDirectory:e.workingDirectory,dirs:e.dirs");
+		const cacheKeyEnd = sdkImplementation.indexOf("JSON.stringify(ut(t))", cacheKeyStart);
 		expect(cacheKeyStart).toBeGreaterThan(-1);
 		expect(cacheKeyEnd).toBeGreaterThan(cacheKeyStart);
 		expect(sdkImplementation.slice(cacheKeyStart, cacheKeyEnd)).not.toContain("useHttp1ForAgent");
 		expect(sdkImplementation).toContain(
-			"e.refs-=1,!(e.refs>0||Ct.get(t)!==e)){Ct.delete(t)",
+			"t.refs-=1,!(t.refs>0||at.get(e)!==t)){at.delete(e)",
 		);
 	});
 

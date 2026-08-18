@@ -152,7 +152,7 @@ export function startRpc({
 	baseEnv = process.env,
 }) {
 	const model =
-		process.env.CURSOR_LOCAL_RESUME_SMOKE_MODEL || "cursor/composer-2-5:slow";
+		process.env.CURSOR_LOCAL_RESUME_SMOKE_MODEL || "cursor/grok-4.6:slow";
 	const workspaceDir = join(artifactDir, "workspace");
 	mkdirSync(workspaceDir, { recursive: true });
 	const pi = findPiCommand();

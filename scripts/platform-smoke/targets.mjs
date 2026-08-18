@@ -662,7 +662,7 @@ async function executeLiveSuite(config, targetName, suiteName, suiteDir, slug, l
 }
 
 function buildLiveSuiteCommand(config, targetName, suiteName, prepDir) {
-	const model = config.cursorModel ?? "cursor/composer-2-5";
+	const model = config.cursorModel ?? "cursor/grok-4.6";
 	const packageName = config.packageName ?? "pi-cursor-sdk";
 	const prepArgs = prepDir ? ` --prep-dir ${platformFor(targetName) === "powershell" ? prepDir : shellQuote(prepDir)}` : "";
 	if (platformFor(targetName) === "powershell") {

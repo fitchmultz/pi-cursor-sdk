@@ -43,6 +43,7 @@ export interface CursorLiveRun {
 	sdkRun?: CursorLiveSdkRun;
 	ignoreFutureSdkTurnUsage?: boolean;
 	accounting: CursorLiveRunAccountingState;
+	billedTurnUsage?: CursorSdkTurnUsage;
 	pendingEvents: CursorLiveQueuedEvent[];
 	textDeltas: string[];
 	emittedText: string;

@@ -407,7 +407,7 @@ describe("cloud smoke helper contracts", () => {
 			{ name: "passive-artifacts-and-raw-usage", status: "passed", artifactsObserved: true, rawUsageObserved: true, observationsValidated: true },
 		];
 		const summary = projectCloudSmokeMatrixEvidence({
-			model: "cursor/composer-2-5",
+			model: "cursor/grok-4.6",
 			timestamp: "2026-07-19T00:00:00.000Z",
 			provenance,
 			cleanup: [

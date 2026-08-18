@@ -17,6 +17,7 @@ import {
 } from "./cursor-provider-run-outcome.js";
 import type { CursorProviderTurnPrepareResult } from "./cursor-provider-turn-types.js";
 import { loadCursorSdk } from "./cursor-sdk-runtime.js";
+import { attachCursorSdkBilledTurnUsage } from "./cursor-sdk-billed-usage.js";
 
 export async function cacheSdkContextWindow(
 	agentId: string,
@@ -149,6 +150,16 @@ export async function awaitFinalizeCursorRunOutcome(params: AwaitFinalizeCursorR
 		resolvedApiKey: params.resolvedApiKey,
 		optionsApiKey: params.optionsApiKey,
 	});
+	const billed = await attachCursorSdkBilledTurnUsage({
+		agent: params.prepared.agent,
+		agentId: params.run.agentId,
+		runtime: params.prepared.runtimeTarget,
+		runId: params.run.id,
+	});
+	params.prepared.runtime.billedTurnUsage = billed.turn;
+	if (params.prepared.runtime.liveRun) {
+		params.prepared.runtime.liveRun.billedTurnUsage = billed.turn;
+	}
 	let displayOnlyTraceBlock: string | undefined;
 	if (params.prepared.runtimeTarget === "cloud" && isCursorRunFinishedSuccessfully(outcome)) {
 		let report: CursorCloudRunReport = { agentId: params.run.agentId, runId: params.run.id, branches: [] };
@@ -158,6 +169,7 @@ export async function awaitFinalizeCursorRunOutcome(params: AwaitFinalizeCursorR
 				run: params.run,
 				waitResult,
 				apiKey,
+				agentUsage: billed.agentUsage,
 			});
 		} catch (error) {
 			recordCursorCloudReportingError(params.sdkEventDebug, error, apiKey);

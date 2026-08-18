@@ -144,6 +144,57 @@ describe("cursor cloud reporting", () => {
 		}
 	});
 
+	it("prefers mapped Agent.getUsage over the REST usage fallback", async () => {
+		const fetchImpl = vi.fn();
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = fetchImpl;
+		try {
+			const report = await collectCursorCloudRunReport({
+				agent: {
+					listArtifacts: vi.fn().mockResolvedValue([]),
+					getUsage: vi.fn().mockResolvedValue({
+						usage: { inputTokens: 9, outputTokens: 2, cacheReadTokens: 1, cacheWriteTokens: 0, totalTokens: 12 },
+						runs: [{
+							runId: "run-1",
+							usage: { inputTokens: 8, outputTokens: 2, cacheReadTokens: 1, cacheWriteTokens: 0, totalTokens: 11 },
+						}],
+					}),
+				} as unknown as SDKAgent,
+				run: { id: "run-1", agentId: "bc-agent" } as Run,
+				waitResult: { id: "run-1", status: "finished" } as RunResult,
+				apiKey: "key",
+			});
+			expect(report.usage).toEqual({
+				totalUsage: { inputTokens: 9, outputTokens: 2, cacheReadTokens: 1, cacheWriteTokens: 0, totalTokens: 12 },
+				runUsage: { inputTokens: 8, outputTokens: 2, cacheReadTokens: 1, cacheWriteTokens: 0, totalTokens: 11 },
+			});
+			expect(fetchImpl).not.toHaveBeenCalled();
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
+	it("uses a prefetched AgentUsage without calling getUsage again", async () => {
+		const getUsage = vi.fn();
+		const report = await collectCursorCloudRunReport({
+			agent: {
+				listArtifacts: vi.fn().mockResolvedValue([]),
+				getUsage,
+			} as unknown as SDKAgent,
+			run: { id: "run-1", agentId: "bc-agent" } as Run,
+			waitResult: { id: "run-1", status: "finished" } as RunResult,
+			apiKey: "key",
+			agentUsage: {
+				usage: { inputTokens: 4, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 5 },
+				runs: [],
+			},
+		});
+		expect(getUsage).not.toHaveBeenCalled();
+		expect(report.usage).toEqual({
+			totalUsage: { inputTokens: 4, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 5 },
+		});
+	});
+
 	it("bounds, sanitizes, and scrubs all remote display strings", () => {
 		const hostile = `prefix\u0085\u2028'secret-key-${"x".repeat(500)}`;
 		const report = formatCursorCloudRunReport({

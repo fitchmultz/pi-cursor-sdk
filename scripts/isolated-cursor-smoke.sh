@@ -134,7 +134,7 @@ run_self_test() {
 	env_capture="$temp_dir/fake-pi.env"
 	cat >"$fake_pi" <<EOF_SELFTEST_PI
 #!/usr/bin/env node
-const { writeFileSync } = require("node:fs");
+import { writeFileSync } from "node:fs";
 writeFileSync("$env_capture", Object.entries(process.env).map(([key, value]) => key + "=" + (value ?? "")).join("\\n") + "\\n", "utf8");
 EOF_SELFTEST_PI
 	cat >"$fake_node" <<EOF_SELFTEST_NODE
@@ -359,13 +359,14 @@ log "check: list-models"
 LIST_OUT="$ISOLATED/list-models.txt"
 run_in_dir_capture_combined "list-models" 30 "$PROJECT_DIR" "$LIST_OUT" "${PI_CURSOR_ENV[@]}" \
 	"$PI_BIN" --approve --cursor-no-fast --list-models cursor
+"$RG_BIN" -q "grok-4\\.6" "$LIST_OUT" || fail "grok-4.6 not listed (see $LIST_OUT)"
 "$RG_BIN" -q "composer-2\\.5|composer-2-5" "$LIST_OUT" || fail "composer-2-5 not listed (see $LIST_OUT)"
 
 log "check: basic provider prompt"
 BASIC_DIR="$SESSION_ROOT/basic"
 mkdir -p "$BASIC_DIR"
 run_in_dir_capture_split "basic prompt" "$PI_LIVE_TIMEOUT" "$PROJECT_DIR" "$ISOLATED/basic.stdout.txt" "$ISOLATED/basic.stderr.txt" "${PI_CURSOR_ENV[@]}" \
-	"$PI_BIN" --approve --cursor-no-fast --model cursor/composer-2-5 --session-dir "$BASIC_DIR" --no-tools -p 'Reply exactly: PI_CURSOR_ISOLATED_OK'
+	"$PI_BIN" --approve --cursor-no-fast --model cursor/grok-4.6 --session-dir "$BASIC_DIR" --no-tools -p 'Reply exactly: PI_CURSOR_ISOLATED_OK'
 "$RG_BIN" -q "PI_CURSOR_ISOLATED_OK" "$ISOLATED/basic.stdout.txt" || fail "basic prompt missing PI_CURSOR_ISOLATED_OK"
 validate_replay_jsonl "$BASIC_DIR"
 
@@ -373,14 +374,14 @@ log "check: native replay"
 REPLAY_DIR="$SESSION_ROOT/native-replay"
 mkdir -p "$REPLAY_DIR"
 run_in_dir_capture_split "native replay" "$PI_LIVE_TIMEOUT" "$PROJECT_DIR" "$ISOLATED/replay.stdout.txt" "$ISOLATED/replay.stderr.txt" "${PI_CURSOR_ENV[@]}" PI_CURSOR_NATIVE_TOOL_DISPLAY=1 \
-	"$PI_BIN" --approve --cursor-no-fast --model cursor/composer-2-5 --session-dir "$REPLAY_DIR" -p 'Read ./README.md briefly, then answer README_SEEN=yes if it mentions pi-cursor-sdk.'
+	"$PI_BIN" --approve --cursor-no-fast --model cursor/grok-4.6 --session-dir "$REPLAY_DIR" -p 'Read ./README.md briefly, then answer README_SEEN=yes if it mentions pi-cursor-sdk.'
 validate_replay_jsonl "$REPLAY_DIR"
 
 log "check: plan-strip shim (plan-mode execute reset)"
 PLAN_DIR="$SESSION_ROOT/plan-strip"
 mkdir -p "$PLAN_DIR"
 run_in_dir_capture_split "plan-strip replay" "$PI_LIVE_TIMEOUT" "$PROJECT_DIR" "$ISOLATED/plan.stdout.txt" "$ISOLATED/plan.stderr.txt" "${PI_CURSOR_ENV[@]}" PI_CURSOR_NATIVE_TOOL_DISPLAY=1 \
-	"$PI_BIN" --approve -e "$SHIM_DIR" --cursor-no-fast --model cursor/composer-2-5 --session-dir "$PLAN_DIR" -p 'After reset, read README.md and answer PLAN_STRIP_OK=yes.'
+	"$PI_BIN" --approve -e "$SHIM_DIR" --cursor-no-fast --model cursor/grok-4.6 --session-dir "$PLAN_DIR" -p 'After reset, read README.md and answer PLAN_STRIP_OK=yes.'
 validate_replay_jsonl "$PLAN_DIR"
 
 log "PASS isolated install smoke: $ISOLATED"

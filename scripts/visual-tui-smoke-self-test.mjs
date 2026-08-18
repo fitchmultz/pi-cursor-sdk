@@ -35,7 +35,7 @@ export function runVisualSmokeSelfTest(deps) {
 		const envCapture = join(tempDir, "fake-pi.env");
 		writeFileSync(
 			fakePi,
-			`#!/usr/bin/env node\nconst { writeFileSync } = require("node:fs");\nwriteFileSync(${JSON.stringify(envCapture)}, Object.entries(process.env).map(([key, value]) => key + "=" + (value ?? "")).join("\\n") + "\\n", "utf8");\n`,
+			`#!/usr/bin/env node\nimport { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(envCapture)}, Object.entries(process.env).map(([key, value]) => key + "=" + (value ?? "")).join("\\n") + "\\n", "utf8");\n`,
 			"utf8",
 		);
 		writeFileSync(fakeNode, `#!/bin/sh\necho fake-node-used > ${shellQuote(fakeNodeMarker)}\nexit 99\n`, "utf8");

@@ -75,10 +75,12 @@ function isCursorSdkAbortError(error: unknown): boolean {
 // The exact observed incident: the Cursor SDK 1.0.23 local shell executor writes a
 // spawned child's stdin without a stream 'error' listener, so a child exiting while
 // a write is in flight surfaces a raw `write EPIPE` uncaught exception whose stack
-// is exactly the single async pipe-write completion frame. Pi's own piped-stdout or
-// dead-terminal EPIPE normally surfaces through the synchronous write-dispatch path
-// with multiple frames (afterWriteDispatched/Socket._writeGeneric) and must stay
-// fatal per Unix convention, so anything beyond this one-frame contract is rejected.
+// is exactly the single async pipe-write completion frame. Installed 1.0.27 attaches
+// a no-op `error` listener before that write; keep this guard as defense in depth.
+// Pi's own piped-stdout or dead-terminal EPIPE normally surfaces through the
+// synchronous write-dispatch path with multiple frames (afterWriteDispatched /
+// Socket._writeGeneric) and must stay fatal per Unix convention, so anything beyond
+// this one-frame contract is rejected.
 const OBSERVED_CLOSED_PIPE_STACK_FRAME =
 	/^\s+at WriteWrap\.onWriteComplete \[as oncomplete\] \(node:internal\/stream_base_commons:\d+:\d+\)$/;
 

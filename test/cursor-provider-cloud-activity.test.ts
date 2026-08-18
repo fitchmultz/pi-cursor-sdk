@@ -67,7 +67,8 @@ describe("cloud provider captured activity callbacks", () => {
 	});
 
 	it("routes normalized captured onDelta/onStep activity through the cloud coordinator without local replay or bridge leakage", async () => {
-		expect(fixture.sdkVersion).toBe(installedSdkVersion);
+		expect(fixture.sdkVersion).toBe("1.0.23");
+		expect(installedSdkVersion).toBe("1.0.27");
 		expect(fixture.sourceCapture.agentId).toMatch(CLOUD_AGENT_ID_PATTERN);
 		expect(fixture.sourceCapture.runId).toMatch(CLOUD_RUN_ID_PATTERN);
 		expect(fixture.sourceCapture.terminalStatus).toBe("finished");

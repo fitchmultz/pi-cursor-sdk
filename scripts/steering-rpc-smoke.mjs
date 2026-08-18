@@ -171,7 +171,7 @@ function buildPiRpcEnv(baseEnv = process.env, nodePath = process.execPath) {
 }
 
 async function runPiRpcSmoke(sessionDir, piBin) {
-	const args = ["--approve", "-e", root, "--cursor-no-fast", "--model", "cursor/composer-2-5", "--mode", "rpc", "--session-dir", sessionDir];
+	const args = ["--approve", "-e", root, "--cursor-no-fast", "--model", "cursor/grok-4.6", "--mode", "rpc", "--session-dir", sessionDir];
 	const env = buildPiRpcEnv();
 
 	const child = spawn(piBin, args, {
@@ -264,7 +264,7 @@ async function runSelfTest() {
 		const envCapture = join(tempDir, "fake-pi.env");
 		writeFileSync(
 			fakePi,
-			`#!/usr/bin/env node\nconst { writeFileSync } = require("node:fs");\nwriteFileSync(${JSON.stringify(envCapture)}, Object.entries(process.env).map(([key, value]) => key + "=" + (value ?? "")).join("\\n") + "\\n", "utf8");\n`,
+			`#!/usr/bin/env node\nimport { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(envCapture)}, Object.entries(process.env).map(([key, value]) => key + "=" + (value ?? "")).join("\\n") + "\\n", "utf8");\n`,
 			"utf8",
 		);
 		writeFileSync(fakeNode, `#!/bin/sh\necho fake-node-used > ${JSON.stringify(fakeNodeMarker)}\nexit 99\n`, "utf8");

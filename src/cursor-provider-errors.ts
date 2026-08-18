@@ -166,7 +166,7 @@ function isCursorSdkStallAbortNetworkError(code: unknown, evidence: string, stac
 }
 
 /**
- * @cursor/sdk@1.0.23 throws internal RetriableError (name/kind "RetriableError") with message
+ * @cursor/sdk@1.0.27 throws internal RetriableError (name/kind "RetriableError") with message
  * "Connection stalled" or "Connection stalled repeatedly" after fetchWithRetry exhausts stalls.
  * The ConnectError is only the cause; the top-level error is not a ConnectError.
  */

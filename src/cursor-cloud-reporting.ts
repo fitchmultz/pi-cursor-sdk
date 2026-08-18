@@ -170,17 +170,38 @@ export async function fetchCursorCloudRawUsage(
 	}
 }
 
+function mapCursorSdkAgentUsageToCloudReport(value: unknown, runId?: string): CursorCloudUsageReport | undefined {
+	const record = asRecord(value);
+	const runs = (getArray(record, "runs") ?? []).map(asRecord);
+	const matchingRun = runId ? runs.find((run) => getString(run, "runId") === runId) : undefined;
+	return normalizeUsage({
+		totalUsage: getRecord(record, "usage"),
+		runUsage: getRecord(matchingRun, "usage"),
+	});
+}
+
 export async function collectCursorCloudRunReport(options: {
 	agent: SDKAgent;
 	run: Run;
 	waitResult: RunResult;
 	apiKey: string | undefined;
+	agentUsage?: unknown;
 }): Promise<CursorCloudRunReport> {
 	const listArtifacts = options.agent.listArtifacts;
-	const [artifactResult, usage] = await Promise.all([
+	const sdkUsage =
+		options.agentUsage !== undefined
+			? mapCursorSdkAgentUsageToCloudReport(options.agentUsage, options.run.id)
+			: typeof options.agent.getUsage === "function"
+				? mapCursorSdkAgentUsageToCloudReport(
+					await withTimeout(Promise.resolve(options.agent.getUsage({ runId: options.run.id }))),
+					options.run.id,
+				)
+				: undefined;
+	const [artifactResult, restUsage] = await Promise.all([
 		typeof listArtifacts === "function" ? withTimeout(listArtifacts.call(options.agent)) : undefined,
-		fetchCursorCloudRawUsage({ agentId: options.run.agentId, runId: options.run.id, apiKey: options.apiKey }),
+		sdkUsage ? undefined : fetchCursorCloudRawUsage({ agentId: options.run.agentId, runId: options.run.id, apiKey: options.apiKey }),
 	]);
+	const usage = sdkUsage ?? restUsage;
 	const waitBranches = getArray(getRecord(asRecord(options.waitResult), "git"), "branches");
 	const runBranches = getArray(getRecord(asRecord(options.run), "git"), "branches");
 	return {

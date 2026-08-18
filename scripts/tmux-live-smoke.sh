@@ -243,7 +243,7 @@ exec %s
 		"$TMUX_BIN" capture-pane -pt "$session" >"$capture" 2>/dev/null || true
 		missing=""
 		"$RG_BIN" -q "SUM=42" "$capture" || missing="${missing} SUM=42"
-		"$RG_BIN" -q "\\(cursor\\) composer-2[-.]5" "$capture" || missing="${missing} footer (cursor) composer-2-5"
+		"$RG_BIN" -q "\\(cursor\\) grok-4\\.6" "$capture" || missing="${missing} footer (cursor) grok-4.6"
 		if [[ -z "$missing" ]]; then
 			"$TMUX_BIN" kill-session -t "$session" 2>/dev/null || true
 			log "$name PASS"
@@ -311,14 +311,14 @@ printf '\''%%s\n'\'' "$code" > %q
 model_listed() {
 	local file="$1"
 	if [[ -n "${RG_BIN:-}" ]]; then
-		"$RG_BIN" -q "composer-2\.5" "$file"
+		"$RG_BIN" -q "grok-4\.6" "$file"
 	else
-		grep -q "composer-2\.5" "$file"
+		grep -q "grok-4\.6" "$file"
 	fi
 }
 
 # Capture full catalog then search. Never pipe list-models into rg -q under pipefail.
-capture_and_require_composer_model() {
+capture_and_require_default_model() {
 	local list_cmd=("$@")
 	local models_out="$SMOKE_DIR/prereq.models.txt"
 	local models_err="$SMOKE_DIR/prereq.stderr.txt"
@@ -326,7 +326,7 @@ capture_and_require_composer_model() {
 		fail "pi --list-models cursor failed"
 	fi
 	if ! model_listed "$models_out" && ! model_listed "$models_err"; then
-		fail "cursor/composer-2-5 not listed"
+		fail "cursor/grok-4.6 not listed"
 	fi
 }
 
@@ -343,7 +343,7 @@ run_self_test() {
 	env_capture="$temp_dir/fake-pi.env"
 	cat >"$fake_pi" <<EOF_SELFTEST_PI
 #!/usr/bin/env node
-const { writeFileSync } = require("node:fs");
+import { writeFileSync } from "node:fs";
 writeFileSync("$env_capture", Object.entries(process.env).map(([key, value]) => key + "=" + (value ?? "")).join("\\n") + "\\n", "utf8");
 EOF_SELFTEST_PI
 	cat >"$fake_node" <<EOF_SELFTEST_NODE
@@ -383,7 +383,7 @@ EOF_SELFTEST_NODE
 	if grep -q '^PI_CURSOR_SETTING_SOURCES=' "$env_capture"; then
 		fail "self-test failed: default-settings env did not unset PI_CURSOR_SETTING_SOURCES"
 	fi
-	# Large-catalog prereq: exercise the same capture_and_require_composer_model helper.
+	# Large-catalog prereq: exercise the same capture_and_require_default_model helper.
 	fake_list_pi="$bin_dir/pi-list-models"
 	cat >"$fake_list_pi" <<'EOF_FAKE_LIST'
 #!/usr/bin/env bash
@@ -392,11 +392,11 @@ while [[ $i -lt 20000 ]]; do
 	printf 'cursor/model-%s\n' "$i"
 	i=$((i + 1))
 done
-printf 'cursor/composer-2.5\n'
+printf 'cursor/grok-4.6\n'
 exit 0
 EOF_FAKE_LIST
 	chmod +x "$fake_list_pi"
-	SMOKE_DIR="$temp_dir" capture_and_require_composer_model "$fake_list_pi"
+	SMOKE_DIR="$temp_dir" capture_and_require_default_model "$fake_list_pi"
 	if [[ "$(wc -l <"$temp_dir/prereq.models.txt" | tr -d ' ')" -lt 20000 ]]; then
 		fail "self-test failed: large catalog was truncated before search"
 	fi
@@ -428,7 +428,7 @@ fi
 PI_BASE=(
 	"$PI_BIN" --approve -e "$ROOT"
 	--cursor-no-fast
-	--model cursor/composer-2-5
+	--model cursor/grok-4.6
 )
 
 if [[ -z "${CURSOR_API_KEY:-}" ]]; then
@@ -448,7 +448,7 @@ log "partial live smoke: prereq, basic, default-settings, noninteractive-math, t
 "${BASE_ENV[@]}" "$PI_BIN" --version | tee "$SMOKE_DIR/prereq.pi-version.txt"
 "${BASE_ENV[@]}" "$NPM_BIN" --prefix "$ROOT" ls @cursor/sdk @earendil-works/pi-coding-agent @earendil-works/pi-ai @earendil-works/pi-tui | tee "$SMOKE_DIR/prereq.npm-ls.txt"
 
-capture_and_require_composer_model "${NONE_ENV[@]}" "${PI_BASE[@]}" --list-models cursor
+capture_and_require_default_model "${NONE_ENV[@]}" "${PI_BASE[@]}" --list-models cursor
 log "prereq PASS"
 
 run_direct basic 600 retry-empty-output "PI_CURSOR_SMOKE_OK" "PI_CURSOR_SMOKE_OK" \

@@ -4,7 +4,7 @@ import type { CursorPiToolBridgeSnapshot } from "./cursor-pi-tool-bridge-types.j
 export const CURSOR_TOOL_MANIFEST_ENV = "PI_CURSOR_TOOL_MANIFEST";
 
 /**
- * Representative @cursor/sdk@1.0.23 local-agent ToolType values; actual exposure can vary by run.
+ * Representative @cursor/sdk@1.0.27 local-agent ToolType values; actual exposure can vary by run.
  * See docs/cursor-native-tool-replay.md#sdk-tooltype-replay-matrix.
  */
 export const CURSOR_HOST_TOOL_MANIFEST_SUMMARY =

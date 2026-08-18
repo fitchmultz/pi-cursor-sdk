@@ -81,6 +81,19 @@ const state: CursorSessionResumeState = {
 	unownedUserEntryIds: new Set(),
 };
 
+// Compaction summarizer sends commit a one-message resume handle. Drop it so the
+// next normal turn_end cannot persist that lineage (#223).
+let resumeHandlePersistSuppressed = false;
+
+export function suppressCursorSessionAgentResumeHandlePersist(): void {
+	resumeHandlePersistSuppressed = true;
+	state.pendingHandle = undefined;
+}
+
+export function allowCursorSessionAgentResumeHandlePersist(): void {
+	resumeHandlePersistSuppressed = false;
+}
+
 function hashParts(parts: readonly string[]): string {
 	const hash = createHash("sha256");
 	for (const part of parts) {
@@ -360,6 +373,7 @@ export function getMatchingCursorSessionAgentResumeHandle(poolKey: string): Curs
 }
 
 export function persistCursorSessionAgentResumeHandle(input: PendingCursorSessionAgentResumeHandle): void {
+	if (resumeHandlePersistSuppressed) return;
 	if (!isCursorLocalAgentId(input.agentId)) return;
 	state.pendingHandle = {
 		runtime: input.runtime,
@@ -371,6 +385,12 @@ export function persistCursorSessionAgentResumeHandle(input: PendingCursorSessio
 }
 
 function flushPendingCursorSessionAgentResumeHandle(branch: readonly SessionEntry[]): void {
+	if (resumeHandlePersistSuppressed) {
+		state.pendingHandle = undefined;
+		resumeHandlePersistSuppressed = false;
+		restoreFromBranch(branch);
+		return;
+	}
 	restoreFromBranch(branch);
 	const pending = state.pendingHandle;
 	state.pendingHandle = undefined;
@@ -442,6 +462,8 @@ export function registerCursorSessionAgentResume(pi: CursorSessionAgentResumeExt
 		restoreFromSessionManager(ctx.sessionManager);
 	});
 	pi.on("session_compact", (event, ctx) => {
+		state.pendingHandle = undefined;
+		resumeHandlePersistSuppressed = false;
 		const branch = ctx.sessionManager.getBranch();
 		if (branch.length > 0) {
 			restoreFromSessionManager(ctx.sessionManager);
@@ -471,6 +493,7 @@ function resetStateForTests(): void {
 	state.lastBranchHandle = undefined;
 	state.pendingHandle = undefined;
 	state.unownedUserEntryIds = new Set();
+	resumeHandlePersistSuppressed = false;
 }
 
 export const __testUtils = {
@@ -479,4 +502,5 @@ export const __testUtils = {
 	reset: resetStateForTests,
 	set: setStateForTests,
 	state,
+	isResumeHandlePersistSuppressed: () => resumeHandlePersistSuppressed,
 };

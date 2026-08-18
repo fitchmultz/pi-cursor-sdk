@@ -17,7 +17,7 @@ import { redactSecrets, writePlatformArtifactBundle } from "./artifacts.mjs";
 import { extractContentText, jsonlHasAssistantFinalTextMarker } from "./jsonl-text.mjs";
 import { getScenario, renderPrompt } from "./scenarios.mjs";
 
-const DEFAULT_MODEL = "cursor/composer-2-5";
+const DEFAULT_MODEL = "cursor/grok-4.6";
 const DEFAULT_WAIT_MS = 240_000;
 const SESSION_JSONL_WAIT_MS = 60_000;
 const COLS = 150;

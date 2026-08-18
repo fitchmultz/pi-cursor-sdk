@@ -36,7 +36,7 @@ function isMainModule() {
 const require = createRequire(import.meta.url);
 const root = fileURLToPath(new URL("..", import.meta.url));
 const packageJson = require("../package.json");
-const DEFAULT_MODEL = "cursor/composer-2-5";
+const DEFAULT_MODEL = "cursor/grok-4.6";
 const DEFAULT_OUT_BASE = ".debug/cursor-sdk-events";
 const SDK_EVENT_DEBUG_LOG_PREFIX = "[pi-cursor-sdk:sdk-events]";
 const PI_SESSION_SNAPSHOT_ARTIFACT = "pi-session-snapshot.jsonl";

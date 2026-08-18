@@ -1,0 +1,33 @@
+{
+  "provenance": {
+    "sdkPackage": "@cursor/sdk",
+    "sdkVersion": "1.0.27",
+    "verified": "2026-08-17",
+    "sourceFile": "node_modules/@cursor/sdk/dist/esm/357.js",
+    "issues": [
+      "https://github.com/fitchmultz/pi-cursor-sdk/issues/194",
+      "https://github.com/fitchmultz/pi-cursor-sdk/issues/197"
+    ]
+  },
+  "errorShape": {
+    "classKind": "RetriableError",
+    "name": "RetriableError",
+    "message": "Connection stalled repeatedly",
+    "displayInfo": {
+      "title": "Connection stalled",
+      "detailTemplate": "The connection stalled ${n} times. Please check your network connection and try again.",
+      "isRetryable": true
+    },
+    "alsoThrows": {
+      "message": "Connection stalled",
+      "when": "single-stall throw path (not the repeatedly exhausted path)"
+    }
+  },
+  "sourceMarkers": [
+    "get kind(){return\"RetriableError\"}",
+    "new _(\"Connection stalled repeatedly\"",
+    "new _(\"Connection stalled\"",
+    "isRetryable:!0"
+  ],
+  "syntheticStackFrame": "at fe (file:///repo/node_modules/@cursor/sdk/dist/esm/357.js:1:62073)"
+}

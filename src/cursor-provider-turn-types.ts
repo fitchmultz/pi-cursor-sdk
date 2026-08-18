@@ -14,6 +14,7 @@ import type { CursorSdkEventDebugSink } from "./cursor-sdk-event-debug.js";
 import type { CursorSdkTurnCoordinator } from "./cursor-provider-turn-coordinator.js";
 import type { CursorPrompt } from "./context.js";
 import type { CursorResolvedSetting } from "./cursor-config.js";
+import type { CursorSdkTurnUsage } from "./cursor-usage-accounting.js";
 
 export interface CursorProviderTurnRunnerParams {
 	model: Model<Api>;
@@ -44,6 +45,7 @@ export interface CursorProviderTurnSendMeta {
 
 interface CursorProviderTurnRuntimeBase {
 	turnCoordinator: CursorSdkTurnCoordinator;
+	billedTurnUsage?: CursorSdkTurnUsage;
 }
 
 /**

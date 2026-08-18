@@ -383,6 +383,7 @@ export async function drainCursorLiveRunTurn(
 				applyCursorUsage(partial, model, context, cursorLiveRuns.takeTurnInputTokens(run, toolResultInputTokens), {
 					runtime: "local",
 					turn: cursorLiveRuns.takeSdkTurnUsage(run),
+					billed: run.billedTurnUsage,
 				});
 				if (run.resumeNotice) {
 					emitDisplayOnlyTraceBlock(stream, partial, run.resumeNotice);

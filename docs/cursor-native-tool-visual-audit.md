@@ -6,7 +6,7 @@ This workflow is the canonical repo path for verifying Cursor SDK tool replay th
 
 Use it before accepting replay-card commits or PRs, and for every Cursor provider/runtime release where TUI card/color behavior could regress. Text logs and JSONL are necessary, but they are not enough when the claim is visual parity: always keep PNGs for the exact prompt, and keep before/after PNGs when reviewing a rendering change.
 
-Current validation baseline: Pi 0.84.0 or later, exact `@cursor/sdk@1.0.23`, and local validation packages `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` at exact 0.84.0. Optional published Pi core peer dependencies use `"*"` ranges per current Pi package guidance.
+Current validation baseline: Pi 0.84.0 or later, exact `@cursor/sdk@1.0.27`, and local validation packages `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` at exact 0.84.0. Optional published Pi core peer dependencies use `"*"` ranges per current Pi package guidance.
 
 ## Cursor SDK 1.0.17 / pi 0.79.0 cutover visual record
 
@@ -82,7 +82,7 @@ npx playwright install chromium
 
 `scripts/visual-tui-smoke.mjs` is the durable source of truth for this workflow. It must keep supporting:
 
-- fixed-size tmux PTY execution of the parent-resolved `pi --approve -e <extension-dir> --model cursor/composer-2-5`
+- fixed-size tmux PTY execution of the parent-resolved `pi --approve -e <extension-dir> --model cursor/grok-4.6`
 - parent-resolved `pi` and `tmux` command paths reused in tmux-launched runs, with `process.execPath`'s directory prepended for prereq checks and tmux launches so Node shims use the validated Node
 - `PI_CURSOR_NATIVE_TOOL_DISPLAY=1`
 - `PI_CURSOR_REGISTER_NATIVE_TOOLS=1` by default

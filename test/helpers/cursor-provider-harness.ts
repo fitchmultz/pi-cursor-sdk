@@ -11,6 +11,7 @@ vi.mock("@cursor/sdk", () => {
 	const mockAgent = {
 		agentId: "agent-1",
 		send: vi.fn(),
+		getUsage: vi.fn().mockResolvedValue(undefined),
 		[Symbol.asyncDispose]: mockDispose,
 	};
 	const mockPlatform = {
@@ -106,6 +107,7 @@ export function asMockSdkAgent(
 	return {
 		agentId: "agent-1",
 		[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		getUsage: vi.fn().mockResolvedValue(undefined),
 		...agent,
 	} as MockSdkAgent;
 }

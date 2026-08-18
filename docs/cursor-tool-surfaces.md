@@ -34,19 +34,19 @@ Default behavior:
 
 ```bash
 # Disable only Cursor's interactive question tool
-PI_CURSOR_ASK_QUESTION=0 pi --model cursor/composer-2-5
+PI_CURSOR_ASK_QUESTION=0 pi --model cursor/grok-4.6
 
 # Disable pi bridge entirely
-PI_CURSOR_PI_TOOL_BRIDGE=0 pi --model cursor/composer-2-5
+PI_CURSOR_PI_TOOL_BRIDGE=0 pi --model cursor/grok-4.6
 
 # Expose overlapping pi builtins through the bridge
-PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1 pi --model cursor/composer-2-5
+PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1 pi --model cursor/grok-4.6
 
 # Fail a stranded bridge call sooner than the effective MCP tool timeout
-PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS=120000 pi --model cursor/composer-2-5
+PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS=120000 pi --model cursor/grok-4.6
 
 # Disable bootstrap tool manifest
-PI_CURSOR_TOOL_MANIFEST=0 pi --model cursor/composer-2-5
+PI_CURSOR_TOOL_MANIFEST=0 pi --model cursor/grok-4.6
 ```
 
 ## Runtime and transport policy

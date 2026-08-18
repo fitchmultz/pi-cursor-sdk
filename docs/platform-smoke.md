@@ -164,7 +164,7 @@ Cloud validation stays separate from `smoke:platform:all`. Releases that touch a
 npm run smoke:cloud
 ```
 
-The no-flag command is the required `cursor/composer-2-5` matrix. It uses current `gh` CLI authentication to create one private throwaway GitHub repository, seeds clean `main`, `starting-ref`, and `direct-push` branches, and runs persisted-session named lanes for:
+The no-flag command is the required `cursor/grok-4.6` matrix. It uses current `gh` CLI authentication to create one private throwaway GitHub repository, seeds clean `main`, `starting-ref`, and `direct-push` branches, and runs persisted-session named lanes for:
 
 - cancellation, with exact agent/run IDs captured before abort, retained `runIdSource` (`metadata` or installed-SDK `Agent.listRuns()` recovery), and terminal `cancelled` independently read through the SDK;
 - explicit HTTPS repository plus `startingRef`, requiring a distinct pushed cloud branch with remote-content and starting-ref-ancestry proof, recording whether the SDK returned branch metadata, and validating any returned PR URL through GitHub;
@@ -288,7 +288,7 @@ import { LOCAL_RESUME_SUITE_NAMES } from "./scripts/platform-smoke/local-resume-
 
 export default {
   packageName: "pi-cursor-sdk",
-  cursorModel: "cursor/composer-2-5",
+  cursorModel: "cursor/grok-4.6",
   artifactRoot: ".artifacts/platform-smoke",
   artifactRetention: {
     maxRunDirs: 18,

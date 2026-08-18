@@ -46,7 +46,7 @@ ${npmUsage}
 ${nodeUsage}
 
 Environment:
-  CURSOR_LOCAL_RESUME_SMOKE_MODEL          Cursor model id (default: cursor/composer-2-5:slow).
+  CURSOR_LOCAL_RESUME_SMOKE_MODEL          Cursor model id (default: cursor/grok-4.6:slow).
   CURSOR_LOCAL_RESUME_SMOKE_TIMEOUT_MS     Timeout in ms per model turn (default: 300000).
   CURSOR_LOCAL_RESUME_SMOKE_KEEP_ARTIFACTS Keep temp artifacts when set to 1.
   CURSOR_LOCAL_RESUME_SMOKE_EXTENSION_PATH Packed extension path override (platform runner only).

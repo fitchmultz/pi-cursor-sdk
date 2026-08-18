@@ -27,7 +27,7 @@ export async function renderHTML(ansiPath, htmlPath, options = {}) {
 		plain,
 		options: {
 			label: options.label ?? "platform-smoke",
-			model: options.model ?? "cursor/composer-2-5",
+			model: options.model ?? "cursor/grok-4.6",
 			mode: options.mode ?? "agent",
 			cwd: options.cwd ?? process.cwd(),
 			sessionId: options.sessionId ?? "platform-smoke",

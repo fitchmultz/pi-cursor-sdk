@@ -28,15 +28,15 @@ The bridge is enabled by default when bridgeable active pi tools exist. Cursor s
 Rollback, timeout, and diagnostics controls:
 
 ```bash
-PI_CURSOR_ASK_QUESTION=0 pi --model cursor/composer-2-5
-PI_CURSOR_PI_TOOL_BRIDGE=0 pi --model cursor/composer-2-5
-PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1 pi --model cursor/composer-2-5
-PI_CURSOR_MCP_TOOL_TIMEOUT_SECONDS=7200 pi --model cursor/composer-2-5
-PI_CURSOR_MCP_TOOL_TIMEOUT_MS=7200000 pi --model cursor/composer-2-5
-PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS=120000 pi --model cursor/composer-2-5
-PI_CURSOR_MCP_CONNECT_TIMEOUT_SECONDS=5 pi --model cursor/composer-2-5
-PI_CURSOR_MCP_CONNECT_TIMEOUT_MS=5000 pi --model cursor/composer-2-5
-PI_CURSOR_PI_TOOL_BRIDGE_DEBUG=1 pi --model cursor/composer-2-5
+PI_CURSOR_ASK_QUESTION=0 pi --model cursor/grok-4.6
+PI_CURSOR_PI_TOOL_BRIDGE=0 pi --model cursor/grok-4.6
+PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1 pi --model cursor/grok-4.6
+PI_CURSOR_MCP_TOOL_TIMEOUT_SECONDS=7200 pi --model cursor/grok-4.6
+PI_CURSOR_MCP_TOOL_TIMEOUT_MS=7200000 pi --model cursor/grok-4.6
+PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS=120000 pi --model cursor/grok-4.6
+PI_CURSOR_MCP_CONNECT_TIMEOUT_SECONDS=5 pi --model cursor/grok-4.6
+PI_CURSOR_MCP_CONNECT_TIMEOUT_MS=5000 pi --model cursor/grok-4.6
+PI_CURSOR_PI_TOOL_BRIDGE_DEBUG=1 pi --model cursor/grok-4.6
 ```
 
 `PI_CURSOR_ASK_QUESTION=0` disables only `cursor_ask_question` / `pi__cursor_ask_question`, leaving the rest of the pi bridge available; it is enabled by default. `PI_CURSOR_PI_TOOL_BRIDGE=0` disables the bridge, including `pi__cursor_ask_question`. `PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1` opts in to exposing overlapping pi tool names that Cursor already has native equivalents for (`read`, `bash`, `write`, `edit`, `grep`, `find`, and `ls`). By default those names are hidden even when pi's Cursor replay wrapper has registered them as extension tools; non-overlapping active built-ins remain bridgeable by default. The installed Cursor SDK uses a 60-second MCP protocol default; pi-cursor-sdk overrides that seam by default with 3600 seconds for MCP `callTool` requests and 10 seconds for verified initialize/listTools requests on first send. Bridged calls also have a local fail-closed deadline capped by the effective MCP tool timeout; lower it with `PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS` to reject stale pending state and abort active pi execution sooner. Unknown MCP protocol timeout stacks keep the SDK default. `PI_CURSOR_PI_TOOL_BRIDGE_DEBUG=1` emits typed, allowlisted, scrubbed single-line JSONL bridge diagnostics to `process.stderr` with prefix `[pi-cursor-sdk:bridge]`; it is off by default, uses run-safe IDs that are not reused in endpoint paths, and does not print endpoint URLs/path components/tokens, raw args/results, file contents, or secrets. Cursor-native tools, Cursor settings, plugins, and configured Cursor MCP servers still come from the Cursor SDK local agent path. Cloud Cursor agents are out of scope for this bridge.
@@ -64,13 +64,13 @@ When Cursor reports completed tool activity, the extension can display recorded 
 
 Cursor `glob` activity is displayed through native `find` cards.
 
-For the full `@cursor/sdk@1.0.23` `ToolType` set, disposition matrix, and runtime alias normalization, see [SDK ToolType replay matrix](#sdk-tooltype-replay-matrix) below. Official SDK reference: https://cursor.com/docs/sdk/typescript
+For the full `@cursor/sdk@1.0.27` `ToolType` set, disposition matrix, and runtime alias normalization, see [SDK ToolType replay matrix](#sdk-tooltype-replay-matrix) below. Official SDK reference: https://cursor.com/docs/sdk/typescript
 
 Edit and write activity replays through pi-facing `edit` and `write` cards only when replay arguments truthfully satisfy the matching pi schema, but still uses recorded Cursor results only. The adapter passes through truthful Cursor paths, content when Cursor reported it, and recorded diff/details; it does not pretend Cursor's editing schema is pi's schema and it fails closed if a recorded replay result is missing. Cursor `StrReplace` with recorded replacement text displays as native-looking `edit`; path-only Cursor `edit` and notebook edit activity fall back to neutral Cursor activity so pi does not reject the replay before recorded-result handling. Cursor `write` displays as native-looking `write`. Diagnostics, delete, todos/plans, task/subagent, image, MCP, semantic search, screen recording, and web search/fetch activity use neutral Cursor activity cards with pi's default success/error tool shell. Cursor SDK `task` activity is labeled **Cursor subagent** by default because it represents Cursor-spawned child-agent work; `PI_CURSOR_TASK_PRESENTATION=task` keeps the older **Cursor task** wording for comparison. MCP completions whose `toolName` is `WebSearch` / `web_search` / `WebFetch` / similar are labeled **Cursor web search** or **Cursor web fetch** instead of generic **Cursor MCP**. Neutral Cursor activity cards carry display metadata such as `activityTitle` and `activitySummary`, so partial/collapsed cards can say `Cursor plan`, `Cursor todos`, `Cursor subagent`, `Cursor MCP`, `Cursor semantic search`, `Cursor screen recording`, `Cursor web search`, `Cursor web fetch`, or `Cursor edit` instead of only `Cursor activity`. These replay tools only display recorded Cursor results; they never mutate files or execute tool work directly. Replay paths are normalized to workspace-relative paths when possible. Most collapsed replay cards include bounded previews for diffs and text details so small edits, todos, task output, and MCP results are visible without expanding; web search/fetch activity stays summary-only while collapsed because those cards often arrive after final text and can otherwise bury the answer. Ctrl+O expansion shows the recorded details. Edit previews omit raw unified diff headers and show compact numbered changed/context lines using pi's native diff added/removed/context colors, and write previews use syntax highlighting when pi can infer a language from the path. Image generation replay cards show the saved image path in the collapsed summary and render the image inline when pi terminal image display is enabled and the generated file is still readable.
 
 ## SDK ToolType replay matrix
 
-Source of truth for SDK tool names: `@cursor/sdk@1.0.23` conversation `ToolType` values and https://cursor.com/docs/sdk/typescript
+Source of truth for SDK tool names: `@cursor/sdk@1.0.27` conversation `ToolType` values and https://cursor.com/docs/sdk/typescript
 
 Implementation owners: `src/cursor-tool-presentation-registry.ts` (canonical names, labels, visibility, replay policy, bridge exclusions for internal replay wrappers, alias normalization, and display-spec key completeness), `src/cursor-transcript-tool-specs.ts` (registry-keyed display implementations for transcript formatting and pi display builders), `src/cursor-native-tool-display-replay.ts` (replay card rendering derived from registry replay metadata), and `src/cursor-web-tool-activity.ts` (MCP/web alias remapping before display lookup).
 
@@ -160,7 +160,7 @@ These are integration boundaries, not pi replay bugs:
 - **Live web-search ordering:** local Cursor WebSearch can be absent from live `onDelta`, `onStep`, and `run.stream()` tool events. When the only evidence is a post-run local transcript `webSearchToolCall`, pi can display the **Cursor web search** card only after `run.wait()` finishes. The extension intentionally keeps assistant text streaming instead of buffering the whole answer just to reorder that card.
 - **WebFetch availability:** `pi-cursor-sdk` can display a Cursor web fetch only after the SDK reports a `webFetchToolCall`, web-fetch-shaped MCP completion, or web-fetch host alias. It cannot make the Cursor SDK expose or execute WebFetch in a run where Cursor's tool set does not include it.
 - **Future SDK tools:** Cursor's official SDK docs say tool names, args, and result payloads can change. Unknown completed tools therefore fall back to neutral Cursor activity cards with bounded, scrubbed text. The extension cannot render tools that the SDK never emits.
-- **Process-level transport exceptions:** Connect/network suppression remains scoped to active provider turns; raw Cursor SDK `AbortError` DOMExceptions are suppressed while any provider turn or session process-error guard is active. The exact SDK-provenance `WriteIterableClosedError: WritableIterable is closed` is guarded for the Pi session lifecycle because SDK 1.0.23 controlled-exec can reject after its originating provider turn when it writes an error frame after output closes. The observed raw `write EPIPE` (SDK 1.0.23 local shell executor child stdin write with no stream error listener; stack exactly the single async `WriteWrap.onWriteComplete` frame, no SDK provenance) is guarded only while a local Cursor provider turn is active, and a contained closed pipe marks that turn's pooled/resumable agent transport dead for bounded disposal and recreation on the next acquire. Idle pooled agents do not suppress EPIPE, and multi-frame synchronous write-path EPIPE (piped stdout, dead terminal) stays fatal. Unrelated failures remain fatal; a materially different future SDK process error must be added only after observation.
+- **Process-level transport exceptions:** Connect/network suppression remains scoped to active provider turns; raw Cursor SDK `AbortError` DOMExceptions are suppressed while any provider turn or session process-error guard is active. The exact SDK-provenance `WriteIterableClosedError: WritableIterable is closed` is guarded for the Pi session lifecycle because SDK 1.0.23 controlled-exec can reject after its originating provider turn when it writes an error frame after output closes. The observed raw `write EPIPE` (SDK 1.0.23 local shell executor child stdin write with no stream error listener; 1.0.27 attaches a no-op listener before that write; stack exactly the single async `WriteWrap.onWriteComplete` frame, no SDK provenance) is guarded only while a local Cursor provider turn is active, and a contained closed pipe marks that turn's pooled/resumable agent transport dead for bounded disposal and recreation on the next acquire. Idle pooled agents do not suppress EPIPE, and multi-frame synchronous write-path EPIPE (piped stdout, dead terminal) stays fatal. Unrelated failures remain fatal; a materially different future SDK process error must be added only after observation.
 
 Maintainer debug (`PI_CURSOR_SDK_EVENT_DEBUG=1`) still records the same discarded started-call events in `coordinator-events.jsonl` under phase `discarded-incomplete-started-tool-call` for investigation (**#52**), including fast local starts suppressed from successful text-producing runs. User-visible incomplete cards and debug artifacts are complementary: cards explain actionable gaps in the TUI; debug files retain normalized tool names and scrubbed call-id hashes without changing default stderr behavior.
 
@@ -203,7 +203,7 @@ Native replay wrappers are registered only for tool names not already owned by a
 Disable native replay registration entirely:
 
 ```bash
-PI_CURSOR_NATIVE_TOOL_DISPLAY=0 pi --model cursor/composer-2-5
+PI_CURSOR_NATIVE_TOOL_DISPLAY=0 pi --model cursor/grok-4.6
 ```
 
 `PI_CURSOR_REGISTER_NATIVE_TOOLS=0` is also accepted as a registration-only opt-out.

@@ -226,7 +226,7 @@ try {
 
 		const prompt = "first line\nsecond line: ' \\\" & | ; $() <> `";
 		const parsed = parsePiArgs([
-			"--approve", "--cursor-no-fast", "--cursor-mode", "agent", "--model", "cursor/composer-2-5",
+			"--approve", "--cursor-no-fast", "--cursor-mode", "agent", "--model", "cursor/grok-4.6",
 			"--session-dir", "C:\\smoke sessions", "--session-id", "platform-test", prompt,
 		]);
 		expect(parsed.unknownFlags.get("cursor-no-fast")).toBe(true);
@@ -278,7 +278,7 @@ try {
 import { detectCards, assertRequiredCards } from "./scripts/platform-smoke/card-detect.mjs";
 import { isSafeBundlePath } from "./scripts/platform-smoke/targets.mjs";
 const promptOnly = detectCards("1. call pi__read on ./package.json\n2. grep ./README.md\n");
-const rendered = detectCards("read /workspace/pi-cursor-sdk/package.json\ngrep /pi-cursor-sdk/ in C:/workspace/README.md\nbridge visual smoke\nENOENT: no such file or directory\ncursor:local · fast:off · http1\ncomposer-2-5\n");
+const rendered = detectCards("read /workspace/pi-cursor-sdk/package.json\ngrep /pi-cursor-sdk/ in C:/workspace/README.md\nbridge visual smoke\nENOENT: no such file or directory\ncursor:local · fast:off · http1\ngrok-4.6\n");
 const wrapped = detectCards("read /workspace/very-long-test-workspace/package.js\non\n");
 const wrappedMidToken = detectCards("read /workspace/very-long-test-workspace/package.j\nson\n");
 const localPreview = detectCards("read package.json · local file preview\n");

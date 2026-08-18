@@ -280,6 +280,58 @@ describe("cursor usage accounting", () => {
 		expect(partial.usage.totalTokens).toBeGreaterThanOrEqual(50_150);
 	});
 
+	it("prefers billed spend even when billed occupancy exceeds the context window", () => {
+		const model = makeModel();
+		const context: Context = {
+			systemPrompt: "Be helpful.",
+			messages: [{ role: "user", content: "Hello", timestamp: 1 }],
+		};
+		const partial = makeAssistantMessage([{ type: "text", text: "Hello back." }]);
+		applyCursorUsage(partial, model, context, 7, {
+			runtime: "local",
+			turn: { inputTokens: 25, outputTokens: 6, cacheReadTokens: 24, cacheWriteTokens: 1 },
+			billed: { inputTokens: 200_000, outputTokens: 80, cacheReadTokens: 150_000, cacheWriteTokens: 10 },
+		});
+		expect(partial.usage.input).toBe(49_990);
+		expect(partial.usage.output).toBe(80);
+		expect(partial.usage.cacheRead).toBe(150_000);
+		expect(partial.usage.cacheWrite).toBe(10);
+		expect(partial.usage.totalTokens).toBe(31);
+		expect(partial.usage.totalTokens).toBeLessThan(model.contextWindow);
+	});
+
+	it("ignores pre-compaction occupancy and watermarks at or above tokensBefore", () => {
+		const model = makeModel();
+		const prior = makeAssistantMessage([{ type: "text", text: "Prior." }]);
+		prior.usage = {
+			input: 10_000,
+			output: 50,
+			cacheRead: 40_000,
+			cacheWrite: 100,
+			totalTokens: 50_150,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+		const kept = makeAssistantMessage([{ type: "text", text: "Kept." }]);
+		kept.usage = {
+			...prior.usage,
+			totalTokens: 50_150,
+		};
+		const context: Context = {
+			systemPrompt: "Be helpful.",
+			messages: [
+				{ role: "user", content: "Hello", timestamp: 1 },
+				prior,
+				{ role: "compactionSummary", summary: "compacted", tokensBefore: 50_150, timestamp: 2 } as unknown as Context["messages"][number],
+				kept,
+				{ role: "user", content: "Again", timestamp: 3 },
+			],
+		};
+		const partial = makeAssistantMessage([{ type: "text", text: "Hi." }]);
+		applyCursorUsage(partial, model, context, 7);
+		expect(partial.usage.cacheRead).toBe(0);
+		expect(partial.usage.totalTokens).toBeLessThan(50_150);
+	});
+
 	it("rejects over-window prior assistant occupancy from the compaction poison fixture", () => {
 		const fixturePath = new URL("./fixtures/cursor-run-usage-compaction-poison.jsonl", import.meta.url);
 		const poisonedAssistant = readFileSync(fixturePath, "utf8")

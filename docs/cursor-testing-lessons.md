@@ -190,7 +190,7 @@ Simulate plan-mode execute stripping with the repo fixture:
 It sets active tools to `read`, `bash`, `edit`, `write` on each `turn_start`. Run pi with:
 
 ```bash
-pi --approve -e scripts/fixtures/plan-strip-shim --cursor-no-fast --model cursor/composer-2-5 \
+pi --approve -e scripts/fixtures/plan-strip-shim --cursor-no-fast --model cursor/grok-4.6 \
   --session-dir "$SMOKE_DIR/plan-strip" \
   -p 'After reset, read README.md and answer PLAN_STRIP_OK=yes.'
 ```
@@ -257,7 +257,7 @@ The script writes timestamped artifacts under `--out` (default `/tmp/pi-cursor-s
 
 Stdout prints artifact paths and summary counts only. Raw payloads stay on disk and may contain local paths, project text, tool args/results, or secrets — do not commit or share them.
 
-Hard repo rule: Cursor SDK behavior claims must come from the installed `@cursor/sdk` package and/or https://cursor.com/docs/sdk/typescript, not from memory or ad-hoc probes alone. Current cutover validation targets exact `@cursor/sdk@1.0.23` and Pi 0.84.0 local packages.
+Hard repo rule: Cursor SDK behavior claims must come from the installed `@cursor/sdk` package and/or https://cursor.com/docs/sdk/typescript, not from memory or ad-hoc probes alone. Current cutover validation targets exact `@cursor/sdk@1.0.27` and Pi 0.84.0 local packages.
 
 ## Pi provider SDK event capture
 
@@ -268,7 +268,7 @@ One-shot maintainer script (RPC pi run, gitignored artifacts by default):
 ```bash
 CURSOR_API_KEY=... npm run debug:provider-events -- \
   --cwd . \
-  --model cursor/composer-2-5 \
+  --model cursor/grok-4.6 \
   --prompt 'Repro prompt here' \
   --out .debug/cursor-sdk-events/manual-repro
 ```
@@ -308,7 +308,7 @@ Artifacts under `--out` (default `.debug/cursor-sdk-events/<timestamp>/` under `
 During any normal pi session you can also opt in with:
 
 ```bash
-PI_CURSOR_SDK_EVENT_DEBUG=1 pi --approve -e . --model cursor/composer-2-5
+PI_CURSOR_SDK_EVENT_DEBUG=1 pi --approve -e . --model cursor/grok-4.6
 ```
 
 Multi-turn sessions group automatically by pi session file:
@@ -359,7 +359,7 @@ Ask the reporter (or capture yourself) for:
 | Field | Why |
 | --- | --- |
 | `pi --version` and installed `pi-cursor-sdk` version | Confirms extension/runtime in use |
-| Model ID (for example `cursor/composer-2-5`) | Routing/replay behavior is model-scoped |
+| Model ID (for example `cursor/grok-4.6`) | Routing/replay behavior is model-scoped |
 | Exact repro prompt and prior turns | Multi-turn replay history affects prompt text |
 | Flags: `--cursor-no-fast`, `PI_CURSOR_PI_TOOL_BRIDGE`, `PI_CURSOR_EXPOSE_BUILTIN_TOOLS`, `PI_CURSOR_SETTING_SOURCES`, `PI_CURSOR_TOOL_MANIFEST` | Bridge vs native-only vs narrowed settings; bootstrap callable-surface manifest |
 | Whether the listed names are `pi__*` bridge MCP, Cursor-native (`browser_navigate`, `WebSearch`), or `cursor-replay-*` replay IDs | Three different surfaces (see [Cursor native tool replay](./cursor-native-tool-replay.md#live-bridge-vs-replay)) |
@@ -380,7 +380,7 @@ chmod 600 "$SMOKE_DIR/home/.pi/agent/auth.json"
 env -i HOME="$SMOKE_DIR/home" PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" \
   MISE_DISABLE=1 \
   PI_CURSOR_PI_TOOL_BRIDGE_DEBUG=1 \
-  pi --approve -e . --cursor-no-fast --model cursor/composer-2-5 \
+  pi --approve -e . --cursor-no-fast --model cursor/grok-4.6 \
   --session-dir "$SMOKE_DIR/session" \
   -p '<exact reporter prompt>'
 ```
@@ -392,7 +392,7 @@ For pi parsing, replay routing, or bridge timing, prefer:
 ```bash
 npm run debug:provider-events -- \
   --cwd "$PWD" \
-  --model cursor/composer-2-5 \
+  --model cursor/grok-4.6 \
   --prompt '<exact reporter prompt>' \
   --out "$SMOKE_DIR/provider-events"
 ```

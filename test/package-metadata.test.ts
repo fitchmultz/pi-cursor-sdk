@@ -18,7 +18,7 @@ const packageJson = require("../package.json") as {
 };
 const packageLock = require("../package-lock.json") as {
 	version: string;
-	packages: Record<string, { version?: string; dependencies?: Record<string, string>; bundleDependencies?: boolean | string[] }>;
+	packages: Record<string, { version?: string; resolved?: string; dependencies?: Record<string, string>; bundleDependencies?: boolean | string[] }>;
 };
 
 const PI_PACKAGES = [
@@ -73,8 +73,16 @@ describe("package metadata cutover baselines", () => {
 	});
 
 	it("pins Cursor SDK exactly", () => {
-		expect(packageJson.dependencies["@cursor/sdk"]).toBe("1.0.23");
-		expect(lockPackageVersion("@cursor/sdk")).toBe("1.0.23");
+		expect(packageJson.dependencies["@cursor/sdk"]).toBe("1.0.27");
+		expect(lockPackageVersion("@cursor/sdk")).toBe("1.0.27");
+	});
+
+	it("keeps lockfile resolved URLs on the public npm registry", () => {
+		const hosts = new Set(
+			Object.values(packageLock.packages)
+				.flatMap((entry) => (entry.resolved ? [new URL(entry.resolved).host] : [])),
+		);
+		expect([...hosts]).toEqual(["registry.npmjs.org"]);
 	});
 
 	it("ships an exact MCP/Hono bundledDependencies closure for published installs", () => {
@@ -206,11 +214,20 @@ describe("package metadata cutover baselines", () => {
 
 	it("keeps Grok UX examples aligned with the generated Cursor catalog", () => {
 		const spec = readFileSync(join(process.cwd(), "docs/cursor-model-ux-spec.md"), "utf8");
-		const grok = FALLBACK_MODEL_ITEMS.find((item) => item.id === "grok-4.5");
+		const grok45 = FALLBACK_MODEL_ITEMS.find((item) => item.id === "grok-4.5");
+		const grok46 = FALLBACK_MODEL_ITEMS.find((item) => item.id === "grok-4.6");
 
-		expect(grok?.parameters?.map((parameter) => parameter.id)).toEqual(["effort", "fast"]);
+		expect(grok45?.parameters?.map((parameter) => parameter.id)).toEqual(["effort", "fast"]);
+		expect(grok46?.parameters?.map((parameter) => parameter.id)).toEqual(["effort", "fast"]);
+		expect(grok46?.parameters?.find((parameter) => parameter.id === "effort")?.values?.map((value) => value.value)).toEqual([
+			"low",
+			"medium",
+			"high",
+			"xhigh",
+		]);
 		expect(FALLBACK_MODEL_ITEMS.some((item) => item.id === "grok-4.3")).toBe(false);
 		expect(spec).toContain("### `grok-4.5`");
+		expect(spec).toContain("### `grok-4.6`");
 		expect(spec).not.toContain("grok-4.3");
 	});
 

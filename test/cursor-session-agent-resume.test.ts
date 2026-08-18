@@ -540,4 +540,62 @@ describe("cursor-session-agent-resume", () => {
 		await pi.runSessionCompact();
 		expect(getMatchingCursorSessionAgentResumeHandle("pool-1")).toBeUndefined();
 	});
+
+	it("does not flush a compaction-summarizer pending handle on the first later turn_end", async () => {
+		const pi = createPiHarness();
+		registerCursorSessionScope(pi);
+		registerCursorSessionAgentResume(pi);
+		const first = messageEntry("u1", null);
+		const compact = {
+			type: "compaction" as const,
+			id: "c1",
+			parentId: "u1",
+			timestamp: "2026-07-07T00:00:00.000Z",
+			summary: "compacted",
+			firstKeptEntryId: "u2",
+			tokensBefore: 50_000,
+		};
+		const after = messageEntry("u2", "c1");
+
+		await pi.runSessionStart({
+			cwd: "/tmp/project",
+			sessionManager: {
+				getSessionFile: vi.fn(() => "/tmp/session.jsonl"),
+				getSessionId: vi.fn(() => "session-1"),
+				getBranch: vi.fn(() => [first]),
+				getEntries: vi.fn(() => [first]),
+			},
+		});
+		persistCursorSessionAgentResumeHandle({
+			runtime: "local",
+			agentId: "agent-summarizer",
+			poolKey: "pool-1",
+			sendState: { bootstrapped: true, contextFingerprint: "one-message", incrementalSendCount: 0 },
+			storeIdentity: { version: 1, stateRoot: "/tmp/store" },
+		});
+		expect(resumeTestUtils.state.pendingHandle?.agentId).toBe("agent-summarizer");
+
+		await pi.runSessionCompact({
+			compactionEntry: compact,
+		}, {
+			sessionManager: {
+				getSessionFile: vi.fn(() => "/tmp/session.jsonl"),
+				getSessionId: vi.fn(() => "session-1"),
+				getBranch: vi.fn(() => [first, compact, after]),
+				getEntries: vi.fn(() => [first, compact, after]),
+			},
+		});
+		expect(resumeTestUtils.state.pendingHandle).toBeUndefined();
+		expect(resumeTestUtils.isResumeHandlePersistSuppressed()).toBe(false);
+
+		pi.appendEntry.mockClear();
+		await pi.runTurnEnd({}, {
+			sessionManager: {
+				getSessionFile: vi.fn(() => "/tmp/session.jsonl"),
+				getSessionId: vi.fn(() => "session-1"),
+				getBranch: vi.fn(() => [first, compact, after]),
+			},
+		});
+		expect(pi.appendEntry).not.toHaveBeenCalled();
+	});
 });

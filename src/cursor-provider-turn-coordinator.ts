@@ -16,6 +16,9 @@ import { getToolName } from "./cursor-transcript-utils.js";
 import { getNormalizedCursorToolName } from "./cursor-tool-visibility.js";
 import { buildCursorPiToolDisplay } from "./cursor-tool-transcript.js";
 import { getField } from "./cursor-record-utils.js";
+import { readCursorTaskMetadata } from "./cursor-task-presentation.js";
+import { mirrorCursorActivityTool } from "./cursor-todo-mirror.js";
+import { getToolArgs, getToolResult, normalizeResult } from "./cursor-transcript-utils.js";
 import { CursorTurnDisplayRouter } from "./cursor-provider-turn-display-router.js";
 import {
 	createTurnCoordinatorContentEmitter,
@@ -313,6 +316,21 @@ export class CursorSdkTurnCoordinator {
 			source: options.source,
 			fingerprint,
 		});
+
+		// Live Cursor activity only. Transcript/history completions stay display-only.
+		if (options.source !== "transcript") {
+			const normalized = getNormalizedCursorToolName(toolCall);
+			if (normalized === "updateTodos" || normalized === "task") {
+				const args = getToolArgs(toolCall);
+				const result = normalizeResult(getToolResult(toolCall));
+				void mirrorCursorActivityTool({
+					toolName: normalized,
+					args,
+					result,
+					taskMetadata: normalized === "task" ? readCursorTaskMetadata(args, result.value) : undefined,
+				});
+			}
+		}
 
 		const action = this.displayRouter.routeCompletedToolCall(toolCall, options);
 		if (action) this.displayRouter.emitDisplayAction(action);

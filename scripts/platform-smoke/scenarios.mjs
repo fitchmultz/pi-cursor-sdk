@@ -96,6 +96,23 @@ NATIVE_MATRIX_OK package=<name> grep=<yes/no> find=<yes/no> list=<yes/no> shell=
 		],
 	},
 
+	"cursor-store-root-live": {
+		description: "Prove persisted session SQLite relocates under PI_CURSOR_SDK_STATE_ROOT instead of ~/.cursor/projects.",
+		cursorCalls: 1,
+		storeRootRelative: ".platform-smoke/custom-store-root",
+		env: {
+			PI_CURSOR_SETTING_SOURCES: "none",
+			PI_CURSOR_NATIVE_TOOL_DISPLAY: "0",
+			PI_CURSOR_REGISTER_NATIVE_TOOLS: "0",
+			PI_CURSOR_PI_TOOL_BRIDGE: "0",
+			PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "0",
+			PI_CURSOR_SDK_EVENT_DEBUG: "1",
+		},
+		promptTemplate: "Join STORE, ROOT, and OK with underscores and reply with only the result.",
+		finalMarker: "STORE_ROOT_OK",
+		requiredCards: ["footer-status"],
+	},
+
 	"cursor-http1-live": {
 		description: "Prove an opt-in HTTP/1.1/SSE local provider turn and visible transport status.",
 		cursorCalls: 1,

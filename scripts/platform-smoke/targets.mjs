@@ -27,6 +27,7 @@ import { collectVisualEvidence } from "./visual-evidence.mjs";
 import { extractContentText, extractFinalTextContent } from "./jsonl-text.mjs";
 import { executeLocalResumeSuite } from "./local-resume-runner.mjs";
 import { LOCAL_RESUME_SUITE_BY_NAME } from "./local-resume-suites.mjs";
+import { collectStoreRootEvidence } from "./store-root-evidence.mjs";
 import {
 	failSuite,
 	fetchPlatformArtifactBundle,
@@ -119,6 +120,7 @@ export async function runTargetSuite(config, targetName, suiteName, leaseSession
 		case "platform-build":
 			return await executePlatformBuild(config, targetName, suiteDir, slug, platform, leaseSession);
 		case "cursor-native-visual-matrix":
+		case "cursor-store-root-live":
 		case "cursor-http1-live":
 		case "cursor-bridge-visual-matrix":
 		case "cursor-abort-cleanup":
@@ -610,6 +612,8 @@ async function executeLiveSuite(config, targetName, suiteName, suiteDir, slug, l
 	];
 	if (violations.length > 0) writeFileSync(resolve(suiteDir, "redaction-violations.json"), JSON.stringify(violations, null, 2));
 	const providerDebugFiles = findFiles(resolve(suiteDir, "cursor-sdk-events"));
+	const storeRootEvidencePath = resolve(liveArtifactDir, "store-root-evidence.json");
+	const storeRootEvidence = readJson(storeRootEvidencePath);
 
 	const checks = [
 		{ id: "live-exit-zero", fn: () => result.code === 0 },
@@ -628,6 +632,14 @@ async function executeLiveSuite(config, targetName, suiteName, suiteDir, slug, l
 		] : []),
 		{ id: "final-marker", fn: () => scenario?.finalMarker ? status?.finalMarkerObserved === true : status?.ok === true },
 		...(suiteName === "cursor-abort-cleanup" ? [{ id: "abort-no-successful-answer", fn: () => !hasAbortSuccessClaim(jsonlRaw) }] : []),
+		...(suiteName === "cursor-store-root-live" ? [
+			{ id: "store-root-evidence-present", fn: () => Boolean(storeRootEvidence) },
+			{ id: "store-root-sqlite-under-custom-root", fn: () => storeRootEvidence?.ok === true },
+			{
+				id: "store-root-not-default-layout",
+				fn: () => Array.isArray(storeRootEvidence?.defaultLayoutSqlite) && storeRootEvidence.defaultLayoutSqlite.length === 0,
+			},
+		] : []),
 		{ id: "no-secrets", fn: () => violations.length === 0 },
 		...cardChecks.map((check) => ({ id: check.id, fn: () => check.ok })),
 		...jsonlToolChecks,

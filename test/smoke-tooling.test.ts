@@ -8,6 +8,7 @@ import { parseArgs as parsePiArgs } from "../node_modules/@earendil-works/pi-cod
 import { buildInitialMessage } from "../node_modules/@earendil-works/pi-coding-agent/dist/cli/initial-message.js";
 import { CURSOR_TOOL_PRESENTATION_SPECS } from "../src/cursor-tool-presentation-registry.js";
 import { getScenario, renderPrompt, SCENARIOS } from "../scripts/platform-smoke/scenarios.mjs";
+import { collectStoreRootEvidence } from "../scripts/platform-smoke/store-root-evidence.mjs";
 
 function run(command: string, args: string[], env = process.env, cwd = process.cwd()) {
 	return spawnSync(command, args, { cwd, encoding: "utf8", env, shell: process.platform === "win32" && command === "npm" });
@@ -259,6 +260,28 @@ try {
 			requiredCards: ["http1-status"],
 			env: { PI_CURSOR_HTTP_1_1: "1", PI_CURSOR_PI_TOOL_BRIDGE: "0", PI_CURSOR_SDK_EVENT_DEBUG: "1" },
 		});
+	});
+
+	it("keeps the required custom storeRoot live lane explicit", () => {
+		const scenario = getScenario("cursor-store-root-live");
+		expect(scenario).toMatchObject({
+			cursorCalls: 1,
+			finalMarker: "STORE_ROOT_OK",
+			storeRootRelative: ".platform-smoke/custom-store-root",
+			env: { PI_CURSOR_PI_TOOL_BRIDGE: "0", PI_CURSOR_SDK_EVENT_DEBUG: "1" },
+		});
+	});
+
+	it("collects custom storeRoot evidence from pi-sessions sqlite paths", () => {
+		const root = mkdtempSync(join(tmpdir(), "platform-store-root-evidence-"));
+		const storeRoot = join(root, "custom-store-root");
+		const sessionRoot = join(storeRoot, "abc123", "pi-sessions", "deadbeef");
+		mkdirSync(sessionRoot, { recursive: true });
+		writeFileSync(join(sessionRoot, "index.db"), "sqlite");
+		const evidence = collectStoreRootEvidence(storeRoot, join(root, "workspace"));
+		expect(evidence.ok).toBe(true);
+		expect(evidence.piSessionSqlite).toHaveLength(1);
+		rmSync(root, { recursive: true, force: true });
 	});
 
 	it("rejects invalid platform smoke targets and suites before Crabbox runs", () => {

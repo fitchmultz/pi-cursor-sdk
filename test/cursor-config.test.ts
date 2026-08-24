@@ -22,7 +22,9 @@ import {
 	CURSOR_LOCAL_FORCE_ENV,
 	CURSOR_LOCAL_RESUME_ENV,
 	CURSOR_HTTP1_ENV,
+	CURSOR_STORE_ROOT_ENV,
 	cursorFastDefaultsFromConfig,
+	parseCursorSdkConfig,
 	getCursorSdkProjectConfigPath,
 	getCursorSdkUserConfigPath,
 	loadCursorSdkConfig,
@@ -564,6 +566,11 @@ describe("Cursor SDK config resolver", () => {
 		}).local;
 		expect(local.autoReview).toMatchObject({ value: false, source: "builtin" });
 		expect(local.resume).toMatchObject({ value: true, source: "builtin" });
+		expect(
+			resolveCursorSdkConfig({
+				session: { local: { storeRoot: "/from-session" } },
+			}).local.storeRoot.source,
+		).toBe("builtin");
 
 		const cloud = resolveCursorSdkConfig({
 			session: { cloud: { repo: "session-repo" } },
@@ -607,5 +614,41 @@ describe("Cursor SDK config resolver", () => {
 			force: expect.objectContaining({ value: false, source: "cli" }),
 			resume: expect.objectContaining({ value: false, source: "cli" }),
 		});
+	});
+
+	it("resolves local.storeRoot from env and user, ignoring cli, project, relative paths, and unsafe segments", () => {
+		expect(resolveCursorSdkConfig().local.storeRoot).toMatchObject({
+			value: undefined,
+			source: "builtin",
+		});
+		expect(parseCursorSdkConfig({ local: { storeRoot: "/opt/pi-cursor-sdk" } })).toEqual({
+			local: { storeRoot: "/opt/pi-cursor-sdk" },
+		});
+		expect(
+			resolveCursorSdkConfig({
+				project: { local: { storeRoot: "/from-project" } },
+				user: { local: { storeRoot: "/from-user" } },
+			}).local.storeRoot,
+		).toMatchObject({ value: "/from-user", source: "user" });
+		expect(
+			resolveCursorSdkConfig({
+				env: { [CURSOR_STORE_ROOT_ENV]: "/from-env" },
+				project: { local: { storeRoot: "/from-project" } },
+				user: { local: { storeRoot: "/from-user" } },
+			}).local.storeRoot,
+		).toMatchObject({ value: "/from-env", source: "environment" });
+		expect(
+			resolveCursorSdkConfig({
+				cli: { local: { storeRoot: "/from-cli" } },
+				user: { local: { storeRoot: "/from-user" } },
+			}).local.storeRoot,
+		).toMatchObject({ value: "/from-user", source: "user" });
+		expect(() => resolveCursorSdkConfig({ user: { local: { storeRoot: "relative-store" } } })).toThrow(
+			/absolute directory/,
+		);
+		expect(() => resolveCursorSdkConfig({ user: { local: { storeRoot: "/var/tmp/foo/../bar" } } })).toThrow(
+			/\.\.|path segments/,
+		);
+		expect(() => resolveCursorSdkConfig({ user: { local: { storeRoot: "/" } } })).toThrow(/filesystem root/);
 	});
 });

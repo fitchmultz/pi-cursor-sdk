@@ -16,6 +16,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { redactSecrets, writePlatformArtifactBundle } from "./artifacts.mjs";
 import { extractContentText, jsonlHasAssistantFinalTextMarker } from "./jsonl-text.mjs";
 import { getScenario, renderPrompt } from "./scenarios.mjs";
+import { collectStoreRootEvidence } from "./store-root-evidence.mjs";
 
 const DEFAULT_MODEL = "cursor/grok-4.6";
 const DEFAULT_WAIT_MS = 240_000;
@@ -554,6 +555,9 @@ async function main() {
 			PI_CURSOR_PI_TOOL_BRIDGE_DEBUG_FILE: join(artifactDir, "bridge-diagnostics.jsonl"),
 			TERM: "xterm-256color",
 		};
+		if (scenario.storeRootRelative) {
+			suiteEnv.PI_CURSOR_SDK_STATE_ROOT = resolve(workspaceDir, scenario.storeRootRelative);
+		}
 		if (args.suite === "cursor-abort-cleanup") writeProcessSnapshot(logDir, "process-before", platform);
 		const prompt = renderPrompt(scenario, platform);
 		writeFileSync(join(artifactDir, "prompt.txt"), prompt);
@@ -591,6 +595,13 @@ async function main() {
 			assertNoAbortLeftover(logDir, platform);
 		}
 		if (jsonlFiles.length === 0) throw new Error("no pi session JSONL artifact was written");
+		if (scenario.storeRootRelative) {
+			const storeRootEvidence = collectStoreRootEvidence(suiteEnv.PI_CURSOR_SDK_STATE_ROOT, workspaceDir);
+			writeFileSync(join(artifactDir, "store-root-evidence.json"), JSON.stringify(storeRootEvidence, null, 2));
+			if (!storeRootEvidence.ok) {
+				throw new Error(`store root evidence failed: ${storeRootEvidence.reasons.join("; ")}`);
+			}
+		}
 		ok = true;
 	} catch (caught) {
 		error = caught instanceof Error ? caught.message : String(caught);

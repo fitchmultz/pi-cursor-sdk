@@ -79,7 +79,7 @@ To reproduce a **minimal** surface (pi-cursor-sdk + Cursor host only), use exten
 | ID prefix | Meaning |
 | --- | --- |
 | `cursor-replay-*` | Display-only replay of Cursor SDK activity |
-| `cursor-pi-bridge-run-*` | Live pi execution via bridge |
+| `cursor-pi-bridge-run-*` (run) / `cursor-pi-bridge-<32 hex>-t<counter>` (tool) | Live pi execution via bridge |
 
 Example mistake: treating `cursor-replay-…` as a tool to invoke. Replay never re-runs work.
 

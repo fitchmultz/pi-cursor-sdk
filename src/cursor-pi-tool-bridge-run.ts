@@ -10,7 +10,11 @@ import {
 	type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import { bridgeToolExecutionAbortTracker } from "./cursor-pi-tool-bridge-abort.js";
-import { MCP_ENDPOINT_ROOT, MCP_SERVER_NAME } from "./cursor-pi-tool-bridge-constants.js";
+import {
+	buildCursorPiBridgeToolCallId,
+	MCP_ENDPOINT_ROOT,
+	MCP_SERVER_NAME,
+} from "./cursor-pi-tool-bridge-constants.js";
 import {
 	type CursorPiToolBridgeDiagnosticEvent,
 	type CursorPiToolBridgeLifecycleDiagnosticFields,
@@ -61,6 +65,7 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 	private readonly registry: CursorPiToolBridgeRunHost;
 	private readonly env: Record<string, string | undefined>;
 	private readonly endpointPath: string;
+	private readonly runUuid: string;
 	private readonly callTimeoutMs: number;
 	private readonly knownMcpToolNames: ReadonlySet<string>;
 	private readonly knownCursorMcpCallIds = new Set<string>();
@@ -89,7 +94,9 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 		this.enabled = enabled;
 		this.onToolRequest = options.onToolRequest;
 		this.debugRecorder = options.debugRecorder;
-		this.id = `cursor-pi-bridge-run-${randomUUID()}`;
+		const runUuid = randomUUID();
+		this.runUuid = runUuid;
+		this.id = `cursor-pi-bridge-run-${runUuid}`;
 		this.endpointPath = `${MCP_ENDPOINT_ROOT}/${randomUUID()}/mcp`;
 		this.callTimeoutMs = resolveCursorPiToolBridgeCallTimeoutMs(env);
 		this.knownMcpToolNames = new Set(snapshot.tools.map((tool) => tool.mcpToolName));
@@ -276,11 +283,17 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 
 		this.toolCallCounter += 1;
 		const bridgeCallId = `${this.id}-bridge-${this.toolCallCounter}`;
+		let piToolCallId: string;
+		try {
+			piToolCallId = buildCursorPiBridgeToolCallId(this.runUuid, this.toolCallCounter);
+		} catch (error) {
+			return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+		}
 		const request: CursorPiBridgeToolRequest = {
 			runId: this.id,
 			bridgeCallId,
 			cursorMcpCallId,
-			piToolCallId: `${this.id}-tool-${this.toolCallCounter}`,
+			piToolCallId,
 			piToolName,
 			mcpToolName,
 			args: normalizeMcpArgs(argsValue),

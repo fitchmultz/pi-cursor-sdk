@@ -13,6 +13,11 @@ import {
 } from "./helpers/pi-harness.js";
 import { __testUtils as nativeToolDisplayTestUtils } from "../src/cursor-native-tool-display-state.js";
 import {
+	CURSOR_PI_BRIDGE_TOOL_CALL_ID_MAX_LENGTH,
+	buildCursorPiBridgeToolCallId,
+	isCursorPiBridgeToolCallId,
+} from "../src/cursor-pi-tool-bridge-constants.js";
+import {
 	__testUtils,
 	buildCursorPiToolBridgeSnapshot,
 	buildCursorPiToolBridgeSurfaceSignature,
@@ -219,6 +224,38 @@ describe("cursor pi tool bridge flags and snapshots", () => {
 		expect(command).not.toMatch(/^PI_CURSOR_BRIDGE_TOOL_CALL_ID=bridge_call_1 if /);
 	});
 
+	it("builds bounded provider-facing bridge tool call IDs", () => {
+		const runUuid = "c2417032-9686-40f2-bd3c-a763fbaa7693";
+		const firstId = buildCursorPiBridgeToolCallId(runUuid, 1);
+		const boundaryId = buildCursorPiBridgeToolCallId(runUuid, 9_999_999_999_999);
+
+		expect(firstId).toBe("cursor-pi-bridge-c2417032968640f2bd3ca763fbaa7693-t1");
+		expect(firstId).toHaveLength(52);
+		expect(isCursorPiBridgeToolCallId(firstId)).toBe(true);
+		expect(boundaryId).toHaveLength(CURSOR_PI_BRIDGE_TOOL_CALL_ID_MAX_LENGTH);
+		expect(boundaryId).toMatch(/^cursor-pi-bridge-[0-9a-f]{32}-t9999999999999$/);
+		expect(isCursorPiBridgeToolCallId(boundaryId)).toBe(true);
+		expect(isCursorPiBridgeToolCallId(`${boundaryId}0`)).toBe(false);
+		expect(isCursorPiBridgeToolCallId("cursor-pi-bridge-c2417032968640f2bd3ca763fbaa7693-t")).toBe(false);
+		expect(isCursorPiBridgeToolCallId("cursor-pi-bridge-c2417032968640f2bd3ca763fbaa769-t1")).toBe(false);
+		expect(isCursorPiBridgeToolCallId("cursor-pi-bridge-c2417032-9686-40f2-bd3c-a763fbaa7693-t1")).toBe(false);
+		expect(isCursorPiBridgeToolCallId("ordinary-tool-call")).toBe(false);
+
+		expect(() => buildCursorPiBridgeToolCallId(runUuid, 10_000_000_000_000)).toThrow(
+			"Cursor pi bridge tool call ID limit exceeded",
+		);
+		for (const invalidRunUuid of ["not-a-uuid", "c2417032968640f2bd3ca763fbaa7693", "c2417032-9686-40f2-bd3c-a763fbaa7693-extra"]) {
+			expect(() => buildCursorPiBridgeToolCallId(invalidRunUuid, 1)).toThrow(
+				"Cursor pi bridge run UUID must be canonical",
+			);
+		}
+		for (const counter of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+			expect(() => buildCursorPiBridgeToolCallId(runUuid, counter)).toThrow(
+				"Cursor pi bridge tool call counter must be a positive safe integer",
+			);
+		}
+	});
+
 	it("uses stable collision-safe MCP names", () => {
 		const pi = createBridgePiHarness({
 			active: ["tool one", "tool_one"],
@@ -258,7 +295,8 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 
 			expect(run.id).toMatch(/^cursor-pi-bridge-run-[0-9a-f-]{36}$/);
 			expect(request.runId).toBe(run.id);
-			expect(request.piToolCallId).toContain(run.id);
+			expect(request.piToolCallId).not.toContain(run.id);
+			expect(request.piToolCallId.length).toBeLessThanOrEqual(64);
 			expect(request.piToolCallId).not.toBe(historicalSequentialToolCallId);
 			expect(request.bridgeCallId).not.toContain(endpointToken);
 			expect(request.piToolCallId).not.toContain(endpointToken);
@@ -292,6 +330,52 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 				],
 			});
 			await expect(callPromise).resolves.toMatchObject({ content: [{ type: "text", text: "current result" }] });
+		} finally {
+			await client.close().catch(() => undefined);
+			await transport.close().catch(() => undefined);
+			await run.dispose();
+		}
+	});
+
+	it("keeps double-digit bridge tool call IDs within the OpenAI limit", async () => {
+		expect(
+			isCursorPiBridgeToolCallId("cursor-pi-bridge-run-c2417032-9686-40f2-bd3c-a763fbaa7693-tool-10"),
+		).toBe(true);
+		const registry = __testUtils.createRegistry(
+			createBridgePiHarness({ active: ["read"], tools: [createToolInfo("read")] }),
+			{ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" },
+		);
+		const run = await registry.createRun();
+		const { client, transport } = await connectClient(getCursorPiBridgeMcpUrl(run));
+		try {
+			const calls = Array.from({ length: 10 }, (_, index) =>
+				client.callTool({ name: "pi__read", arguments: { path: `file-${index}.txt` } }),
+			);
+			const requests = [];
+			while (requests.length < calls.length) {
+				requests.push(...(await waitForQueuedRequests(run)));
+			}
+			const ids = requests.map((request) => request.piToolCallId);
+
+			expect(ids).toHaveLength(10);
+			expect(ids.at(-1)).toMatch(/-t10$/);
+			expect(new Set(ids).size).toBe(ids.length);
+			for (const id of ids) {
+				expect(id.length).toBeLessThanOrEqual(64);
+				expect(isCursorPiBridgeToolCallId(id)).toBe(true);
+			}
+
+			await run.resolveToolResults(
+				requests.map((request, index) => ({
+					role: "toolResult",
+					toolCallId: request.piToolCallId,
+					toolName: request.piToolName,
+					content: [{ type: "text", text: `result-${index}` }],
+					isError: false,
+					timestamp: index,
+				})),
+			);
+			await expect(Promise.all(calls)).resolves.toHaveLength(10);
 		} finally {
 			await client.close().catch(() => undefined);
 			await transport.close().catch(() => undefined);
@@ -452,7 +536,8 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 			const [resolvedRequest] = await waitForQueuedRequests(run);
 			expect(resolvedRequest.runId).toBe(run.id);
 			expect(resolvedRequest.bridgeCallId).toContain(run.id);
-			expect(resolvedRequest.piToolCallId).toContain(run.id);
+			expect(resolvedRequest.piToolCallId).not.toContain(run.id);
+			expect(resolvedRequest.piToolCallId).toMatch(/^cursor-pi-bridge-[0-9a-f]{32}-t\d+$/);
 			expect(resolvedRequest.bridgeCallId).not.toContain(endpointToken);
 			expect(resolvedRequest.piToolCallId).not.toContain(endpointToken);
 			await run.resolveToolResultsFromContext({

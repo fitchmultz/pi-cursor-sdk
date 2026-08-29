@@ -36,6 +36,7 @@ import {
 } from "./cursor-config.js";
 import { asRecord } from "./cursor-record-utils.js";
 import { getResolvedSessionCursorHttp1Enabled } from "./cursor-http1.js";
+import { getResolvedSessionCursorAttributionEnabled } from "./cursor-attribution.js";
 import { getCursorSessionCwd, getCursorSessionProjectTrusted } from "./cursor-session-scope.js";
 
 export const CURSOR_RUNTIME_ENTRY_TYPE = "cursor-runtime-state";
@@ -94,6 +95,11 @@ export function getCursorCliConfig(): CursorExplicitSdkConfig {
 
 export function getCursorSessionConfig(): CursorSdkConfig {
 	const useHttp1ForAgent = getResolvedSessionCursorHttp1Enabled();
+	const attributeCommitsToAgent = getResolvedSessionCursorAttributionEnabled();
+	const local = {
+		...(useHttp1ForAgent === undefined ? {} : { useHttp1ForAgent }),
+		...(attributeCommitsToAgent === undefined ? {} : { attributeCommitsToAgent }),
+	};
 	return {
 		...(sessionCursorRuntime
 			? {
@@ -101,7 +107,7 @@ export function getCursorSessionConfig(): CursorSdkConfig {
 					...(sessionCursorCloudAcknowledged ? { cloud: { acknowledged: true } } : {}),
 				}
 			: {}),
-		...(useHttp1ForAgent === undefined ? {} : { local: { useHttp1ForAgent } }),
+		...(Object.keys(local).length === 0 ? {} : { local }),
 	};
 }
 
@@ -130,6 +136,7 @@ export type CursorRuntimeResolution =
 			kind: "valid";
 			runtime: CursorResolvedSetting<CursorRuntime>;
 			useHttp1ForAgent: CursorResolvedSetting<boolean>;
+			attributeCommitsToAgent: CursorResolvedSetting<boolean>;
 		}
 	| { kind: "invalid"; message: string };
 
@@ -140,6 +147,7 @@ export function resolveCursorStatusRuntime(ctx: CursorRuntimeContext): CursorRun
 			kind: "valid",
 			runtime: config.runtime,
 			useHttp1ForAgent: config.local.useHttp1ForAgent,
+			attributeCommitsToAgent: config.local.attributeCommitsToAgent,
 		};
 	} catch (error) {
 		return { kind: "invalid", message: error instanceof Error ? error.message : String(error) };
@@ -158,9 +166,11 @@ export function formatCursorStatus(
 	fast: boolean | undefined,
 	mode: "agent" | "plan" | "invalid",
 	useHttp1ForAgent = false,
+	attributeCommitsToAgent = true,
 ): string {
 	const parts = [`cursor:${runtime}`, fast === true ? "fast:on" : fast === false ? "fast:off" : "fast:n/a"];
 	if (runtime === "local" && useHttp1ForAgent) parts.push("http1");
+	if (!attributeCommitsToAgent) parts.push("attrib:off");
 	if (mode === "invalid") parts.push("mode invalid");
 	else if (mode === "plan") parts.push("plan");
 	return parts.join(" · ");

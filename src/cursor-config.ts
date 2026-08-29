@@ -36,6 +36,7 @@ export const CURSOR_SANDBOX_ENV = "PI_CURSOR_SANDBOX";
 export const CURSOR_LOCAL_FORCE_ENV = "PI_CURSOR_LOCAL_FORCE";
 export const CURSOR_LOCAL_RESUME_ENV = "PI_CURSOR_LOCAL_RESUME";
 export const CURSOR_HTTP1_ENV = "PI_CURSOR_HTTP_1_1";
+export const CURSOR_ATTRIBUTION_ENV = "PI_CURSOR_ATTRIBUTION";
 
 export type CursorConfigSource = "cli" | "environment" | "project" | "user" | "session" | "model-alias" | "builtin";
 export type CursorConfigTrustLevel = "one-shot" | "environment" | "trusted-project" | "user" | "session" | "model-catalog" | "builtin";
@@ -73,6 +74,8 @@ export interface CursorSdkConfig {
 		force?: boolean;
 		resume?: boolean;
 		useHttp1ForAgent?: boolean;
+		/** When false, ask Cursor not to brand its work (Co-authored-by: Cursor trailers). */
+		attributeCommitsToAgent?: boolean;
 	};
 }
 
@@ -113,6 +116,7 @@ export interface CursorResolvedSdkConfig {
 		force: CursorResolvedSetting<boolean>;
 		resume: CursorResolvedSetting<boolean>;
 		useHttp1ForAgent: CursorResolvedSetting<boolean>;
+		attributeCommitsToAgent: CursorResolvedSetting<boolean>;
 	};
 }
 
@@ -280,6 +284,7 @@ export function parseCursorSdkConfig(value: unknown): CursorSdkConfig | undefine
 		if (typeof local.force === "boolean") parsedLocal.force = local.force;
 		if (typeof local.resume === "boolean") parsedLocal.resume = local.resume;
 		if (typeof local.useHttp1ForAgent === "boolean") parsedLocal.useHttp1ForAgent = local.useHttp1ForAgent;
+		if (typeof local.attributeCommitsToAgent === "boolean") parsedLocal.attributeCommitsToAgent = local.attributeCommitsToAgent;
 		const sandboxOptions = asRecord(local.sandboxOptions);
 		if (typeof sandboxOptions?.enabled === "boolean") parsedLocal.sandboxOptions = { enabled: sandboxOptions.enabled };
 		if (Object.keys(parsedLocal).length > 0) config.local = parsedLocal;
@@ -533,6 +538,7 @@ const CLOUD_ORDER: CursorFieldSource[] = ["cli", "environment", "session", "user
 const LOCAL_ORDER: CursorFieldSource[] = ["cli", "environment", "project", "user", "builtin"];
 const LOCAL_FORCE_ORDER: CursorFieldSource[] = ["cli", "environment", "builtin"];
 const HTTP1_ORDER: CursorFieldSource[] = ["session", "environment", "user", "builtin"];
+const ATTRIBUTION_ORDER: CursorFieldSource[] = ["session", "environment", "project", "user", "builtin"];
 
 function buildFieldLayers<T>(order: CursorFieldSource[], values: CursorFieldValues<T>): Array<CursorResolvedSetting<T> | undefined> {
 	return order.map((source) => (source === "builtin" ? resolved("builtin", values.builtin as T) : valueFrom(source, values[source])));
@@ -605,13 +611,22 @@ export function cursorSdkConfigFromEnv(env: Record<string, string | undefined> =
 	const force = parseOptionalEnvBoolean(env[CURSOR_LOCAL_FORCE_ENV]);
 	const resume = parseOptionalEnvBoolean(env[CURSOR_LOCAL_RESUME_ENV]);
 	const useHttp1ForAgent = parseOptionalEnvBoolean(env[CURSOR_HTTP1_ENV]);
-	if (autoReview !== undefined || sandbox !== undefined || force !== undefined || resume !== undefined || useHttp1ForAgent !== undefined) {
+	const attributeCommitsToAgent = parseOptionalEnvBoolean(env[CURSOR_ATTRIBUTION_ENV]);
+	if (
+		autoReview !== undefined ||
+		sandbox !== undefined ||
+		force !== undefined ||
+		resume !== undefined ||
+		useHttp1ForAgent !== undefined ||
+		attributeCommitsToAgent !== undefined
+	) {
 		config.local = {
 			...(autoReview !== undefined ? { autoReview } : {}),
 			...(sandbox !== undefined ? { sandboxOptions: { enabled: sandbox } } : {}),
 			...(force !== undefined ? { force } : {}),
 			...(resume !== undefined ? { resume } : {}),
 			...(useHttp1ForAgent !== undefined ? { useHttp1ForAgent } : {}),
+			...(attributeCommitsToAgent !== undefined ? { attributeCommitsToAgent } : {}),
 		};
 	}
 	return config;
@@ -783,6 +798,14 @@ export function resolveCursorSdkConfig(options: ResolveCursorSdkConfigOptions = 
 				environment: env.local?.useHttp1ForAgent,
 				user: user?.local?.useHttp1ForAgent,
 				builtin: false,
+			}),
+			// Defaults to the Cursor SDK behaviour (attribution on); opt-out is prompt-level only.
+			attributeCommitsToAgent: resolveOrdinaryField(ATTRIBUTION_ORDER, {
+				session: session?.local?.attributeCommitsToAgent,
+				environment: env.local?.attributeCommitsToAgent,
+				project: project?.local?.attributeCommitsToAgent,
+				user: user?.local?.attributeCommitsToAgent,
+				builtin: true,
 			}),
 		},
 	};

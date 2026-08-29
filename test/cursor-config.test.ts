@@ -21,6 +21,7 @@ import {
 	CURSOR_SANDBOX_ENV,
 	CURSOR_LOCAL_FORCE_ENV,
 	CURSOR_LOCAL_RESUME_ENV,
+	CURSOR_ATTRIBUTION_ENV,
 	CURSOR_HTTP1_ENV,
 	cursorFastDefaultsFromConfig,
 	getCursorSdkProjectConfigPath,
@@ -125,6 +126,34 @@ describe("Cursor SDK config resolver", () => {
 			value: false,
 			source: "builtin",
 		});
+	});
+
+	it("resolves commit attribution as session, env, project, user, then SDK-compatible default", () => {
+		const user = { local: { attributeCommitsToAgent: false } };
+		const project = { local: { attributeCommitsToAgent: true } };
+
+		expect(resolveCursorSdkConfig({ env: {} }).local.attributeCommitsToAgent).toMatchObject({
+			value: true,
+			source: "builtin",
+		});
+		expect(resolveCursorSdkConfig({ env: {}, user }).local.attributeCommitsToAgent).toMatchObject({
+			value: false,
+			source: "user",
+		});
+		expect(resolveCursorSdkConfig({ env: {}, user, project }).local.attributeCommitsToAgent).toMatchObject({
+			value: true,
+			source: "project",
+		});
+		expect(
+			resolveCursorSdkConfig({ env: { [CURSOR_ATTRIBUTION_ENV]: "0" }, user, project }).local.attributeCommitsToAgent,
+		).toMatchObject({ value: false, source: "environment" });
+		expect(
+			resolveCursorSdkConfig({
+				env: { [CURSOR_ATTRIBUTION_ENV]: "0" },
+				session: { local: { attributeCommitsToAgent: true } },
+				user,
+			}).local.attributeCommitsToAgent,
+		).toMatchObject({ value: true, source: "session" });
 	});
 
 	it("rejects invalid explicit CLI runtime and cloud-context overrides before lower layers", () => {

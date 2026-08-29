@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Add commit attribution control through `PI_CURSOR_ATTRIBUTION`, `/cursor-attribution [on|off|toggle]`, and `cursor-sdk.json` `local.attributeCommitsToAgent`, resolved as session > environment > trusted project > user > built-in on. When disabled, bootstrap and incremental prompts ban `Co-authored-by: Cursor` trailers and other Cursor attribution, and the footer shows `attrib:off`. The suppression is prompt-level only: the installed `@cursor/sdk` defaults `attributeCommitsToAgent` on for embedders, has no public option to disable it, and does not read `~/.cursor/cli-config.json` (#143).
+
 ## 0.3.6 - 2026-08-18
 
 ### Fixed

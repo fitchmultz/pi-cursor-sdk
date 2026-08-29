@@ -19,6 +19,8 @@ export interface CursorPromptOptions {
 	toolManifest?: string;
 	includePiBridgeGuidance?: boolean;
 	includePiAskQuestionGuidance?: boolean;
+	/** When false, the prompt tells Cursor not to brand commits/PRs with its own attribution. */
+	attributeCommitsToAgent?: boolean;
 }
 
 export const CURSOR_APPROX_CHARS_PER_TOKEN = 4;
@@ -40,10 +42,13 @@ export function getCursorPlanModeToolGuidanceText(
 }
 
 export function getCursorToolTailGuardText(
-	options: Pick<CursorPromptOptions, "agentMode"> & { includePlanModeGuidance?: boolean; includePiBridgeGuidance?: boolean } = {},
+	options: Pick<CursorPromptOptions, "agentMode" | "attributeCommitsToAgent"> & { includePlanModeGuidance?: boolean; includePiBridgeGuidance?: boolean } = {},
 ): string {
 	return [
 		"Shell: use explicit `cd` to repo path for project commands; session cwd may differ from tool args.",
+		options.attributeCommitsToAgent === false
+			? "Commits: no Co-authored-by: Cursor trailers or other Cursor attribution."
+			: undefined,
 		options.includePlanModeGuidance === false
 			? undefined
 			: getCursorPlanModeToolGuidanceText(options.agentMode, { includePiBridgeGuidance: options.includePiBridgeGuidance }),
@@ -54,7 +59,7 @@ export function getCursorToolTailGuardText(
 }
 
 function getCursorToolBoundaryText(
-	options: Pick<CursorPromptOptions, "agentMode" | "includePiAskQuestionGuidance"> & { hasToolManifest?: boolean; includePiBridgeGuidance?: boolean } = {},
+	options: Pick<CursorPromptOptions, "agentMode" | "includePiAskQuestionGuidance" | "attributeCommitsToAgent"> & { hasToolManifest?: boolean; includePiBridgeGuidance?: boolean } = {},
 ): string {
 	const includePiBridgeGuidance = options.includePiBridgeGuidance !== false;
 	const includePiAskQuestionGuidance = includePiBridgeGuidance && options.includePiAskQuestionGuidance !== false;
@@ -65,6 +70,9 @@ function getCursorToolBoundaryText(
 			? "For exposed pi bridge tools, call pi__* MCP names, not pi card/history names."
 			: undefined,
 		"Do not claim pi-side or WebSearch/WebFetch tools unless Cursor ran an equivalent tool.",
+		options.attributeCommitsToAgent === false
+			? "Do not add Co-authored-by: Cursor trailers or any other Cursor attribution to commits, PRs, or comments."
+			: undefined,
 		includePiAskQuestionGuidance ? "Use pi__cursor_ask_question for material choices if exposed." : undefined,
 		getCursorPlanModeToolGuidanceText(options.agentMode, { includePiBridgeGuidance }),
 		"Images: only latest user images are sent; ask to reattach prior images.",
@@ -407,6 +415,7 @@ export function buildCursorPrompt(context: Context, options: CursorPromptOptions
 		hasToolManifest: Boolean(options.toolManifest),
 		includePiBridgeGuidance: options.includePiBridgeGuidance,
 		includePiAskQuestionGuidance: options.includePiAskQuestionGuidance,
+		attributeCommitsToAgent: options.attributeCommitsToAgent,
 	})];
 	if (options.toolManifest) {
 		sectionsBeforeMessages.push(options.toolManifest);

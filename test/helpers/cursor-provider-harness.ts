@@ -50,6 +50,7 @@ import { __testUtils as cursorSessionResumeTestUtils } from "../../src/cursor-se
 import { __testUtils as cursorSessionLineageTestUtils } from "../../src/cursor-session-agent-lineage.js";
 import { __testUtils as cursorStateTestUtils } from "../../src/cursor-state.js";
 import { __testUtils as cursorHttp1TestUtils } from "../../src/cursor-http1.js";
+import { __testUtils as cursorAttributionTestUtils } from "../../src/cursor-attribution.js";
 import { CURSOR_HTTP1_ENV } from "../../src/cursor-config.js";
 import { streamCursor, __testUtils as cursorProviderTestUtils } from "../../src/cursor-provider.js";
 import { registerCursorPiToolBridge, __testUtils as cursorPiToolBridgeTestUtils } from "../../src/cursor-pi-tool-bridge.js";
@@ -401,6 +402,7 @@ export async function resetCursorProviderTestState(): Promise<void> {
 	cursorSessionLineageTestUtils.reset();
 	cursorStateTestUtils.resetCursorModeStateForTests();
 	cursorHttp1TestUtils.reset();
+	cursorAttributionTestUtils.reset();
 	nativeToolDisplayTestUtils.reset();
 	modelDiscoveryTestUtils.registerModelItems(cursorModelItems);
 	mockCreatedAgent({ send: vi.fn() });

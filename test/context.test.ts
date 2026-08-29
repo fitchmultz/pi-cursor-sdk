@@ -570,6 +570,7 @@ describe("buildCursorPrompt", () => {
 		expect(result.text).toContain("call pi__* MCP names");
 		expect(result.text).toContain("not pi card/history names");
 		expect(result.text).toContain("Do not claim pi-side or WebSearch/WebFetch tools");
+		expect(result.text).toContain("Do not comment on GitHub issues or PRs unless the user asked");
 		expect(result.text).toContain("Use pi__cursor_ask_question for material choices if exposed");
 		expect(result.text).toContain("prefer pi__mcp for MCP work and pi__subagent for delegation");
 		expect(result.text).not.toContain("Pi bridge contract:");

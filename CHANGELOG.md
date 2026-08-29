@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Tell Cursor not to comment on GitHub issues or pull requests unless the user asked. Cursor otherwise treats an issue mentioned in conversation as an invitation to post a status comment on it.
+
 ## 0.3.6 - 2026-08-18
 
 ### Fixed

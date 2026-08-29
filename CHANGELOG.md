@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Re-register native replay wrappers on every model sync so bash replay cards cannot re-execute host commands after `/new`, `/resume`, or a session switch (#203). Registration was process-once, but pi rebuilds its tool registry back to the builtins, so session 2+ replayed through the real `bash`.
+- Fail closed for every `cursor-replay-*` call with no recorded display, not only the `edit` and `write` ids covered by `block-file-mutation`.
+
 ## 0.3.6 - 2026-08-18
 
 ### Fixed

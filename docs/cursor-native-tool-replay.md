@@ -200,6 +200,8 @@ Bridge MCP names are also not pi tool names. Cursor may see names such as `pi__s
 
 Native replay wrappers are registered only for tool names not already owned by another extension. If another extension already owns a wrapper name needed for replay, pi-cursor-sdk skips only the conflicting wrapper and uses the scrubbed Cursor activity transcript for that tool instead.
 
+Registration runs on every model sync, not once per process. Pi rebuilds its tool registry back to the builtins after `/new`, `/resume`, and session switches, so the wrappers have to be reinstalled each time. A conflicting name is still reported to the user only once. Any `cursor-replay-*` call that reaches a wrapper with no recorded display fails closed instead of running the real tool.
+
 Disable native replay registration entirely:
 
 ```bash

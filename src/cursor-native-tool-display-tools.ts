@@ -178,8 +178,9 @@ export function wrapNativeCursorTool<TParams extends TSchema, TDetails, TState>(
 					terminate: cursorDisplay.terminate ?? true,
 				};
 			}
-			if (strategy?.missingReplayPolicy === "block-file-mutation" && isCursorReplayToolCallId(toolCallId)) {
-				throw new Error(`No recorded Cursor ${definition.name} result was available. This replay-only call does not execute file mutations.`);
+			if (isCursorReplayToolCallId(toolCallId)) {
+				const action = strategy?.missingReplayPolicy === "block-file-mutation" ? "file mutations" : "work directly";
+				throw new Error(`No recorded Cursor ${definition.name} result was available. This replay-only call does not execute ${action}.`);
 			}
 			return getCurrentDefinition().execute(toolCallId, params, signal, onUpdate, ctx);
 		},

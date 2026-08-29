@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Breaking:** `cursor_ask_question` is off unless `PI_CURSOR_ASK_QUESTION=1`. It was on by default, and the prompt told Cursor to use it for material choices, which produced Cursor-style questionnaires in a harness that already has its own input model. The tool description and prompt guidelines now favor a stated assumption over blocking on a question.
+
 ## 0.3.6 - 2026-08-18
 
 ### Fixed

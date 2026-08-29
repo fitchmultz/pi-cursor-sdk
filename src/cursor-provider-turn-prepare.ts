@@ -297,7 +297,7 @@ async function prepareCursorLocalProviderTurn(
 				...getCursorPromptOptions(model),
 				agentMode,
 				includePiBridgeGuidance,
-				includePiAskQuestionGuidance: bridgeToolNames.has("pi__cursor_ask_question"),
+				includePiAskQuestionGuidance: false,
 			};
 			if (plan.mode !== "bootstrap" || !resolveCursorToolManifestEnabled()) {
 				return promptOptions;

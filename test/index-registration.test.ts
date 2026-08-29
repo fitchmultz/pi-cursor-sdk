@@ -47,7 +47,10 @@ const mockedStreamCursor = vi.mocked(streamCursor);
 type DiscoverOptions = Parameters<typeof discoverModels>[0];
 
 describe("extension registration and discovery", () => {
-	beforeEach(resetIndexExtensionTestState);
+	beforeEach(async () => {
+		await resetIndexExtensionTestState();
+		process.env.PI_CURSOR_ASK_QUESTION = "1";
+	});
 
 	it("keeps one process error guard for the active session lifecycle", async () => {
 		mockedDiscover.mockResolvedValueOnce([]);
@@ -202,7 +205,7 @@ describe("extension registration and discovery", () => {
 			"edit",
 			"write",
 		]);
-		expect(pi._tools.find((tool) => tool.name === CURSOR_ASK_QUESTION_TOOL_NAME)?.promptSnippet).toContain("clarifying question");
+		expect(pi._tools.find((tool) => tool.name === CURSOR_ASK_QUESTION_TOOL_NAME)?.promptSnippet).toContain("Do not prompt");
 		expect(pi._tools.find((tool) => tool.name === CURSOR_ACTIVATE_SKILL_TOOL_NAME)?.promptSnippet).toContain("Agent Skill");
 		const replayTool = pi._tools.find((tool) => tool.name === "cursor");
 		expect(replayTool?.promptSnippet).toBeUndefined();
@@ -537,8 +540,11 @@ describe("extension registration and discovery", () => {
 		expect(snapshot.tools.find((tool) => tool.piToolName === CURSOR_ASK_QUESTION_TOOL_NAME)?.description).toContain("Ask the user");
 	});
 
-	it("disables only the Cursor question tool with PI_CURSOR_ASK_QUESTION=0", async () => {
-		expect(resolveCursorAskQuestionEnabled({})).toBe(true);
+	it("leaves the Cursor question tool off unless PI_CURSOR_ASK_QUESTION is enabled", async () => {
+		expect(resolveCursorAskQuestionEnabled({})).toBe(false);
+		for (const value of ["1", "true", "on", "yes", "enabled"]) {
+			expect(resolveCursorAskQuestionEnabled({ PI_CURSOR_ASK_QUESTION: value })).toBe(true);
+		}
 		for (const value of ["0", "false", "off", "none", "no", "disabled"]) {
 			expect(resolveCursorAskQuestionEnabled({ PI_CURSOR_ASK_QUESTION: value })).toBe(false);
 		}

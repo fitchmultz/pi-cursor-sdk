@@ -174,6 +174,10 @@ describe("extension registration and discovery", () => {
 			expect.objectContaining({ description: expect.stringContaining("Toggle Cursor SDK HTTP/1.1") }),
 		);
 		expect(pi.registerCommand).toHaveBeenCalledWith(
+			"cursor-attribution",
+			expect.objectContaining({ description: expect.stringContaining("Toggle Cursor commit/PR attribution") }),
+		);
+		expect(pi.registerCommand).toHaveBeenCalledWith(
 			"cursor-cloud",
 			expect.objectContaining({ description: expect.stringContaining("recorded Cursor cloud agents") }),
 		);

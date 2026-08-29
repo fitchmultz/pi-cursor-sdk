@@ -15,6 +15,14 @@ import {
 	type CursorHttp1EntryData,
 } from "./cursor-http1.js";
 import {
+	CURSOR_ATTRIBUTION_ENTRY_TYPE,
+	getStoredCursorAttributionEnabled,
+	isCursorAttributionEntryData,
+	setCursorAttributionGlobalPreferenceAuthoritative,
+	setStoredCursorAttributionEnabled,
+	type CursorAttributionEntryData,
+} from "./cursor-attribution.js";
+import {
 	buildCursorPiToolBridgeSnapshot,
 	CURSOR_PI_TOOL_BRIDGE_ENV,
 	resolveCursorPiToolBridgeEnabled,
@@ -152,6 +160,16 @@ function saveGlobalCursorHttp1Enabled(enabled: boolean): void {
 	);
 }
 
+function saveGlobalCursorAttributionEnabled(enabled: boolean): void {
+	updateCursorSdkConfig(
+		getConfigPath(),
+		(current) => mergeCursorSdkConfigForUpdate(current, {
+			local: { attributeCommitsToAgent: enabled },
+		}),
+		{ newFileMode: 0o600 },
+	);
+}
+
 function restoreSessionFastPreferences(branch: readonly SessionEntry[]): void {
 	sessionFastPreferences.clear();
 	for (const entry of branch) {
@@ -179,6 +197,17 @@ function restoreSessionCursorPreferences(ctx: { sessionManager: Pick<ExtensionCo
 	restoreSessionFastPreferences(branch);
 	restoreSessionCursorMode(branch);
 	restoreSessionCursorHttp1(branch);
+	restoreSessionCursorAttribution(branch);
+}
+
+function restoreSessionCursorAttribution(branch: readonly SessionEntry[]): void {
+	setStoredCursorAttributionEnabled(undefined);
+	for (const entry of branch) {
+		if (entry.type !== "custom" || entry.customType !== CURSOR_ATTRIBUTION_ENTRY_TYPE) continue;
+		if (isCursorAttributionEntryData(entry.data)) {
+			setStoredCursorAttributionEnabled(entry.data.enabled);
+		}
+	}
 }
 
 function restoreSessionCursorHttp1(branch: readonly SessionEntry[]): void {
@@ -270,7 +299,7 @@ function updateCursorStatus(ctx: CursorStatusContext & Pick<ExtensionContext, "m
 	const fast = runtime === "cloud" ? undefined : metadata?.supportsFast ? getEffectiveFast(model.id) : undefined;
 	ctx.ui.setStatus(
 		"cursor",
-		formatCursorStatus(runtime, fast, mode, resolution.useHttp1ForAgent.value),
+		formatCursorStatus(runtime, fast, mode, resolution.useHttp1ForAgent.value, resolution.attributeCommitsToAgent.value),
 	);
 }
 
@@ -343,6 +372,28 @@ function persistCursorHttp1Preference(
 		return undefined;
 	} catch (error) {
 		setCursorHttp1GlobalPreferenceAuthoritative(true);
+		return error;
+	}
+}
+
+function persistCursorAttributionPreference(
+	pi: Pick<ExtensionAPI, "appendEntry">,
+	enabled: boolean,
+): unknown | undefined {
+	const previousSession = getStoredCursorAttributionEnabled();
+	setStoredCursorAttributionEnabled(enabled);
+	try {
+		saveGlobalCursorAttributionEnabled(enabled);
+	} catch (error) {
+		setStoredCursorAttributionEnabled(previousSession);
+		throw error;
+	}
+	try {
+		pi.appendEntry<CursorAttributionEntryData>(CURSOR_ATTRIBUTION_ENTRY_TYPE, { enabled });
+		setCursorAttributionGlobalPreferenceAuthoritative(false);
+		return undefined;
+	} catch (error) {
+		setCursorAttributionGlobalPreferenceAuthoritative(true);
 		return error;
 	}
 }
@@ -553,6 +604,63 @@ export function registerCursorRuntimeControls(pi: CursorRuntimeControlsExtension
 		},
 	});
 
+	pi.registerCommand("cursor-attribution", {
+		description: "Toggle Cursor commit/PR attribution (Co-authored-by: Cursor trailers)",
+		handler: async (args, ctx) => {
+			const usage = "Usage: /cursor-attribution [on|off|toggle]";
+			const normalized = args.trim().toLowerCase();
+			const resolution = resolveCursorStatusRuntime(ctx);
+			if (resolution.kind === "invalid") {
+				ctx.ui.notify(resolution.message, "error");
+				return;
+			}
+			const setting = resolution.attributeCommitsToAgent;
+			if (!normalized) {
+				ctx.ui.notify(
+					`Cursor attribution is ${setting.value ? "enabled" : "disabled"} (source: ${setting.source}). ${usage}`,
+					"info",
+				);
+				return;
+			}
+			const next = normalized === "on"
+				? true
+				: normalized === "off"
+					? false
+					: normalized === "toggle"
+						? !setting.value
+						: undefined;
+			if (next === undefined) {
+				ctx.ui.notify(`Invalid Cursor attribution mode "${args.trim()}". ${usage}`, "error");
+				return;
+			}
+			let appendError: unknown;
+			try {
+				appendError = persistCursorAttributionPreference(pi, next);
+			} catch (error) {
+				updateCursorStatus(ctx);
+				ctx.ui.notify(
+					`Failed to save Cursor attribution preference: ${error instanceof Error ? error.message : String(error)}`,
+					"error",
+				);
+				return;
+			}
+			updateCursorStatus(ctx);
+			if (appendError !== undefined) {
+				ctx.ui.notify(
+					`Cursor attribution preference was saved globally, but persisting the session entry failed: ${appendError instanceof Error ? appendError.message : String(appendError)}`,
+					"error",
+				);
+				return;
+			}
+			ctx.ui.notify(
+				next
+					? "Cursor attribution enabled; Cursor may add Co-authored-by trailers again."
+					: "Cursor attribution disabled; Cursor is instructed not to add Co-authored-by trailers.",
+				"info",
+			);
+		},
+	});
+
 	pi.registerCommand("cursor-local-resume-cleanup", {
 		description: "Dry-run or delete recorded superseded local Cursor SDK agents",
 		handler: async (args, ctx) => {
@@ -632,6 +740,7 @@ export function registerCursorRuntimeControls(pi: CursorRuntimeControlsExtension
 		sessionStart: (_event, ctx) => {
 			authoritativeGlobalFastPreferenceIds.clear();
 			setCursorHttp1GlobalPreferenceAuthoritative(false);
+			setCursorAttributionGlobalPreferenceAuthoritative(false);
 			globalFastPreferences = loadGlobalFastPreferences();
 			cliForceFast = pi.getFlag("cursor-fast") === true;
 			cliForceNoFast = pi.getFlag("cursor-no-fast") === true;
@@ -650,6 +759,8 @@ function resetCursorModeStateForTests(): void {
 	sessionCursorAgentMode = undefined;
 	setCursorHttp1GlobalPreferenceAuthoritative(false);
 	setStoredCursorHttp1Enabled(undefined);
+	setCursorAttributionGlobalPreferenceAuthoritative(false);
+	setStoredCursorAttributionEnabled(undefined);
 	cliCursorModeState = { kind: "unset" };
 	resetCursorRuntimeStateForTests();
 	invalidCursorModeNotifiedSessionScopeKeys.clear();
@@ -660,6 +771,7 @@ export const __testUtils = {
 	FAST_ENTRY_TYPE,
 	MODE_ENTRY_TYPE,
 	CURSOR_HTTP1_ENTRY_TYPE,
+	CURSOR_ATTRIBUTION_ENTRY_TYPE,
 	RUNTIME_ENTRY_TYPE: CURSOR_RUNTIME_ENTRY_TYPE,
 	DEFAULT_CURSOR_AGENT_MODE,
 	getConfigPath,

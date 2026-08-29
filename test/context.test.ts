@@ -576,6 +576,25 @@ describe("buildCursorPrompt", () => {
 		expect(result.text).not.toContain("do not use SwitchMode");
 	});
 
+	it("suppresses Cursor attribution only when attribution is disabled", () => {
+		const ctx: Context = { messages: [{ role: "user", content: "commit this", timestamp: 1 }] };
+
+		const attributed = buildCursorPrompt(ctx);
+		expect(attributed.text).not.toContain("Co-authored-by");
+
+		const unattributed = buildCursorPrompt(ctx, { attributeCommitsToAgent: false });
+		expect(unattributed.text).toContain(
+			"Do not add Co-authored-by: Cursor trailers or any other Cursor attribution to commits, PRs, or comments.",
+		);
+	});
+
+	it("repeats the attribution ban in the incremental tail guard when disabled", () => {
+		expect(getCursorToolTailGuardText({ attributeCommitsToAgent: false })).toContain(
+			"Commits: no Co-authored-by: Cursor trailers or other Cursor attribution.",
+		);
+		expect(getCursorToolTailGuardText()).not.toContain("Co-authored-by");
+	});
+
 	it("omits manifest pointer from boundary when tool manifest is disabled", () => {
 		const result = buildCursorPrompt({ messages: [{ role: "user", content: "test", timestamp: 1 }] });
 		expect(result.text).not.toContain("See callable surfaces below.");

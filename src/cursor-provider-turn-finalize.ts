@@ -17,7 +17,7 @@ import {
 } from "./cursor-provider-run-outcome.js";
 import type { CursorProviderTurnPrepareResult } from "./cursor-provider-turn-types.js";
 import { loadCursorSdk } from "./cursor-sdk-runtime.js";
-import { attachCursorSdkBilledTurnUsage } from "./cursor-sdk-billed-usage.js";
+import { attachCursorSdkBilledTurnUsage, resolveCursorSdkCompletedRunUsage } from "./cursor-sdk-billed-usage.js";
 
 export async function cacheSdkContextWindow(
 	agentId: string,
@@ -156,9 +156,20 @@ export async function awaitFinalizeCursorRunOutcome(params: AwaitFinalizeCursorR
 		runtime: params.prepared.runtimeTarget,
 		runId: params.run.id,
 	});
+	const completedRunUsage = resolveCursorSdkCompletedRunUsage({
+		runtime: params.prepared.runtimeTarget,
+		billedUsageAvailable: billed.turn !== undefined,
+		turnUsageObserved:
+			params.prepared.runtime.turnCoordinator.lastSdkTurnUsage !== undefined ||
+			params.prepared.runtime.liveRun?.accounting.sdkTurnUsageObserved,
+		waitResultUsage: waitResult.usage,
+		runUsage: params.run.usage,
+	});
 	params.prepared.runtime.billedTurnUsage = billed.turn;
+	params.prepared.runtime.completedRunUsage = completedRunUsage;
 	if (params.prepared.runtime.liveRun) {
 		params.prepared.runtime.liveRun.billedTurnUsage = billed.turn;
+		params.prepared.runtime.liveRun.completedRunUsage = completedRunUsage;
 	}
 	let displayOnlyTraceBlock: string | undefined;
 	if (params.prepared.runtimeTarget === "cloud" && isCursorRunFinishedSuccessfully(outcome)) {

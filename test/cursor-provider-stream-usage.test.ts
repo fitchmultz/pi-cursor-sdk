@@ -15,7 +15,7 @@ import { streamCursor } from "../src/cursor-provider.js";
 describe("streamCursor usage accounting", () => {
 	beforeEach(resetCursorProviderTestState);
 
-	it("ignores returned RunResult usage when no turn-ended usage was applied", async () => {
+	it("uses returned local RunResult usage for spend when no turn-ended usage was applied", async () => {
 		const mockSend = vi.fn().mockResolvedValue(asMockCursorRun({
 			id: "run-1",
 			agentId: "agent-1",
@@ -42,9 +42,10 @@ describe("streamCursor usage accounting", () => {
 		const events = await collectEvents(stream);
 		const done = getDoneEvent(events);
 
-		expect(done.message.usage.cacheRead).toBe(0);
+		expect(done.message.usage.cacheRead).toBe(1_015_493);
 		expect(done.message.usage.cacheWrite).toBe(0);
-		expect(done.message.usage.input).toBeLessThan(1_125_429);
+		expect(done.message.usage.input).toBe(1_125_429 - 1_015_493);
+		expect(done.message.usage.output).toBe(7_049);
 		expect(done.message.usage.totalTokens).toBeLessThan(1_125_429);
 	});
 

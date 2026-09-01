@@ -187,6 +187,7 @@ export class CursorRunFinalizer {
 					runtime: prepared.runtimeTarget,
 					turn: prepared.runtime.turnCoordinator.lastSdkTurnUsage,
 					billed: prepared.runtime.billedTurnUsage,
+					completed: prepared.runtime.completedRunUsage,
 				});
 				if (prepared.meta.resumeNotice) emitDisplayOnlyTraceBlock(stream, partial, prepared.meta.resumeNotice);
 				if (displayOnlyTraceBlock) emitDisplayOnlyTraceBlock(stream, partial, displayOnlyTraceBlock);

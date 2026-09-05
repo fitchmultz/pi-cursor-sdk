@@ -32,6 +32,7 @@ import {
 } from "./cursor-native-tool-display-replay.js";
 import {
 	consumeCursorNativeToolDisplay,
+	isCursorFileMutationToolName,
 	isCursorReplayToolCallId,
 } from "./cursor-native-tool-display-state.js";
 
@@ -42,7 +43,6 @@ type RenderResult = NonNullable<AnyToolDefinition["renderResult"]>;
 
 type NativeReplayStrategy = {
 	createDefinition: (cwd: string) => AnyToolDefinition;
-	missingReplayPolicy?: "block-file-mutation";
 	renderReplayCall?: (
 		args: Parameters<RenderCall>[0],
 		theme: Parameters<RenderCall>[1],
@@ -130,14 +130,12 @@ const NATIVE_CURSOR_TOOL_STRATEGIES: Record<BuiltinNativeCursorToolName, NativeR
 	bash: { createDefinition: (cwd) => createBashToolDefinition(cwd) as AnyToolDefinition },
 	edit: {
 		createDefinition: (cwd) => createEditToolDefinition(cwd) as AnyToolDefinition,
-		missingReplayPolicy: "block-file-mutation",
 		renderReplayCall: (args, theme, context) =>
 			renderNativeLookingCursorFileMutationCall("edit", args as Record<string, unknown>, theme, context.isPartial),
 		renderReplayResult: renderEditReplayResult,
 	},
 	write: {
 		createDefinition: (cwd) => createWriteToolDefinition(cwd) as AnyToolDefinition,
-		missingReplayPolicy: "block-file-mutation",
 		renderReplayCall: (args, theme, context) =>
 			renderNativeLookingCursorFileMutationCall("write", args as Record<string, unknown>, theme, context.isPartial),
 		renderReplayResult: renderWriteReplayResult,
@@ -179,7 +177,7 @@ export function wrapNativeCursorTool<TParams extends TSchema, TDetails, TState>(
 				};
 			}
 			if (isCursorReplayToolCallId(toolCallId)) {
-				const action = strategy?.missingReplayPolicy === "block-file-mutation" ? "file mutations" : "work directly";
+				const action = isCursorFileMutationToolName(definition.name) ? "file mutations" : "work directly";
 				throw new Error(`No recorded Cursor ${definition.name} result was available. This replay-only call does not execute ${action}.`);
 			}
 			return getCurrentDefinition().execute(toolCallId, params, signal, onUpdate, ctx);

@@ -33,7 +33,7 @@ Inspect the session JSONL under the temp `--session-dir`:
 | Pattern | Meaning |
 | --- | --- |
 | `cursor-replay-*` | Display-only replay of Cursor SDK activity—not callable |
-| `cursor-pi-bridge-run-*` | Live pi execution via bridge |
+| `cursor-pi-bridge-run-*` (run) / `cursor-pi-bridge-<32 hex>-t<counter>` (tool) | Live pi execution via bridge |
 | Callable tools | Cursor SDK host + MCP `listTools` + exposed `pi__*` only |
 
 Common mistake: treating `cursor-replay-*` IDs or pi transcript tool labels as tools to invoke.

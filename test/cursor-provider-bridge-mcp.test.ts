@@ -326,6 +326,7 @@ describe("streamCursor bridge MCP", () => {
 	});
 
 	it("emits bridge MCP requests as real pi tool calls and resumes the same Cursor run after tool results in plan mode", async () => {
+		const model = { ...makeModel("composer-2"), cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.5 } };
 		await setCursorModeForBridgeTest("plan");
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		process.env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS = "1";
@@ -367,7 +368,7 @@ describe("streamCursor bridge MCP", () => {
 			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
 		});
 
-		const firstEventsPromise = collectEvents(streamCursor(makeModel("composer-2"), makeContext(), { apiKey: "test-key" }));
+		const firstEventsPromise = collectEvents(streamCursor(model, makeContext(), { apiKey: "test-key" }));
 		await vi.waitFor(() => expect(mockSend).toHaveBeenCalled());
 		const createOptions = getCreatedAgentOptions();
 		const { client, transport } = await connectMcpClient(getPiToolsMcpUrlFromAgentCreateOptions(createOptions));
@@ -440,7 +441,7 @@ describe("streamCursor bridge MCP", () => {
 				bashToolResultMessage,
 			];
 
-			const replayEventsPromise = collectEvents(streamCursor(makeModel("composer-2"), replayContext, { apiKey: "test-key" }));
+			const replayEventsPromise = collectEvents(streamCursor(model, replayContext, { apiKey: "test-key" }));
 			await expect(readCallPromise).resolves.toMatchObject({ content: [{ type: "text", text: "file contents" }] });
 			await expect(bashCallPromise).resolves.toMatchObject({ content: [{ type: "text", text: "/repo" }] });
 			resolveRun({ id: "run-1", status: "finished", result: "Bridge complete." });
@@ -455,6 +456,13 @@ describe("streamCursor bridge MCP", () => {
 			expect(runWait).toHaveBeenCalledTimes(1);
 			expect(replayText).toBe("Bridge complete.");
 			expect(replayDone.reason).toBe("stop");
+			expect(firstDone.message.usage.cost.input).toBeGreaterThan(0);
+			expect(firstDone.message.usage.cost.total).toBeCloseTo(
+				(firstDone.message.usage.input + firstDone.message.usage.output * 2) / 1_000_000, 10,
+			);
+			expect(replayDone.message.usage.cost.total).toBeCloseTo(
+				(replayDone.message.usage.input + replayDone.message.usage.output * 2) / 1_000_000, 10,
+			);
 			expect(replayDone.message.usage.input).toBeGreaterThanOrEqual(
 				estimateCursorPromptMessageTokens(readToolResultMessage) + estimateCursorPromptMessageTokens(bashToolResultMessage),
 			);

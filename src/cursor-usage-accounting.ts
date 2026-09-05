@@ -221,8 +221,5 @@ export function applyCursorUsage(
 	} else {
 		applyCursorApproximateUsage(partial, model, context, sessionInputTokens);
 	}
-	// Cursor SDK reports no cost, and discovery registers zero rates, so this is a no-op until a user
-	// configures `modelOverrides.cost` in models.json. Pi only calculates cost inside built-in api
-	// implementations, so an extension-registered provider has to do it here.
 	calculateCost(model, partial.usage);
 }

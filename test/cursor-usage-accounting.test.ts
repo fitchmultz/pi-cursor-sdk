@@ -12,6 +12,7 @@ import {
 	isCursorSdkUsageSafeForPiMessage,
 	readCursorSdkTurnUsage,
 	readCursorSdkTurnUsageFromUpdate,
+	type CursorSdkUsageApplyOptions,
 } from "../src/cursor-usage-accounting.js";
 import { makeHarnessModel, makeModel } from "./helpers/pi-harness.js";
 
@@ -501,13 +502,53 @@ describe("cursor usage accounting", () => {
 
 		applyCursorUsage(partial, model, context, 1000);
 
-		// The fallback reports the whole prompt estimate as uncached input, so cache rates never apply.
+		// The supplied activity estimate is uncached input; later splits can supply only new tool-result input.
 		expect(partial.usage.input).toBe(1000);
 		expect(partial.usage.cost.input).toBeCloseTo(0.001, COST_PRECISION);
 		expect(partial.usage.cost.output).toBeGreaterThan(0);
 		expect(partial.usage.cost.cacheRead).toBe(0);
 		expect(partial.usage.cost.cacheWrite).toBe(0);
 		expect(partial.usage.cost.total).toBe(partial.usage.cost.input + partial.usage.cost.output);
+	});
+
+	it.each<CursorSdkUsageApplyOptions>([
+		{ runtime: "local", turn: { inputTokens: 100, outputTokens: 1, cacheReadTokens: 101, cacheWriteTokens: 0 } },
+		{ runtime: "local", turn: { inputTokens: 1_000_000, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 } },
+		{ runtime: "cloud", turn: { inputTokens: 100, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 } },
+		{ runtime: "local", billed: { inputTokens: 100, outputTokens: 1, cacheReadTokens: 101, cacheWriteTokens: 0 } },
+	])("prices the existing fallback when SDK usage is unusable: %j", (sdkUsage) => {
+		const partial = makeAssistantMessage([{ type: "text", text: "Hello back." }]);
+		applyCursorUsage(partial, makeCostModel({ input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.5 }), makeCostContext(), 1000, sdkUsage);
+		expect(partial.usage.input).toBe(1000);
+		expect(partial.usage.cacheRead).toBe(0);
+		expect(partial.usage.cacheWrite).toBe(0);
+		expect(partial.usage.cost.input).toBeCloseTo(0.001, COST_PRECISION);
+		expect(partial.usage.cost.output).toBeCloseTo(partial.usage.output * 2 / 1_000_000, COST_PRECISION);
+	});
+
+	it("prices valid local usage when an unusable billed row falls through", () => {
+		const partial = makeAssistantMessage([]);
+		applyCursorUsage(partial, makeCostModel({ input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 }), makeCostContext(), 7, {
+			runtime: "local",
+			billed: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 2, cacheWriteTokens: 0 },
+			turn: { inputTokens: 10000, outputTokens: 100, cacheReadTokens: 8000, cacheWriteTokens: 1000 },
+		});
+		expect(partial.usage).toMatchObject({ input: 1000, output: 100, cacheRead: 8000, cacheWrite: 1000, totalTokens: 10100 });
+		expect(partial.usage.cost.total).toBeCloseTo(0.0071, COST_PRECISION);
+	});
+
+	it.each([
+		{ threshold: 10000, expectedCost: 0.0101 },
+		{ threshold: 9999, expectedCost: 0.0071 },
+	])("uses the native tier threshold $threshold with cached prompt tokens, not occupancy", ({ threshold, expectedCost }) => {
+		const partial = makeAssistantMessage([]);
+		const model = makeCostModel({ input: 1, output: 1, cacheRead: 1, cacheWrite: 1,
+			tiers: [{ inputTokensAbove: threshold, input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 }],
+		});
+		applyCursorUsage(partial, model, makeCostContext(), 7, {
+			runtime: "local", turn: { inputTokens: 10000, outputTokens: 100, cacheReadTokens: 8000, cacheWriteTokens: 1000 },
+		});
+		expect(partial.usage.cost.total).toBeCloseTo(expectedCost, COST_PRECISION);
 	});
 
 	it("keeps cost at zero when the model carries zero cost rates", () => {

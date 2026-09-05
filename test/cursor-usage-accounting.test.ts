@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 import { InteractionUpdateSchema, TurnEndedUpdateSchema } from "@cursor/sdk";
-import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
 import { calculateContextTokens } from "@earendil-works/pi-coding-agent";
 import {
 	applyCursorApproximateUsage,
@@ -12,8 +12,9 @@ import {
 	isCursorSdkUsageSafeForPiMessage,
 	readCursorSdkTurnUsage,
 	readCursorSdkTurnUsageFromUpdate,
+	type CursorSdkUsageApplyOptions,
 } from "../src/cursor-usage-accounting.js";
-import { makeModel } from "./helpers/pi-harness.js";
+import { makeHarnessModel, makeModel } from "./helpers/pi-harness.js";
 
 function makeAssistantMessage(content: AssistantMessage["content"]): AssistantMessage {
 	return {
@@ -32,6 +33,22 @@ function makeAssistantMessage(content: AssistantMessage["content"]): AssistantMe
 		},
 		stopReason: "stop",
 		timestamp: 2,
+	};
+}
+
+// pi cost rates are per-million tokens, so realistic per-message costs land near 1e-3.
+// vitest's default toBeCloseTo precision (2) would pass even against 0; pin a meaningful one.
+const COST_PRECISION = 10;
+
+// Same fixture as makeModel(), with cost rates a user would supply via models.json modelOverrides.
+function makeCostModel(cost: Model<"cursor-sdk">["cost"]): Model<"cursor-sdk"> {
+	return makeHarnessModel("cursor", "cursor-sdk", "test-model", { cost });
+}
+
+function makeCostContext(): Context {
+	return {
+		systemPrompt: "Be helpful.",
+		messages: [{ role: "user", content: "Hello", timestamp: 1 }],
 	};
 }
 
@@ -433,5 +450,125 @@ describe("cursor usage accounting", () => {
 		expect(partial.usage.cacheRead).toBe(0);
 		expect(partial.usage.totalTokens).toBeLessThan(model.contextWindow);
 		expect(partial.usage.totalTokens).not.toBe(1_132_478);
+	});
+
+	it("calculates cost from disjoint local turn components when the model defines cost rates", () => {
+		const model = makeCostModel({ input: 0.75, output: 3.5, cacheRead: 0.075, cacheWrite: 0.375 });
+		const context = makeCostContext();
+		const partial = makeAssistantMessage([{ type: "text", text: "Hello back." }]);
+
+		applyCursorUsage(partial, model, context, 7, {
+			runtime: "local",
+			turn: { inputTokens: 6500, outputTokens: 200, cacheReadTokens: 5000, cacheWriteTokens: 500 },
+		});
+
+		// Full-prompt inputTokens 6500 minus the 5500-token cache partition bills 1000 uncached input tokens.
+		expect(partial.usage.input).toBe(1000);
+		expect(partial.usage.output).toBe(200);
+		expect(partial.usage.cacheRead).toBe(5000);
+		expect(partial.usage.cacheWrite).toBe(500);
+
+		expect(partial.usage.cost.input).toBeCloseTo(0.00075, COST_PRECISION);
+		expect(partial.usage.cost.output).toBeCloseTo(0.0007, COST_PRECISION);
+		expect(partial.usage.cost.cacheRead).toBeCloseTo(0.000375, COST_PRECISION);
+		expect(partial.usage.cost.cacheWrite).toBeCloseTo(0.0001875, COST_PRECISION);
+		expect(partial.usage.cost.total).toBeCloseTo(0.0020125, COST_PRECISION);
+	});
+
+	it("calculates cost from cloud billed rows without letting billed spend become occupancy", () => {
+		const model = makeCostModel({ input: 0.75, output: 3.5, cacheRead: 0.075, cacheWrite: 0.375 });
+		const context = makeCostContext();
+		const partial = makeAssistantMessage([{ type: "text", text: "Hello back." }]);
+
+		applyCursorUsage(partial, model, context, 7, {
+			runtime: "cloud",
+			billed: { inputTokens: 3000, outputTokens: 400, cacheReadTokens: 2000, cacheWriteTokens: 500 },
+		});
+
+		expect(partial.usage.input).toBe(500);
+		expect(partial.usage.cost.input).toBeCloseTo(0.000375, COST_PRECISION);
+		expect(partial.usage.cost.output).toBeCloseTo(0.0014, COST_PRECISION);
+		expect(partial.usage.cost.cacheRead).toBeCloseTo(0.00015, COST_PRECISION);
+		expect(partial.usage.cost.cacheWrite).toBeCloseTo(0.0001875, COST_PRECISION);
+		expect(partial.usage.cost.total).toBeCloseTo(0.0021125, COST_PRECISION);
+		// Billed spend still never becomes context occupancy.
+		expect(partial.usage.totalTokens).toBe(estimateCursorContextTotalTokens(partial, model, context));
+	});
+
+	it("calculates estimate-derived cost with no cache split on the approximate fallback", () => {
+		const model = makeCostModel({ input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.5 });
+		const context = makeCostContext();
+		const partial = makeAssistantMessage([{ type: "text", text: "Hello back." }]);
+
+		applyCursorUsage(partial, model, context, 1000);
+
+		// The supplied activity estimate is uncached input; later splits can supply only new tool-result input.
+		expect(partial.usage.input).toBe(1000);
+		expect(partial.usage.cost.input).toBeCloseTo(0.001, COST_PRECISION);
+		expect(partial.usage.cost.output).toBeGreaterThan(0);
+		expect(partial.usage.cost.cacheRead).toBe(0);
+		expect(partial.usage.cost.cacheWrite).toBe(0);
+		expect(partial.usage.cost.total).toBe(partial.usage.cost.input + partial.usage.cost.output);
+	});
+
+	it.each<CursorSdkUsageApplyOptions>([
+		{ runtime: "local", turn: { inputTokens: 100, outputTokens: 1, cacheReadTokens: 101, cacheWriteTokens: 0 } },
+		{ runtime: "local", turn: { inputTokens: 1_000_000, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 } },
+		{ runtime: "cloud", turn: { inputTokens: 100, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 } },
+		{ runtime: "local", billed: { inputTokens: 100, outputTokens: 1, cacheReadTokens: 101, cacheWriteTokens: 0 } },
+	])("prices the existing fallback when SDK usage is unusable: %j", (sdkUsage) => {
+		const partial = makeAssistantMessage([{ type: "text", text: "Hello back." }]);
+		applyCursorUsage(partial, makeCostModel({ input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.5 }), makeCostContext(), 1000, sdkUsage);
+		expect(partial.usage.input).toBe(1000);
+		expect(partial.usage.cacheRead).toBe(0);
+		expect(partial.usage.cacheWrite).toBe(0);
+		expect(partial.usage.cost.input).toBeCloseTo(0.001, COST_PRECISION);
+		expect(partial.usage.cost.output).toBeCloseTo(partial.usage.output * 2 / 1_000_000, COST_PRECISION);
+	});
+
+	it("prices valid local usage when an unusable billed row falls through", () => {
+		const partial = makeAssistantMessage([]);
+		applyCursorUsage(partial, makeCostModel({ input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 }), makeCostContext(), 7, {
+			runtime: "local",
+			billed: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 2, cacheWriteTokens: 0 },
+			turn: { inputTokens: 10000, outputTokens: 100, cacheReadTokens: 8000, cacheWriteTokens: 1000 },
+		});
+		expect(partial.usage).toMatchObject({ input: 1000, output: 100, cacheRead: 8000, cacheWrite: 1000, totalTokens: 10100 });
+		expect(partial.usage.cost.total).toBeCloseTo(0.0071, COST_PRECISION);
+	});
+
+	it.each([
+		{ threshold: 10000, expectedCost: 0.0101 },
+		{ threshold: 9999, expectedCost: 0.0071 },
+	])("uses the native tier threshold $threshold with cached prompt tokens, not occupancy", ({ threshold, expectedCost }) => {
+		const partial = makeAssistantMessage([]);
+		const model = makeCostModel({ input: 1, output: 1, cacheRead: 1, cacheWrite: 1,
+			tiers: [{ inputTokensAbove: threshold, input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 }],
+		});
+		applyCursorUsage(partial, model, makeCostContext(), 7, {
+			runtime: "local", turn: { inputTokens: 10000, outputTokens: 100, cacheReadTokens: 8000, cacheWriteTokens: 1000 },
+		});
+		expect(partial.usage.cost.total).toBeCloseTo(expectedCost, COST_PRECISION);
+	});
+
+	it("keeps cost at zero when the model carries zero cost rates", () => {
+		const model = makeModel();
+		// src/model-discovery.ts registers every cursor/* model with ZERO_COST; the fixture mirrors that.
+		expect(model.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+		const context = makeCostContext();
+		const partial = makeAssistantMessage([{ type: "text", text: "Hello back." }]);
+
+		applyCursorUsage(partial, model, context, 7, {
+			runtime: "local",
+			turn: { inputTokens: 25, outputTokens: 6, cacheReadTokens: 24, cacheWriteTokens: 1 },
+		});
+
+		expect(partial.usage.cost).toEqual({
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			total: 0,
+		});
 	});
 });

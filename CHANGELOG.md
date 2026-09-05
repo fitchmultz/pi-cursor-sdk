@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Apply configured `models.json` cost rates to Cursor's existing mapped token usage with pi's native pricing helper. Default rates remain zero; token attribution and Cursor billed amounts are unchanged (#230, #231; thanks @TianZuo555).
+
 ## 0.3.6 - 2026-08-18
 
 ### Fixed

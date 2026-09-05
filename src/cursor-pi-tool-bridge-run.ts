@@ -283,12 +283,7 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 
 		this.toolCallCounter += 1;
 		const bridgeCallId = `${this.id}-bridge-${this.toolCallCounter}`;
-		let piToolCallId: string;
-		try {
-			piToolCallId = buildCursorPiBridgeToolCallId(this.runUuid, this.toolCallCounter);
-		} catch (error) {
-			return Promise.reject(error instanceof Error ? error : new Error(String(error)));
-		}
+		const piToolCallId = buildCursorPiBridgeToolCallId(this.runUuid, this.toolCallCounter);
 		const request: CursorPiBridgeToolRequest = {
 			runId: this.id,
 			bridgeCallId,

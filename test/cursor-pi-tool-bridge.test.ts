@@ -2,7 +2,8 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { McpServerConfig } from "@cursor/sdk";
-import type { Context } from "@earendil-works/pi-ai";
+import type { Context, ToolResultMessage } from "@earendil-works/pi-ai";
+import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
 import type { ExtensionHandler, SessionShutdownEvent, ToolInfo } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
 import {
@@ -10,6 +11,8 @@ import {
 	createBuiltinToolInfo,
 	createTestToolInfo,
 	getCursorPiBridgeMcpUrl,
+	makeAssistantMessage,
+	makeHarnessModel,
 } from "./helpers/pi-harness.js";
 import { __testUtils as nativeToolDisplayTestUtils } from "../src/cursor-native-tool-display-state.js";
 import {
@@ -337,18 +340,14 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 		}
 	});
 
-	it("keeps double-digit bridge tool call IDs within the OpenAI limit", async () => {
-		expect(
-			isCursorPiBridgeToolCallId("cursor-pi-bridge-run-c2417032-9686-40f2-bd3c-a763fbaa7693-tool-10"),
-		).toBe(true);
-		const registry = __testUtils.createRegistry(
-			createBridgePiHarness({ active: ["read"], tools: [createToolInfo("read")] }),
-			{ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" },
-		);
-		const run = await registry.createRun();
+	it("preserves eleven bridge calls and matching results through native Responses conversion", async () => {
+		const pi = createBridgePiHarness({ active: ["read"], tools: [createToolInfo("read")] });
+		process.env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS = "1";
+		const bridge = registerCursorPiToolBridge(pi);
+		const run = await bridge.createRun();
 		const { client, transport } = await connectClient(getCursorPiBridgeMcpUrl(run));
 		try {
-			const calls = Array.from({ length: 10 }, (_, index) =>
+			const calls = Array.from({ length: 11 }, (_, index) =>
 				client.callTool({ name: "pi__read", arguments: { path: `file-${index}.txt` } }),
 			);
 			const requests = [];
@@ -356,26 +355,50 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 				requests.push(...(await waitForQueuedRequests(run)));
 			}
 			const ids = requests.map((request) => request.piToolCallId);
+			const toolResults: ToolResultMessage[] = requests.map((request, index) => ({
+				role: "toolResult",
+				toolCallId: request.piToolCallId,
+				toolName: request.piToolName,
+				content: [{ type: "text", text: `result-${request.args.path}` }],
+				isError: false,
+				timestamp: index,
+			}));
+			await run.resolveToolResults([...toolResults].reverse());
+			expect(await Promise.all(calls)).toEqual(Array.from({ length: 11 }, (_, index) => ({
+				content: [{ type: "text", text: `result-file-${index}.txt` }],
+			})));
 
-			expect(ids).toHaveLength(10);
-			expect(ids.at(-1)).toMatch(/-t10$/);
-			expect(new Set(ids).size).toBe(ids.length);
-			for (const id of ids) {
-				expect(id.length).toBeLessThanOrEqual(64);
-				expect(isCursorPiBridgeToolCallId(id)).toBe(true);
+			const assistant = makeAssistantMessage();
+			assistant.stopReason = "toolUse";
+			assistant.content = requests.map((request) => ({
+				type: "toolCall", id: request.piToolCallId, name: request.piToolName, arguments: request.args,
+			}));
+			const context: Context = { messages: [assistant, ...toolResults] };
+			for (const [provider, api] of [["openai", "openai-responses"], ["openai-codex", "openai-codex-responses"]] as const) {
+				const converted = convertResponsesMessages(makeHarnessModel(provider, api, "target-model"), context, new Set([provider]));
+				const convertedCalls = converted.filter((item) => item.type === "function_call");
+				expect(new Set(convertedCalls.map((item) => item.call_id)).size).toBe(11);
+				expect(convertedCalls.map((item) => item.call_id)).toEqual(ids);
+				expect(converted.filter((item) => item.type === "function_call_output")).toEqual(requests.map((request) => ({
+					type: "function_call_output", call_id: request.piToolCallId, output: `result-${request.args.path}`,
+				})));
 			}
-
-			await run.resolveToolResults(
-				requests.map((request, index) => ({
-					role: "toolResult",
-					toolCallId: request.piToolCallId,
-					toolName: request.piToolName,
-					content: [{ type: "text", text: `result-${index}` }],
-					isError: false,
-					timestamp: index,
-				})),
+			expect(ids.at(-1)).toMatch(/-t11$/);
+			for (const [index, request] of requests.entries()) {
+				expect(request.piToolCallId.length).toBeLessThanOrEqual(64);
+				expect(isCursorPiBridgeToolCallId(request.piToolCallId)).toBe(true);
+				expect(request.bridgeCallId).toBe(`${run.id}-bridge-${index + 1}`);
+				expect(run.hasPendingPiToolCallId(request.piToolCallId)).toBe(false);
+			}
+			const legacyIds = [1, 10, 11].map((counter) =>
+				`cursor-pi-bridge-run-c2417032-9686-40f2-bd3c-a763fbaa7693-tool-${counter}`,
 			);
-			await expect(Promise.all(calls)).resolves.toHaveLength(10);
+			for (const toolCallId of [...ids, ...legacyIds]) {
+				expect(await pi.runToolCall({ type: "tool_call", toolCallId, toolName: "read", input: {} })).toEqual({
+					block: true, reason: "Cursor pi bridge tool call is no longer pending",
+				});
+			}
+			expect(await pi.runToolCall({ type: "tool_call", toolCallId: "ordinary-tool-call", toolName: "read", input: {} })).toBeUndefined();
 		} finally {
 			await client.close().catch(() => undefined);
 			await transport.close().catch(() => undefined);

@@ -267,34 +267,37 @@ while (true) {
 		expect(readdirSync(outside).sort()).toEqual(sentinelPaths.map((path) => path.slice("parent/".length)).sort());
 	});
 
-	it.skipIf(process.platform === "win32")("rolls back through a parent descriptor after the opened directory moves outside", async () => {
-		const { extractPlatformArtifactBundle, formatPlatformArtifactBundle } = await import(artifactsModule);
+	it.skipIf(process.platform === "win32")("rolls back through a parent descriptor after the opened directory moves outside", () => {
 		const out = tempDir("platform-moved-parent-");
 		const outside = tempDir("platform-moved-parent-outside-");
 		const parent = join(out, "parent");
 		const escaped = join(outside, "escaped");
 		mkdirSync(parent);
-		const content = Buffer.alloc(5 * 1024 * 1024, 65);
-		const contentBase64 = content.toString("base64");
-		const stdout = formatPlatformArtifactBundle({ files: Array.from({ length: 8 }, (_, index) => ({
-			path: `parent/payload-${index}.txt`, contentBase64, size: content.length,
-		})) });
-		const mover = spawn(process.execPath, ["--input-type=module", "-e", String.raw`
-import { existsSync, renameSync } from "node:fs";
-const [watched, parent, escaped] = process.argv.slice(1);
-const wait = new Int32Array(new SharedArrayBuffer(4));
-while (!existsSync(watched)) Atomics.wait(wait, 0, 0, 1);
-renameSync(parent, escaped);
-`, join(parent, "payload-0.txt"), parent, escaped], { stdio: "ignore" });
+		const parentIdentity = lstatSync(parent);
+		const executable = join(tempDir("platform-moved-parent-helper-"), "extract");
+		const compiled = spawnSync("cc", [
+			"-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-o", executable,
+			"test/fixtures/artifact-moved-parent.c",
+		], { encoding: "utf8", timeout: 30_000 });
+		expect(compiled.status, compiled.stderr).toBe(0);
 
-		const result = extractPlatformArtifactBundle(out, stdout);
-		await new Promise<void>((resolveExit, reject) => {
-			const timer = setTimeout(() => { mover.kill(); reject(new Error("directory mover did not observe extraction")); }, 5_000);
-			mover.once("exit", (code) => { clearTimeout(timer); code === 0 ? resolveExit() : reject(new Error(`directory mover exited ${code}`)); });
-			mover.once("error", reject);
+		const path = Buffer.from("parent/payload.txt");
+		const content = Buffer.from("safe");
+		const header = Buffer.alloc(20);
+		header.write("PIART01\0");
+		header.writeUInt32LE(1, 8);
+		header.writeUInt32LE(path.length, 12);
+		header.writeUInt32LE(content.length, 16);
+		const root = lstatSync(out);
+		// The fixture moves the parent after the real write, before the real verification/rollback.
+		const result = spawnSync(executable, [out, String(root.dev), String(root.ino), parent, escaped], {
+			input: Buffer.concat([header, path, content]), encoding: "utf8", timeout: 5_000,
 		});
 
-		expect(result.ok).toBe(false);
+		expect(result.status, result.stderr).toBe(2);
+		expect(result.stdout).toBe("moved-after-write\n");
+		expect(lstatSync(escaped)).toMatchObject({ dev: parentIdentity.dev, ino: parentIdentity.ino });
+		expect(readdirSync(out)).toEqual([]);
 		expect(readdirSync(escaped)).toEqual([]);
 	}, 20_000);
 

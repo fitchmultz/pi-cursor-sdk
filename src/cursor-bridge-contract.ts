@@ -1,3 +1,5 @@
+import { isCursorLeanEnabled } from "./cursor-lean.js";
+
 export const CURSOR_PI_BRIDGE_MCP_TOOL_PREFIX = "pi__";
 export const CURSOR_PI_BRIDGE_PREFERENCE_TEXT =
 	"When exposed, prefer pi__mcp for MCP work and pi__subagent for delegation; use Cursor-configured MCP or Cursor-native subagents only when the matching pi__ tool is not exposed or unavailable.";
@@ -12,8 +14,16 @@ const CURSOR_PI_BRIDGE_CONTRACT_LINES = [
 	"Cursor-native host tools, settings, plugins, and configured MCP servers are separate from the pi bridge.",
 ] as const;
 
+export function getCursorPiBridgePreferenceText(): string {
+	return isCursorLeanEnabled()
+		? "Only exposed pi__* tools are callable. Cursor-native tools, subagents, web search, and ambient MCP are disabled."
+		: CURSOR_PI_BRIDGE_PREFERENCE_TEXT;
+}
+
 export function getCursorPiBridgeContractText(): string {
-	return CURSOR_PI_BRIDGE_CONTRACT_LINES.join("\n");
+	return CURSOR_PI_BRIDGE_CONTRACT_LINES.map((line) =>
+		line === CURSOR_PI_BRIDGE_PREFERENCE_TEXT ? getCursorPiBridgePreferenceText() : line,
+	).join("\n");
 }
 
 function formatPromptGuidelines(promptGuidelines: readonly string[] | undefined): string | undefined {

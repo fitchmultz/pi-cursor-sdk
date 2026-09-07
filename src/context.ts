@@ -3,7 +3,8 @@ import { getCursorConversationMessages, resolveCursorPiContext } from "./cursor-
 import type { Context, Message, ToolCall } from "@earendil-works/pi-ai";
 import { convertToLlm } from "@earendil-works/pi-coding-agent";
 import type { AgentModeOption, SDKImage } from "@cursor/sdk";
-import { CURSOR_PI_BRIDGE_PREFERENCE_TEXT } from "./cursor-bridge-contract.js";
+import { isCursorLeanEnabled } from "./cursor-lean.js";
+import { getCursorPiBridgePreferenceText } from "./cursor-bridge-contract.js";
 import { getCursorReplayPromptLabel } from "./cursor-tool-presentation-registry.js";
 
 export interface CursorPrompt {
@@ -33,6 +34,9 @@ export function getCursorPlanModeToolGuidanceText(
 	options: { includePiBridgeGuidance?: boolean } = {},
 ): string | undefined {
 	if (agentMode !== "plan") return undefined;
+	if (isCursorLeanEnabled()) {
+		return "Cursor SDK mode is plan for this run. Use exposed pi__* tools for inspection when needed; do not make changes without user approval.";
+	}
 	return [
 		"Cursor SDK mode is plan for this run. In pi-cursor-sdk, plan mode may still use available Cursor SDK/MCP tools for inspection when needed.",
 		"Safe/read-only shell commands that inspect or print information are allowed when Cursor chooses to call Shell; do not say Shell is blocked by plan mode and then call it anyway.",
@@ -46,14 +50,16 @@ export function getCursorToolTailGuardText(
 	options: Pick<CursorPromptOptions, "agentMode"> & { includePlanModeGuidance?: boolean; includePiBridgeGuidance?: boolean } = {},
 ): string {
 	return [
-		"Shell: use explicit `cd` to repo path for project commands; session cwd may differ from tool args.",
+		isCursorLeanEnabled()
+			? "For project commands through pi__bash, use explicit `cd` to the repo path."
+			: "Shell: use explicit `cd` to repo path for project commands; session cwd may differ from tool args.",
 		options.includePlanModeGuidance === false
 			? undefined
 			: getCursorPlanModeToolGuidanceText(options.agentMode, { includePiBridgeGuidance: options.includePiBridgeGuidance }),
 		"Exact-output requests: output exactly the requested text; no preamble or checks unless asked.",
 		"Tools: call available Cursor SDK/MCP tools; never print tool cards as assistant text.",
 		"Do not comment on GitHub issues or PRs unless the user asked.",
-		options.includePiBridgeGuidance === false ? undefined : CURSOR_PI_BRIDGE_PREFERENCE_TEXT,
+		options.includePiBridgeGuidance === false ? undefined : getCursorPiBridgePreferenceText(),
 	].filter((line): line is string => line !== undefined).join("\n");
 }
 
@@ -61,14 +67,16 @@ function getCursorToolBoundaryText(
 	options: Pick<CursorPromptOptions, "agentMode" | "includePiAskQuestionGuidance"> & { hasToolManifest?: boolean; includePiBridgeGuidance?: boolean } = {},
 ): string {
 	const includePiBridgeGuidance = options.includePiBridgeGuidance !== false;
-	const includePiAskQuestionGuidance = includePiBridgeGuidance && options.includePiAskQuestionGuidance === true;
+	const includePiAskQuestionGuidance = !isCursorLeanEnabled() && includePiBridgeGuidance && options.includePiAskQuestionGuidance === true;
 	const lines = [
 		"Cursor SDK tool boundary:",
 		"Call only Cursor SDK/MCP tools exposed in this run; pi history names, replay labels, and transcript names are not callable.",
 		includePiBridgeGuidance
 			? "For exposed pi bridge tools, call pi__* MCP names, not pi card/history names."
 			: undefined,
-		"Do not claim pi-side or WebSearch/WebFetch tools unless Cursor ran an equivalent tool.",
+		isCursorLeanEnabled()
+			? "Do not claim tool results unless the corresponding pi__* call completed."
+			: "Do not claim pi-side or WebSearch/WebFetch tools unless Cursor ran an equivalent tool.",
 		includePiAskQuestionGuidance ? "Use pi__cursor_ask_question only if the user asked to be prompted." : undefined,
 		getCursorPlanModeToolGuidanceText(options.agentMode, { includePiBridgeGuidance }),
 		"Images: only latest user images are sent; ask to reattach prior images.",

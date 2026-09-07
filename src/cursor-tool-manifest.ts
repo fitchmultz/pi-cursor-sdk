@@ -1,3 +1,4 @@
+import { isCursorLeanEnabled } from "./cursor-lean.js";
 import { parseEnvBoolean } from "./cursor-env-boolean.js";
 import type { CursorPiToolBridgeSnapshot } from "./cursor-pi-tool-bridge-types.js";
 
@@ -26,8 +27,12 @@ export function buildCursorToolManifestText(options: {
 	const includePiBridgeGuidance = options.includePiBridgeGuidance !== false;
 	const lines = [
 		"Callable tool surfaces this run:",
-		`- Cursor host/MCP: ${CURSOR_HOST_TOOL_MANIFEST_SUMMARY}; configured MCP depends on Cursor settings.`,
-		"- Pi tool toggles affect pi tools/bridge exposure only; they do not disable Cursor host/configured MCP tools.",
+		...(isCursorLeanEnabled()
+			? ["- Cursor native tools and ambient MCP: disabled. Only Pi's active tools are callable through the bridge."]
+			: [
+				`- Cursor host/MCP: ${CURSOR_HOST_TOOL_MANIFEST_SUMMARY}; configured MCP depends on Cursor settings.`,
+				"- Pi tool toggles affect pi tools/bridge exposure only; they do not disable Cursor host/configured MCP tools.",
+			]),
 	];
 	const bridgeTools = includePiBridgeGuidance ? options.bridgeSnapshot?.tools ?? [] : [];
 	if (includePiBridgeGuidance) {

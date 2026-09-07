@@ -1,3 +1,4 @@
+import { isCursorLeanEnabled } from "./cursor-lean.js";
 import type { Context, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { getCursorConversationMessages, resolveCursorPiContext } from "./cursor-pi-context.js";
 import type { AgentModeOption, AgentOptions, ModelSelection, SDKAgent } from "@cursor/sdk";
@@ -468,6 +469,9 @@ export async function prepareCursorProviderTurn(
 	const { params, resolvedConfig } = prepareParams;
 	const { model, options } = params;
 
+	if (isCursorLeanEnabled() && resolvedConfig.runtime.value === "cloud") {
+		throw new Error("PI_CURSOR_LEAN requires local runtime: Cursor SDK tool restrictions are not supported on Cloud.");
+	}
 	const fastEnabled = resolvedConfig.runtime.value === "cloud" ? undefined : getEffectiveFastForModelId(model.id, params.scope.scopeKey);
 	const selection = buildCursorModelSelection(model.id, options?.reasoning ?? "off", fastEnabled);
 	if (resolvedConfig.runtime.value === "local" && params.request.purpose !== "normal") {

@@ -119,21 +119,21 @@ describe("cursor pi tool bridge flags and snapshots", () => {
 		await __testUtils.resetRegisteredBridgeForTests();
 	});
 
-	it("defaults the bridge on and built-in overlap exposure off with explicit env controls", () => {
-		expect(resolveCursorPiToolBridgeEnabled({})).toBe(true);
-		expect(resolveCursorPiToolBridgeEnabled({ PI_CURSOR_PI_TOOL_BRIDGE: "0" })).toBe(false);
-		expect(resolveCursorPiToolBridgeEnabled({ PI_CURSOR_PI_TOOL_BRIDGE: "false" })).toBe(false);
-		expect(resolveCursorPiToolBridgeEnabled({ PI_CURSOR_PI_TOOL_BRIDGE: "off" })).toBe(false);
-		expect(resolveCursorPiToolBridgeEnabled({ PI_CURSOR_PI_TOOL_BRIDGE: "none" })).toBe(false);
-		expect(resolveCursorPiToolBridgeEnabled({ PI_CURSOR_PI_TOOL_BRIDGE: "1" })).toBe(true);
-		expect(resolveCursorPiToolBridgeEnabled({ PI_CURSOR_PI_TOOL_BRIDGE: "true" })).toBe(true);
+	it("supports bridge and built-in overlap controls when lean mode is disabled", () => {
+		expect(resolveCursorPiToolBridgeEnabled({ PI_CURSOR_LEAN: "0" })).toBe(true);
+		expect(resolveCursorPiToolBridgeEnabled({ PI_CURSOR_LEAN: "0", PI_CURSOR_PI_TOOL_BRIDGE: "0" })).toBe(false);
+		expect(resolveCursorPiToolBridgeEnabled({ PI_CURSOR_LEAN: "0", PI_CURSOR_PI_TOOL_BRIDGE: "false" })).toBe(false);
+		expect(resolveCursorPiToolBridgeEnabled({ PI_CURSOR_LEAN: "0", PI_CURSOR_PI_TOOL_BRIDGE: "off" })).toBe(false);
+		expect(resolveCursorPiToolBridgeEnabled({ PI_CURSOR_LEAN: "0", PI_CURSOR_PI_TOOL_BRIDGE: "none" })).toBe(false);
+		expect(resolveCursorPiToolBridgeEnabled({ PI_CURSOR_LEAN: "0", PI_CURSOR_PI_TOOL_BRIDGE: "1" })).toBe(true);
+		expect(resolveCursorPiToolBridgeEnabled({ PI_CURSOR_LEAN: "0", PI_CURSOR_PI_TOOL_BRIDGE: "true" })).toBe(true);
 
-		expect(resolveCursorPiToolBridgeBuiltinsEnabled({})).toBe(false);
-		expect(resolveCursorPiToolBridgeBuiltinsEnabled({ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "0" })).toBe(false);
-		expect(resolveCursorPiToolBridgeBuiltinsEnabled({ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "off" })).toBe(false);
-		expect(resolveCursorPiToolBridgeBuiltinsEnabled({ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "unexpected" })).toBe(false);
-		expect(resolveCursorPiToolBridgeBuiltinsEnabled({ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" })).toBe(true);
-		expect(resolveCursorPiToolBridgeBuiltinsEnabled({ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "true" })).toBe(true);
+		expect(resolveCursorPiToolBridgeBuiltinsEnabled({ PI_CURSOR_LEAN: "0" })).toBe(false);
+		expect(resolveCursorPiToolBridgeBuiltinsEnabled({ PI_CURSOR_LEAN: "0", PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "0" })).toBe(false);
+		expect(resolveCursorPiToolBridgeBuiltinsEnabled({ PI_CURSOR_LEAN: "0", PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "off" })).toBe(false);
+		expect(resolveCursorPiToolBridgeBuiltinsEnabled({ PI_CURSOR_LEAN: "0", PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "unexpected" })).toBe(false);
+		expect(resolveCursorPiToolBridgeBuiltinsEnabled({ PI_CURSOR_LEAN: "0", PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" })).toBe(true);
+		expect(resolveCursorPiToolBridgeBuiltinsEnabled({ PI_CURSOR_LEAN: "0", PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "true" })).toBe(true);
 
 		expect(resolveCursorPiToolBridgeDebugEnabled({})).toBe(false);
 		expect(resolveCursorPiToolBridgeDebugEnabled({ PI_CURSOR_PI_TOOL_BRIDGE_DEBUG: "false" })).toBe(false);
@@ -490,7 +490,7 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 		const tools = [createToolInfo("cursor")];
 		const disabledRegistry = __testUtils.createRegistry(
 			createBridgePiHarness({ active: ["read"], tools: [createToolInfo("read")] }),
-			{ PI_CURSOR_PI_TOOL_BRIDGE: "0" },
+			{ PI_CURSOR_LEAN: "0", PI_CURSOR_PI_TOOL_BRIDGE: "0" },
 		);
 		const disabledRun = await disabledRegistry.createRun();
 		expect(disabledRun.enabled).toBe(false);
@@ -582,7 +582,7 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 		try {
 			const disabledRegistry = __testUtils.createRegistry(
 				createBridgePiHarness({ active: ["read"], tools: [createToolInfo("read")] }),
-				{ PI_CURSOR_PI_TOOL_BRIDGE_DEBUG: "1", PI_CURSOR_PI_TOOL_BRIDGE: "0" },
+				{ PI_CURSOR_LEAN: "0", PI_CURSOR_PI_TOOL_BRIDGE_DEBUG: "1", PI_CURSOR_PI_TOOL_BRIDGE: "0" },
 			);
 			const disabledRun = await disabledRegistry.createRun();
 			await disabledRun.dispose();

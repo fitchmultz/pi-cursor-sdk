@@ -47,6 +47,21 @@ describe("extension native Cursor tool replay", () => {
 		process.env.PI_CURSOR_ASK_QUESTION = "1";
 	});
 
+	it("does not register or activate extra tools in lean mode", async () => {
+		vi.stubEnv("PI_CURSOR_LEAN", "1");
+		try {
+			mockedDiscover.mockResolvedValueOnce([]);
+			const pi = createExtensionPi();
+			await extensionFactory(pi);
+			const active = [...pi.getActiveTools()];
+			await pi.runSessionStart();
+			expect(pi._tools).toEqual([]);
+			expect(pi.getActiveTools()).toEqual(active);
+		} finally {
+			vi.unstubAllEnvs();
+		}
+	});
+
 	it("defers native Cursor tool wrapper registration until session_start", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		mockedDiscover.mockResolvedValueOnce([]);

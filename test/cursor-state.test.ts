@@ -749,6 +749,7 @@ describe("Cursor runtime state", () => {
 	it("formatCursorToolsDebugReport notes disabled bridge", () => {
 		const pi = createPiHarness();
 		const report = formatCursorToolsDebugReport(pi, {
+			PI_CURSOR_LEAN: "0",
 			PI_CURSOR_PI_TOOL_BRIDGE: "0",
 			PI_CURSOR_SETTING_SOURCES: "project",
 		});

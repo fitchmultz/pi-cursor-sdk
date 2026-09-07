@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { writeRawTestEvidence } from "./helpers/raw-test-evidence.mjs";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { computeCursorContextFingerprint } from "../src/context.js";
 import { __testUtils as cursorSessionScopeTestUtils, registerCursorSessionScope } from "../src/cursor-session-scope.js";
 import { __testUtils as resumeTestUtils, registerCursorSessionAgentResume, CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE } from "../src/cursor-session-agent-resume.js";
@@ -20,6 +20,7 @@ const historicalPoolKey = (scopeKey: string) => [scopeKey, "/tmp/project", '{"id
 	'{"autoReview":false,"sandboxEnabled":false}', "http1:default", "62af8704764faf8e", "bridge:absent"].join("\0");
 
 describe("cursor-session-agent local resume", () => {
+	afterEach(() => vi.unstubAllEnvs());
 	beforeEach(async () => {
 		installCursorSessionStoreMock();
 		cursorSessionScopeTestUtils.reset();
@@ -28,7 +29,8 @@ describe("cursor-session-agent local resume", () => {
 		vi.clearAllMocks();
 	});
 
-	it("resumes a recorded local SDK agent from its versioned session store", async () => {
+	it.each([false, true])("resumes a recorded local SDK agent from its versioned session store (lean=%s)", async (lean) => {
+		vi.stubEnv("PI_CURSOR_LEAN", lean ? "1" : "0");
 		const storeMock = installCursorSessionStoreMock();
 		const scopeKey = "/tmp/sessions/test.jsonl";
 		const stateRoot = buildCursorSessionStateRoot("/tmp/cursor-sdk-state/workspace", scopeKey);
@@ -93,6 +95,8 @@ describe("cursor-session-agent local resume", () => {
 		);
 		expect(createAgent).not.toHaveBeenCalled();
 		expect(resumeAgent.mock.calls[0][1]).not.toHaveProperty("agents");
+		expect(resumeAgent.mock.calls[0][1].tools).toEqual(lean ? [] : undefined);
+		if (lean) expect(resumeAgent.mock.calls[0][1].local.settingSources).toEqual([]);
 	});
 
 	it("persists digest-only definitions and resumes same content, rejecting changed content from reopened JSONL", async () => {

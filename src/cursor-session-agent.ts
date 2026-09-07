@@ -1,3 +1,4 @@
+import { isCursorLeanEnabled } from "./cursor-lean.js";
 import { createHash } from "node:crypto";
 import type { AgentModeOption, AgentOptions, LocalAgentOptions, LocalAgentStore, ModelSelection, SDKAgent, SettingSource } from "@cursor/sdk";
 import type { Context } from "@earendil-works/pi-ai";
@@ -174,7 +175,7 @@ export function buildCursorLocalAgentOptions(options: {
 	return {
 		cwd: options.cwd,
 		...(options.store ? { store: options.store } : {}),
-		...(options.settingSources ? { settingSources: options.settingSources } : {}),
+		...(isCursorLeanEnabled() ? { settingSources: [] } : options.settingSources ? { settingSources: options.settingSources } : {}),
 		...(options.localSafety?.autoReview === true ? { autoReview: true } : {}),
 		...(options.localSafety?.sandboxEnabled === true ? { sandboxOptions: { enabled: true } } : {}),
 	};
@@ -254,6 +255,7 @@ function buildSessionAgentPoolKey(scopeKey: string, params: SessionCursorAgentCr
 		buildApiKeyPoolKeyFingerprint(params.apiKey),
 		buildBridgePoolKeySuffix("bridge" in params ? params.bridge : getRegisteredCursorPiToolBridge()),
 		...buildCustomSubagentPoolKeySuffix(params.agents),
+		...(isCursorLeanEnabled() ? ["lean"] : []),
 	].join("\0");
 }
 
@@ -514,6 +516,7 @@ async function createSessionAgentEntry(
 			apiKey: params.apiKey,
 			model: params.modelSelection,
 			mode: params.agentMode,
+			...(isCursorLeanEnabled() ? { tools: bridgeRun ? ["mcp"] : [] } : {}),
 			local: buildCursorLocalAgentOptions({
 				cwd: params.cwd,
 				settingSources: params.settingSources,

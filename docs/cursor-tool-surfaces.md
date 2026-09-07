@@ -2,6 +2,12 @@
 
 pi-cursor-sdk runs Cursor models through the local `@cursor/sdk` agent runtime by default. A local pi session can expose **three related but different** tool namespaces. This page is the user-facing guide; maintainer replay details live in [Cursor native tool replay](./cursor-native-tool-replay.md).
 
+## Pi-tools-only mode
+
+Lean mode is enabled by default. Only the Pi bridge is callable. Active Pi builtins are included automatically; native Cursor tools (including web search and subagents) and ambient Cursor MCP/settings are disabled. Pi's own instructions and skill catalog remain intact, and the extension does not add replay, question, or skill activation tools. Pi tool toggles control the entire exposed surface. Empty active tools mean no SDK tools.
+
+Lean mode overrides bridge/builtin opt-outs and `PI_CURSOR_SETTING_SOURCES`. It requires local runtime and rejects Cloud. Set `PI_CURSOR_LEAN=0` at startup to restore native tools or use Cloud; restart Pi when changing the flag. See [Pi-tools-only mode](../README.md#pi-tools-only-mode) for setup. The rest of this page describes legacy mode (`PI_CURSOR_LEAN=0`) unless stated otherwise.
+
 ## The three surfaces
 
 | Surface | Who owns it | Callable by Cursor? | What pi shows |
@@ -38,7 +44,7 @@ For an advertised-but-unused `pi__subagent`, first identify the active provider/
 
 ## Pi bridge vs Cursor native
 
-Default behavior:
+Legacy behavior (`PI_CURSOR_LEAN=0`):
 
 - Cursor host tools handle files, shell, grep, and edits.
 - When exposed, `pi__mcp` is preferred for MCP work and `pi__subagent` is preferred for delegation. Cursor-configured MCP and Cursor-native subagents are fallbacks when the matching pi tool is not exposed or is unavailable.

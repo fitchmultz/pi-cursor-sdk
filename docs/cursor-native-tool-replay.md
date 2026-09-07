@@ -2,9 +2,11 @@
 
 User-facing overview of callable vs display-only tools: [Cursor tool surfaces in pi](./cursor-tool-surfaces.md).
 
+Lean mode is the default. It exposes only the first path below and disables Cursor's own callable local-agent tools; set `PI_CURSOR_LEAN=0` to restore the legacy hybrid surface described here.
+
 pi-cursor-sdk has two separate pi-facing paths plus Cursor's own local-agent tool surface:
 
-1. **Local pi MCP bridge:** default-on for local Cursor agents. It exposes the current pi session's bridgeable active tools to Cursor through a tokenized `127.0.0.1` MCP endpoint, excluding internal Cursor replay activity names and, by default, overlapping built-in pi tools (`read`, `bash`, `write`, `edit`, `grep`, `find`, `ls`). When Cursor calls one of those MCP tools, pi executes the real pi tool through the normal pi tool path.
+1. **Local pi MCP bridge:** default-on for local Cursor agents. It exposes the current pi session's bridgeable active tools to Cursor through a tokenized `127.0.0.1` MCP endpoint, excluding internal Cursor replay activity names. Lean mode includes overlapping builtins (`read`, `bash`, `write`, `edit`, `grep`, `find`, `ls`); legacy mode hides them unless `PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1`. When Cursor calls one of these MCP tools, pi executes the real pi tool through the normal pi tool path.
 2. **Cursor native tool replay:** display-only. It renders completed Cursor SDK tool activity as pi-native-looking cards using recorded Cursor results.
 
 This document is about replay. Replay is not execution and is not the local pi bridge.
@@ -23,7 +25,8 @@ Cursor SDK `plan` mode (`--cursor-mode plan` or `/cursor-mode plan`) can make Cu
 
 ## Local pi bridge summary
 
-The bridge is enabled by default when bridgeable active pi tools exist. Cursor sees bridge-owned MCP names such as `pi__sem_reindex`, while pi history and tool cards use the real pi tool name such as `sem_reindex`. The bridge hides overlapping built-in pi tools by default because Cursor already has native equivalents; extension/custom tools and non-overlapping active tools present in pi's active tool registry normally remain exposed. pi-cursor-sdk also registers `cursor_ask_question` for Cursor models when the bridge is enabled and `PI_CURSOR_ASK_QUESTION=1`, exposed to Cursor as `pi__cursor_ask_question`. The tool is off by default. When pi has visible Agent Skills loaded, pi-cursor-sdk registers `cursor_activate_skill`, exposed as `pi__cursor_activate_skill`, so Cursor can load the full pi `SKILL.md` that corresponds to the current pi skill catalog. The bridge does not call pi tool `execute()` handlers directly; it queues the request, emits a real pi `toolCall`, waits for the matching pi `toolResult`, and resolves the Cursor MCP call back into the same live Cursor SDK run without creating a new `Agent`, unless the run was disposed, aborted, or cancelled.
+The bridge is enabled by default when bridgeable active pi tools exist. Cursor sees bridge-owned MCP names such as `pi__sem_reindex`, while pi history and tool cards use the real pi tool name such as `sem_reindex`. Lean mode does not register replay, question, or skill-activation tools, so Pi's active tool registry is authoritative. Legacy mode also registers those optional display/interaction tools and hides overlapping builtins unless opted in. The bridge does not call pi tool `execute()` handlers directly; it queues the request, emits a real pi `toolCall`, waits for the matching pi `toolResult`, and resolves the Cursor MCP call back into the same live Cursor SDK run without creating a new `Agent`, unless the run was disposed, aborted, or cancelled.
+
 
 Outstanding bridge calls pause the live run's idle-abandonment timer (five minutes by default), including queued/emitted requests and pi tools awaiting an answer. The full idle window resumes after the last matching call settles and the provider drain lease ends, including when cleanup was requested before the lease. Explicit abort/shutdown/reset/compaction and the fail-closed MCP/bridge deadline (one hour by default) still clean up pending work. Display-only native replay without pending bridge work retains its idle expiry.
 

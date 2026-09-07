@@ -914,8 +914,18 @@ describe("discoverModels", () => {
 		]);
 		expect(issues[0].message).toContain("network error");
 		expect(issues[0].errorMessage).toBe("network error");
-		expect(issues[0].message).toContain("/login");
+		expect(issues[0].message).not.toContain("/login");
 		expect(issues[0].message).not.toContain("test-key-123");
+	});
+
+	it("preserves structured loader errors in startup fallback diagnostics", async () => {
+		process.env.CURSOR_API_KEY = "test-key-123";
+		const issues: CursorModelFallbackIssue[] = [];
+		mockedList.mockRejectedValueOnce({ name: "ResolveMessage", code: "ERR_MODULE_NOT_FOUND", message: "Cannot find module '@cursor/sdk' Bearer test-key-123" });
+		await discoverModels({ onFallback: (issue) => issues.push(issue) });
+		expect(issues[0].errorMessage).toContain("ERR_MODULE_NOT_FOUND");
+		expect(issues[0].message).toContain("Cannot find module '@cursor/sdk'");
+		expect(issues[0].message).not.toMatch(/test-key-123|API key|\/login/);
 	});
 
 	it("redacts sensitive values from fallback failure details", async () => {

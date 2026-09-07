@@ -160,6 +160,52 @@ function makeCursorBackendUnavailableConnectError(): Error & {
 }
 
 describe("cursor-provider-errors", () => {
+	it("preserves structured loader details and causes without blaming the key or leaking headers", () => {
+		const error = {
+			name: "ResolveMessage", code: "ERR_MODULE_NOT_FOUND",
+			message: "Cannot find module '@cursor/sdk/auth' from '/extension/dist/cursor-sdk-runtime.js'",
+			cause: { name: "SyntaxError", message: "The requested module '@bufbuild/protobuf' does not provide an export named 'protoBase64' Bearer secret-key" },
+			headers: { authorization: "never-print-this-header" },
+		};
+		const message = sanitizeCursorProviderError(error, "secret-key", "local");
+		expect(message).toContain("ResolveMessage");
+		expect(message).toContain("ERR_MODULE_NOT_FOUND");
+		expect(message).toContain(error.message);
+		expect(message).toContain("SyntaxError");
+		expect(message).toContain("protoBase64");
+		expect(message).not.toMatch(/API key|\/login|secret-key|never-print-this-header/);
+	});
+
+	it("keeps loader causes ahead of generic authentication wrappers", () => {
+		const message = sanitizeCursorProviderError(new Error("Authentication error", {
+			cause: { name: "ResolveMessage", code: "MODULE_NOT_FOUND", message: "Cannot find module '@cursor/sdk'" },
+		}), undefined, "local");
+		expect(message).toContain("MODULE_NOT_FOUND");
+		expect(message).toContain("Cannot find module");
+		expect(message).not.toMatch(/API key|\/login/);
+	});
+
+	it("bounds cyclic error causes and scrubs before truncating", () => {
+		const error = { name: "ResolveMessage", code: "ERR_MODULE_NOT_FOUND", message: `Cannot find module ${"x".repeat(1900)} Bearer secret-key`, cause: {} };
+		error.cause = error;
+		const message = sanitizeCursorProviderError(error, "secret-key");
+		expect(message).toContain("ERR_MODULE_NOT_FOUND");
+		expect(message.length).toBeLessThanOrEqual(6000);
+		expect(message).not.toContain("secret-key");
+	});
+
+	it("does not diagnose an unknown failure or idle session authentication as a bad API key", () => {
+		const detail = "Authentication error If you are logged in, try logging out and back in.";
+		const message = sanitizeCursorProviderError(new Error(detail), "valid-key", "local");
+		expect(message).toContain(detail);
+		expect(message).not.toMatch(/API key|\/login|recreat|expired/i);
+		expect(sanitizeCursorProviderError({})).not.toMatch(/API key|\/login/);
+	});
+
+	it.each(["Invalid API key", "API key revoked", "Revoked API key"])("retains actionable guidance for %s", (message) => {
+		expect(sanitizeCursorProviderError({ name: "Error", message }, "secret-key", "local")).toContain("/login");
+	});
+
 	it("builds run metadata when SDK result text is the generic failure string", () => {
 		const detail = formatCursorSdkRunFailureDetail({
 			id: "run-abc123456789",
@@ -218,9 +264,9 @@ describe("cursor-provider-errors", () => {
 		expect(detail).toBe("ConnectError: read ETIMEDOUT");
 	});
 
-	it("scrubs secrets and maps generic startup errors to actionable auth guidance", () => {
+	it("scrubs secrets and maps explicit invalid keys to actionable auth guidance", () => {
 		expect(sanitizeCursorProviderError(new Error("Error"), "test-key")).toContain("Cursor SDK request failed");
-		expect(sanitizeCursorProviderError(new Error("Unauthorized Bearer secret-key"), "secret-key")).toContain(
+		expect(sanitizeCursorProviderError(new Error("Invalid API key Bearer secret-key"), "secret-key")).toContain(
 			"invalid or unauthorized",
 		);
 		expect(sanitizeCursorProviderError(new Error("Bearer secret-key"), "secret-key")).not.toContain("secret-key");
@@ -228,7 +274,7 @@ describe("cursor-provider-errors", () => {
 
 	it("uses the installed AuthenticationError class only for cloud guidance", () => {
 		const error = new AuthenticationError("Invalid User API Key at https://alice:pw@api.cursor.com");
-		const localMessage = "Invalid User API Key at https://[redacted]@api.cursor.com";
+		const localMessage = "Cursor SDK request failed because the Cursor SDK API key may be invalid or unauthorized. Cursor Agent CLI/Desktop login is not reused. Run /login -> Use an API key -> Cursor, verify CURSOR_API_KEY, or pass --api-key, then retry.";
 		const cloudMessage =
 			"Cursor Cloud Agents request failed because Cloud API authentication rejected the API key. Use a user API key from Cursor Dashboard -> API Keys or a service account API key from Team settings; Team Admin API keys are not supported as Cursor Cloud Agents credentials. Configure the key with /login -> Use an API key -> Cursor, CURSOR_API_KEY, or --api-key, then retry.";
 
@@ -308,26 +354,27 @@ describe("cursor-provider-errors", () => {
 		expect(message).not.toContain("/cursor-pi-tool-bridge/");
 	});
 
-	it("maps Cursor SDK unauthenticated ConnectError to actionable auth guidance", () => {
+	it("preserves unauthenticated ConnectError without diagnosing a rejected API key", () => {
 		const error = makeUnauthenticatedConnectError();
 		const message = sanitizeCursorProviderError(error, "secret-key");
 
 		expect(isUnauthenticatedConnectError(error)).toBe(true);
-		expect(message).toContain("invalid or unauthorized");
-		expect(message).toContain("/login");
-		expect(message).toContain("CURSOR_API_KEY");
+		expect(message).toContain("Cursor SDK authentication failed");
+		expect(message).toContain("ConnectError");
+		expect(message).toContain("code: 16");
+		expect(message).not.toMatch(/API key|\/login/);
 		expect(message).not.toContain("secret-key");
 		expect(message).not.toContain("Bearer");
 	});
 
-	it("maps connect-layer network failures to actionable retry guidance", () => {
+	it("maps connect-layer network failures to pi's retryable Network error classifier", () => {
 		expect(sanitizeCursorProviderError(new Error("ConnectError: [unavailable] read ETIMEDOUT"), "test-key")).toContain(
 			"Network error",
 		);
 		expect(sanitizeCursorProviderError(new Error("ConnectError: [unavailable] read ETIMEDOUT"), "test-key")).toContain(
 			"failed during network or service I/O",
 		);
-		expect(sanitizeCursorProviderError("ConnectError: read ETIMEDOUT", "test-key")).toContain("pi will retry automatically");
+		expect(sanitizeCursorProviderError("ConnectError: read ETIMEDOUT", "test-key")).toContain("Network error");
 		expect(sanitizeCursorProviderError(new Error("ConnectError: [unavailable] read ETIMEDOUT"), "test-key")).not.toContain(
 			"ETIMEDOUT",
 		);
@@ -341,7 +388,6 @@ describe("cursor-provider-errors", () => {
 		expect(classification).toEqual({ kind: "network", source: "cursor-sdk-stack" });
 		expect(message).toContain("Network error");
 		expect(message).toContain("failed during network or service I/O");
-		expect(message).toContain("pi will retry automatically");
 		expect(message).not.toContain("ECONNRESET");
 	});
 
@@ -352,7 +398,6 @@ describe("cursor-provider-errors", () => {
 
 		expect(classification).toEqual({ kind: "network", source: "cursor-sdk-stack" });
 		expect(message).toContain("Network error");
-		expect(message).toContain("pi will retry automatically");
 		expect(message).not.toContain("NGHTTP2_ENHANCE_YOUR_CALM");
 	});
 
@@ -363,7 +408,6 @@ describe("cursor-provider-errors", () => {
 
 		expect(classification).toEqual({ kind: "network", source: "cursor-sdk-stack" });
 		expect(message).toContain("Network error");
-		expect(message).toContain("pi will retry automatically");
 		expect(message).not.toContain("operation was aborted");
 	});
 
@@ -376,7 +420,6 @@ describe("cursor-provider-errors", () => {
 		expect(isCursorSdkConnectionStalledError(error)).toBe(true);
 		const message = sanitizeCursorProviderError(error, "test-key");
 		expect(message).toContain("Network error");
-		expect(message).toContain("pi will retry automatically");
 		expect(message).not.toMatch(/stalled(?: repeatedly)?/i);
 	});
 
@@ -388,7 +431,6 @@ describe("cursor-provider-errors", () => {
 		expect(classification).toEqual({ kind: "network", source: "cursor-backend-details" });
 		expect(message).toContain("Network error");
 		expect(message).toContain("failed during network or service I/O");
-		expect(message).toContain("pi will retry automatically");
 		expect(message).not.toContain("[unavailable] Error");
 	});
 

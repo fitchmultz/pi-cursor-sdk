@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 
 import { describe, expect, it, vi } from "vitest";
@@ -31,6 +31,381 @@ function encodeBinaryText(value: string, encoding: "utf16le" | "utf16be" | "utf3
 }
 
 describe("platform smoke artifact transport", () => {
+	const promptOptions = { charsPerToken: 4, maxInputTokens: 239616, imageTokenEstimate: 1200 };
+	const benign = { providerMeta: { promptOptions }, enabled: true, disabled: false, empty: "", absent: null, nested: [0, false, null, "", [3, { count: 2 }]] };
+	const prompt = 'Before: CURSOR_API_KEY="your-key" after: keep this documentation.';
+	const redactedPrompt = 'Before: CURSOR_API_KEY="[redacted]" after: keep this documentation.';
+	const parseJsonl = (text: string) => text.split(/\r?\n/).filter((line) => line.trim()).map((line) => JSON.parse(line));
+
+	it.skipIf(process.platform === "win32").each(["", "local-resume-evidence"])("preserves numeric debug metadata through extraction (%s)", async (prefix) => {
+		const { buildPlatformArtifactBundle, extractPlatformArtifactBundle, formatPlatformArtifactBundle } = await import(artifactsModule);
+		const root = mkdtempSync(join(tmpdir(), "platform-json-metric-"));
+		try {
+			const source = join(root, "source");
+			const path = "cursor-sdk-events/sessions/test/turn-001/metadata.json";
+			mkdirSync(dirname(join(source, path)), { recursive: true });
+			for (const indent of [undefined, 2]) {
+				const raw = JSON.stringify(benign, null, indent);
+				writeFileSync(join(source, path), raw);
+				const bundle = buildPlatformArtifactBundle(source, prefix);
+				expect(bundle.files.map((file: { path: string }) => file.path)).toEqual([prefix ? `${prefix}/${path}` : path]);
+				let input = formatPlatformArtifactBundle(bundle);
+				for (const pass of [1, 2]) {
+					const out = join(root, `out-${indent}-${pass}`);
+					mkdirSync(out);
+					expect(extractPlatformArtifactBundle(out, input)).toEqual({ ok: true, violations: [] });
+					const exported = readFileSync(join(out, prefix, path), "utf8");
+					expect(JSON.parse(exported)).toEqual(benign);
+					input = formatPlatformArtifactBundle(buildPlatformArtifactBundle(join(out, prefix), prefix));
+				}
+				expect(readFileSync(join(source, path), "utf8")).toBe(raw);
+			}
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it.skipIf(process.platform === "win32").each([
+		"context-snapshot.json", "send-payload.json", "provider-events.jsonl", "timeline.jsonl",
+	])("preserves escaped documentation prompts through extraction (%s)", async (filename) => {
+		const { buildPlatformArtifactBundle, extractPlatformArtifactBundle, formatPlatformArtifactBundle } = await import(artifactsModule);
+		const root = mkdtempSync(join(tmpdir(), "platform-json-prompt-"));
+		try {
+			const source = join(root, "source");
+			const path = `debug/sessions/test/turn-001/${filename}`;
+			mkdirSync(dirname(join(source, path)), { recursive: true });
+			const jsonl = filename.endsWith(".jsonl");
+			const records = [{ text: prompt, enabled: true }, { text: "Unrelated record", absent: null }];
+			const raw = jsonl ? records.map((record) => JSON.stringify(record)).join("\r\n\r\n") + "\r\n" : JSON.stringify(records, null, 2);
+			writeFileSync(join(source, path), raw);
+			let input = formatPlatformArtifactBundle(buildPlatformArtifactBundle(source, "local-resume-evidence"));
+			let previous: string | undefined;
+			for (const pass of [1, 2]) {
+				const out = join(root, `out-${pass}`);
+				mkdirSync(out);
+				expect(extractPlatformArtifactBundle(out, input)).toEqual({ ok: true, violations: [] });
+				const exported = readFileSync(join(out, "local-resume-evidence", path), "utf8");
+				expect(jsonl ? parseJsonl(exported) : JSON.parse(exported)).toEqual([{ ...records[0], text: redactedPrompt }, records[1]]);
+				expect(exported).not.toContain("your-key");
+				if (previous !== undefined) expect(exported).toBe(previous);
+				previous = exported;
+				input = formatPlatformArtifactBundle(buildPlatformArtifactBundle(join(out, "local-resume-evidence"), "local-resume-evidence"));
+			}
+			expect(readFileSync(join(source, path), "utf8")).toBe(raw);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it.each(["numeric", "escaped prompt"])("preserves %s records in the actual session copy before bundling", async (kind) => {
+		const runnerModule = "../scripts/platform-smoke/live-suite-runner.mjs";
+		const { writeJsonlArtifacts } = await import(runnerModule);
+		const { buildPlatformArtifactBundle, extractPlatformArtifactBundle, formatPlatformArtifactBundle } = await import(artifactsModule);
+		const root = mkdtempSync(join(tmpdir(), "platform-json-session-"));
+		try {
+			const sessions = join(root, "native-sessions");
+			const artifacts = join(root, "copy", "artifacts");
+			mkdirSync(sessions);
+			mkdirSync(artifacts, { recursive: true });
+			const record = kind === "numeric" ? benign : { text: prompt };
+			const expected = kind === "numeric" ? benign : { text: redactedPrompt };
+			const raw = `${JSON.stringify(record)}\n\n${JSON.stringify({ sequence: 2, apiKey: "short" })}\n`;
+			const source = join(sessions, "native.jsonl");
+			writeFileSync(source, raw);
+			expect(writeJsonlArtifacts(artifacts, sessions)).toEqual([source]);
+			expect(readFileSync(source, "utf8")).toBe(raw);
+			const copied = readFileSync(join(artifacts, "session.jsonl"), "utf8");
+			expect(parseJsonl(copied)).toEqual([expected, { sequence: 2, apiKey: "[redacted]" }]);
+			expect(copied).not.toContain("short");
+			const out = join(root, "export");
+			mkdirSync(out);
+			const result = extractPlatformArtifactBundle(out, formatPlatformArtifactBundle(buildPlatformArtifactBundle(join(root, "copy"))));
+			expect(result.ok).toBe(process.platform !== "win32");
+			if (result.ok) expect(readFileSync(join(out, "artifacts", "session.jsonl"), "utf8")).toBe(copied);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it.each(["extraction", "session copy"])("scrubs secret property names and preserves their values through %s", async (writer) => {
+		const { buildPlatformArtifactBundle, extractPlatformArtifactBundle, formatPlatformArtifactBundle, redactSecrets, scanForSecrets } = await import(artifactsModule);
+		const runnerModule = "../scripts/platform-smoke/live-suite-runner.mjs";
+		const { writeJsonlArtifacts } = await import(runnerModule);
+		const root = mkdtempSync(join(tmpdir(), "platform-json-keys-"));
+		const route = "/cursor-pi-tool-bridge/synthetic-route/mcp";
+		const bearer = "Bearer s3";
+		const record = { ...benign, routes: { [route]: "seen", [bearer]: "seen", nested: [{ [route]: benign, apiKey: "s3" }] } };
+		const expected = { ...benign, routes: { [redactSecrets(route)]: "seen", [redactSecrets(bearer)]: "seen", nested: [{ [redactSecrets(route)]: benign, apiKey: "[redacted]" }] } };
+		try {
+			const source = join(root, "source");
+			const out = join(root, "out");
+			mkdirSync(source);
+			mkdirSync(out);
+			const filename = writer === "extraction" ? "capture.json" : "native.jsonl";
+			const raw = `${JSON.stringify(record)}\n`;
+			expect(scanForSecrets(raw)).toEqual([]);
+			writeFileSync(join(source, filename), raw);
+			let exported: string;
+			if (writer === "session copy") {
+				expect(writeJsonlArtifacts(out, source)).toEqual([join(source, filename)]);
+				exported = readFileSync(join(out, "session.jsonl"), "utf8");
+			} else {
+				const result = extractPlatformArtifactBundle(out, formatPlatformArtifactBundle(buildPlatformArtifactBundle(source, "evidence")));
+				expect(result.ok).toBe(process.platform !== "win32");
+				if (!result.ok) return;
+				exported = readFileSync(join(out, "evidence", filename), "utf8");
+			}
+			expect(JSON.parse(exported)).toEqual(expected);
+			for (const secret of ["synthetic-route", "s3"]) expect(exported).not.toContain(secret);
+			expect(scanForSecrets(exported)).toEqual([]);
+			const second = join(root, "second");
+			mkdirSync(second);
+			const secondSource = writer === "extraction" ? join(out, "evidence") : out;
+			const result = extractPlatformArtifactBundle(second, formatPlatformArtifactBundle(buildPlatformArtifactBundle(secondSource, "evidence")));
+			expect(result.ok).toBe(process.platform !== "win32");
+			if (result.ok) expect(readFileSync(join(second, "evidence", writer === "extraction" ? filename : "session.jsonl"), "utf8")).toBe(exported);
+			expect(readFileSync(join(source, filename), "utf8")).toBe(raw);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it.each(["extraction", "session copy"])("keeps bounded nested JSON compact through %s", async (writer) => {
+		const { buildPlatformArtifactBundle, extractPlatformArtifactBundle, formatPlatformArtifactBundle } = await import(artifactsModule);
+		const runnerModule = "../scripts/platform-smoke/live-suite-runner.mjs";
+		const { writeJsonlArtifacts } = await import(runnerModule);
+		const root = mkdtempSync(join(tmpdir(), "platform-json-depth-"));
+		let nested: unknown = Array(64).fill(0);
+		for (let depth = 0; depth < 20; depth++) nested = [nested];
+		const raw = `${JSON.stringify(nested)}\n`;
+		expect(Buffer.byteLength(raw)).toBe(170);
+		try {
+			const source = join(root, "source");
+			const out = join(root, "out");
+			mkdirSync(source);
+			mkdirSync(out);
+			const filename = writer === "extraction" ? "capture.json" : "native.jsonl";
+			writeFileSync(join(source, filename), raw);
+			if (writer === "session copy") {
+				writeJsonlArtifacts(out, source);
+				expect(readFileSync(join(out, "session.jsonl"), "utf8")).toBe(raw);
+			} else {
+				const result = extractPlatformArtifactBundle(out, formatPlatformArtifactBundle(buildPlatformArtifactBundle(source, "evidence")));
+				expect(result.ok).toBe(process.platform !== "win32");
+				if (result.ok) expect(readFileSync(join(out, "evidence", filename), "utf8")).toBe(raw);
+			}
+			expect(readFileSync(join(source, filename), "utf8")).toBe(raw);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it.each(["extraction", "session copy"])("rejects colliding redacted property names before %s writes", async (writer) => {
+		const { buildPlatformArtifactBundle, extractPlatformArtifactBundle, formatPlatformArtifactBundle } = await import(artifactsModule);
+		const runnerModule = "../scripts/platform-smoke/live-suite-runner.mjs";
+		const { writeJsonlArtifacts } = await import(runnerModule);
+		const root = mkdtempSync(join(tmpdir(), "platform-json-key-collision-"));
+		try {
+			const source = join(root, "source");
+			const out = join(root, "out");
+			mkdirSync(source);
+			mkdirSync(out);
+			const raw = JSON.stringify({ nested: [{ "/cursor-pi-tool-bridge/route-one/mcp": 1, "/cursor-pi-tool-bridge/route-two/mcp": 2 }] }) + "\n";
+			const filename = writer === "extraction" ? "later.json" : "native.jsonl";
+			writeFileSync(join(source, filename), raw);
+			writeFileSync(join(out, "session.jsonl"), "prior evidence");
+			if (writer === "session copy") {
+				expect(() => writeJsonlArtifacts(out, source)).toThrowError(new Error("invalid structured artifact"));
+			} else {
+				writeFileSync(join(source, "first.json"), "{}");
+				const bundle = buildPlatformArtifactBundle(source, "evidence");
+				bundle.files.sort((a: { path: string }, b: { path: string }) => a.path.localeCompare(b.path));
+				expect(extractPlatformArtifactBundle(out, formatPlatformArtifactBundle(bundle))).toEqual({ ok: false, violations: [] });
+			}
+			expect(readdirSync(out)).toEqual(["session.jsonl"]);
+			expect(readFileSync(join(out, "session.jsonl"), "utf8")).toBe("prior evidence");
+			expect(readFileSync(join(source, filename), "utf8")).toBe(raw);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it.each(["file", "aggregate"])("rejects post-redaction %s byte overflow before the extraction writer", async (limit) => {
+		const { buildPlatformArtifactBundle, extractPlatformArtifactBundle, formatPlatformArtifactBundle, MAX_BUNDLE_FILE_BYTES, MAX_BUNDLE_AGGREGATE_BYTES } = await import(artifactsModule);
+		const fsModule = "../scripts/platform-smoke/artifact-fs-safety.mjs";
+		const writer = vi.spyOn(await import(fsModule), "writeExtractedFiles");
+		const root = mkdtempSync(join(tmpdir(), "platform-json-output-limit-"));
+		try {
+			const source = join(root, "source");
+			const out = join(root, "out");
+			mkdirSync(source);
+			mkdirSync(out);
+			writeFileSync(join(source, "first.json"), "{}");
+			const initial = formatPlatformArtifactBundle(buildPlatformArtifactBundle(source, "evidence"));
+			expect(extractPlatformArtifactBundle(out, initial).ok).toBe(process.platform !== "win32");
+			expect(writer).toHaveBeenCalledOnce();
+			writer.mockClear();
+			rmSync(out, { recursive: true });
+			mkdirSync(out);
+			writeFileSync(join(out, "sentinel.txt"), "untouched");
+			const count = limit === "file" ? 1 : Math.floor(MAX_BUNDLE_AGGREGATE_BYTES / MAX_BUNDLE_FILE_BYTES) + 1;
+			const size = Math.floor((limit === "file" ? MAX_BUNDLE_FILE_BYTES : MAX_BUNDLE_AGGREGATE_BYTES) / count) - 4;
+			const empty = JSON.stringify({ apiKey: "s3", padding: "" });
+			const raw = JSON.stringify({ apiKey: "s3", padding: "x".repeat(size - empty.length) });
+			for (let index = 0; index < count; index++) writeFileSync(join(source, `later-${index}.json`), raw);
+			const bundle = buildPlatformArtifactBundle(source, "evidence");
+			expect(bundle.files).toHaveLength(count + 1);
+			bundle.files.sort((a: { path: string }, b: { path: string }) => a.path.localeCompare(b.path));
+			expect(extractPlatformArtifactBundle(out, formatPlatformArtifactBundle(bundle))).toEqual({ ok: false, violations: [] });
+			expect(writer).not.toHaveBeenCalled();
+			expect(readdirSync(out)).toEqual(["sentinel.txt"]);
+			expect(readFileSync(join(out, "sentinel.txt"), "utf8")).toBe("untouched");
+		} finally {
+			writer.mockRestore();
+			rmSync(root, { recursive: true, force: true });
+		}
+	}, 20_000);
+
+	it("rejects post-redaction session byte overflow without replacing prior evidence", async () => {
+		const { MAX_BUNDLE_FILE_BYTES } = await import(artifactsModule);
+		const runnerModule = "../scripts/platform-smoke/live-suite-runner.mjs";
+		const { writeJsonlArtifacts } = await import(runnerModule);
+		const root = mkdtempSync(join(tmpdir(), "platform-session-output-limit-"));
+		try {
+			const source = join(root, "source");
+			const out = join(root, "out");
+			mkdirSync(source);
+			mkdirSync(out);
+			const empty = JSON.stringify({ apiKey: "s3", padding: "" }) + "\n";
+			const raw = JSON.stringify({ apiKey: "s3", padding: "x".repeat(MAX_BUNDLE_FILE_BYTES - 4 - empty.length) }) + "\n";
+			writeFileSync(join(source, "native.jsonl"), raw);
+			writeFileSync(join(out, "session.jsonl"), "prior evidence");
+			expect(() => writeJsonlArtifacts(out, source)).toThrowError(new Error("invalid structured artifact"));
+			expect(readdirSync(out)).toEqual(["session.jsonl"]);
+			expect(readFileSync(join(out, "session.jsonl"), "utf8")).toBe("prior evidence");
+			expect(readFileSync(join(source, "native.jsonl"), "utf8")).toBe(raw);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it.each([
+		"authorization", "apiKey", "api_key", "accessToken", "refresh_token", "CURSOR_API_KEY",
+		"myApiKey", "sdkToken", "serviceSessionId", "cookie", "session",
+	])("uses shared field recognition for short and escaped %s strings without changing typed data", async (key) => {
+		const { redactArtifactText } = await import(artifactsModule);
+		const sharedModule = "../shared/cursor-sensitive-text.mjs";
+		const { scrubSensitiveText } = await import(sharedModule);
+		expect(scrubSensitiveText(`${key}=s3`)).not.toContain("s3");
+		for (const secret of ["s3", 'short"\\secret']) {
+			const data = { ...benign, credentials: [{ [key]: secret }, { [key]: "" }], text: prompt };
+			for (const indent of [undefined, 2]) {
+				const result = redactArtifactText("capture.JsOn", JSON.stringify(data, null, indent));
+				expect(JSON.parse(result)).toEqual({ ...benign, credentials: [{ [key]: "[redacted]" }, { [key]: "" }], text: redactedPrompt });
+				expect(result).not.toContain(JSON.stringify(secret).slice(1, -1));
+				expect(redactArtifactText("capture.JsOn", result)).toBe(result);
+			}
+		}
+	});
+
+	it("keeps the full text scrubber for decoded strings and non-JSON paths", async () => {
+		const { redactArtifactText, redactSecrets, scanForSecrets } = await import(artifactsModule);
+		const strings = [
+			{ text: "before Bearer short-token after", hidden: ["short-token"] },
+			{ text: "cookie: first=one-secret; second=two-secret\nkeep this line", hidden: ["one-secret", "two-secret"] },
+			{ text: "connect.sid=abc123def456", hidden: ["abc123def456"] },
+			{ text: "clone https://repo-user:repo-p@ss@example.com/repo.git or repo-user:repo-p@ss@example.com:org/repo.git", hidden: ["repo-user", "repo-p@ss"] },
+			{ text: "http://127.0.0.1:54321/cursor-pi-tool-bridge/bridge-full/mcp", hidden: ["127.0.0.1", "bridge-full"] },
+			{ text: "https://127.0.0.1/cursor-pi-tool-bridge/bridge-https/mcp", hidden: ["127.0.0.1", "bridge-https"] },
+			{ text: "127.0.0.1:8080/cursor-pi-tool-bridge/bridge-host/mcp", hidden: ["127.0.0.1", "bridge-host"] },
+			{ text: "/cursor-pi-tool-bridge/bridge-path/mcp", hidden: ["bridge-path"] },
+			{ text: "https://example.com/cursor-pi-tool-bridge/bridge-remote/mcp", hidden: ["bridge-remote"] },
+			{ text: String.raw`before apiKey="AAAAAAAAAAAA\"BBBBBBBBBBBB" after`, hidden: ["AAAAAAAAAAAA", "BBBBBBBBBBBB"] },
+			{ text: String.raw`before apiKey='AAAAAAAAAAAA\'BBBBBBBBBBBB' after`, hidden: ["AAAAAAAAAAAA", "BBBBBBBBBBBB"] },
+			{ text: "before api_key=`abcdefghijkl1234` after", hidden: ["abcdefghijkl1234"] },
+		];
+		for (const { text, hidden } of strings) {
+			const result = redactArtifactText("capture.json", JSON.stringify({ text }));
+			expect(JSON.parse(result)).toEqual({ text: redactSecrets(text) });
+			for (const secret of hidden) expect(result).not.toContain(secret);
+			expect(scanForSecrets(result)).toEqual([]);
+			expect(redactArtifactText("capture.json", result)).toBe(result);
+			for (const path of ["capture.log", "capture.json.txt", "capture.JSON/terminal.ansi", "no-extension"]) {
+				expect(redactArtifactText(path, text)).toBe(redactSecrets(text));
+			}
+		}
+		for (const newline of ["\n", "\r\n"]) {
+			const records = [benign, ...strings.map(({ text }) => ({ text }))];
+			const raw = ["", ...records.map((record) => JSON.stringify(record)), "  ", ""].join(newline);
+			const result = redactArtifactText("capture.JsOnL", raw);
+			expect(parseJsonl(result)).toEqual([benign, ...strings.map(({ text }) => ({ text: redactSecrets(text) }))]);
+			expect(result.split("\n")).toHaveLength(records.length + 3);
+			expect(redactArtifactText("capture.JsOnL", result)).toBe(result);
+		}
+	});
+
+	it("redacts a synthetic explicit key from ordinary JSON strings", async () => {
+		const { redactArtifactText } = await import(artifactsModule);
+		const key = "cursor-synthetic-explicit-key-123456";
+		vi.stubEnv("CURSOR_API_KEY", key);
+		try {
+			const result = redactArtifactText("capture.json", JSON.stringify({ text: `before ${key} after`, [key]: "seen" }));
+			expect(JSON.parse(result)).toEqual({ text: "before [redacted] after", "[redacted]": "seen" });
+			expect(result).not.toContain(key);
+		} finally {
+			vi.unstubAllEnvs();
+		}
+	});
+
+	it.each(["json", "jsonl"])("rejects malformed %s without leaking content or partially extracting", async (extension) => {
+		const { buildPlatformArtifactBundle, extractPlatformArtifactBundle, formatPlatformArtifactBundle, redactArtifactText } = await import(artifactsModule);
+		const root = mkdtempSync(join(tmpdir(), "platform-json-invalid-"));
+		const malformed = `${extension === "jsonl" ? '{}\n\n' : ""}{"private":"do-not-leak"`;
+		try {
+			const source = join(root, "source");
+			const out = join(root, "out");
+			mkdirSync(source);
+			mkdirSync(out);
+			writeFileSync(join(out, "sentinel.txt"), "untouched");
+			writeFileSync(join(source, "first.json"), "{}");
+			writeFileSync(join(source, `later.${extension}`), malformed);
+			expect(() => redactArtifactText(`later.${extension}`, malformed)).toThrowError(new Error("invalid structured artifact"));
+			const bundle = buildPlatformArtifactBundle(source, "evidence");
+			bundle.files.sort((a: { path: string }, b: { path: string }) => a.path.localeCompare(b.path));
+			expect(bundle.files.map((file: { path: string }) => file.path)).toEqual(["evidence/first.json", `evidence/later.${extension}`]);
+			const result = extractPlatformArtifactBundle(out, formatPlatformArtifactBundle(bundle));
+			expect(result).toEqual({ ok: false, violations: [] });
+			expect(JSON.stringify(result)).not.toContain("do-not-leak");
+			expect(readdirSync(out)).toEqual(["sentinel.txt"]);
+			expect(readFileSync(join(out, "sentinel.txt"), "utf8")).toBe("untouched");
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects an invalid native session record before writing any session-copy artifacts", async () => {
+		const runnerModule = "../scripts/platform-smoke/live-suite-runner.mjs";
+		const { writeJsonlArtifacts } = await import(runnerModule);
+		const root = mkdtempSync(join(tmpdir(), "platform-session-invalid-"));
+		try {
+			const sessions = join(root, "sessions");
+			const artifacts = join(root, "artifacts");
+			mkdirSync(sessions);
+			mkdirSync(artifacts);
+			const raw = '{}\n{"private":"do-not-leak"\n';
+			writeFileSync(join(sessions, "native.jsonl"), raw);
+			for (const existing of [false, true]) {
+				if (existing) writeFileSync(join(artifacts, "session.jsonl"), "prior evidence");
+				expect(() => writeJsonlArtifacts(artifacts, sessions)).toThrowError(new Error("invalid structured artifact"));
+				expect(readdirSync(artifacts)).toEqual(existing ? ["session.jsonl"] : []);
+				if (existing) expect(readFileSync(join(artifacts, "session.jsonl"), "utf8")).toBe("prior evidence");
+				expect(readFileSync(join(sessions, "native.jsonl"), "utf8")).toBe(raw);
+			}
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	it("detects a Cursor key in binary artifacts and never transports or extracts the binary", async () => {
 		const { buildPlatformArtifactBundle, extractPlatformArtifactBundle, formatPlatformArtifactBundle, scanArtifacts } = await import(artifactsModule);
 		const root = mkdtempSync(join(tmpdir(), "platform-binary-secret-"));

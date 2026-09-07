@@ -18,7 +18,7 @@ import {
 	boundedFileSnapshot, openRegularFileNoFollow, walkArtifactTree,
 	writeBundleSpillFile, writeExtractedFiles,
 } from "./artifact-fs-safety.mjs";
-import { isBinaryArtifactContent, redactSecrets, scanForSecrets } from "./artifact-secrets.mjs";
+import { isBinaryArtifactContent, redactArtifactText, redactSecrets, scanForSecrets } from "./artifact-secrets.mjs";
 
 export {
 	MAX_BUNDLE_AGGREGATE_BYTES, MAX_BUNDLE_FILE_BYTES, MAX_BUNDLE_FILE_COUNT,
@@ -29,7 +29,7 @@ export {
 	isCanonicalPlatformBundlePath,
 };
 export { openRegularFileNoFollow };
-export { isBinaryArtifactContent, redactSecrets, scanForSecrets };
+export { isBinaryArtifactContent, redactArtifactText, redactSecrets, scanForSecrets };
 
 const PLATFORM_SMOKE_RUN_DIR_PATTERN = /^run-(\d+)-[a-z0-9]+$/i;
 const HOURS_TO_MS = 60 * 60 * 1000;
@@ -406,6 +406,7 @@ export function extractPlatformArtifactBundle(outputDir, stdout) {
 
 	const files = [];
 	const violations = [];
+	let aggregateBytes = 0;
 	for (const file of decodedFiles) {
 		const text = file.content.toString("utf8");
 		violations.push(...scanForSecrets(file.content).map((violation) => ({ file: file.path, violation })));
@@ -417,7 +418,12 @@ export function extractPlatformArtifactBundle(outputDir, stdout) {
 				})));
 			} catch {}
 		}
-		files.push({ path: file.path, content: Buffer.from(redactSecrets(text)) });
+		try {
+			const content = Buffer.from(redactArtifactText(file.path, text));
+			aggregateBytes += content.length;
+			if (content.length > MAX_BUNDLE_FILE_BYTES || aggregateBytes > MAX_BUNDLE_AGGREGATE_BYTES) return failed;
+			files.push({ path: file.path, content });
+		} catch { return failed; }
 	}
 
 	const succeeded = writeExtractedFiles(outputDir, files);

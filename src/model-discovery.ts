@@ -10,7 +10,7 @@ import { getCursorModelSelectionIdentities } from "../shared/cursor-model-select
 import { loadContextWindowCache } from "./context-window-cache.js";
 import { loadCursorSdk } from "./cursor-sdk-runtime.js";
 import { resolveCursorApiKey, resolveCursorRuntimeApiKey } from "./cursor-api-key.js";
-import { scrubSensitiveText } from "./cursor-sensitive-text.js";
+import { sanitizeCursorProviderError } from "./cursor-provider-errors.js";
 import {
 	fingerprintApiKey,
 	loadAnyCachedModelCatalog,
@@ -65,6 +65,7 @@ export interface CursorModelMetadata {
 		reasoning: boolean;
 		effort: boolean;
 		thinking: boolean;
+		reasoning_effort: boolean;
 		fast: boolean;
 	};
 }
@@ -114,7 +115,7 @@ function getThinkingLevelMap(item: ModelListItem): ThinkingLevelMap | undefined 
 	const reasoningParameter = getParameter(item, "reasoning");
 	const effortParameter = getParameter(item, "effort");
 	const thinkingParameter = getParameter(item, "thinking");
-	const valueParameter = effortParameter ?? reasoningParameter ?? thinkingParameter;
+	const valueParameter = effortParameter ?? reasoningParameter ?? thinkingParameter ?? getParameter(item, "reasoning_effort");
 	if (!valueParameter) return undefined;
 
 	if (valueParameter.id === "thinking" && hasBooleanValues(valueParameter)) {
@@ -235,6 +236,7 @@ function toMetadata(
 			reasoning: getParameter(item, "reasoning") !== undefined,
 			effort: getParameter(item, "effort") !== undefined,
 			thinking: getParameter(item, "thinking") !== undefined,
+			reasoning_effort: getParameter(item, "reasoning_effort") !== undefined,
 			fast: getParameter(item, "fast") !== undefined,
 		},
 	};
@@ -336,6 +338,8 @@ function applyThinkingLevel(
 
 	if (metadata.parameterIds.thinking) {
 		setParam(params, "thinking", mapped);
+	} else if (metadata.parameterIds.reasoning_effort) {
+		setParam(params, "reasoning_effort", mapped);
 	}
 }
 
@@ -355,11 +359,6 @@ export function buildCursorModelSelection(
 	}
 
 	return params.length > 0 ? { id: metadata.selectionModelId, params } : { id: metadata.selectionModelId };
-}
-
-function sanitizeDiscoveryError(error: unknown, apiKey: string): string | undefined {
-	const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
-	return scrubSensitiveText(message, apiKey).trim() || undefined;
 }
 
 async function useFallbackModels(options: DiscoverModelsOptions, issue: CursorModelFallbackIssue): Promise<ProviderModelConfig[]> {
@@ -398,7 +397,7 @@ export async function discoverModels(options: DiscoverModelsOptions = {}): Promi
 			message: `Cursor model discovery returned no models. Using fallback Cursor models; verify ${AUTH_SETUP_HINT}. ${CATALOG_REFRESH_HINT}`,
 		});
 	} catch (error) {
-		const errorMessage = sanitizeDiscoveryError(error, apiKey);
+		const errorMessage = sanitizeCursorProviderError(error, apiKey);
 		// Prefer a previously cached catalog over the generic bundled fallback when
 		// a live refresh fails (e.g. transient network/auth errors), but keep the
 		// provenance visible so refresh commands do not claim a live refresh worked.
@@ -406,15 +405,15 @@ export async function discoverModels(options: DiscoverModelsOptions = {}): Promi
 		if (cachedCatalog && cachedCatalog.models.length > 0) {
 			options.onFallback?.({
 				reason: "cached-after-error",
-				message: `Cursor model discovery failed; using cached Cursor model catalog from ${new Date(cachedCatalog.fetchedAt).toISOString()}.${errorMessage ? ` ${errorMessage}` : ""}`,
-				...(errorMessage ? { errorMessage } : {}),
+				message: `Cursor model discovery failed; using cached Cursor model catalog from ${new Date(cachedCatalog.fetchedAt).toISOString()}. ${errorMessage}`,
+				errorMessage,
 			});
 			return registerModelItems(cachedCatalog.models);
 		}
 		return useFallbackModels(options, {
 			reason: "discovery-failed",
-			message: `Cursor model discovery failed${errorMessage ? `: ${errorMessage}` : ""}. Using fallback Cursor models; verify ${AUTH_SETUP_HINT}. ${CATALOG_REFRESH_HINT}`,
-			...(errorMessage ? { errorMessage } : {}),
+			message: `Cursor model discovery failed: ${errorMessage} Using fallback Cursor models; run /cursor-refresh-models to retry discovery.`,
+			errorMessage,
 		});
 	}
 }

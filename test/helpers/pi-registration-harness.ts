@@ -38,6 +38,7 @@ export function createPiHarness(options: PiHarnessOptions = {}): PiHarness {
 	const registered: Array<{ name: string; config: ProviderConfig }> = [];
 	const commands = new Map<string, RegisteredCommandOptions>();
 	const tools: RegisteredTool[] = [];
+	const sourceInfo: ToolInfo["sourceInfo"] = { source: "test", path: "pi-cursor-sdk-test", scope: "temporary", origin: "top-level" };
 	const initialTools =
 		options.initialTools ?? [...DEFAULT_BUILTIN_TOOL_NAMES].map((name) => createBuiltinToolInfo(name));
 	let activeToolNames = [...(options.activeTools ?? DEFAULT_ACTIVE_TOOL_NAMES)];
@@ -97,7 +98,7 @@ export function createPiHarness(options: PiHarnessOptions = {}): PiHarness {
 					name: tool.name,
 					description: tool.description,
 					parameters: tool.parameters,
-					sourceInfo: { source: "test", path: "pi-cursor-sdk-test", scope: "temporary", origin: "top-level" },
+					sourceInfo,
 				});
 			}
 			return [...toolsByName.values()];

@@ -13,7 +13,8 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSy
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { redactSecrets, writePlatformArtifactBundle } from "./artifacts.mjs";
+import { pathToFileURL } from "node:url";
+import { redactArtifactText, writePlatformArtifactBundle } from "./artifacts.mjs";
 import { extractContentText, jsonlHasAssistantFinalTextMarker } from "./jsonl-text.mjs";
 import { getScenario, renderPrompt } from "./scenarios.mjs";
 
@@ -24,7 +25,7 @@ const COLS = 150;
 const ROWS = 45;
 
 function writeRedactedTextFile(path, text) {
-	writeFileSync(path, redactSecrets(text ?? ""));
+	writeFileSync(path, redactArtifactText(path, text ?? ""));
 }
 
 function usage() {
@@ -437,12 +438,12 @@ function findJsonlFiles(root) {
 	return out;
 }
 
-function writeJsonlArtifacts(artifactDir, sessionDir) {
+export function writeJsonlArtifacts(artifactDir, sessionDir) {
 	const jsonlFiles = findJsonlFiles(sessionDir);
-	writeRedactedTextFile(join(artifactDir, "session-jsonl-files.txt"), jsonlFiles.join("\n") + (jsonlFiles.length ? "\n" : ""));
 	if (jsonlFiles[0]) {
 		writeRedactedTextFile(join(artifactDir, "session.jsonl"), readFileSync(jsonlFiles[0], "utf8"));
 	}
+	writeRedactedTextFile(join(artifactDir, "session-jsonl-files.txt"), jsonlFiles.join("\n") + (jsonlFiles.length ? "\n" : ""));
 	return jsonlFiles;
 }
 
@@ -605,11 +606,13 @@ async function main() {
 	if (!ok) process.exitCode = 1;
 }
 
-main()
-	.then(() => {
-		process.exit(process.exitCode ?? 0);
-	})
-	.catch((error) => {
-		console.error(error instanceof Error ? error.message : String(error));
-		process.exit(1);
-	});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+	main()
+		.then(() => {
+			process.exit(process.exitCode ?? 0);
+		})
+		.catch((error) => {
+			console.error(error instanceof Error ? error.message : String(error));
+			process.exit(1);
+		});
+}

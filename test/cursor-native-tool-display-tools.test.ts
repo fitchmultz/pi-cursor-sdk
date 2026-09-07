@@ -4,6 +4,7 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import * as replay from "../src/cursor-native-tool-display-replay.js";
 import { wrapNativeCursorTool } from "../src/cursor-native-tool-display-tools.js";
+import { createExtensionTestContext } from "./helpers/pi-harness.js";
 import { createRenderContext, createRenderOptions, createRenderTheme } from "./helpers/render-fixtures.js";
 
 describe("wrapNativeCursorTool", () => {
@@ -41,5 +42,23 @@ describe("wrapNativeCursorTool", () => {
 		expect(replaySpy).not.toHaveBeenCalled();
 		expect(delegateRenderResult).toHaveBeenCalledOnce();
 		replaySpy.mockRestore();
+	});
+
+	it("does not execute bash when a replay id has no recorded display", async () => {
+		const execute = vi.fn(async () => ({ content: [{ type: "text" as const, text: "ran" }], details: undefined }));
+		const parameters = Type.Object({});
+		const definition: ToolDefinition<typeof parameters, unknown, unknown> = {
+			name: "bash",
+			label: "bash",
+			description: "bash",
+			parameters,
+			execute,
+		};
+		const wrapped = wrapNativeCursorTool(definition, () => definition);
+
+		await expect(
+			wrapped.execute("cursor-replay-2-1-tool-1", {}, undefined, undefined, createExtensionTestContext()),
+		).rejects.toThrow("replay-only call does not execute work directly");
+		expect(execute).not.toHaveBeenCalled();
 	});
 });

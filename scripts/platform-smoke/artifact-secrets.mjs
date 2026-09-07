@@ -3,8 +3,10 @@
  */
 
 import { isUtf8 } from "node:buffer";
+import { extname } from "node:path";
 import { TextDecoder } from "node:util";
 import { scrubSensitiveText } from "../../shared/cursor-sensitive-text.mjs";
+import { MAX_BUNDLE_FILE_BYTES } from "./artifact-bundle-contract.mjs";
 
 export const SECRET_PATTERNS = [
 	[/Authorization:\s*Bearer\s+[A-Za-z0-9\-._~+/]{20,}=*/gi, "Authorization header", "Authorization: Bearer [REDACTED_BEARER_TOKEN]"],
@@ -69,6 +71,37 @@ export function redactSecrets(text) {
 		redacted = redacted.replace(pattern, replacement);
 	}
 	return redacted;
+}
+
+/** Scrub decoded property names and strings, not JSON syntax or diagnostic scalars. */
+export function redactArtifactText(path, text) {
+	const extension = extname(path).toLowerCase();
+	if (extension !== ".json" && extension !== ".jsonl") return redactSecrets(text);
+	const replace = (key, value) => {
+		if (value && typeof value === "object" && !Array.isArray(value)) {
+			const redacted = Object.create(null);
+			for (const [name, item] of Object.entries(value)) {
+				const redactedName = redactSecrets(name);
+				if (Object.hasOwn(redacted, redactedName)) throw new Error("invalid structured artifact");
+				redacted[redactedName] = item;
+			}
+			return redacted;
+		}
+		if (typeof value !== "string") return value;
+		// Ask the shared recognizer about the field name without passing secret contents.
+		if (value && scrubSensitiveText(`${key}=x`) !== `${key}=x`) return "[redacted]";
+		return redactSecrets(value);
+	};
+	const json = (record) => JSON.stringify(JSON.parse(record), replace);
+	try {
+		const redacted = extension === ".json"
+			? `${json(text)}\n`
+			: text.split(/\r?\n/).map((line) => line.trim() ? json(line) : line).join("\n");
+		if (Buffer.byteLength(redacted) > MAX_BUNDLE_FILE_BYTES) throw new Error("invalid structured artifact");
+		return redacted;
+	} catch {
+		throw new Error("invalid structured artifact");
+	}
 }
 
 export function isBinaryArtifactContent(value) {

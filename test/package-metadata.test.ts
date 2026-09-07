@@ -217,7 +217,7 @@ describe("package metadata cutover baselines", () => {
 		const grok45 = FALLBACK_MODEL_ITEMS.find((item) => item.id === "grok-4.5");
 		const grok46 = FALLBACK_MODEL_ITEMS.find((item) => item.id === "grok-4.6");
 
-		expect(grok45?.parameters?.map((parameter) => parameter.id)).toEqual(["effort", "fast"]);
+		expect(grok45).toBeUndefined();
 		expect(grok46?.parameters?.map((parameter) => parameter.id)).toEqual(["effort", "fast"]);
 		expect(grok46?.parameters?.find((parameter) => parameter.id === "effort")?.values?.map((value) => value.value)).toEqual([
 			"low",
@@ -226,7 +226,7 @@ describe("package metadata cutover baselines", () => {
 			"xhigh",
 		]);
 		expect(FALLBACK_MODEL_ITEMS.some((item) => item.id === "grok-4.3")).toBe(false);
-		expect(spec).toContain("### `grok-4.5`");
+		expect(spec).not.toContain("grok-4.5");
 		expect(spec).toContain("### `grok-4.6`");
 		expect(spec).not.toContain("grok-4.3");
 	});

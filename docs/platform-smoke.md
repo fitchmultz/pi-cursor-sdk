@@ -978,6 +978,8 @@ The runner must binary-safe scan every bounded regular artifact file, including 
 - raw Cursor SDK auth payloads;
 - contents of `~/.pi/agent/auth.json`.
 
+Exported JSON and JSONL is parsed, property names and string secrets are redacted with field context, and output is serialized compactly so numeric, boolean, null, and array values remain intact. Malformed structured evidence and colliding redacted property names fail export before writing. Redacted output must fit the existing per-file and aggregate byte limits before extraction. Native debug captures remain raw; other text artifacts use the existing text scrubber.
+
 Bridge diagnostics may include safe tool names and correlation IDs only.
 
 ## Release bar

@@ -6,6 +6,7 @@ import {
 	__testUtils,
 } from "../src/model-discovery.js";
 import type { ModelListItem } from "@cursor/sdk";
+import { FALLBACK_MODEL_ITEMS } from "../src/cursor-fallback-models.generated.js";
 
 function register(items: ModelListItem[]) {
 	return __testUtils.registerModelItems(items);
@@ -106,6 +107,41 @@ describe("buildCursorModelSelection", () => {
 				{ id: "effort", value: "high" },
 			],
 		});
+	});
+
+	it("maps generated Gemini reasoning_effort controls without changing catalog defaults", () => {
+		const gemini = FALLBACK_MODEL_ITEMS.find(({ id }) => id === "gemini-3.8-flash");
+		if (!gemini) throw new Error("gemini-3.8-flash fallback fixture missing");
+		const original = structuredClone(gemini);
+		const [model] = register([gemini]);
+
+		expect(model).toMatchObject({
+			id: gemini.id,
+			reasoning: true,
+			thinkingLevelMap: {
+				off: null,
+				minimal: null,
+				low: "low",
+				medium: "medium",
+				high: "high",
+				xhigh: null,
+				max: null,
+			},
+		});
+		for (const level of ["low", "medium", "high"] as const) {
+			expect(buildCursorModelSelection(gemini.id, level)).toEqual({
+				id: gemini.id,
+				params: [{ id: "reasoning_effort", value: level }],
+			});
+		}
+		for (const level of ["off", "minimal", "xhigh", "max"] as const) {
+			expect(buildCursorModelSelection(gemini.id, level)).toEqual({
+				id: gemini.id,
+				params: [{ id: "reasoning_effort", value: "high" }],
+			});
+		}
+		expect(getCursorModelMetadata(gemini.id)?.defaultParams).toEqual([{ id: "reasoning_effort", value: "high" }]);
+		expect(gemini).toEqual(original);
 	});
 
 	it("passes unknown model IDs through plainly", () => {

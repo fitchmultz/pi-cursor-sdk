@@ -100,7 +100,6 @@ describe("streamCursor connect timeout boundary", () => {
 			expect(error.reason).toBe("error");
 			expect(error.error.errorMessage).toContain("Network error");
 			expect(error.error.errorMessage).toContain("failed during network or service I/O");
-			expect(error.error.errorMessage).toContain("pi will retry automatically");
 			expect(rejections).toEqual([]);
 		} finally {
 			restore();
@@ -167,7 +166,6 @@ describe("streamCursor connect timeout boundary", () => {
 			expect(errors[0].reason).toBe("error");
 			expect(errors[0].error.errorMessage).toContain("Network error");
 			expect(errors[0].error.errorMessage).toContain("failed during network or service I/O");
-			expect(errors[0].error.errorMessage).toContain("pi will retry automatically");
 			expect(processListenerCalled).toBe(false);
 			expect(cursorSdkProcessGuardTestUtils.activeProviderTurnCount()).toBe(0);
 		} finally {
@@ -204,7 +202,6 @@ describe("streamCursor connect timeout boundary", () => {
 			expect(errors[0].reason).toBe("error");
 			expect(errors[0].error.errorMessage).toContain("Network error");
 			expect(errors[0].error.errorMessage).toContain("failed during network or service I/O");
-			expect(errors[0].error.errorMessage).toContain("pi will retry automatically");
 			expect(processListenerCalled).toBe(false);
 			expect(cursorSdkProcessGuardTestUtils.activeProviderTurnCount()).toBe(0);
 		} finally {

@@ -206,13 +206,14 @@ Cursor `context` becomes a pi-visible model variant because it changes pi's nati
 
 All Cursor SDK models should be treated as thinking-capable Cursor models. The `thinking` column in `pi --list-models` is narrower: it only means pi can control a Cursor SDK thinking parameter for that model.
 
-For models where Cursor exposes `reasoning`, `effort`, or boolean `thinking` parameters, pi's native thinking controls map to Cursor SDK params:
+For models where Cursor exposes `reasoning`, `effort`, `reasoning_effort`, or boolean `thinking` parameters, pi's native thinking controls map to Cursor SDK params:
 
 - `reasoning=none|low|medium|high|extra-high`
 - `effort=low|medium|high|xhigh|max`
+- `reasoning_effort=low|medium|high`
 - `thinking=false|true` for boolean thinking models
 
-Pi `xhigh` maps to Cursor `xhigh` or `extra-high`; Pi `max` maps only to a distinct Cursor `max` value.
+Pi `xhigh` maps to Cursor `xhigh` or `extra-high`; Pi `max` maps only to a distinct Cursor `max` value. Gemini 3.8 Flash exposes only `low`, `medium`, and `high` through `reasoning_effort`; its SDK default remains `high`.
 
 For Claude models with both `thinking` and `effort`, pi thinking `off` sends `thinking=false` and omits `effort`.
 
@@ -220,7 +221,7 @@ For Claude models with both `thinking` and `effort`, pi thinking `off` sends `th
 
 In `pi --list-models`, `thinking=no` means pi cannot control the model's thinking level with `--thinking`, a final `:medium` model suffix, or shift+tab. It does not mean the Cursor model cannot think.
 
-Some Cursor SDK models do not expose a `reasoning`, `effort`, or `thinking` parameter for the extension to set. Cursor thinking is still enabled/supported by the model, and Cursor may still emit thinking deltas. The extension surfaces those deltas through pi's native thinking rendering when the SDK emits them.
+Some Cursor SDK models do not expose a `reasoning`, `effort`, `reasoning_effort`, or `thinking` parameter for the extension to set. Cursor thinking is still enabled/supported by the model, and Cursor may still emit thinking deltas. The extension surfaces those deltas through pi's native thinking rendering when the SDK emits them.
 
 ## Fast mode
 
@@ -521,7 +522,7 @@ See [Cursor testing lessons](docs/cursor-testing-lessons.md#cursor-sdk-event-cap
 
 If startup has no stored `/login` key or `CURSOR_API_KEY`, model discovery fails, or discovery returns no models, the extension registers a bundled fallback snapshot of the latest reviewed Cursor SDK model catalog and notifies interactive users when possible. Pi CLI `--api-key` remains available to provider turns but is not parsed independently during startup discovery.
 
-The fallback snapshot includes Grok 4.6, Composer 2.5 (`composer-2.5` and `composer-2-5`), Composer 2, Cursor's GPT-5.6 Luna/Sol/Terra models, Claude, Gemini, Grok 4.5, Kimi, and other model IDs exposed by the reviewed `Cursor.models.list()` output. Recommended local/smoke runs use `cursor/grok-4.6`. Pi's separate `openai-codex` catalog is owned by Pi itself; Pi 0.84.0 includes native `gpt-5.6-luna`, `gpt-5.6-sol`, and `gpt-5.6-terra` support. The exact checked-in Cursor snapshot lives in `src/cursor-fallback-models.generated.ts`. A dated maintainer capture documents the assistant-visible [Cursor system prompts and tool guidance](https://github.com/fitchmultz/pi-cursor-sdk/blob/main/docs/evidence/cursor-system-prompts-2026-08-02/README.md) for Grok 4.5, Opus 5, Fable 5, and the GPT-5.6 Sol/Terra/Luna family.
+The fallback snapshot includes Grok 4.6, Composer 2.5 (`composer-2.5` and `composer-2-5`), Composer 2, Cursor's GPT-5.6 Luna/Sol/Terra models, Claude, Gemini, Kimi, and other model IDs exposed by the reviewed `Cursor.models.list()` output. Recommended local/smoke runs use `cursor/grok-4.6`. Pi's separate `openai-codex` catalog is owned by Pi itself; Pi 0.84.0 includes native `gpt-5.6-luna`, `gpt-5.6-sol`, and `gpt-5.6-terra` support. The exact checked-in Cursor snapshot lives in `src/cursor-fallback-models.generated.ts`. A dated maintainer capture documents the assistant-visible [Cursor system prompts and tool guidance](https://github.com/fitchmultz/pi-cursor-sdk/blob/main/docs/evidence/cursor-system-prompts-2026-08-02/README.md) for Grok 4.5, Opus 5, Fable 5, and the GPT-5.6 Sol/Terra/Luna family.
 
 Actual Cursor runs still need a key from `/login`, `CURSOR_API_KEY`, or `--api-key`. If you add auth after startup, run `/cursor-refresh-models` to refresh the full live Cursor model catalog without restarting pi.
 
@@ -536,7 +537,8 @@ Actual Cursor runs still need a key from `/login`, `CURSOR_API_KEY`, or `--api-k
 - **AGENTS.md / CLAUDE.md are not duplicated on Cursor models when Cursor loads the same rules.** Pi discovers global and project context files (`AGENTS.md`, `CLAUDE.md`, and case variants) unless you start with `-nc`. On `cursor/*` models the extension removes only `<project_instructions>` blocks that overlap Cursor `settingSources` via the `before_agent_start` hook: `user` for `~/.pi/agent/AGENTS.md`, `project` for repo/parent `AGENTS.md` and `CLAUDE.md` (verified Cursor behavior: local agents load project `AGENTS.md` and `CLAUDE.md` alongside Cursor rules). `~/.pi/agent/CLAUDE.md` is not stripped (Cursor user rules use `~/.claude/CLAUDE.md`, not pi's agent dir). With `PI_CURSOR_SETTING_SOURCES=none` or `plugins`-only, pi context is left intact. Set `PI_CURSOR_PRESERVE_PI_AGENTS_MD=1` to keep duplicate injection.
 - **Max Mode is not a manual pi variant.** Cursor's SDK may enable Max Mode automatically for models that require it. This extension only advertises exact context-window variants that the SDK catalog exposes and otherwise uses conservative SDK-derived default/non-Max context windows.
 - **Output token limits are conservative.** Cursor SDK model metadata does not currently expose output token limits directly.
-- **Local token usage uses Cursor SDK data when safely attributable.** For local turns with in-time SDK usage, pi records the latest per-turn raw `turn-ended` `inputTokens`, `outputTokens`, `cacheReadTokens`, and `cacheWriteTokens`; that raw local shape keeps full-prompt `inputTokens` with cache as a partition (published SDK `toTokenUsage` totals differ), so pi maps disjoint components (`input = inputTokens - cacheRead - cacheWrite`, plus cache fields) and sets `totalTokens = inputTokens + outputTokens` for occupancy/compaction. If the local SDK reports no usage in time, the extension falls back to local `input/output` activity estimates while setting `totalTokens` to the current replayable context estimate so the footer/compaction percentage does not collapse after split tool turns. Later usage for that live run is ignored rather than risk applying stale usage to the wrong pi turn. Raw cloud usage remains display-only until its field semantics are independently captured. Cursor SDK cost is not exposed, so pi cost remains zero/absent.
+- **Local token usage uses Cursor SDK data when safely attributable.** For local turns with in-time SDK usage, pi records the latest per-turn raw `turn-ended` `inputTokens`, `outputTokens`, `cacheReadTokens`, and `cacheWriteTokens`; that raw local shape keeps full-prompt `inputTokens` with cache as a partition (published SDK `toTokenUsage` totals differ), so pi maps disjoint components (`input = inputTokens - cacheRead - cacheWrite`, plus cache fields) and sets `totalTokens = inputTokens + outputTokens` for occupancy/compaction. If the local SDK reports no usage in time, the extension falls back to local `input/output` activity estimates while setting `totalTokens` to the current replayable context estimate so the footer/compaction percentage does not collapse after split tool turns. Later usage for that live run is ignored rather than risk applying stale usage to the wrong pi turn. Raw cloud usage remains display-only until its field semantics are independently captured.
+- **Configured cost is separate from Cursor billing.** Discovered `cursor/*` models register zero rates, so pi cost is zero by default. Set per-million `cost` rates through `modelOverrides` in `models.json` to calculate cost from the mapped token components using pi's native pricing helper, including configured tiers. This does not change which usage is recorded or recover missing/late SDK usage. Fallback cost uses approximate uncached input/output with no cache split: a split live run reports its prompt estimate once, then newly consumed tool-result input estimates, not the whole prompt on every split. Estimates can differ from actual spend in either direction. SDK 1.0.27 `getUsage()` can separately return optional `cost.rawCostCents` and `cost.chargedCents` in floating-point cents; these server-derived amounts are eventually consistent and are not used for pi's configured cost. Configured cost is per emitted pi message, not an invoice reconciliation or a reconstruction of Cursor's internal request-level pricing.
 
 ## Troubleshooting
 
@@ -544,7 +546,7 @@ Actual Cursor runs still need a key from `/login`, `CURSOR_API_KEY`, or `--api-k
 
 You may be seeing fallback startup models or a missing/invalid Cursor SDK API key. Cursor Agent CLI/Desktop login is not reused by this extension. In interactive pi, run `/login`, choose `Use an API key`, choose `Cursor`, paste the key, then run `/cursor-refresh-models`.
 
-When a Cursor run fails after auth is configured, pi now surfaces scrubbed provider detail instead of only `Cursor SDK run failed`. Generic SDK failures include safe run metadata such as model id, a short run id prefix, and duration when available, and are phrased as pi retryable provider errors so automatic retry/backoff can recover transient SDK failures.
+When a Cursor run fails after auth is configured, pi surfaces scrubbed provider detail instead of only `Cursor SDK run failed`. Structured errors retain bounded name, code, message, and up to two nested causes; headers and other object fields are not displayed. Generic completed-run failures include safe run metadata such as model id, a short run id prefix, and duration when available, and are phrased as pi retryable provider errors so automatic retry/backoff can recover transient SDK failures. Unknown startup failures, module-loading errors, and ambiguous session authentication errors are not diagnosed as invalid API keys. Explicit missing, invalid, or revoked API-key errors still show key setup guidance.
 
 Aborted runs now include a likely cause when determinable, for example `Cancelled: prompt interrupted.` for user cancel or `Cancelled: Cursor SDK run was cancelled.` for SDK-side cancellation.
 
@@ -562,6 +564,14 @@ Or run a one-shot command:
 ```bash
 pi --api-key "your-key" --model cursor/grok-4.6 -p "Say ok only"
 ```
+
+### Native shell parsing or module loading fails
+
+Before loading the SDK, the extension resolves the installed `@cursor/sdk-<platform>-<arch>` package relative to `@cursor/sdk` and supplies its `vendor` directory through the SDK's `CURSOR_TREE_SITTER_VENDOR_DIR`. This lets native Bash parsing work when Pi's launcher and extension live in separate installation trees. The platform package must be installed; the extension does not download or bundle replacement native binaries.
+
+An explicitly set `CURSOR_TREE_SITTER_VENDOR_DIR` is left untouched. Use an absolute path to a vendor directory containing both `tree-sitter` and `tree-sitter-bash`, or unset it to use package-relative discovery. Empty and relative overrides are also preserved; the SDK decides whether to use them or its own fallback lookup.
+
+A `ResolveMessage`, missing module, or missing `protoBase64` export is a loader problem, not evidence of a bad API key. Reports involving compiled Bun Pi and embedded hosts remain open; this native-path repair does not change their dependency loading graph. An npm-installed Node Pi is the known working control. Likewise, preserving the reported idle-session `Authentication error` does not establish why an hour-idle session fails or promise automatic recovery.
 
 ### `pi --list-models cursor` shows no Cursor models
 

@@ -47,6 +47,7 @@ describe("streamCursor native replay live run", () => {
 	beforeEach(resetCursorProviderTestState);
 
 	it("uses bounded approximate usage on the final native replay stop turn when no turn-ended usage arrives", async () => {
+		const model = { ...makeModel(), cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.5 } };
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		const registeredTools: RegisteredTool[] = [];
 		await registerNativeToolDisplayForTest(registeredTools);
@@ -97,7 +98,7 @@ describe("streamCursor native replay live run", () => {
 			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
 		});
 
-		const firstEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		const firstEvents = await collectEvents(streamCursor(model, makeContext(), { apiKey: "test-key" }));
 		const firstDone = getDoneEvent(firstEvents);
 		const toolCall = firstDone.message.content.find(isToolCallBlock);
 		expect(firstDone.reason).toBe("toolUse");
@@ -127,11 +128,17 @@ describe("streamCursor native replay live run", () => {
 			},
 		];
 
-		const replayEvents = await collectEvents(streamCursor(makeModel(), replayContext, { apiKey: "test-key" }));
+		const replayEvents = await collectEvents(streamCursor(model, replayContext, { apiKey: "test-key" }));
 		const replayDone = getDoneEvent(replayEvents);
 
 		expect(replayDone.reason).toBe("stop");
 		expect(collectTextDeltas(replayEvents)).toBe("Final answer only.");
+		expect(firstDone.message.usage.cost.input).toBeGreaterThan(0);
+		expect(firstDone.message.usage.cost.input).toBeCloseTo(firstDone.message.usage.input / 1_000_000, 10);
+		expect(replayDone.message.usage.cost.output).toBeGreaterThan(0);
+		expect(replayDone.message.usage.cost.total).toBeCloseTo(
+			(replayDone.message.usage.input + replayDone.message.usage.output * 2) / 1_000_000, 10,
+		);
 		expect(replayDone.message.usage.cacheRead).toBe(0);
 		expect(replayDone.message.usage.cacheWrite).toBe(0);
 		expect(replayDone.message.usage.input).toBeLessThan(500);

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.7 - 2026-09-05
+
+### Fixed
+
+- Re-register native replay wrappers on every model sync so bash replay cards cannot re-execute host commands after `/new`, `/resume`, or a session switch (#203). Registration was process-once, but pi rebuilds its tool registry back to the builtins, so session 2+ replayed through the real `bash`.
+- Fail closed for every `cursor-replay-*` call with no recorded display, not only the `edit` and `write` ids covered by `block-file-mutation`.
+- Check the current tool owner after session changes: leave newly loaded third-party wrappers untouched and use activity transcripts until native replay can safely resume.
+- Apply configured `models.json` cost rates to Cursor's existing mapped token usage with pi's native pricing helper. Default rates remain zero; token attribution and Cursor billed amounts are unchanged (#230, #231; thanks @TianZuo555).
+- Resolve the installed Cursor SDK native parser package before shared SDK initialization, so separate Pi launcher/extension trees can use the vendored Bash parser. Preserve explicit `CURSOR_TREE_SITTER_VENDOR_DIR` overrides (#232).
+- Preserve bounded, scrubbed structured error details and causes in provider/discovery failures. Stop blaming API keys for module-loading failures or ambiguous session-authentication errors; retain explicit bad-key guidance (#228, #233, #247). This does not fix the reported compiled Bun/embedded-host loading failures or establish hour-idle session recovery.
+- Keep bridge tool-call IDs within provider limits while preserving unique IDs and matching results (#237; thanks @gwatkins-arista).
+- Keep skill activation callable with its catalog and descriptions intact while the system prompt stays stable (#244).
+- Map SDK `reasoning_effort` controls to pi thinking levels so Gemini 3.8 Flash honors low, medium, and high without changing its SDK default.
+
+### Changed
+
+- Refresh the bundled Cursor catalog from SDK metadata: add Claude Fable 5.1 and Gemini 3.8 Flash, remove Grok 4.5, and include 1M-context fast variants for GPT-5.6 Luna, Sol, and Terra. Existing default selections remain unchanged.
+- Use the existing conservative 200,000-token fallback for Gemini 3.8 Flash, whose catalog has no context size; this is not a new checkpoint measurement. Remove the obsolete Grok 4.5 context entries while preserving all retained values.
+
 ## 0.3.6 - 2026-08-18
 
 ### Fixed

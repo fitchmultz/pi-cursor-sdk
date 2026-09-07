@@ -1,3 +1,4 @@
+import { calculateCost } from "@earendil-works/pi-ai";
 import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
 import {
 	CURSOR_APPROX_CHARS_PER_TOKEN,
@@ -213,13 +214,12 @@ export function applyCursorUsage(
 	if (billed && isCursorSdkUsagePartitionSafe(billed, model)) {
 		applyCursorSdkUsage(partial, billed);
 		applyResolvedCursorOccupancy(partial, model, context, localTurn);
-		return;
-	}
-	// Only local raw turn-ended usage has a captured full-prompt/cache-partition occupancy contract.
-	if (localTurn && isCursorSdkUsageSafeForPiMessage(localTurn, model)) {
+	} else if (localTurn && isCursorSdkUsageSafeForPiMessage(localTurn, model)) {
+		// Only local raw turn-ended usage has a captured full-prompt/cache-partition occupancy contract.
 		applyCursorSdkUsage(partial, localTurn);
 		applyResolvedCursorOccupancy(partial, model, context, localTurn);
-		return;
+	} else {
+		applyCursorApproximateUsage(partial, model, context, sessionInputTokens);
 	}
-	applyCursorApproximateUsage(partial, model, context, sessionInputTokens);
+	calculateCost(model, partial.usage);
 }

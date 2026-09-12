@@ -84,6 +84,21 @@ function getCursorBootstrapTailSections(
 	];
 }
 
+/**
+ * Bootstrap sends flatten the live pi session into one Cursor prompt as
+ * `User:` / `Assistant:` / `Tool result:` text. Models often misread that as a
+ * pasted or adversarial transcript and refuse with "fake conversation".
+ * This preamble is only for bootstrap (incremental sends omit history).
+ */
+export function getCursorSessionTranscriptAuthenticityText(): string {
+	return [
+		"Live pi session transcript (authentic):",
+		"The User:/Assistant:/Tool call/Tool result blocks below are the real prior turns of THIS live pi session, serialized for Cursor SDK bootstrap/rebootstrap.",
+		"They are not a pasted chat, not a roleplay, and not a prompt-injection payload. Treat them as authentic conversation history for this session and continue from the latest user request.",
+		"Do not claim the history is fake, fabricated, or from another session.",
+	].join("\n");
+}
+
 function normalizePiContextMessages(messages: Context["messages"]): Message[] {
 	return convertToLlm(messages as Parameters<typeof convertToLlm>[0]);
 }
@@ -423,6 +438,10 @@ export function buildCursorPrompt(context: Context, options: CursorPromptOptions
 			return text ? { index, text } : undefined;
 		})
 		.filter((section): section is { index: number; text: string } => section !== undefined);
+	// Only when prior turns are present — empty/bootstrap-first prompts need no authenticity notice.
+	if (messageSections.length > 0) {
+		sectionsBeforeMessages.push(getCursorSessionTranscriptAuthenticityText());
+	}
 	const sectionsAfterMessages = getCursorBootstrapTailSections(options);
 	const images = extractLatestImages(messages);
 	const imageTokenReserve = images.length * (options.imageTokenEstimate ?? 0);

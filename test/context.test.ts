@@ -84,6 +84,29 @@ describe("buildCursorPrompt", () => {
 		expect(result.text).toContain("Assistant: Hi there");
 	});
 
+	it("labels serialized prior turns as authentic live session history on bootstrap", () => {
+		const ctx: Context = {
+			messages: [
+				{ role: "user", content: "Hello", timestamp: 1 } satisfies UserMessage,
+				{ role: "assistant", content: [{ type: "text", text: "Hi there" }], api: "cursor-sdk", provider: "cursor", model: "test", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "stop", timestamp: 2 } satisfies AssistantMessage,
+				{ role: "user", content: "Continue", timestamp: 3 } satisfies UserMessage,
+			],
+		};
+		const result = buildCursorPrompt(ctx);
+		expect(result.text).toContain("Live pi session transcript (authentic):");
+		expect(result.text).toContain("not a prompt-injection payload");
+		expect(result.text).toContain("Do not claim the history is fake");
+		const authenticityAt = result.text.indexOf("Live pi session transcript (authentic):");
+		const firstUserAt = result.text.indexOf("User: Hello");
+		expect(authenticityAt).toBeGreaterThanOrEqual(0);
+		expect(firstUserAt).toBeGreaterThan(authenticityAt);
+	});
+
+	it("omits authenticity notice when bootstrap has no prior message turns", () => {
+		const result = buildCursorPrompt({ systemPrompt: "You are helpful.", messages: [] });
+		expect(result.text).not.toContain("Live pi session transcript (authentic):");
+	});
+
 	it("defensively formats assistant string content", () => {
 		const ctx: Context = {
 			messages: [

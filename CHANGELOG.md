@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Label bootstrap/rebootstrap `User:` / `Assistant:` / `Tool result:` history as authentic live pi session transcript so Cursor models stop treating serialized prior turns as a fake or injected conversation.
+
 ## 0.3.6 - 2026-08-18
 
 ### Fixed

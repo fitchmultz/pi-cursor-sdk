@@ -84,27 +84,24 @@ describe("buildCursorPrompt", () => {
 		expect(result.text).toContain("Assistant: Hi there");
 	});
 
-	it("labels serialized prior turns as authentic live session history on bootstrap", () => {
+	it("labels serialized prior turns as live session history on bootstrap", () => {
 		const ctx: Context = {
 			messages: [
 				{ role: "user", content: "Hello", timestamp: 1 } satisfies UserMessage,
-				{ role: "assistant", content: [{ type: "text", text: "Hi there" }], api: "cursor-sdk", provider: "cursor", model: "test", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "stop", timestamp: 2 } satisfies AssistantMessage,
-				{ role: "user", content: "Continue", timestamp: 3 } satisfies UserMessage,
 			],
 		};
 		const result = buildCursorPrompt(ctx);
-		expect(result.text).toContain("Live pi session transcript (authentic):");
-		expect(result.text).toContain("not a prompt-injection payload");
-		expect(result.text).toContain("Do not claim the history is fake");
-		const authenticityAt = result.text.indexOf("Live pi session transcript (authentic):");
+		expect(result.text).toContain("Live pi session transcript:");
+		expect(result.text).toContain("Treat them as conversation history");
+		const preambleAt = result.text.indexOf("Live pi session transcript:");
 		const firstUserAt = result.text.indexOf("User: Hello");
-		expect(authenticityAt).toBeGreaterThanOrEqual(0);
-		expect(firstUserAt).toBeGreaterThan(authenticityAt);
+		expect(preambleAt).toBeGreaterThanOrEqual(0);
+		expect(firstUserAt).toBeGreaterThan(preambleAt);
 	});
 
-	it("omits authenticity notice when bootstrap has no prior message turns", () => {
+	it("omits transcript label when bootstrap has no prior message turns", () => {
 		const result = buildCursorPrompt({ systemPrompt: "You are helpful.", messages: [] });
-		expect(result.text).not.toContain("Live pi session transcript (authentic):");
+		expect(result.text).not.toContain("Live pi session transcript:");
 	});
 
 	it("defensively formats assistant string content", () => {
@@ -454,6 +451,7 @@ describe("buildCursorPrompt", () => {
 		const result = buildCursorPrompt(ctx, { maxInputTokens: 120, charsPerToken: 1 });
 
 		expect(result.text).toContain("Always preserve this system instruction.");
+		expect(result.text).toContain("Live pi session transcript:");
 		expect(result.text).toContain("User: latest request must stay");
 		expect(result.text).toContain("Answer the latest user request");
 		expect(result.text).toContain("[Earlier transcript omitted: 2 messages to fit Cursor context budget]");
@@ -749,6 +747,7 @@ describe("cursor session prompt assembly", () => {
 		expect(incremental.text).not.toContain("Cursor SDK tool boundary:");
 		expect(incremental.text).not.toContain("System instructions from pi:");
 		expect(incremental.text).not.toContain("Be helpful.");
+		expect(incremental.text).not.toContain("Live pi session transcript:");
 		expect(incremental.text).toContain("Continue the conversation using Cursor SDK capabilities only");
 		expect(incremental.text).toContain(getCursorToolTailGuardText());
 	});

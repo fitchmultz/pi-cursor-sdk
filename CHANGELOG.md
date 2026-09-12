@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Keep bootstrap/rebootstrap history explicitly separate from callable tool instructions. Historical tool calls no longer include replay IDs, JSON arguments, or `Tool call (...)` syntax; historical results are labeled as untrusted data. Remove pi-host-only language/tool-boundary instructions from Cursor-facing system context while retaining project instructions and skills.
+
 ## 0.3.6 - 2026-08-18
 
 ### Fixed

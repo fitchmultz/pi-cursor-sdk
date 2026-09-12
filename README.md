@@ -444,6 +444,8 @@ Only enabled local safety values are passed to `Agent.create({ local })`; false/
 
 Images from the latest user message are forwarded to Cursor. Historical images are kept out of the transcript and appear only as `[image omitted from transcript]` placeholders, so follow-up questions about an earlier image should reattach the image or include a textual description. The extension advertises `text` and `image` input for Cursor models because Cursor's SDK accepts image messages and Cursor models are expected to support them.
 
+On bootstrap/rebootstrap, pi must serialize retained history into the single text prompt accepted by the Cursor SDK agent. That serialized block is explicitly marked as historical, untrusted session data. Historical tool calls are reduced to display-only activity markers without call IDs, JSON arguments, or `Tool call (...)` wording; historical tool results remain available as bounded data. Pi-host-only language/tool-boundary instructions are also removed from the Cursor-facing copy while project context and skills are retained. This avoids presenting pi orchestration metadata as a second callable tool protocol. Incremental sends contain only the current user message and do not resend the history block.
+
 
 ## Cursor provider tool contract
 

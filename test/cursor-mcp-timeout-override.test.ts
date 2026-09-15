@@ -197,6 +197,7 @@ describe("Cursor MCP timeout override", () => {
 		expect(isCursorSdkMcpConnectTimeoutStack(initializeStack)).toBe(true);
 		expect(isCursorSdkMcpConnectTimeoutStack(unknownProtocolStack)).toBe(false);
 		expect(isCursorSdkMcpConnectTimeoutStack(stack)).toBe(false);
+		expect(isCursorSdkMcpToolTimeoutStack(unknownProtocolStack)).toBe(true);
 		expect(isCursorSdkMcpToolTimeoutStack(stack.replace(/node_modules\/\@cursor\/sdk/g, "src"))).toBe(false);
 	});
 
@@ -272,17 +273,17 @@ describe("Cursor MCP timeout override", () => {
 		expect(initializeCallback).toHaveBeenCalledTimes(1);
 	});
 
-	it("does not shorten unknown Cursor SDK MCP protocol default timeouts", () => {
+	it("extends truncated Cursor SDK MCP protocol default timeouts that omit callTool frames", () => {
 		vi.useFakeTimers();
-		installCursorMcpToolTimeoutOverride({ connectTimeoutMs: 10_000 });
+		installCursorMcpToolTimeoutOverride({ timeoutMs: 3_600_000 });
 		const callback = vi.fn();
 
 		scheduleSyntheticCursorSdkMcpUnknownProtocolTimeout(callback);
 
-		vi.advanceTimersByTime(10_000);
+		vi.advanceTimersByTime(60_000);
 		expect(callback).not.toHaveBeenCalled();
 
-		vi.advanceTimersByTime(50_000);
+		vi.advanceTimersByTime(3_600_000 - 60_000);
 		expect(callback).toHaveBeenCalledTimes(1);
 	});
 

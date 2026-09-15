@@ -229,4 +229,72 @@ describe("cursor pi tool bridge CallTool deadline", () => {
 			await run.dispose();
 		}
 	});
+
+	it("does not apply the CallTool deadline to cursor_ask_question", async () => {
+		process.env.PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS = "500";
+		const pi = createBridgePiHarness({
+			active: ["cursor_ask_question"],
+			tools: [createBuiltinToolInfo("cursor_ask_question", Type.Object({ question: Type.String() }), "Ask")],
+		});
+		const run = await registerCursorPiToolBridge(pi).createRun();
+		const client = new Client({ name: "pi-cursor-sdk-test", version: "1.0.0" });
+		const transport = new StreamableHTTPClientTransport(new URL(getCursorPiBridgeMcpUrl(run)));
+		await client.connect(transport);
+		try {
+			const callResult = client.callTool({ name: "pi__cursor_ask_question", arguments: { question: "Stay?" } }).catch((error: unknown) => error);
+			const request = await waitForQueuedRequest(run);
+			const abort = vi.fn();
+			await pi.runToolCall(
+				{ type: "tool_call", toolCallId: request.piToolCallId, toolName: "cursor_ask_question", input: request.args },
+				{ signal: new AbortController().signal, abort },
+			);
+
+			const result = await Promise.race([
+				callResult,
+				new Promise((resolve) => setTimeout(() => resolve("still pending"), 2_000)),
+			]);
+			expect(result).toBe("still pending");
+			expect(abort).not.toHaveBeenCalled();
+			expect(run.hasPendingPiToolCallId(request.piToolCallId)).toBe(true);
+		} finally {
+			await client.close().catch(() => undefined);
+			await transport.close().catch(() => undefined);
+			await run.dispose();
+		}
+	});
+
+	it("does not abort cursor_ask_question when the MCP client cancels CallTool", async () => {
+		const pi = createBridgePiHarness({
+			active: ["cursor_ask_question"],
+			tools: [createBuiltinToolInfo("cursor_ask_question", Type.Object({ question: Type.String() }), "Ask")],
+		});
+		const run = await registerCursorPiToolBridge(pi).createRun();
+		const client = new Client({ name: "pi-cursor-sdk-test", version: "1.0.0" });
+		const transport = new StreamableHTTPClientTransport(new URL(getCursorPiBridgeMcpUrl(run)));
+		await client.connect(transport);
+		try {
+			const clientAbort = new AbortController();
+			const callResult = client.callTool(
+				{ name: "pi__cursor_ask_question", arguments: { question: "Stay?" } },
+				undefined,
+				{ signal: clientAbort.signal },
+			).catch((error: unknown) => error);
+			const request = await waitForQueuedRequest(run);
+			const abort = vi.fn();
+			await pi.runToolCall(
+				{ type: "tool_call", toolCallId: request.piToolCallId, toolName: "cursor_ask_question", input: request.args },
+				{ signal: new AbortController().signal, abort },
+			);
+
+			clientAbort.abort();
+
+			expect(await callResult).toBeInstanceOf(Error);
+			expect(abort).not.toHaveBeenCalled();
+			expect(__testUtils.getActiveBridgeToolExecutionAbortCount()).toBe(1);
+		} finally {
+			await client.close().catch(() => undefined);
+			await transport.close().catch(() => undefined);
+			await run.dispose();
+		}
+	});
 });

@@ -17,8 +17,17 @@ export function resolveCursorAskQuestionEnabled(env: Record<string, string | und
 /** Package-namespaced event while `cursor_ask_question` awaits pi UI input. */
 export const CURSOR_ASK_QUESTION_BLOCKED_EVENT = "pi-cursor-sdk:ask-question:blocked";
 
+/** Fired after the questionnaire resolves so late answers can be delivered if MCP already timed out. */
+export const CURSOR_ASK_QUESTION_ANSWERED_EVENT = "pi-cursor-sdk:ask-question:answered";
+
 export interface CursorAskQuestionBlockedEventPayload {
 	active: boolean;
+}
+
+export interface CursorAskQuestionAnsweredEventPayload {
+	toolCallId: string;
+	summary: string;
+	cancelled: boolean;
 }
 
 interface CursorQuestionOption {
@@ -209,6 +218,13 @@ function emitCursorAskQuestionBlockedEvent(
 	pi.events.emit(CURSOR_ASK_QUESTION_BLOCKED_EVENT, payload);
 }
 
+function emitCursorAskQuestionAnsweredEvent(
+	pi: Pick<ExtensionAPI, "events">,
+	payload: CursorAskQuestionAnsweredEventPayload,
+): void {
+	pi.events.emit(CURSOR_ASK_QUESTION_ANSWERED_EVENT, payload);
+}
+
 export function registerCursorQuestionTool(pi: CursorQuestionToolExtensionApi): void {
 	if (!resolveCursorAskQuestionEnabled()) return;
 
@@ -224,7 +240,7 @@ export function registerCursorQuestionTool(pi: CursorQuestionToolExtensionApi): 
 			"Use cursor_ask_question only when running a Cursor model and user input would materially change the plan, scope, platform, or implementation path.",
 			"Prefer cursor_ask_question with 2-4 concrete options instead of guessing when Cursor plan mode needs user choices.",
 		],
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(toolCallId, params, _signal, _onUpdate, ctx) {
 			const questions = normalizeQuestions(params as CursorAskQuestionParams);
 			if (questions.length === 0) {
 				throw new Error("No valid question was provided.");
@@ -246,9 +262,16 @@ export function registerCursorQuestionTool(pi: CursorQuestionToolExtensionApi): 
 					if (answer.cancelled) break;
 				}
 
+				const summary = summarizeAnswers(answers);
+				const details = buildDetails(questions, answers, true);
+				emitCursorAskQuestionAnsweredEvent(pi, {
+					toolCallId,
+					summary,
+					cancelled: details.cancelled,
+				});
 				return {
-					content: [{ type: "text" as const, text: summarizeAnswers(answers) }],
-					details: buildDetails(questions, answers, true),
+					content: [{ type: "text" as const, text: summary }],
+					details,
 				};
 			} finally {
 				emitCursorAskQuestionBlockedEvent(pi, { active: false });

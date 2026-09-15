@@ -10,7 +10,11 @@ import {
 	type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import { bridgeToolExecutionAbortTracker } from "./cursor-pi-tool-bridge-abort.js";
-import { MCP_ENDPOINT_ROOT, MCP_SERVER_NAME } from "./cursor-pi-tool-bridge-constants.js";
+import {
+	isCursorPiBridgeWaitForUserTool,
+	MCP_ENDPOINT_ROOT,
+	MCP_SERVER_NAME,
+} from "./cursor-pi-tool-bridge-constants.js";
 import {
 	type CursorPiToolBridgeDiagnosticEvent,
 	type CursorPiToolBridgeLifecycleDiagnosticFields,
@@ -223,7 +227,7 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 		}
 		this.queuedRequests.splice(0);
 		for (const pending of [...this.pendingByBridgeCallId.values()]) {
-			this.rejectAndAbortPending(pending, error, "cancelled");
+			this.rejectAndAbortPending(pending, error, "cancelled", { abortWaitForUser: true });
 		}
 	}
 
@@ -306,11 +310,13 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 			this.pendingByBridgeCallId.set(request.bridgeCallId, pending);
 			this.pendingByCursorMcpCallId.set(cursorMcpCallId, pending);
 			this.knownCursorMcpCallIds.add(cursorMcpCallId);
-			pending.timeout = setTimeout(() => {
-				const reason = `Cursor pi bridge CallTool timed out after ${this.callTimeoutMs} ms`;
-				this.rejectAndAbortPending(pending, new Error(reason));
-			}, this.callTimeoutMs);
-			pending.timeout.unref?.();
+			if (!isCursorPiBridgeWaitForUserTool(piToolName)) {
+				pending.timeout = setTimeout(() => {
+					const reason = `Cursor pi bridge CallTool timed out after ${this.callTimeoutMs} ms`;
+					this.rejectAndAbortPending(pending, new Error(reason));
+				}, this.callTimeoutMs);
+				pending.timeout.unref?.();
+			}
 			if (!this.onToolRequest) {
 				if (this.liveRunHandlerDetached) {
 					this.rejectPending(pending, new Error("Cursor pi tool bridge has no active live run"), "cancelled");
@@ -374,7 +380,13 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 		pending: PendingBridgeCall,
 		error: Error,
 		kind: "cancelled" | "error" = "error",
+		options: { abortWaitForUser?: boolean } = {},
 	): void {
+		const waitForUser = isCursorPiBridgeWaitForUserTool(pending.request.piToolName);
+		if (waitForUser && options.abortWaitForUser !== true) {
+			this.rejectPending(pending, error, kind);
+			return;
+		}
 		if (this.rejectPending(pending, error, kind)) {
 			bridgeToolExecutionAbortTracker.abort(pending.request.piToolCallId, error.message);
 		}

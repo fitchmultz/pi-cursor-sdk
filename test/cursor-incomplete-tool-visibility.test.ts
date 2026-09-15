@@ -82,6 +82,47 @@ describe("cursor incomplete tool visibility", () => {
 		).toBe("emit");
 	});
 
+	it("treats a stale shell start as debug-only only after a successful text-producing turn", () => {
+		const missingCompletionWithText = buildIncompleteCursorToolRunOutcome({
+			assistantTextProduced: true,
+			reason: DISCARDED_INCOMPLETE_TOOL_CALL_REASON,
+		});
+		for (const toolCall of [
+			{ name: "shell", args: { command: "echo ok" } },
+			{ name: "bash", args: { command: "echo ok" } },
+			{ name: "run_terminal_cmd", args: { command: "echo ok" } },
+		]) {
+			expect(resolveIncompleteCursorToolVisibility(toolCall, missingCompletionWithText)).toBe("debugOnly");
+		}
+		expect(
+			resolveIncompleteCursorToolVisibility(
+				{ name: "shell", args: { command: "echo ok" } },
+				buildIncompleteCursorToolRunOutcome({
+					assistantTextProduced: false,
+					reason: DISCARDED_INCOMPLETE_TOOL_CALL_REASON,
+				}),
+			),
+		).toBe("emit");
+		expect(
+			resolveIncompleteCursorToolVisibility(
+				{ name: "shell", args: { command: "echo ok" } },
+				buildIncompleteCursorToolRunOutcome({ assistantTextProduced: true, reason: "abort" }),
+			),
+		).toBe("emit");
+		expect(
+			resolveIncompleteCursorToolVisibility(
+				{ name: "shell", args: { command: "echo ok" } },
+				buildIncompleteCursorToolRunOutcome({ assistantTextProduced: true, reason: "sdk-failure" }),
+			),
+		).toBe("emit");
+		expect(
+			resolveIncompleteCursorToolVisibility(
+				{ name: "edit", args: { path: "README.md" } },
+				missingCompletionWithText,
+			),
+		).toBe("emit");
+	});
+
 	it("labels incomplete generateImage as activity instead of a generateImage result card", () => {
 		const display = buildIncompleteCursorToolDisplay(
 			{ name: "generateImage", args: { prompt: "a red circle" } },

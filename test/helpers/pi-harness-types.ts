@@ -205,6 +205,7 @@ export interface PiHarness extends EventHarness {
 	getActiveTools: MockFn<ExtensionAPI["getActiveTools"]>;
 	setActiveTools: MockFn<ExtensionAPI["setActiveTools"]>;
 	sendMessage: MockFn<ExtensionAPI["sendMessage"]>;
+	sendUserMessage: MockFn<ExtensionAPI["sendUserMessage"]>;
 	getFlag: MockFn<ExtensionAPI["getFlag"]>;
 	appendEntry: MockFn<ExtensionAPI["appendEntry"]>;
 	events: ExtensionAPI["events"];

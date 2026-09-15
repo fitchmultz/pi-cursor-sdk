@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Auto-recover Cursor SDK auth failures and idle aborts via `/cursor-sdk-recover` (`ctx.reload()`, then `continue`). Softens the visible error; re-delivers a late ask-question answer when `ask-question:answered` was emitted (e.g. by the ask-question timeout fix). 60s cooldown.
+
 ## 0.3.6 - 2026-08-18
 
 ### Fixed

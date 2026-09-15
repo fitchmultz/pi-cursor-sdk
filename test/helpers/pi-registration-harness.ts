@@ -107,6 +107,7 @@ export function createPiHarness(options: PiHarnessOptions = {}): PiHarness {
 			activeToolNames = [...toolNames];
 		}),
 		sendMessage: vi.fn<ExtensionAPI["sendMessage"]>(),
+		sendUserMessage: vi.fn<ExtensionAPI["sendUserMessage"]>(),
 		getFlag: vi.fn<ExtensionAPI["getFlag"]>((name: string) => resolveFlagValue(name)),
 		appendEntry: vi.fn<ExtensionAPI["appendEntry"]>(),
 		events,

@@ -81,17 +81,17 @@ function isCursorSdkMcpProtocolTimeoutStack(stack: string | undefined): boolean 
 	);
 }
 
-export function isCursorSdkMcpToolTimeoutStack(stack: string | undefined): boolean {
-	if (!stack) return false;
-	return (
-		isCursorSdkMcpProtocolTimeoutStack(stack) &&
-		/\bcallTool\b|\bClient\.callTool\b|\bMcpSdkClient\.callTool\b/.test(stack)
-	);
-}
-
 export function isCursorSdkMcpConnectTimeoutStack(stack: string | undefined): boolean {
 	if (!stack || !isCursorSdkMcpProtocolTimeoutStack(stack)) return false;
 	return /\bClient\.(?:connect|listTools)\b|\bMcpSdkClient\.getTools\b/.test(stack);
+}
+
+export function isCursorSdkMcpToolTimeoutStack(stack: string | undefined): boolean {
+	if (!isCursorSdkMcpProtocolTimeoutStack(stack)) return false;
+	// Installed @cursor/sdk minifies some callTool frames away. Any Protocol._setupTimeout
+	// from the SDK that is not a known initialize/listTools path is a 60s MCP request
+	// default — extend it rather than leaving interactive tools on a 60s fuse.
+	return !isCursorSdkMcpConnectTimeoutStack(stack);
 }
 
 function isCursorSdkDefaultMcpTimeout(delay: SetTimeoutDelay): boolean {
@@ -109,10 +109,10 @@ function patchedSetTimeout(
 	let nextDelay = delay;
 	if (isCursorSdkDefaultMcpTimeout(delay)) {
 		const stack = new Error().stack;
-		if (isCursorSdkMcpToolTimeoutStack(stack)) {
-			nextDelay = installedToolTimeoutMs;
-		} else if (isCursorSdkMcpConnectTimeoutStack(stack)) {
+		if (isCursorSdkMcpConnectTimeoutStack(stack)) {
 			nextDelay = installedConnectTimeoutMs;
+		} else if (isCursorSdkMcpToolTimeoutStack(stack)) {
+			nextDelay = installedToolTimeoutMs;
 		}
 	}
 

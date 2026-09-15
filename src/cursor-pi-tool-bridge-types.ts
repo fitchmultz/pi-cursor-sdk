@@ -75,6 +75,7 @@ export interface CursorPiToolBridge {
 	isEnabled(): boolean;
 	getToolSurfaceSignature(): string;
 	createRun(options?: CursorPiToolBridgeRunOptions): Promise<CursorPiToolBridgeRun>;
+	hasPendingPiToolCallId(piToolCallId: string): boolean;
 	disposeAll(reason?: string): Promise<void>;
 }
 

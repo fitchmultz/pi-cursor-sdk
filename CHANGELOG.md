@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `cursor_ask_question`: no bridge CallTool deadline; keep pi UI open on MCP cancel; late answers follow up, or queue `continue` if the UI is already closed.
+- Treat truncated `@cursor/sdk` `Protocol._setupTimeout` stacks (no `callTool` frame) as tool-call timeouts so the 3600s override still applies.
+
 ## 0.3.6 - 2026-08-18
 
 ### Fixed

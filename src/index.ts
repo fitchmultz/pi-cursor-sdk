@@ -14,6 +14,7 @@ import { CURSOR_API_KEY_CONFIG_VALUE, resolveCursorApiKey } from "./cursor-api-k
 import { registerCursorFallbackIssueWarning } from "./cursor-fallback-warning.js";
 import { registerCursorAgentsContextDedup } from "./cursor-agents-context-registration.js";
 import { registerCursorOverflowNormalization } from "./cursor-provider-overflow.js";
+import { registerCursorAskQuestionTimeoutRecovery } from "./cursor-question-timeout-recovery.js";
 import { registerCursorSdkSessionProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
 import { prepareCursorSessionForCompaction } from "./cursor-session-compaction-prep.js";
 
@@ -31,6 +32,7 @@ type CursorExtensionApi =
 	& Parameters<typeof registerCursorFallbackIssueWarning>[0]
 	& Parameters<typeof registerCursorAgentsContextDedup>[0]
 	& Parameters<typeof registerCursorOverflowNormalization>[0]
+	& Parameters<typeof registerCursorAskQuestionTimeoutRecovery>[0]
 	& Parameters<typeof registerCursorSdkSessionProcessErrorGuard>[0];
 
 function createCursorProviderConfig(models: ProviderModelConfig[]): ProviderConfig {
@@ -64,6 +66,7 @@ export default async function (pi: CursorExtensionApi) {
 	registerCursorPiToolBridge(pi);
 	registerCursorAgentsContextDedup(pi);
 	registerCursorOverflowNormalization(pi);
+	registerCursorAskQuestionTimeoutRecovery(pi);
 	let fallbackIssue: CursorModelFallbackIssue | undefined;
 	const models = await discoverModels({
 		onFallback: (issue) => {

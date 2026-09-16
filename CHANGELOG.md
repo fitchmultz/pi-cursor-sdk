@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.7 - 2026-09-16
+
+### Fixed
+
+- Treat a Cursor shell `tool-call-started` with no matching completion as debug-only after a successful text-producing turn, so a stale **Cursor shell did not complete** / `missing completion` card does not appear after stdout already replayed. Incomplete shell starts stay user-visible when the turn produced no assistant text, and abort or SDK-failure leftovers stay visible. Other external or side-effectful tools are unchanged.
+
 ## 0.3.6 - 2026-08-18
 
 ### Fixed

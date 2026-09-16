@@ -50,10 +50,14 @@ export function resolveIncompleteCursorToolVisibility(
 	outcome: IncompleteCursorToolRunOutcome,
 ): IncompleteCursorToolVisibilityDecision {
 	const visibility = classifyCursorToolVisibility(toolCall);
+	// Shell is side-effectful, so incomplete starts stay visible by default.
+	// After a successful text-producing turn, Cursor often omits tool-call-completed
+	// for shell even when stdout already replayed as bash — same stale-start class as read/grep.
+	const suppressStaleStart = visibility.fastLocalDiscovery || visibility.normalizedKey === "shell";
 	if (
 		outcome.reason === DISCARDED_INCOMPLETE_TOOL_CALL_REASON &&
 		outcome.assistantTextProduced &&
-		visibility.fastLocalDiscovery
+		suppressStaleStart
 	) {
 		return "debugOnly";
 	}

@@ -507,26 +507,11 @@ describe("streamCursor Cursor tool lifecycle", () => {
 
 		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 		const done = getDoneEvent(events);
-		expect(done.reason).toBe("toolUse");
+		expect(done.reason).toBe("stop");
+		expect(done.message.content.find(isToolCallBlock)).toBeUndefined();
 		expect(collectThinkingDeltas(events)).not.toMatch(lifecycleShellProgressPattern);
-
-		const incompleteToolCall = done.message.content.find(isToolCallBlock);
-		const replayContext = makeContext();
-		replayContext.messages = [
-			...replayContext.messages,
-			done.message,
-			{
-				role: "toolResult" as const,
-				toolCallId: incompleteToolCall!.id,
-				toolName: "cursor",
-				content: [{ type: "text" as const, text: "Cursor shell did not complete" }],
-				isError: true,
-				timestamp: 2,
-			},
-		];
-		const finalEvents = await collectEvents(streamCursor(makeModel(), replayContext, { apiKey: "test-key" }));
-		expect(getDoneEvent(finalEvents).reason).toBe("stop");
-		expect(collectTextDeltas(finalEvents)).toBe("Done.");
+		expect(collectThinkingDeltas(events)).not.toContain("Cursor shell did not complete");
+		expect(collectTextDeltas(events)).toBe("Done.");
 		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
 
 		await delayBeyondLifecycleDefer();

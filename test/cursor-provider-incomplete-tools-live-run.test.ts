@@ -109,6 +109,53 @@ describe("streamCursor incomplete native replay tools", () => {
 		expect(mockDispose).toHaveBeenCalledTimes(1);
 	});
 
+	it("does not replay a stale incomplete shell start as an error card after a successful text-producing turn", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		const registeredTools: RegisteredTool[] = [];
+		await registerNativeToolDisplayForTest(registeredTools);
+
+		let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
+		const runWait = vi.fn(
+			() =>
+				new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
+					resolveRun = resolve;
+				}),
+		);
+		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
+			opts.onDelta({
+				update: {
+					type: "tool-call-started",
+					toolCall: { name: "shell", args: { command: "echo cursor-stuck-probe-ok" } },
+					callId: "c-shell-stale",
+				},
+			});
+			return {
+				id: "run-1",
+				agentId: "agent-1",
+				status: "running",
+				wait: runWait,
+				cancel: vi.fn(),
+				supports: () => true,
+				unsupportedReason: () => undefined,
+			};
+		});
+		mockCreatedAgent({ send: mockSend });
+
+		const eventsPromise = collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		await vi.waitFor(() => expect(mockSend).toHaveBeenCalled());
+		resolveRun({ id: "run-1", status: "finished", result: "done after stale shell" });
+		const events = await eventsPromise;
+		const done = getDoneEvent(events);
+
+		expect(done.reason).toBe("stop");
+		expect(done.message.content.filter(isToolCallBlock)).toHaveLength(0);
+		expect(collectThinkingDeltas(events)).not.toContain("Cursor shell did not complete");
+		expect(collectThinkingDeltas(events)).not.toContain("missing completion");
+		expect(collectTextDeltas(events)).toBe("done after stale shell");
+		expect(nativeToolDisplayTestUtils.nativeToolResultCount()).toBe(0);
+		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
+	});
+
 	it("replays incomplete external Cursor tools as neutral cursor activity cards before final text", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		const registeredTools: RegisteredTool[] = [];

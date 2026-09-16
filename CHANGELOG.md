@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Isolate Cursor session scope, agent state, resume lineage, runtime preferences, tool bridges, skill catalogs, and debug routing across concurrent in-process Pi sessions, so subagent startup or cleanup cannot close or overwrite the parent session before its next Cursor turn.
+
 ## 0.3.6 - 2026-08-18
 
 ### Fixed

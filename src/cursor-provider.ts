@@ -22,7 +22,7 @@ import { installCursorSdkProcessErrorGuard } from "./cursor-sdk-process-error-gu
 import { sanitizeCursorProviderError } from "./cursor-provider-errors.js";
 import { resolveCursorApiKey } from "./cursor-api-key.js";
 import { CursorProviderTurnRunner } from "./cursor-provider-turn-runner.js";
-import { getCursorSessionScopeKey } from "./cursor-session-scope.js";
+import { resolveCursorSessionScope } from "./cursor-session-scope.js";
 import { runExclusiveCursorSessionTurn, __testUtils as cursorSessionTurnQueueTestUtils } from "./cursor-session-turn-queue.js";
 
 function makeInitialMessage(model: Model<Api>): AssistantMessage {
@@ -56,12 +56,17 @@ export function streamCursor(
 
 	(async () => {
 		const partial = makeInitialMessage(model);
+		const scope = resolveCursorSessionScope({
+			sessionId: options?.sessionId,
+			signal: options?.signal,
+		});
 
 		const runner = new CursorProviderTurnRunner({
 			model,
 			context,
 			stream,
 			partial,
+			scope,
 			options,
 			sdkEventDebugRef,
 		});
@@ -69,7 +74,7 @@ export function streamCursor(
 		try {
 			stream.push({ type: "start", partial });
 			await runExclusiveCursorSessionTurn(
-				getCursorSessionScopeKey(),
+				scope.scopeKey,
 				() => runner.run(installCursorSdkProcessErrorGuard()),
 				options?.signal,
 			);

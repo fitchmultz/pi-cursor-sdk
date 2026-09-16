@@ -13,7 +13,7 @@ import { getCursorSessionScopeKey } from "./cursor-session-scope.js";
 export async function prepareCursorSessionForCompaction(
 	scopeKey: string = getCursorSessionScopeKey(),
 ): Promise<void> {
-	suppressCursorSessionAgentResumeHandlePersist();
+	suppressCursorSessionAgentResumeHandlePersist(scopeKey);
 	while (true) {
 		const run = cursorLiveRuns.getActiveForScope(scopeKey);
 		if (!run || run.disposed) break;

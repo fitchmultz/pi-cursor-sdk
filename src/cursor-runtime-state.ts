@@ -36,7 +36,10 @@ import {
 } from "./cursor-config.js";
 import { asRecord } from "./cursor-record-utils.js";
 import { getResolvedSessionCursorHttp1Enabled } from "./cursor-http1.js";
-import { getCursorSessionCwd, getCursorSessionProjectTrusted } from "./cursor-session-scope.js";
+import {
+	getCursorSessionScopeKey,
+	resolveCursorSessionScopeFromContext,
+} from "./cursor-session-scope.js";
 
 export const CURSOR_RUNTIME_ENTRY_TYPE = "cursor-runtime-state";
 
@@ -59,7 +62,7 @@ export type CursorRuntimeStateExtensionApi = Pick<
 	"appendEntry" | "getFlag" | "registerFlag" | "registerCommand" | "on"
 >;
 
-type CursorRuntimeContext = Pick<ExtensionContext, "cwd">;
+type CursorRuntimeContext = Pick<ExtensionContext, "cwd" | "sessionManager">;
 
 type CursorStatusRefresh = (ctx: ExtensionContext) => void;
 
@@ -68,11 +71,29 @@ interface CursorCliConfigSnapshot {
 	cloudEnvNames?: string;
 }
 
-let cliCursorSnapshot: CursorCliConfigSnapshot = { config: {} };
-let cliLocalForceConsumed = false;
 let envLocalForceConsumed = false;
-let sessionCursorRuntime: CursorRuntime | undefined;
-let sessionCursorCloudAcknowledged = false;
+interface CursorSessionRuntimeState {
+	runtime?: CursorRuntime;
+	cloudAcknowledged: boolean;
+	cliSnapshot: CursorCliConfigSnapshot;
+	cliLocalForceConsumed: boolean;
+}
+const sessionRuntimeStatesByScopeKey = new Map<string, CursorSessionRuntimeState>();
+
+function getCursorSessionRuntimeState(
+	scopeKey: string = getCursorSessionScopeKey(),
+): CursorSessionRuntimeState {
+	let state = sessionRuntimeStatesByScopeKey.get(scopeKey);
+	if (!state) {
+		state = {
+			cloudAcknowledged: false,
+			cliSnapshot: { config: {} },
+			cliLocalForceConsumed: false,
+		};
+		sessionRuntimeStatesByScopeKey.set(scopeKey, state);
+	}
+	return state;
+}
 
 function isCursorRuntimeEntryData(value: unknown): value is CursorRuntimeEntryData {
 	const record = asRecord(value);
@@ -85,20 +106,22 @@ function stringFlagValue(value: boolean | string | undefined): string | undefine
 	return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-export function getCursorCliConfig(): CursorExplicitSdkConfig {
-	const config = structuredClone(cliCursorSnapshot.config);
-	const envNames = parseExplicitCursorCloudEnvNames(cliCursorSnapshot.cloudEnvNames, "--cursor-cloud-env");
+export function getCursorCliConfig(scopeKey?: string): CursorExplicitSdkConfig {
+	const snapshot = getCursorSessionRuntimeState(scopeKey).cliSnapshot;
+	const config = structuredClone(snapshot.config);
+	const envNames = parseExplicitCursorCloudEnvNames(snapshot.cloudEnvNames, "--cursor-cloud-env");
 	if (envNames) config.cloud = { ...config.cloud, envNames };
 	return config;
 }
 
-export function getCursorSessionConfig(): CursorSdkConfig {
-	const useHttp1ForAgent = getResolvedSessionCursorHttp1Enabled();
+export function getCursorSessionConfig(scopeKey?: string): CursorSdkConfig {
+	const state = getCursorSessionRuntimeState(scopeKey);
+	const useHttp1ForAgent = getResolvedSessionCursorHttp1Enabled(scopeKey);
 	return {
-		...(sessionCursorRuntime
+		...(state.runtime
 			? {
-					runtime: sessionCursorRuntime,
-					...(sessionCursorCloudAcknowledged ? { cloud: { acknowledged: true } } : {}),
+					runtime: state.runtime,
+					...(state.cloudAcknowledged ? { cloud: { acknowledged: true } } : {}),
 				}
 			: {}),
 		...(useHttp1ForAgent === undefined ? {} : { local: { useHttp1ForAgent } }),
@@ -108,20 +131,23 @@ export function getCursorSessionConfig(): CursorSdkConfig {
 export function resolveEffectiveCursorConfig(options: {
 	cwd: string;
 	projectTrusted?: boolean;
+	scopeKey?: string;
 }): CursorResolvedSdkConfig {
 	const loadedConfig = loadCursorSdkConfig({ cwd: options.cwd, projectTrusted: options.projectTrusted === true });
 	return resolveCursorSdkConfig({
-		cli: getCursorCliConfig(),
-		session: getCursorSessionConfig(),
+		cli: getCursorCliConfig(options.scopeKey),
+		session: getCursorSessionConfig(options.scopeKey),
 		user: loadedConfig.user,
 		project: loadedConfig.project,
 	});
 }
 
 export function resolveEffectiveCursorConfigForContext(ctx: CursorRuntimeContext): CursorResolvedSdkConfig {
+	const scope = resolveCursorSessionScopeFromContext(ctx);
 	return resolveEffectiveCursorConfig({
 		cwd: ctx.cwd,
-		projectTrusted: getCursorSessionCwd() === ctx.cwd && getCursorSessionProjectTrusted(),
+		projectTrusted: scope.cwd === ctx.cwd && scope.projectTrusted,
+		scopeKey: scope.scopeKey,
 	});
 }
 
@@ -166,14 +192,18 @@ export function formatCursorStatus(
 	return parts.join(" · ");
 }
 
-export function consumeCursorLocalForceOverride(resolved: { value: boolean; source: string }): boolean {
+export function consumeCursorLocalForceOverride(
+	resolved: { value: boolean; source: string },
+	scopeKey?: string,
+): boolean {
 	if (!resolved.value) return false;
-	if (resolved.source === "cli" && !cliLocalForceConsumed) {
-		if (cliCursorSnapshot.config.local) {
-			const { force: _, ...local } = cliCursorSnapshot.config.local;
-			cliCursorSnapshot.config.local = local;
+	const state = getCursorSessionRuntimeState(scopeKey);
+	if (resolved.source === "cli" && !state.cliLocalForceConsumed) {
+		if (state.cliSnapshot.config.local) {
+			const { force: _, ...local } = state.cliSnapshot.config.local;
+			state.cliSnapshot.config.local = local;
 		}
-		cliLocalForceConsumed = true;
+		state.cliLocalForceConsumed = true;
 		return true;
 	}
 	if (resolved.source === "environment" && !envLocalForceConsumed) {
@@ -183,19 +213,27 @@ export function consumeCursorLocalForceOverride(resolved: { value: boolean; sour
 	return false;
 }
 
-export function restoreSessionCursorRuntimeState(branch: readonly SessionEntry[]): void {
-	sessionCursorRuntime = undefined;
-	sessionCursorCloudAcknowledged = false;
+export function restoreSessionCursorRuntimeState(
+	branch: readonly SessionEntry[],
+	scopeKey: string = getCursorSessionScopeKey(),
+): void {
+	const state = getCursorSessionRuntimeState(scopeKey);
+	state.runtime = undefined;
+	state.cloudAcknowledged = false;
 	for (const entry of branch) {
 		if (entry.type !== "custom" || entry.customType !== CURSOR_RUNTIME_ENTRY_TYPE) continue;
 		if (isCursorRuntimeEntryData(entry.data)) {
-			sessionCursorRuntime = entry.data.runtime;
-			sessionCursorCloudAcknowledged ||= entry.data.cloudAcknowledged === true;
+			state.runtime = entry.data.runtime;
+			state.cloudAcknowledged ||= entry.data.cloudAcknowledged === true;
 		}
 	}
 }
 
-export function restoreCursorCliState(pi: Pick<ExtensionAPI, "getFlag">): void {
+export function restoreCursorCliState(
+	pi: Pick<ExtensionAPI, "getFlag">,
+	scopeKey?: string,
+): void {
+	const state = getCursorSessionRuntimeState(scopeKey);
 	const runtime = stringFlagValue(pi.getFlag("cursor-runtime"));
 	const repo = stringFlagValue(pi.getFlag("cursor-cloud-repo"));
 	const branch = stringFlagValue(pi.getFlag("cursor-cloud-branch"));
@@ -220,14 +258,14 @@ export function restoreCursorCliState(pi: Pick<ExtensionAPI, "getFlag">): void {
 	const local: NonNullable<CursorExplicitSdkConfig["local"]> = {
 		...(pi.getFlag("cursor-auto-review") === true ? { autoReview: true } : {}),
 		...(pi.getFlag("cursor-sandbox") === true ? { sandboxOptions: { enabled: true } } : {}),
-		...(!cliLocalForceConsumed && pi.getFlag("cursor-local-force") === true ? { force: true } : {}),
+		...(!state.cliLocalForceConsumed && pi.getFlag("cursor-local-force") === true ? { force: true } : {}),
 		...(pi.getFlag("cursor-no-local-resume") === true
 			? { resume: false }
 			: pi.getFlag("cursor-local-resume") === true
 				? { resume: true }
 				: {}),
 	};
-	cliCursorSnapshot = {
+	state.cliSnapshot = {
 		config: {
 			...(runtime ? { runtime } : {}),
 			...(Object.keys(cloud).length ? { cloud } : {}),
@@ -241,14 +279,16 @@ function persistCursorRuntimePreference(
 	pi: Pick<ExtensionAPI, "appendEntry">,
 	runtime: CursorRuntime,
 	cloudAcknowledged = false,
+	scopeKey: string = getCursorSessionScopeKey(),
 ): void {
-	const acknowledged = sessionCursorCloudAcknowledged || cloudAcknowledged;
+	const state = getCursorSessionRuntimeState(scopeKey);
+	const acknowledged = state.cloudAcknowledged || cloudAcknowledged;
 	pi.appendEntry<CursorRuntimeEntryData>(CURSOR_RUNTIME_ENTRY_TYPE, {
 		runtime,
 		...(acknowledged ? { cloudAcknowledged: true } : {}),
 	});
-	sessionCursorRuntime = runtime;
-	sessionCursorCloudAcknowledged = acknowledged;
+	state.runtime = runtime;
+	state.cloudAcknowledged = acknowledged;
 }
 
 function registerCursorRuntimeFlags(pi: Pick<ExtensionAPI, "registerFlag">): void {
@@ -392,7 +432,8 @@ function registerCursorRuntimeCommand(
 				ctx.ui.notify(`${currentResolution.message} Fix the explicit override before changing the session runtime.`, "error");
 				return;
 			}
-			if (saveProject && (getCursorSessionCwd() !== ctx.cwd || !getCursorSessionProjectTrusted())) {
+			const scope = resolveCursorSessionScopeFromContext(ctx);
+			if (saveProject && (scope.cwd !== ctx.cwd || !scope.projectTrusted)) {
 				ctx.ui.notify(
 					"Cannot save Cursor project config without explicit project-trust provenance. Ensure .pi/settings.json or another Pi project resource exists, trust the project, then restart pi; or restart with --approve. Project-local package installs must use --approve on every run that reads or writes .pi/cursor-sdk.json.",
 					"error",
@@ -435,7 +476,12 @@ function registerCursorRuntimeCommand(
 				}
 			}
 			try {
-				persistCursorRuntimePreference(pi, raw, cloudAcknowledged);
+				persistCursorRuntimePreference(
+					pi,
+					raw,
+					cloudAcknowledged,
+					resolveCursorSessionScopeFromContext(ctx).scopeKey,
+				);
 			} catch (error) {
 				const effectiveResolution = resolveCursorStatusRuntime(ctx);
 				refreshStatus(ctx);
@@ -488,10 +534,11 @@ export function registerCursorCloudRuntimeControls(
 	});
 }
 
+export function releaseCursorSessionRuntimeState(scopeKey: string): void {
+	sessionRuntimeStatesByScopeKey.delete(scopeKey);
+}
+
 export function resetCursorRuntimeStateForTests(): void {
-	cliCursorSnapshot = { config: {} };
-	cliLocalForceConsumed = false;
 	envLocalForceConsumed = false;
-	sessionCursorRuntime = undefined;
-	sessionCursorCloudAcknowledged = false;
+	sessionRuntimeStatesByScopeKey.clear();
 }

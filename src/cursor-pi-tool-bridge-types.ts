@@ -5,6 +5,7 @@ import type {
 	ExtensionAPI,
 	ExtensionHandler,
 	SessionShutdownEvent,
+	SessionStartEvent,
 	ToolCallEvent,
 	ToolCallEventResult,
 	ToolInfo,
@@ -14,6 +15,7 @@ import type {
 export type CursorPiToolBridgeSnapshotApi = Pick<ExtensionAPI, "getActiveTools" | "getAllTools">;
 
 export type CursorPiToolBridgeExtensionApi = CursorPiToolBridgeSnapshotApi & {
+	on(event: "session_start", handler: ExtensionHandler<SessionStartEvent>): void;
 	on(event: "tool_call", handler: ExtensionHandler<ToolCallEvent, ToolCallEventResult>): void;
 	on(event: "tool_result", handler: ExtensionHandler<ToolResultEvent>): void;
 	on(event: "session_shutdown", handler: ExtensionHandler<SessionShutdownEvent>): void;

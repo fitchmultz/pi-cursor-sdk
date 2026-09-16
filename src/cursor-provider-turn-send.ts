@@ -111,13 +111,16 @@ export async function sendCursorProviderTurn(sendParams: SendCursorProviderTurnP
 			},
 		};
 		throwIfAborted();
-		if (prepared.runtimeTarget === "local" && consumeCursorLocalForceOverride(prepared.localForce)) {
+		if (
+			prepared.runtimeTarget === "local"
+			&& consumeCursorLocalForceOverride(prepared.localForce, params.scope.scopeKey)
+		) {
 			sendOptions.local = { force: true };
 		}
 		const runPromise = agent.send(payload, sendOptions);
 		// Record at send initiation (promise created), including later reject/cancel paths.
 		if (prepared.runtimeTarget === "local") {
-			recordCursorSessionAgentLineage(agent.agentId);
+			recordCursorSessionAgentLineage(agent.agentId, params.scope.scopeKey);
 		}
 		const run = await runPromise;
 		sdkRun = run;

@@ -784,7 +784,7 @@ describe("cursor-session-agent", () => {
 
 		registerCursorSessionScope(pi);
 		registerCursorSessionAgentLifecycle(pi);
-		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/session-a.jsonl");
+		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/session-a.jsonl", "test-session");
 		await acquireSessionCursorAgent({
 			apiKey: "test-key",
 			agentMode: "agent" as const,

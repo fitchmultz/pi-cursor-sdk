@@ -6,6 +6,7 @@ import {
 	createLsToolDefinition,
 	createReadToolDefinition,
 	createWriteToolDefinition,
+	type ExtensionContext,
 	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
@@ -157,7 +158,7 @@ function getNativeReplayStrategy(toolName: string): NativeReplayStrategy | undef
 
 export function wrapNativeCursorTool<TParams extends TSchema, TDetails, TState>(
 	definition: ToolDefinition<TParams, TDetails, TState>,
-	getCurrentDefinition: () => ToolDefinition<TParams, TDetails, TState>,
+	getCurrentDefinition: (ctx?: Pick<ExtensionContext, "cwd">) => ToolDefinition<TParams, TDetails, TState>,
 ): ToolDefinition<TParams, TDetails, TState> {
 	const strategy = getNativeReplayStrategy(definition.name);
 	return {
@@ -181,7 +182,7 @@ export function wrapNativeCursorTool<TParams extends TSchema, TDetails, TState>(
 			if (strategy?.missingReplayPolicy === "block-file-mutation" && isCursorReplayToolCallId(toolCallId)) {
 				throw new Error(`No recorded Cursor ${definition.name} result was available. This replay-only call does not execute file mutations.`);
 			}
-			return getCurrentDefinition().execute(toolCallId, params, signal, onUpdate, ctx);
+			return getCurrentDefinition(ctx).execute(toolCallId, params, signal, onUpdate, ctx);
 		},
 		renderCall(args, theme, context) {
 			const currentRenderCall = getCurrentDefinition().renderCall;
@@ -216,7 +217,10 @@ export function registerNativeCursorTool(
 	toolName: NativeCursorToolName,
 ): void {
 	const definition = createNativeCursorToolDefinition(toolName, getCursorSessionCwd());
-	pi.registerTool(wrapNativeCursorTool(definition, () => createNativeCursorToolDefinition(toolName, getCursorSessionCwd())));
+	pi.registerTool(wrapNativeCursorTool(
+		definition,
+		(ctx) => createNativeCursorToolDefinition(toolName, ctx?.cwd ?? getCursorSessionCwd()),
+	));
 }
 
 export { CURSOR_MODEL_ACTIVE_REPLAY_TOOL_NAMES, CURSOR_REPLAY_TOOL_NAMES };

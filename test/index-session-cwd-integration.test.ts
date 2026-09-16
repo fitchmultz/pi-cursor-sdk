@@ -94,6 +94,56 @@ describe("extension session cwd integration", () => {
 		await cursorPiToolBridgeTestUtils.resetRegisteredBridgeForTests();
 	});
 
+	it("keeps a parent provider bound after an in-process child session shuts down", async () => {
+		const parentDir = mkdtempSync(join(tmpdir(), "pi-cursor-parent-cwd-"));
+		const childDir = mkdtempSync(join(tmpdir(), "pi-cursor-child-cwd-"));
+		try {
+			const parent = createExtensionRegistrationPi();
+			await extensionFactory(parent);
+			await parent.runSessionStart({
+				cwd: parentDir,
+				sessionManager: {
+					getSessionId: () => "parent-session",
+					getSessionFile: () => "/tmp/parent-session.jsonl",
+				},
+			});
+			const parentStream = parent._registered[0]?.config.streamSimple;
+
+			const child = createExtensionRegistrationPi();
+			await extensionFactory(child);
+			await child.runSessionStart({
+				cwd: childDir,
+				sessionManager: {
+					getSessionId: () => "child-session",
+					getSessionFile: () => "/tmp/child-session.jsonl",
+				},
+			});
+			await child.runSessionShutdown(
+				{ reason: "quit" },
+				{
+					cwd: childDir,
+					sessionManager: {
+						getSessionId: () => "child-session",
+						getSessionFile: () => "/tmp/child-session.jsonl",
+					},
+				},
+			);
+
+			await collectEvents(parentStream!(
+				makeModel("composer-2.5"),
+				makeContext(),
+				{ apiKey: "test-key", sessionId: "parent-session" },
+			));
+
+			expect(mockedAgentCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ local: expect.objectContaining({ cwd: parentDir }) }),
+			);
+		} finally {
+			rmSync(parentDir, { recursive: true, force: true });
+			rmSync(childDir, { recursive: true, force: true });
+		}
+	});
+
 	it("passes pi session cwd from extension registration through streamSimple to Agent.create", async () => {
 		const sessionDir = mkdtempSync(join(tmpdir(), "pi-cursor-index-agent-cwd-"));
 		try {

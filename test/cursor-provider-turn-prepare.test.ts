@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { resolveCursorSdkConfig, type CursorResolvedSdkConfig } from "../src/cursor-config.js";
 import { installCursorSdkProcessErrorGuard } from "../src/cursor-sdk-process-error-guard.js";
+import { getCursorSessionScope } from "../src/cursor-session-scope.js";
 import { makeAssistantMessage, makeContext, makeModel } from "./helpers/pi-harness.js";
 
 function makeResolvedConfig(runtime: "local" | "cloud"): CursorResolvedSdkConfig {
@@ -53,6 +54,7 @@ describe("CursorProviderTurnRunner config snapshotting (F3)", () => {
 			context: makeContext(),
 			stream: createAssistantMessageEventStream(),
 			partial: makeAssistantMessage(""),
+			scope: getCursorSessionScope(),
 			options: { apiKey: "test-key" },
 			sdkEventDebugRef: {},
 		});

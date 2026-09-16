@@ -1,14 +1,22 @@
 import type { ExtensionAPI, ProviderConfig, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import { discoverModels, type CursorModelFallbackIssue } from "./model-discovery.js";
-import { registerCursorRuntimeControls } from "./cursor-state.js";
+import { registerCursorRuntimeControls, releaseCursorSessionState } from "./cursor-state.js";
 import { registerCursorNativeToolDisplay } from "./cursor-native-tool-display-registration.js";
 import { registerCursorPiToolBridge } from "./cursor-pi-tool-bridge.js";
 import { registerCursorQuestionTool } from "./cursor-question-tool.js";
-import { registerCursorSkillTool } from "./cursor-skill-tool.js";
-import { registerCursorSessionScope } from "./cursor-session-scope.js";
+import { registerCursorSkillTool, releaseCursorSkillState } from "./cursor-skill-tool.js";
+import {
+	associateCursorSessionScopeSignal,
+	registerCursorSessionScope,
+	releaseCursorSessionScope,
+	resolveCursorSessionScopeFromContext,
+} from "./cursor-session-scope.js";
 import { registerCursorSessionAgentLifecycle } from "./cursor-session-agent-lifecycle.js";
 import { registerCursorSessionAgentLineage } from "./cursor-session-agent-lineage.js";
-import { registerCursorSessionAgentResume } from "./cursor-session-agent-resume.js";
+import {
+	registerCursorSessionAgentResume,
+	releaseCursorSessionAgentResumeState,
+} from "./cursor-session-agent-resume.js";
 import { streamCursorLazy } from "./cursor-provider-lazy.js";
 import { CURSOR_API_KEY_CONFIG_VALUE, resolveCursorApiKey } from "./cursor-api-key.js";
 import { registerCursorFallbackIssueWarning } from "./cursor-fallback-warning.js";
@@ -16,6 +24,9 @@ import { registerCursorAgentsContextDedup } from "./cursor-agents-context-regist
 import { registerCursorOverflowNormalization } from "./cursor-provider-overflow.js";
 import { registerCursorSdkSessionProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
 import { prepareCursorSessionForCompaction } from "./cursor-session-compaction-prep.js";
+import { releaseCursorHttp1SessionState } from "./cursor-http1.js";
+import { releaseCursorSessionRuntimeState } from "./cursor-runtime-state.js";
+import { releaseCursorSdkEventDebugSessionState } from "./cursor-sdk-event-debug-session.js";
 
 type CursorExtensionApi =
 	& Pick<ExtensionAPI, "registerProvider" | "registerCommand" | "on">
@@ -54,8 +65,9 @@ export default async function (pi: CursorExtensionApi) {
 	registerCursorSessionAgentLineage(pi);
 	registerCursorSessionAgentLifecycle(pi);
 	registerCursorSessionAgentResume(pi);
-	pi.on("session_before_compact", async () => {
-		await prepareCursorSessionForCompaction();
+	pi.on("session_before_compact", async (event, ctx) => {
+		const scope = associateCursorSessionScopeSignal(event.signal, ctx);
+		await prepareCursorSessionForCompaction(scope.scopeKey);
 	});
 	registerCursorRuntimeControls(pi);
 	registerCursorNativeToolDisplay(pi);
@@ -98,6 +110,16 @@ export default async function (pi: CursorExtensionApi) {
 	});
 
 	registerCursorProvider(pi, models);
+	pi.on("session_shutdown", (_event, ctx) => {
+		const scope = resolveCursorSessionScopeFromContext(ctx);
+		releaseCursorSessionAgentResumeState(scope.scopeKey);
+		releaseCursorSessionState(scope.scopeKey);
+		releaseCursorSessionRuntimeState(scope.scopeKey);
+		releaseCursorHttp1SessionState(scope.scopeKey);
+		releaseCursorSdkEventDebugSessionState(scope.scopeKey);
+		releaseCursorSkillState(scope.scopeKey);
+		releaseCursorSessionScope(ctx);
+	});
 	// Register last so session_shutdown cleanup remains protected until other Cursor handlers finish.
 	registerCursorSdkSessionProcessErrorGuard(pi);
 }

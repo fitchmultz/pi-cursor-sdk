@@ -4,7 +4,7 @@ import { asRecord, getString } from "./cursor-record-utils.js";
 import { fsyncExistingRegularFile } from "./cursor-durable-fs.js";
 import { scrubSensitiveText } from "./cursor-sensitive-text.js";
 import { loadCursorSdk } from "./cursor-sdk-runtime.js";
-import { getCursorSessionScopeKey } from "./cursor-session-scope.js";
+import { resolveCursorSessionScopeFromContext } from "./cursor-session-scope.js";
 import {
 	CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE,
 	isCursorLocalAgentId,
@@ -96,7 +96,7 @@ function getCurrentCleanupScope(ctx: LocalResumeCleanupCommandContext): CursorSe
 	const sessionId = ctx.sessionManager.getSessionId();
 	const repoRoot = resolveCursorSessionRepoRoot(ctx.cwd);
 	return {
-		scopeKey: getCursorSessionScopeKey(),
+		scopeKey: resolveCursorSessionScopeFromContext(ctx).scopeKey,
 		...(sessionFile ? { sessionFile } : {}),
 		...(sessionId ? { sessionId } : {}),
 		cwd: ctx.cwd,

@@ -37,7 +37,7 @@ import {
 	preflightCursorCloudRuntime,
 } from "./cursor-cloud-options.js";
 import { inspectCursorCloudLocalState } from "./cursor-cloud-local-state.js";
-import { getCursorSessionName, getCursorSessionProjectTrusted } from "./cursor-session-scope.js";
+import { getCursorSessionScope, type CursorSessionScope } from "./cursor-session-scope.js";
 import { resolveCursorPiToolBridgeEnabled } from "./cursor-pi-tool-bridge-env.js";
 import {
 	buildCursorToolManifestText,
@@ -89,8 +89,13 @@ function buildCursorCloudPromptContext(context: Context, handoff: "fresh" | "boo
 
 const CLOUD_SEND_PLAN: CursorSessionSendPlan = { mode: "bootstrap", resetAgent: false, reason: "initial" };
 
-export function resolveCursorProviderTurnConfig(cwd: string) {
-	return resolveEffectiveCursorConfig({ cwd, projectTrusted: getCursorSessionProjectTrusted() });
+export function resolveCursorProviderTurnConfig(scopeOrCwd: CursorSessionScope | string) {
+	const scope = getCursorSessionScope();
+	return resolveEffectiveCursorConfig({
+		cwd: typeof scopeOrCwd === "string" ? scopeOrCwd : scopeOrCwd.cwd,
+		projectTrusted: typeof scopeOrCwd === "string" ? scope.projectTrusted : scopeOrCwd.projectTrusted,
+		scopeKey: typeof scopeOrCwd === "string" ? scope.scopeKey : scopeOrCwd.scopeKey,
+	});
 }
 
 function buildCloudCursorProviderTurnLifecycle(agent: SDKAgent): CursorProviderTurnLifecycle {
@@ -138,7 +143,7 @@ async function prepareCursorCloudProviderTurn(
 			hasPriorContext: context.messages.length > 1,
 		});
 		if (!preflight.ok) throw new Error(formatCursorCloudPreflightError(preflight));
-		if (getPendingCursorLiveRun(context) || getActiveCursorLiveRunForCurrentScope()) {
+		if (getPendingCursorLiveRun(context) || getActiveCursorLiveRunForCurrentScope(params.scope.scopeKey)) {
 			throw new Error("Cursor cloud runtime cannot start while a local Cursor live run is pending; finish or abort the local run, then retry.");
 		}
 
@@ -161,7 +166,7 @@ async function prepareCursorCloudProviderTurn(
 				modelSelection: selection,
 				agentMode,
 				resolvedConfig,
-				name: getCursorSessionName(),
+				name: params.scope.sessionName,
 			})),
 		);
 		cloudAgentForCleanup = agent;
@@ -286,7 +291,10 @@ async function prepareCursorLocalProviderTurn(
 			createAgent: (createOptions: Parameters<typeof Agent.create>[0]) =>
 				suppressCursorSdkOutput(() => Agent.create(createOptions)),
 		};
-		let sessionAgentLease = await acquireSessionCursorAgent(sessionAgentAcquireParams);
+		let sessionAgentLease = await acquireSessionCursorAgent({
+			...sessionAgentAcquireParams,
+			scope: params.scope,
+		});
 		sessionAgentScopeKey = sessionAgentLease.scopeKey;
 		throwIfAborted();
 
@@ -319,7 +327,11 @@ async function prepareCursorLocalProviderTurn(
 		let prompt = buildCursorSessionSendPrompt(context, promptOptions, sendPlan);
 		if (sendPlan.resetAgent) {
 			await resetSessionCursorAgent(sessionAgentScopeKey);
-			sessionAgentLease = await acquireSessionCursorAgent({ ...sessionAgentAcquireParams, forceCreate: true });
+			sessionAgentLease = await acquireSessionCursorAgent({
+				...sessionAgentAcquireParams,
+				scope: params.scope,
+				forceCreate: true,
+			});
 			sessionAgentScopeKey = sessionAgentLease.scopeKey;
 			bridgeToolNames = new Set(sessionAgentLease.bridgeRun?.snapshot.tools.map((tool) => tool.mcpToolName) ?? []);
 			includePiBridgeGuidance = bridgeToolNames.size > 0;
@@ -444,8 +456,10 @@ export async function prepareCursorProviderTurn(
 	const { params, resolvedConfig } = prepareParams;
 	const { model, options } = params;
 
-	const agentMode = getCursorProviderAgentModeOrThrow();
-	const fastEnabled = resolvedConfig.runtime.value === "cloud" ? undefined : getEffectiveFastForModelId(model.id);
+	const agentMode = getCursorProviderAgentModeOrThrow(params.scope.scopeKey);
+	const fastEnabled = resolvedConfig.runtime.value === "cloud"
+		? undefined
+		: getEffectiveFastForModelId(model.id, params.scope.scopeKey);
 	const selection = buildCursorModelSelection(model.id, options?.reasoning ?? "off", fastEnabled);
 	const context: PrepareCursorProviderTurnContext = { ...prepareParams, agentMode, selection, fastEnabled };
 

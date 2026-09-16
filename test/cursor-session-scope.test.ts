@@ -4,13 +4,17 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	__testUtils as cursorSessionScopeTestUtils,
+	associateCursorSessionScopeSignal,
 	getCursorSessionCwd,
 	getCursorSessionName,
 	getCursorSessionProjectTrusted,
+	getCursorSessionScope,
 	MAX_CURSOR_SESSION_NAME_LENGTH,
 	registerCursorSessionScope,
+	releaseCursorSessionScope,
+	resolveCursorSessionScope,
 } from "../src/cursor-session-scope.js";
-import { createEventHarness } from "./helpers/pi-harness.js";
+import { createEventHarness, createExtensionTestContext } from "./helpers/pi-harness.js";
 
 describe("cursor-session-scope cwd", () => {
 	afterEach(() => {
@@ -99,6 +103,46 @@ describe("cursor-session-scope cwd", () => {
 		expect(MAX_CURSOR_SESSION_NAME_LENGTH).toBe(100);
 		expect(getCursorSessionName()).toHaveLength(MAX_CURSOR_SESSION_NAME_LENGTH);
 		expect(getCursorSessionName()?.endsWith("…")).toBe(true);
+	});
+
+	it("resolves concurrent sessions by Pi session ID and event signal", async () => {
+		const parent = createEventHarness();
+		const child = createEventHarness();
+		registerCursorSessionScope(parent);
+		registerCursorSessionScope(child);
+		await parent.runSessionStart({
+			cwd: "/tmp/parent",
+			sessionManager: {
+				getSessionId: () => "parent-session",
+				getSessionFile: () => "/tmp/parent.jsonl",
+			},
+		});
+		await child.runSessionStart({
+			cwd: "/tmp/child",
+			sessionManager: {
+				getSessionId: () => "child-session",
+				getSessionFile: () => "/tmp/child.jsonl",
+			},
+		});
+
+		const parentScope = resolveCursorSessionScope({ sessionId: "parent-session" });
+		expect(parentScope).toMatchObject({ cwd: "/tmp/parent", scopeKey: "/tmp/parent.jsonl" });
+		expect(resolveCursorSessionScope({ sessionId: "child-session" })).toMatchObject({
+			cwd: "/tmp/child",
+			scopeKey: "/tmp/child.jsonl",
+		});
+
+		const signal = new AbortController().signal;
+		associateCursorSessionScopeSignal(signal, createExtensionTestContext({
+			cwd: "/tmp/parent",
+			sessionManager: { getSessionId: () => "parent-session" },
+		}));
+		expect(resolveCursorSessionScope({ sessionId: "standalone-summary", signal })).toBe(parentScope);
+
+		releaseCursorSessionScope(createExtensionTestContext({
+			sessionManager: { getSessionId: () => "child-session" },
+		}));
+		expect(getCursorSessionScope()).toBe(parentScope);
 	});
 
 	it("updates cwd on subsequent session_start events", async () => {

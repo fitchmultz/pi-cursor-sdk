@@ -8,6 +8,7 @@ import type { CursorProviderTurnPrepareResult, LiveCursorProviderTurnRuntime, Lo
 import { installCursorSdkProcessErrorGuard } from "../src/cursor-sdk-process-error-guard.js";
 import type { CursorSdkEventDebugSink } from "../src/cursor-sdk-event-debug.js";
 import type { SessionCursorAgentLease } from "../src/cursor-session-agent.js";
+import { getCursorSessionScope } from "../src/cursor-session-scope.js";
 import { createCursorLiveRunAccountingState } from "../src/cursor-live-run-accounting.js";
 import { asMockCursorRun } from "./helpers/cursor-provider-harness.js";
 import { collectAssistantEvents, makeAssistantMessage, makeContext, makeModel } from "./helpers/pi-harness.js";
@@ -104,6 +105,7 @@ describe("CursorRunFinalizer", () => {
 				context: makeContext(),
 				stream: createAssistantMessageEventStream(),
 				partial: makeAssistantMessage(""),
+				scope: getCursorSessionScope(),
 				sdkEventDebugRef: {},
 			},
 			sdkEventDebug: () => debugSink,
@@ -203,6 +205,7 @@ describe("CursorRunFinalizer", () => {
 				context,
 				stream,
 				partial,
+				scope: getCursorSessionScope(),
 				sdkEventDebugRef: {},
 			},
 			sdkEventDebug: () => debugSink,
@@ -310,6 +313,7 @@ describe("CursorRunFinalizer", () => {
 				context,
 				stream,
 				partial,
+				scope: getCursorSessionScope(),
 				sdkEventDebugRef: {},
 			},
 			sdkEventDebug: () => debugSink,

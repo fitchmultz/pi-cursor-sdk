@@ -269,6 +269,50 @@ describe("cursor-session-agent-resume", () => {
 		);
 	});
 
+	it("keeps parent resume persistence bound to the parent extension API after a child registers", async () => {
+		const parent = createPiHarness();
+		registerCursorSessionScope(parent);
+		registerCursorSessionAgentResume(parent);
+		const first = messageEntry("u1", null);
+		const assistant = messageEntry("a1", "u1", "assistant");
+		const parentSessionManager = {
+			getSessionFile: vi.fn(() => "/tmp/parent.jsonl"),
+			getSessionId: vi.fn(() => "parent-session"),
+			getBranch: vi.fn(() => [first, assistant]),
+		};
+		await parent.runSessionStart({ cwd: "/tmp/parent", sessionManager: parentSessionManager });
+
+		const child = createPiHarness();
+		registerCursorSessionScope(child);
+		registerCursorSessionAgentResume(child);
+		await child.runSessionStart({
+			cwd: "/tmp/child",
+			sessionManager: {
+				getSessionFile: vi.fn(() => "/tmp/child.jsonl"),
+				getSessionId: vi.fn(() => "child-session"),
+				getBranch: vi.fn(() => []),
+			},
+		});
+
+		parent.appendEntry.mockClear();
+		child.appendEntry.mockClear();
+		persistCursorSessionAgentResumeHandle({
+			runtime: "local",
+			agentId: "agent-parent",
+			poolKey: "pool-parent",
+			sendState: { bootstrapped: true, contextFingerprint: "parent", incrementalSendCount: 0 },
+			storeIdentity: { version: 1, stateRoot: "/tmp/parent-store" },
+		}, "/tmp/parent.jsonl");
+
+		await parent.runTurnEnd({}, { cwd: "/tmp/parent", sessionManager: parentSessionManager });
+
+		expect(parent.appendEntry).toHaveBeenCalledWith(
+			CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE,
+			expect.objectContaining({ scopeKey: "/tmp/parent.jsonl", agentId: "agent-parent" }),
+		);
+		expect(child.appendEntry).not.toHaveBeenCalled();
+	});
+
 	it("rejects restored handles when a later assistant exists without a newer resume entry", async () => {
 		const pi = createPiHarness();
 		registerCursorSessionScope(pi);

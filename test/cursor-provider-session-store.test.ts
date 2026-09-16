@@ -1,7 +1,11 @@
 import { toNamespacedPath } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { streamCursor } from "../src/cursor-provider.js";
-import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
+import {
+	__testUtils as cursorSessionScopeTestUtils,
+	registerCursorSessionScope,
+} from "../src/cursor-session-scope.js";
+import { registerCursorSessionAgentLifecycle } from "../src/cursor-session-agent-lifecycle.js";
 import { buildCursorSessionStateRoot } from "../src/cursor-session-store.js";
 import {
 	collectEvents,
@@ -13,6 +17,7 @@ import {
 	mockedMessagesList,
 	resetCursorProviderTestState,
 } from "./helpers/cursor-provider-harness.js";
+import { createEventHarness, createExtensionTestContext } from "./helpers/pi-harness.js";
 import { installCursorSessionStoreMock } from "./helpers/cursor-session-store.js";
 
 describe("streamCursor session store", () => {
@@ -44,5 +49,74 @@ describe("streamCursor session store", () => {
 		expect(mockedCreate.mock.calls[0][0].local?.store).toBe(store);
 		expect(mockedMessagesList).toHaveBeenCalledWith("agent-1", expect.objectContaining({ store }));
 		expect(mockedCreateAgentPlatform).toHaveBeenCalledWith(expect.objectContaining({ localStore: store }));
+	});
+
+	it("keeps a parent provider turn on its own scope after a child session shuts down", async () => {
+		const storeMock = installCursorSessionStoreMock();
+		const parentCwd = "/tmp/parent-project";
+		const childCwd = "/tmp/child-project";
+		const parentSessionId = "parent-session";
+		const childSessionId = "child-session";
+		const parentSessionFile = "/tmp/sessions/parent.jsonl";
+		const childSessionFile = "/tmp/sessions/child.jsonl";
+		const pi = createEventHarness();
+		registerCursorSessionScope(pi);
+		registerCursorSessionAgentLifecycle(pi);
+		const parentCtx = createExtensionTestContext({
+			cwd: parentCwd,
+			sessionManager: {
+				getSessionId: () => parentSessionId,
+				getSessionFile: () => parentSessionFile,
+			},
+		});
+		const childCtx = createExtensionTestContext({
+			cwd: childCwd,
+			sessionManager: {
+				getSessionId: () => childSessionId,
+				getSessionFile: () => childSessionFile,
+			},
+		});
+
+		await pi.invokeEventWithContext(
+			"session_start",
+			{ type: "session_start", reason: "startup" },
+			parentCtx,
+		);
+		await pi.invokeEventWithContext(
+			"session_start",
+			{ type: "session_start", reason: "startup" },
+			childCtx,
+		);
+		await pi.invokeEventWithContext(
+			"session_shutdown",
+			{ type: "session_shutdown", reason: "quit" },
+			childCtx,
+		);
+		mockCreatedAgent({
+			send: vi.fn().mockResolvedValue({
+				id: "run-parent",
+				agentId: "agent-parent",
+				status: "finished",
+				wait: vi.fn().mockResolvedValue({ id: "run-parent", status: "finished" }),
+				cancel: vi.fn(),
+				supports: () => true,
+				unsupportedReason: () => undefined,
+			}),
+		});
+
+		const events = await collectEvents(streamCursor(
+			makeModel("gpt-5.5@1m"),
+			makeContext(),
+			{ apiKey: "test-key", sessionId: parentSessionId },
+		));
+
+		expect(events.some((event) => event.type === "done")).toBe(true);
+		expect(mockedCreate).toHaveBeenCalledWith(expect.objectContaining({
+			local: expect.objectContaining({ cwd: parentCwd }),
+		}));
+		expect(storeMock.openSqliteStore).toHaveBeenCalledWith({
+			workspaceRef: parentCwd,
+			stateRoot: toNamespacedPath(buildCursorSessionStateRoot("/tmp/cursor-sdk-state", parentSessionFile, true)),
+		});
 	});
 });

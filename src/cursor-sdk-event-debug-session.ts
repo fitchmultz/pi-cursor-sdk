@@ -7,7 +7,7 @@ import {
 	SESSION_MANIFEST,
 	resolveCursorSdkEventDebugBaseDir,
 } from "./cursor-sdk-event-debug-constants.js";
-import { getCursorSessionFile, getCursorSessionScopeKey } from "./cursor-session-scope.js";
+import type { CursorSessionScope } from "./cursor-session-scope.js";
 
 const ANONYMOUS_SESSION_SCOPE_KEY = "__anonymous__";
 
@@ -93,13 +93,14 @@ function resolveSessionDebugDir(
 export function allocateCursorSdkEventDebugTurn(
 	cwd: string,
 	env: Record<string, string | undefined>,
+	scope: CursorSessionScope,
 ): CursorSdkEventDebugTurnAllocation {
 	const pinnedRunDir = resolvePinnedRunArtifactDir(env[CURSOR_SDK_EVENT_DEBUG_RUN_DIR_ENV]);
 	if (pinnedRunDir) {
 		return { artifactDir: pinnedRunDir, pinnedRun: true };
 	}
 
-	const scopeKey = getCursorSessionScopeKey();
+	const scopeKey = scope.scopeKey;
 	const sessionDir = resolveSessionDebugDir(cwd, env, scopeKey);
 	mkdirSync(sessionDir, { recursive: true });
 
@@ -118,13 +119,13 @@ export function allocateCursorSdkEventDebugTurn(
 	const existing = readSessionManifest(sessionDir);
 	const manifest: CursorSdkEventDebugSessionManifest = existing ?? {
 		sessionKey: scopeKey,
-		sessionFile: getCursorSessionFile(),
+		sessionFile: scope.sessionFile,
 		sessionDir,
 		createdAt: new Date().toISOString(),
 		updatedAt: new Date().toISOString(),
 		turns: [],
 	};
-	manifest.sessionFile = getCursorSessionFile();
+	manifest.sessionFile = scope.sessionFile;
 	manifest.updatedAt = new Date().toISOString();
 	manifest.turns.push({
 		turn: state.turnCounter,
@@ -146,6 +147,7 @@ export function updateCursorSdkEventDebugSessionManifest(
 	sessionDir: string,
 	artifactDir: string,
 	summary: Record<string, unknown>,
+	sessionFile?: string,
 ): void {
 	const manifest = readSessionManifest(sessionDir);
 	if (!manifest) return;
@@ -154,8 +156,12 @@ export function updateCursorSdkEventDebugSessionManifest(
 	turnEntry.finalizedAt = new Date().toISOString();
 	turnEntry.summary = summary;
 	manifest.updatedAt = new Date().toISOString();
-	manifest.sessionFile = getCursorSessionFile();
+	manifest.sessionFile = sessionFile;
 	writeSessionManifest(sessionDir, manifest);
+}
+
+export function releaseCursorSdkEventDebugSessionState(scopeKey: string): void {
+	sessionDebugStates.delete(scopeKey);
 }
 
 export function resetCursorSdkEventDebugSessionStateForTests(): void {

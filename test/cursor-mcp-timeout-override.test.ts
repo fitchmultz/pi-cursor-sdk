@@ -11,6 +11,7 @@ import {
 	resolveCursorMcpToolTimeoutMs,
 	restoreCursorMcpToolTimeoutOverride,
 } from "../src/cursor-mcp-timeout-override.js";
+import { getCursorSessionScope } from "../src/cursor-session-scope.js";
 
 afterEach(() => {
 	restoreCursorMcpToolTimeoutOverride();
@@ -224,6 +225,7 @@ describe("Cursor MCP timeout override", () => {
 					context: {} as never,
 					stream: { push: vi.fn() } as never,
 					partial: { content: [] } as never,
+					scope: getCursorSessionScope(),
 					sdkEventDebugRef: {},
 				},
 				cwd: process.cwd(),

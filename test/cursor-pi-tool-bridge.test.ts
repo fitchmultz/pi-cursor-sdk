@@ -16,12 +16,17 @@ import {
 	__testUtils,
 	buildCursorPiToolBridgeSnapshot,
 	buildCursorPiToolBridgeSurfaceSignature,
+	getRegisteredCursorPiToolBridge,
 	registerCursorPiToolBridge,
 	resolveCursorPiToolBridgeBuiltinsEnabled,
 	resolveCursorPiToolBridgeDebugEnabled,
 	resolveCursorPiToolBridgeEnabled,
 	type CursorPiToolBridgeRun,
 } from "../src/cursor-pi-tool-bridge.js";
+import {
+	__testUtils as cursorSessionScopeTestUtils,
+	registerCursorSessionScope,
+} from "../src/cursor-session-scope.js";
 
 function createToolInfo(name: string, description = `${name} description`, parameters: TSchema = Type.Object({})): ToolInfo {
 	return createTestToolInfo(name, parameters, description);
@@ -96,7 +101,54 @@ describe("cursor pi tool bridge flags and snapshots", () => {
 		delete process.env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS;
 		delete process.env.PI_CURSOR_PI_TOOL_BRIDGE_DEBUG;
 		nativeToolDisplayTestUtils.reset();
+		cursorSessionScopeTestUtils.reset();
 		await __testUtils.resetRegisteredBridgeForTests();
+	});
+
+	it("keeps the parent bridge registered when a child session starts and shuts down", async () => {
+		const parent = createBridgePiHarness({
+			active: ["parent_tool"],
+			tools: [createToolInfo("parent_tool")],
+		});
+		registerCursorSessionScope(parent);
+		const parentBridge = registerCursorPiToolBridge(parent);
+		await parent.runSessionStart({
+			cwd: "/tmp/parent",
+			sessionManager: {
+				getSessionId: () => "parent-session",
+				getSessionFile: () => "/tmp/parent.jsonl",
+			},
+		});
+
+		const child = createBridgePiHarness({
+			active: ["child_tool"],
+			tools: [createToolInfo("child_tool")],
+		});
+		registerCursorSessionScope(child);
+		const childBridge = registerCursorPiToolBridge(child);
+		await child.runSessionStart({
+			cwd: "/tmp/child",
+			sessionManager: {
+				getSessionId: () => "child-session",
+				getSessionFile: () => "/tmp/child.jsonl",
+			},
+		});
+
+		expect(getRegisteredCursorPiToolBridge("/tmp/parent.jsonl")).toBe(parentBridge);
+		expect(getRegisteredCursorPiToolBridge("/tmp/child.jsonl")).toBe(childBridge);
+		await child.runSessionShutdown(
+			{ reason: "quit" },
+			{
+				cwd: "/tmp/child",
+				sessionManager: {
+					getSessionId: () => "child-session",
+					getSessionFile: () => "/tmp/child.jsonl",
+				},
+			},
+		);
+
+		expect(getRegisteredCursorPiToolBridge("/tmp/parent.jsonl")).toBe(parentBridge);
+		expect(parentBridge.isEnabled()).toBe(true);
 	});
 
 	it("defaults the bridge on and built-in overlap exposure off with explicit env controls", () => {
@@ -240,6 +292,7 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 		delete process.env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS;
 		delete process.env.PI_CURSOR_PI_TOOL_BRIDGE_DEBUG;
 		nativeToolDisplayTestUtils.reset();
+		cursorSessionScopeTestUtils.reset();
 		await __testUtils.resetRegisteredBridgeForTests();
 	});
 

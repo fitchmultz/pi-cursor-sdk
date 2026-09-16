@@ -14,6 +14,10 @@ import { isCursorModel } from "./cursor-model.js";
 import { registerCursorModelLifecycle, type CursorModelLifecycleExtensionApi } from "./cursor-model-lifecycle.js";
 import { resolveCursorPiToolBridgeEnabled } from "./cursor-pi-tool-bridge-env.js";
 import { resolveEffectiveCursorConfigForContext } from "./cursor-runtime-state.js";
+import {
+	getCursorSessionScopeKey,
+	resolveCursorSessionScopeFromContext,
+} from "./cursor-session-scope.js";
 
 export const CURSOR_ACTIVATE_SKILL_TOOL_NAME = "cursor_activate_skill";
 export const CURSOR_ACTIVATE_SKILL_MCP_NAME = "pi__cursor_activate_skill";
@@ -36,7 +40,7 @@ interface CursorSkillActivationDetails {
 	availableSkillNames: string[];
 }
 
-let currentSkillsByName = new Map<string, Skill>();
+const skillsByScopeKey = new Map<string, Map<string, Skill>>();
 
 function escapeXml(value: string): string {
 	return value
@@ -51,32 +55,43 @@ function getVisibleSkills(skills: readonly Skill[] | undefined): Skill[] {
 	return (skills ?? []).filter((skill) => !skill.disableModelInvocation);
 }
 
-function setCurrentSkills(skills: readonly Skill[] | undefined): void {
-	currentSkillsByName = new Map(getVisibleSkills(skills).map((skill) => [skill.name, skill]));
+function setCurrentSkills(
+	skills: readonly Skill[] | undefined,
+	scopeKey: string = getCursorSessionScopeKey(),
+): void {
+	skillsByScopeKey.set(scopeKey, new Map(getVisibleSkills(skills).map((skill) => [skill.name, skill])));
 }
 
-function getAvailableSkillNames(): string[] {
-	return [...currentSkillsByName.keys()].sort();
+function getAvailableSkillNames(scopeKey: string = getCursorSessionScopeKey()): string[] {
+	return [...(skillsByScopeKey.get(scopeKey)?.keys() ?? [])].sort();
 }
 
 function resolveEffectiveRuntimeForSkillLifecycle(
 	cursorModel: boolean,
-	ctx: Pick<ExtensionContext, "cwd"> & Partial<Pick<ExtensionContext, "isProjectTrusted">>,
+	ctx: Pick<ExtensionContext, "cwd" | "sessionManager"> & Partial<Pick<ExtensionContext, "isProjectTrusted">>,
 ): CursorRuntime {
 	return cursorModel ? resolveEffectiveCursorConfigForContext(ctx).runtime.value : "local";
 }
 
-function shouldExposeSkillTool(model: ExtensionContext["model"], runtime: CursorRuntime): boolean {
-	return runtime === "local" && isCursorModel(model) && resolveCursorPiToolBridgeEnabled() && currentSkillsByName.size > 0;
+function shouldExposeSkillTool(
+	model: ExtensionContext["model"],
+	runtime: CursorRuntime,
+	scopeKey: string,
+): boolean {
+	return runtime === "local"
+		&& isCursorModel(model)
+		&& resolveCursorPiToolBridgeEnabled()
+		&& (skillsByScopeKey.get(scopeKey)?.size ?? 0) > 0;
 }
 
 function syncCursorSkillToolForModel(
 	pi: Pick<ExtensionAPI, "getActiveTools" | "setActiveTools">,
 	model: ExtensionContext["model"],
 	runtime: CursorRuntime,
+	scopeKey: string,
 ): void {
 	const activeToolNames = new Set(pi.getActiveTools());
-	const shouldBeActive = !arePiToolsDisabled(pi) && shouldExposeSkillTool(model, runtime);
+	const shouldBeActive = !arePiToolsDisabled(pi) && shouldExposeSkillTool(model, runtime, scopeKey);
 	const alreadyActive = activeToolNames.has(CURSOR_ACTIVATE_SKILL_TOOL_NAME);
 	if (shouldBeActive === alreadyActive) return;
 	if (shouldBeActive) {
@@ -157,13 +172,17 @@ async function listSkillResourcePaths(baseDir: string): Promise<string[]> {
 	return resources;
 }
 
-function buildActivationDetails(skill: Skill | undefined, resources: string[] = []): CursorSkillActivationDetails {
+function buildActivationDetails(
+	skill: Skill | undefined,
+	resources: string[] = [],
+	scopeKey: string = getCursorSessionScopeKey(),
+): CursorSkillActivationDetails {
 	return {
 		name: skill?.name,
 		filePath: skill?.filePath,
 		baseDir: skill ? dirname(skill.filePath) : undefined,
 		resources,
-		availableSkillNames: getAvailableSkillNames(),
+		availableSkillNames: getAvailableSkillNames(scopeKey),
 	};
 }
 
@@ -202,7 +221,9 @@ export function registerCursorSkillTool(pi: CursorSkillToolExtensionApi): void {
 			`Use ${CURSOR_ACTIVATE_SKILL_TOOL_NAME} only for skill names listed in the current <available_skills> catalog.`,
 			"After loading a skill, follow its instructions and resolve relative skill paths against the returned skill directory.",
 		],
-		async execute(_toolCallId, params) {
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const scopeKey = resolveCursorSessionScopeFromContext(ctx).scopeKey;
+			const currentSkillsByName = skillsByScopeKey.get(scopeKey) ?? new Map<string, Skill>();
 			const requestedName = (params as CursorActivateSkillParams).name?.trim();
 			if (!requestedName) {
 				throw new Error("No skill name was provided.");
@@ -210,7 +231,7 @@ export function registerCursorSkillTool(pi: CursorSkillToolExtensionApi): void {
 			const skill = currentSkillsByName.get(requestedName);
 			if (!skill) {
 				throw new Error(
-					`Skill not available: ${requestedName}. Available skills: ${getAvailableSkillNames().join(", ") || "none"}.`,
+					`Skill not available: ${requestedName}. Available skills: ${getAvailableSkillNames(scopeKey).join(", ") || "none"}.`,
 				);
 			}
 
@@ -221,7 +242,7 @@ export function registerCursorSkillTool(pi: CursorSkillToolExtensionApi): void {
 				]);
 				return {
 					content: [{ type: "text" as const, text: wrapSkillContent(skill, content, resources) }],
-					details: buildActivationDetails(skill, resources),
+					details: buildActivationDetails(skill, resources, scopeKey),
 				};
 			} catch (error) {
 				throw new Error(
@@ -231,38 +252,48 @@ export function registerCursorSkillTool(pi: CursorSkillToolExtensionApi): void {
 		},
 	});
 
-	const clearSkillsAndSync = (model: ExtensionContext["model"], runtime: CursorRuntime = "local"): void => {
-		setCurrentSkills([]);
-		syncCursorSkillToolForModel(pi, model, runtime);
+	const clearSkillsAndSync = (
+		ctx: Pick<ExtensionContext, "model" | "sessionManager">,
+		runtime: CursorRuntime = "local",
+	): void => {
+		const scopeKey = resolveCursorSessionScopeFromContext(ctx).scopeKey;
+		setCurrentSkills([], scopeKey);
+		syncCursorSkillToolForModel(pi, ctx.model, runtime, scopeKey);
 	};
 
 	registerCursorModelLifecycle(pi, {
 		sessionStart: (_event, ctx) => {
-			clearSkillsAndSync(ctx.model);
+			clearSkillsAndSync(ctx);
 		},
-		modelSelect: (event) => {
-			clearSkillsAndSync(event.model);
+		modelSelect: (_event, ctx) => {
+			clearSkillsAndSync(ctx);
 		},
 		turnStart: (_event, ctx) => {
 			const cursorModel = isCursorModel(ctx.model);
 			const runtime = resolveEffectiveRuntimeForSkillLifecycle(cursorModel, ctx);
-			if (!cursorModel || runtime === "cloud") setCurrentSkills([]);
-			syncCursorSkillToolForModel(pi, ctx.model, runtime);
+			const scopeKey = resolveCursorSessionScopeFromContext(ctx).scopeKey;
+			if (!cursorModel || runtime === "cloud") setCurrentSkills([], scopeKey);
+			syncCursorSkillToolForModel(pi, ctx.model, runtime, scopeKey);
 		},
 		beforeAgentStart: (event, ctx) => {
 			const cursorModel = isCursorModel(ctx.model);
 			const runtime = resolveEffectiveRuntimeForSkillLifecycle(cursorModel, ctx);
+			const scopeKey = resolveCursorSessionScopeFromContext(ctx).scopeKey;
 			if (cursorModel && runtime === "local") {
-				setCurrentSkills(event.systemPromptOptions?.skills);
+				setCurrentSkills(event.systemPromptOptions?.skills, scopeKey);
 			} else {
-				setCurrentSkills([]);
+				setCurrentSkills([], scopeKey);
 			}
-			syncCursorSkillToolForModel(pi, ctx.model, runtime);
+			syncCursorSkillToolForModel(pi, ctx.model, runtime, scopeKey);
 			const resolved = resolveCursorSkillSystemPrompt(event.systemPrompt, ctx.model, event.systemPromptOptions, runtime);
 			if (resolved === event.systemPrompt) return undefined;
 			return { systemPrompt: resolved };
 		},
 	});
+}
+
+export function releaseCursorSkillState(scopeKey: string): void {
+	skillsByScopeKey.delete(scopeKey);
 }
 
 export const __testUtils = {

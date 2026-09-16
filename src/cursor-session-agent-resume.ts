@@ -3,7 +3,10 @@ import { execFileSync } from "node:child_process";
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { SessionCursorAgentSendState } from "./cursor-session-agent.js";
 import { asRecord } from "./cursor-record-utils.js";
-import { getCursorSessionScopeKey } from "./cursor-session-scope.js";
+import {
+	getCursorSessionScopeKey,
+	resolveCursorSessionScopeFromContext,
+} from "./cursor-session-scope.js";
 import type { CursorSessionStoreIdentity } from "./cursor-session-store.js";
 
 export const CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE = "cursor-sdk-agent-resume";
@@ -80,18 +83,26 @@ const state: CursorSessionResumeState = {
 	compactionGeneration: 0,
 	unownedUserEntryIds: new Set(),
 };
+const statesByScopeKey = new Map<string, CursorSessionResumeState>();
+const resumeHandlePersistSuppressedScopeKeys = new Set<string>();
+
+function getCursorSessionResumeState(scopeKey: string = getCursorSessionScopeKey()): CursorSessionResumeState {
+	return statesByScopeKey.get(scopeKey) ?? state;
+}
 
 // Compaction summarizer sends commit a one-message resume handle. Drop it so the
 // next normal turn_end cannot persist that lineage (#223).
-let resumeHandlePersistSuppressed = false;
-
-export function suppressCursorSessionAgentResumeHandlePersist(): void {
-	resumeHandlePersistSuppressed = true;
-	state.pendingHandle = undefined;
+export function suppressCursorSessionAgentResumeHandlePersist(
+	scopeKey: string = getCursorSessionScopeKey(),
+): void {
+	resumeHandlePersistSuppressedScopeKeys.add(scopeKey);
+	getCursorSessionResumeState(scopeKey).pendingHandle = undefined;
 }
 
-export function allowCursorSessionAgentResumeHandlePersist(): void {
-	resumeHandlePersistSuppressed = false;
+export function allowCursorSessionAgentResumeHandlePersist(
+	scopeKey: string = getCursorSessionScopeKey(),
+): void {
+	resumeHandlePersistSuppressedScopeKeys.delete(scopeKey);
 }
 
 function hashParts(parts: readonly string[]): string {
@@ -211,9 +222,10 @@ function matchesResumeScope(data: CursorSessionAgentResumeEntryData, scope: Curs
 function matchesCurrentSession(
 	data: CursorSessionAgentResumeEntryData,
 	branchPathHash: string,
-	compactionGeneration = state.compactionGeneration,
+	targetState: CursorSessionResumeState,
+	compactionGeneration = targetState.compactionGeneration,
 ): boolean {
-	return matchesResumeScope(data, state) &&
+	return matchesResumeScope(data, targetState) &&
 		data.compactionGeneration === compactionGeneration &&
 		data.branchPathHash === branchPathHash;
 }
@@ -333,49 +345,61 @@ export function readResumableCursorSessionAgentIds(
 	return [...agentIds].sort((a, b) => a.localeCompare(b));
 }
 
-function canRestoreHandleSpanEntry(entry: SessionEntry): boolean {
-	if (entry.type === "message" && entry.message.role === "user") return !state.unownedUserEntryIds.has(entry.id);
+function canRestoreHandleSpanEntry(entry: SessionEntry, targetState: CursorSessionResumeState): boolean {
+	if (entry.type === "message" && entry.message.role === "user") return !targetState.unownedUserEntryIds.has(entry.id);
 	return canResumeHandleSpanEntry(entry);
 }
 
-function restoreFromBranch(branch: readonly SessionEntry[], allEntries: readonly SessionEntry[] = branch): void {
+function restoreFromBranch(
+	branch: readonly SessionEntry[],
+	allEntries: readonly SessionEntry[] = branch,
+	targetState: CursorSessionResumeState = state,
+): void {
 	const resumeIndex = indexLatestResumeEntries(allEntries);
 	let fold: ResumeBranchFoldState = { branchPathHash: EMPTY_BRANCH_HASH, compactionGeneration: 0 };
 	let lastBranchHandle: CursorSessionAgentResumeEntryData | undefined;
 	for (const entry of branch) {
 		const next = advanceResumeBranchState(entry, fold, resumeIndex, {
-			matchesEntry: matchesCurrentSession,
-			canSpanEntry: canRestoreHandleSpanEntry,
+			matchesEntry: (data, branchPathHash, compactionGeneration) =>
+				matchesCurrentSession(data, branchPathHash, targetState, compactionGeneration),
+			canSpanEntry: (candidate) => canRestoreHandleSpanEntry(candidate, targetState),
 		});
 		if (next.activeHandle && next.activeHandle !== fold.activeHandle) lastBranchHandle = next.activeHandle;
 		fold = next;
 	}
-	state.branchPathHash = fold.branchPathHash;
-	state.compactionGeneration = fold.compactionGeneration;
-	state.activeHandle = fold.activeHandle;
-	state.lastBranchHandle = lastBranchHandle;
+	targetState.branchPathHash = fold.branchPathHash;
+	targetState.compactionGeneration = fold.compactionGeneration;
+	targetState.activeHandle = fold.activeHandle;
+	targetState.lastBranchHandle = lastBranchHandle;
 }
 
-export function getMatchingCursorSessionAgentResumeHandle(poolKey: string): CursorSessionAgentResumeEntryData | undefined {
-	const handle = state.activeHandle;
+export function getMatchingCursorSessionAgentResumeHandle(
+	poolKey: string,
+	scopeKey: string = getCursorSessionScopeKey(),
+): CursorSessionAgentResumeEntryData | undefined {
+	const targetState = getCursorSessionResumeState(scopeKey);
+	const handle = targetState.activeHandle;
 	if (!handle || !isCursorLocalAgentId(handle.agentId)) return undefined;
 	if (handle.poolKey !== poolKey) return undefined;
-	if (handle.scopeKey !== state.scopeKey) return undefined;
-	if (handle.sessionFile !== state.sessionFile) return undefined;
-	if (handle.sessionId !== state.sessionId) return undefined;
-	if (handle.cwd !== state.cwd) return undefined;
-	if (handle.repoRoot !== state.repoRoot) return undefined;
-	if (handle.compactionGeneration !== state.compactionGeneration) return undefined;
+	if (handle.scopeKey !== targetState.scopeKey) return undefined;
+	if (handle.sessionFile !== targetState.sessionFile) return undefined;
+	if (handle.sessionId !== targetState.sessionId) return undefined;
+	if (handle.cwd !== targetState.cwd) return undefined;
+	if (handle.repoRoot !== targetState.repoRoot) return undefined;
+	if (handle.compactionGeneration !== targetState.compactionGeneration) return undefined;
 	return {
 		...handle,
 		sendState: { ...handle.sendState },
 	};
 }
 
-export function persistCursorSessionAgentResumeHandle(input: PendingCursorSessionAgentResumeHandle): void {
-	if (resumeHandlePersistSuppressed) return;
+export function persistCursorSessionAgentResumeHandle(
+	input: PendingCursorSessionAgentResumeHandle,
+	scopeKey: string = getCursorSessionScopeKey(),
+): void {
+	if (resumeHandlePersistSuppressedScopeKeys.has(scopeKey)) return;
 	if (!isCursorLocalAgentId(input.agentId)) return;
-	state.pendingHandle = {
+	getCursorSessionResumeState(scopeKey).pendingHandle = {
 		runtime: input.runtime,
 		agentId: input.agentId,
 		poolKey: input.poolKey,
@@ -384,18 +408,22 @@ export function persistCursorSessionAgentResumeHandle(input: PendingCursorSessio
 	};
 }
 
-function flushPendingCursorSessionAgentResumeHandle(branch: readonly SessionEntry[]): void {
-	if (resumeHandlePersistSuppressed) {
-		state.pendingHandle = undefined;
-		restoreFromBranch(branch);
+function flushPendingCursorSessionAgentResumeHandle(
+	branch: readonly SessionEntry[],
+	scopeKey: string,
+): void {
+	const targetState = getCursorSessionResumeState(scopeKey);
+	if (resumeHandlePersistSuppressedScopeKeys.has(scopeKey)) {
+		targetState.pendingHandle = undefined;
+		restoreFromBranch(branch, branch, targetState);
 		return;
 	}
-	restoreFromBranch(branch);
-	const pending = state.pendingHandle;
-	state.pendingHandle = undefined;
-	if (!pending || !state.appendEntry) return;
-	const previousHandle = state.activeHandle ?? state.lastBranchHandle;
-	const cleanupCandidates = state.sessionFile && previousHandle && previousHandle.agentId !== pending.agentId
+	restoreFromBranch(branch, branch, targetState);
+	const pending = targetState.pendingHandle;
+	targetState.pendingHandle = undefined;
+	if (!pending || !targetState.appendEntry) return;
+	const previousHandle = targetState.activeHandle ?? targetState.lastBranchHandle;
+	const cleanupCandidates = targetState.sessionFile && previousHandle && previousHandle.agentId !== pending.agentId
 		? [{
 				agentId: previousHandle.agentId,
 				...(previousHandle.storeIdentity ? { storeIdentity: { ...previousHandle.storeIdentity } } : {}),
@@ -405,22 +433,22 @@ function flushPendingCursorSessionAgentResumeHandle(branch: readonly SessionEntr
 		version: RESUME_ENTRY_VERSION,
 		runtime: pending.runtime,
 		agentId: pending.agentId,
-		scopeKey: state.scopeKey,
-		...(state.sessionFile ? { sessionFile: state.sessionFile } : {}),
-		...(state.sessionId ? { sessionId: state.sessionId } : {}),
-		cwd: state.cwd,
-		...(state.repoRoot ? { repoRoot: state.repoRoot } : {}),
+		scopeKey: targetState.scopeKey,
+		...(targetState.sessionFile ? { sessionFile: targetState.sessionFile } : {}),
+		...(targetState.sessionId ? { sessionId: targetState.sessionId } : {}),
+		cwd: targetState.cwd,
+		...(targetState.repoRoot ? { repoRoot: targetState.repoRoot } : {}),
 		poolKey: pending.poolKey,
-		branchPathHash: state.branchPathHash,
-		compactionGeneration: state.compactionGeneration,
+		branchPathHash: targetState.branchPathHash,
+		compactionGeneration: targetState.compactionGeneration,
 		sendState: { ...pending.sendState },
 		createdAt: new Date().toISOString(),
 		storeIdentity: { ...pending.storeIdentity },
 		...(cleanupCandidates ? { cleanupCandidates } : {}),
 	};
 	try {
-		state.appendEntry<CursorSessionAgentResumeEntryData>(CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE, data);
-		state.activeHandle = data;
+		targetState.appendEntry<CursorSessionAgentResumeEntryData>(CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE, data);
+		targetState.activeHandle = data;
 	} catch {
 		// Resume persistence is an optimization; a failed custom-entry append must not fail the completed turn.
 	}
@@ -432,47 +460,96 @@ interface CursorSessionAgentResumeExtensionApi {
 }
 
 export function registerCursorSessionAgentResume(pi: CursorSessionAgentResumeExtensionApi): void {
-	state.appendEntry = pi.appendEntry;
-	const restoreFromSessionManager = (sessionManager: { getBranch(): SessionEntry[]; getEntries(): SessionEntry[] }): void => {
+	const restoreFromSessionManager = (
+		sessionManager: { getBranch(): SessionEntry[]; getEntries(): SessionEntry[] },
+		targetState: CursorSessionResumeState,
+	): void => {
 		const branch = sessionManager.getBranch();
 		const entries = sessionManager.getEntries();
-		restoreFromBranch(branch, entries.length > 0 ? entries : branch);
+		restoreFromBranch(branch, entries.length > 0 ? entries : branch, targetState);
 	};
 	pi.on("session_start", (_event, ctx) => {
-		state.scopeKey = getCursorSessionScopeKey();
-		state.sessionFile = ctx.sessionManager.getSessionFile?.() ?? undefined;
-		state.sessionId = ctx.sessionManager.getSessionId?.() ?? undefined;
-		state.cwd = ctx.cwd;
-		state.repoRoot = resolveCursorSessionRepoRoot(ctx.cwd);
-		state.unownedUserEntryIds = new Set(ctx.sessionManager.getBranch().flatMap((entry) =>
-			entry.type === "message" && entry.message.role === "user" ? [entry.id] : []));
-		restoreFromSessionManager(ctx.sessionManager);
+		const scope = resolveCursorSessionScopeFromContext(ctx);
+		const targetState = statesByScopeKey.get(scope.scopeKey)
+			?? (statesByScopeKey.size === 0
+				? state
+				: {
+						scopeKey: scope.scopeKey,
+						cwd: ctx.cwd,
+						branchPathHash: EMPTY_BRANCH_HASH,
+						compactionGeneration: 0,
+						unownedUserEntryIds: new Set<string>(),
+					});
+		Object.assign(targetState, {
+			appendEntry: pi.appendEntry,
+			scopeKey: scope.scopeKey,
+			sessionFile: ctx.sessionManager.getSessionFile?.() ?? undefined,
+			sessionId: ctx.sessionManager.getSessionId?.() ?? undefined,
+			cwd: ctx.cwd,
+			repoRoot: resolveCursorSessionRepoRoot(ctx.cwd),
+			branchPathHash: EMPTY_BRANCH_HASH,
+			compactionGeneration: 0,
+			activeHandle: undefined,
+			lastBranchHandle: undefined,
+			pendingHandle: undefined,
+			unownedUserEntryIds: new Set(ctx.sessionManager.getBranch().flatMap((entry) =>
+				entry.type === "message" && entry.message.role === "user" ? [entry.id] : [])),
+		});
+		statesByScopeKey.set(scope.scopeKey, targetState);
+		restoreFromSessionManager(ctx.sessionManager, targetState);
 	});
 	pi.on("before_agent_start", (_event, ctx) => {
-		restoreFromSessionManager(ctx.sessionManager);
+		const targetState = getCursorSessionResumeState(resolveCursorSessionScopeFromContext(ctx).scopeKey);
+		restoreFromSessionManager(ctx.sessionManager, targetState);
 	});
 	pi.on("turn_end", (_event, ctx) => {
-		flushPendingCursorSessionAgentResumeHandle(ctx.sessionManager.getBranch());
+		const scopeKey = resolveCursorSessionScopeFromContext(ctx).scopeKey;
+		flushPendingCursorSessionAgentResumeHandle(ctx.sessionManager.getBranch(), scopeKey);
 	});
 	pi.on("session_tree", (_event, ctx) => {
+		const targetState = getCursorSessionResumeState(resolveCursorSessionScopeFromContext(ctx).scopeKey);
 		for (const entry of ctx.sessionManager.getBranch()) {
-			if (entry.type === "message" && entry.message.role === "user") state.unownedUserEntryIds.add(entry.id);
+			if (entry.type === "message" && entry.message.role === "user") targetState.unownedUserEntryIds.add(entry.id);
 		}
-		restoreFromSessionManager(ctx.sessionManager);
+		restoreFromSessionManager(ctx.sessionManager, targetState);
 	});
 	pi.on("session_compact", (event, ctx) => {
-		state.pendingHandle = undefined;
-		resumeHandlePersistSuppressed = false;
+		const scopeKey = resolveCursorSessionScopeFromContext(ctx).scopeKey;
+		const targetState = getCursorSessionResumeState(scopeKey);
+		targetState.pendingHandle = undefined;
+		resumeHandlePersistSuppressedScopeKeys.delete(scopeKey);
 		const branch = ctx.sessionManager.getBranch();
 		if (branch.length > 0) {
-			restoreFromSessionManager(ctx.sessionManager);
+			restoreFromSessionManager(ctx.sessionManager, targetState);
 			return;
 		}
-		state.activeHandle = undefined;
-		state.lastBranchHandle = undefined;
-		state.compactionGeneration += 1;
-		state.branchPathHash = hashBranchStep(state.branchPathHash, event.compactionEntry);
+		targetState.activeHandle = undefined;
+		targetState.lastBranchHandle = undefined;
+		targetState.compactionGeneration += 1;
+		targetState.branchPathHash = hashBranchStep(targetState.branchPathHash, event.compactionEntry);
 	});
+}
+
+function clearCursorSessionResumeState(targetState: CursorSessionResumeState): void {
+	targetState.appendEntry = undefined;
+	targetState.scopeKey = getCursorSessionScopeKey();
+	targetState.sessionFile = undefined;
+	targetState.sessionId = undefined;
+	targetState.cwd = process.cwd();
+	targetState.repoRoot = undefined;
+	targetState.branchPathHash = EMPTY_BRANCH_HASH;
+	targetState.compactionGeneration = 0;
+	targetState.activeHandle = undefined;
+	targetState.lastBranchHandle = undefined;
+	targetState.pendingHandle = undefined;
+	targetState.unownedUserEntryIds = new Set();
+}
+
+export function releaseCursorSessionAgentResumeState(scopeKey: string): void {
+	const targetState = statesByScopeKey.get(scopeKey);
+	statesByScopeKey.delete(scopeKey);
+	resumeHandlePersistSuppressedScopeKeys.delete(scopeKey);
+	if (targetState === state) clearCursorSessionResumeState(state);
 }
 
 function setStateForTests(next: Partial<CursorSessionResumeState>): void {
@@ -480,19 +557,9 @@ function setStateForTests(next: Partial<CursorSessionResumeState>): void {
 }
 
 function resetStateForTests(): void {
-	state.appendEntry = undefined;
-	state.scopeKey = getCursorSessionScopeKey();
-	state.sessionFile = undefined;
-	state.sessionId = undefined;
-	state.cwd = process.cwd();
-	state.repoRoot = undefined;
-	state.branchPathHash = EMPTY_BRANCH_HASH;
-	state.compactionGeneration = 0;
-	state.activeHandle = undefined;
-	state.lastBranchHandle = undefined;
-	state.pendingHandle = undefined;
-	state.unownedUserEntryIds = new Set();
-	resumeHandlePersistSuppressed = false;
+	statesByScopeKey.clear();
+	resumeHandlePersistSuppressedScopeKeys.clear();
+	clearCursorSessionResumeState(state);
 }
 
 export const __testUtils = {
@@ -501,5 +568,6 @@ export const __testUtils = {
 	reset: resetStateForTests,
 	set: setStateForTests,
 	state,
-	isResumeHandlePersistSuppressed: () => resumeHandlePersistSuppressed,
+	isResumeHandlePersistSuppressed: (scopeKey: string = getCursorSessionScopeKey()) =>
+		resumeHandlePersistSuppressedScopeKeys.has(scopeKey),
 };

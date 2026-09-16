@@ -1,6 +1,9 @@
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { isCursorLocalAgentId } from "./cursor-session-agent-resume.js";
-import { getCursorSessionScopeKey } from "./cursor-session-scope.js";
+import {
+	getCursorSessionScopeKey,
+	resolveCursorSessionScopeFromContext,
+} from "./cursor-session-scope.js";
 import { asRecord } from "./cursor-record-utils.js";
 
 export const CURSOR_SESSION_AGENT_LINEAGE_ENTRY_TYPE = "cursor-sdk-agent-lineage";
@@ -33,9 +36,12 @@ interface CursorSessionAgentLineageState {
 	recordedAgentIds: Set<string>;
 }
 
-const state: CursorSessionAgentLineageState = {
-	recordedAgentIds: new Set(),
-};
+function createEmptyLineageState(): CursorSessionAgentLineageState {
+	return { recordedAgentIds: new Set() };
+}
+
+let defaultState = createEmptyLineageState();
+const statesByScopeKey = new Map<string, CursorSessionAgentLineageState>();
 
 export function parseCursorSessionAgentLineageEntryData(value: unknown): CursorSessionAgentLineageEntryData | undefined {
 	const record = asRecord(value);
@@ -77,9 +83,13 @@ function readRecordedAgentIds(entries: readonly SessionEntry[], sessionId: strin
 }
 
 /** Best-effort forensic lineage at the local Agent.send() boundary. Independent of resume. */
-export function recordCursorSessionAgentLineage(agentId: string): void {
-	const { appendEntry, sessionId, sessionFile, scopeKey, cwd } = state;
-	if (!appendEntry || !sessionId || !scopeKey || !cwd) return;
+export function recordCursorSessionAgentLineage(
+	agentId: string,
+	scopeKey: string = getCursorSessionScopeKey(),
+): void {
+	const state = statesByScopeKey.get(scopeKey) ?? defaultState;
+	const { appendEntry, sessionId, sessionFile, cwd } = state;
+	if (!appendEntry || !sessionId || !cwd) return;
 	if (!isCursorLocalAgentId(agentId) || state.recordedAgentIds.has(agentId)) return;
 	const data: CursorSessionAgentLineageEntryData = {
 		version: LINEAGE_ENTRY_VERSION,
@@ -106,30 +116,30 @@ interface CursorSessionAgentLineageExtensionApi {
 
 export function registerCursorSessionAgentLineage(pi: CursorSessionAgentLineageExtensionApi): void {
 	pi.on("session_start", (_event, ctx) => {
-		state.appendEntry = pi.appendEntry;
-		state.sessionId = ctx.sessionManager.getSessionId();
-		state.sessionFile = ctx.sessionManager.getSessionFile() ?? undefined;
-		state.scopeKey = getCursorSessionScopeKey();
-		state.cwd = ctx.cwd;
-		state.recordedAgentIds = readRecordedAgentIds(ctx.sessionManager.getEntries(), state.sessionId);
+		const scope = resolveCursorSessionScopeFromContext(ctx);
+		const sessionId = ctx.sessionManager.getSessionId();
+		const state: CursorSessionAgentLineageState = {
+			appendEntry: pi.appendEntry,
+			sessionId,
+			sessionFile: ctx.sessionManager.getSessionFile() ?? undefined,
+			scopeKey: scope.scopeKey,
+			cwd: ctx.cwd,
+			recordedAgentIds: readRecordedAgentIds(ctx.sessionManager.getEntries(), sessionId),
+		};
+		statesByScopeKey.set(scope.scopeKey, state);
+		defaultState = state;
 	});
-	pi.on("session_shutdown", () => {
-		state.appendEntry = undefined;
-		state.sessionId = undefined;
-		state.sessionFile = undefined;
-		state.scopeKey = undefined;
-		state.cwd = undefined;
-		state.recordedAgentIds = new Set();
+	pi.on("session_shutdown", (_event, ctx) => {
+		const scopeKey = resolveCursorSessionScopeFromContext(ctx).scopeKey;
+		const state = statesByScopeKey.get(scopeKey);
+		statesByScopeKey.delete(scopeKey);
+		if (state === defaultState) defaultState = createEmptyLineageState();
 	});
 }
 
 function resetStateForTests(): void {
-	state.appendEntry = undefined;
-	state.sessionId = undefined;
-	state.sessionFile = undefined;
-	state.scopeKey = undefined;
-	state.cwd = undefined;
-	state.recordedAgentIds = new Set();
+	statesByScopeKey.clear();
+	defaultState = createEmptyLineageState();
 }
 
 export const __testUtils = {

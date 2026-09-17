@@ -4,6 +4,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { parseEnvBoolean } from "./cursor-env-boolean.js";
+import { isCursorLeanEnabled } from "./cursor-lean.js";
 import { isCursorModel } from "./cursor-model.js";
 import {
 	cursorSettingSourcesIncludes,
@@ -132,6 +133,22 @@ export function serializePiProjectContextSection(
 	return `${PI_PROJECT_CONTEXT_OPEN}${contextFiles.map(serializePiProjectInstructionsBlock).join("")}${PI_PROJECT_CONTEXT_CLOSE}`;
 }
 
+/** Ensure lean mode receives Pi's authoritative project context, even if another hook altered its rendered block. */
+export function ensurePiAgentsContextInSystemPrompt(
+	systemPrompt: string,
+	contextFiles: readonly PiAgentsContextFile[],
+): string {
+	const expectedSection = serializePiProjectContextSection(contextFiles);
+	if (!expectedSection || systemPrompt.includes(expectedSection)) return systemPrompt;
+
+	const start = systemPrompt.indexOf(PI_PROJECT_CONTEXT_OPEN);
+	if (start < 0) return `${systemPrompt.trimEnd()}${expectedSection}`;
+	const closeStart = systemPrompt.indexOf(PI_PROJECT_CONTEXT_CLOSE, start);
+	if (closeStart < 0) return `${systemPrompt.trimEnd()}${expectedSection}`;
+	const end = closeStart + PI_PROJECT_CONTEXT_CLOSE.length;
+	return systemPrompt.slice(0, start) + expectedSection + systemPrompt.slice(end);
+}
+
 /** Remove pi context blocks that overlap Cursor setting sources. */
 export function removePiAgentsContextFromSystemPrompt(
 	systemPrompt: string,
@@ -172,6 +189,9 @@ export function resolveCursorFacingSystemPrompt(
 ): string {
 	if (runtime === "cloud" || !systemPromptOptions) return systemPrompt;
 	const contextFiles = systemPromptOptions.contextFiles ?? [];
+	if (isCursorLeanEnabled()) {
+		return ensurePiAgentsContextInSystemPrompt(systemPrompt, contextFiles);
+	}
 	const settingSources =
 		settingSourcesRaw === undefined
 			? getEffectiveCursorSettingSources()

@@ -17,6 +17,7 @@ import * as piAi from "@earendil-works/pi-ai";
 import {
 	classifyContextFileOverlap,
 	CURSOR_PRESERVE_PI_AGENTS_MD_ENV,
+	ensurePiAgentsContextInSystemPrompt,
 	getAgentsContextFileBaseName,
 	isPiAgentDirAgentsMdPath,
 	PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX,
@@ -70,6 +71,7 @@ beforeEach(() => {
 	delete process.env[CURSOR_PRESERVE_PI_AGENTS_MD_ENV];
 	delete process.env[CURSOR_SETTING_SOURCES_ENV];
 	delete process.env.PI_CURSOR_RUNTIME;
+	vi.stubEnv("PI_CURSOR_LEAN", "0");
 });
 
 describe("classifyContextFileOverlap", () => {
@@ -327,6 +329,18 @@ describe("resolveCursorFacingSystemPrompt", () => {
 	});
 });
 
+describe("ensurePiAgentsContextInSystemPrompt", () => {
+	it("restores Pi's loaded AGENTS.md files when the rendered section was emptied", () => {
+		const emptiedPrompt = buildPiSystemPromptWithContextFiles([
+			{ ...PROJECT_FILE, content: "" },
+		]);
+		const restored = ensurePiAgentsContextInSystemPrompt(emptiedPrompt, [PROJECT_FILE]);
+
+		expect(restored).toContain(PROJECT_AGENTS_PATH);
+		expect(restored).toContain("Project guidance");
+	});
+});
+
 describe("shouldSuppressPiAgentsContext", () => {
 	const cursorModel = { provider: "cursor", id: "composer-2.5" } as ExtensionContext["model"];
 
@@ -343,6 +357,33 @@ describe("shouldSuppressPiAgentsContext", () => {
 
 describe("registerCursorAgentsContextDedup", () => {
 	const cursorModelOverrides = { model: makeModel("composer-2.5") };
+
+	it("restores loaded AGENTS.md context for lean Cursor prompts", async () => {
+		vi.stubEnv("PI_CURSOR_LEAN", "1");
+		const pi = createEventHarness();
+		registerCursorAgentsContextDedup(pi);
+		const emptiedPrompt = buildPiSystemPromptWithContextFiles([
+			{ ...PROJECT_FILE, content: "" },
+		]);
+
+		const result = await pi.invokeEvent(
+			"before_agent_start",
+			{
+				type: "before_agent_start",
+				prompt: "hello",
+				systemPrompt: emptiedPrompt,
+				systemPromptOptions: makeSystemPromptOptions([PROJECT_FILE]),
+			},
+			cursorModelOverrides,
+		);
+
+		expect(result?.systemPrompt).toContain("Project guidance");
+		const cursorPrompt = buildCursorPrompt({
+			systemPrompt: result?.systemPrompt ?? emptiedPrompt,
+			messages: [],
+		});
+		expect(cursorPrompt.text).toContain("Project guidance");
+	});
 
 	it("strips via before_agent_start for cursor models with overlapping setting sources", async () => {
 		process.env[CURSOR_SETTING_SOURCES_ENV] = "all";

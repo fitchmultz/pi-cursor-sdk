@@ -110,7 +110,8 @@ test("compiled provider registers and shapes native Pi transcript/tool transitio
     assert.ok(modelRuntime.getProviders().some((provider) => provider.id === "cursor"));
     assert.ok(modelRuntime.getModels().some((model) => model.provider === "cursor" && model.api === "cursor-sdk"));
     session.setActiveToolsByName(["contract_alpha"]);
-    const image = { type: "image", data: "aW1hZ2U=", mimeType: "image/png" };
+    // Real 1x1 PNG, also used in index-native-tools.test.ts: native hosts may decode/resize images.
+    const image = { type: "image", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", mimeType: "image/png" };
     await session.prompt("first native request", { images: [image] });
     session.setActiveToolsByName(["contract_beta"]);
     await session.prompt("second native request");

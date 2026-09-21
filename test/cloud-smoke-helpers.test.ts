@@ -1,8 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
 	assertCloudSmokeEvidenceSafe,
@@ -244,7 +244,7 @@ describe("cloud smoke helper contracts", () => {
 		)).toEqual({ url: "https://github.com/acme/widget/pull/7", state: "OPEN" });
 	});
 
-	it("hashes the published source surface and validates round-trippable evidence", () => {
+	it("hashes the published source surface and validates round-trippable evidence", ({ onTestFinished }) => {
 		const packageFiles = [
 			"package.json",
 			"src/index.ts",
@@ -269,68 +269,15 @@ describe("cloud smoke helper contracts", () => {
 			["docs/evidence/cursor-cloud-smoke-matrix-latest.json", "{\"should\":\"not-hash\"}\n"],
 			["cloud-roadmap-change-scout.md", "protected\n"],
 		]);
-		const directories = new Set([
-			"",
-			"src",
-			"shared",
-			"scripts",
-			"scripts/lib",
-			"node_modules",
-			"node_modules/@cursor",
-			"node_modules/@cursor/sdk",
-			"docs",
-			"docs/evidence",
-		]);
-		const virtualRoot = resolve("/virtual");
-		const virtualRelative = (target: string) => relative(virtualRoot, String(target)).replaceAll("\\", "/");
-		const virtualFs = {
-			readFileSync: ((target: string) => {
-				const relative = virtualRelative(target);
-				const content = fileContents.get(relative);
-				if (content === undefined) throw new Error(`missing ${relative}`);
-				return content;
-			}) as typeof readFileSync,
-			lstatSync: ((target: string) => {
-				const relative = virtualRelative(target);
-				if (directories.has(relative)) {
-					return { isSymbolicLink: () => false, isFile: () => false, isDirectory: () => true };
-				}
-				if (fileContents.has(relative)) {
-					return { isSymbolicLink: () => false, isFile: () => true, isDirectory: () => false };
-				}
-				throw new Error(`missing ${relative}`);
-			}) as unknown as typeof import("node:fs").lstatSync,
-			readdirSync: ((target: string) => {
-				const relative = virtualRelative(target);
-				const prefix = relative ? `${relative}/` : "";
-				const names = new Set<string>();
-				for (const dir of directories) {
-					if (!dir.startsWith(prefix)) continue;
-					const rest = dir.slice(prefix.length);
-					if (rest && !rest.includes("/")) names.add(rest);
-				}
-				for (const file of fileContents.keys()) {
-					if (!file.startsWith(prefix)) continue;
-					const rest = file.slice(prefix.length);
-					if (rest && !rest.includes("/")) names.add(rest);
-				}
-				return [...names].sort().map((name) => {
-					const child = `${prefix}${name}`;
-					const isDirectory = directories.has(child);
-					return {
-						name,
-						isSymbolicLink: () => false,
-						isDirectory: () => isDirectory,
-						isFile: () => !isDirectory,
-					};
-				});
-			}) as unknown as typeof import("node:fs").readdirSync,
-		};
+		const fixtureRoot = mkdtempSync(join(tmpdir(), "cloud-smoke-provenance-test-"));
+		onTestFinished(() => rmSync(fixtureRoot, { recursive: true, force: true }));
+		for (const [path, content] of fileContents) {
+			const target = join(fixtureRoot, path);
+			mkdirSync(dirname(target), { recursive: true });
+			writeFileSync(target, content);
+		}
 
-		const packageSourcePaths = listCloudSmokePackageSourcePaths({
-			root: virtualRoot,
-			...virtualFs,
-		});
+		const packageSourcePaths = listCloudSmokePackageSourcePaths({ root: fixtureRoot });
 		expect(packageSourcePaths).toEqual([...packageFiles].sort((left, right) => left.localeCompare(right)));
 		expect(packageSourcePaths).not.toContain("docs/evidence/cursor-cloud-smoke-matrix-latest.json");
 		expect(packageSourcePaths).not.toContain("cloud-roadmap-change-scout.md");
@@ -347,14 +294,12 @@ describe("cloud smoke helper contracts", () => {
 
 		const gitRevision = "d".repeat(40);
 		const provenance = buildCloudSmokeEvidenceProvenance({
-			root: virtualRoot,
+			root: fixtureRoot,
 			gitRevision,
-			...virtualFs,
 		});
 		const again = buildCloudSmokeEvidenceProvenance({
-			root: virtualRoot,
+			root: fixtureRoot,
 			gitRevision,
-			...virtualFs,
 		});
 		expect(provenance).toEqual({
 			extensionVersion: "9.9.9",
@@ -364,11 +309,10 @@ describe("cloud smoke helper contracts", () => {
 		});
 		expect(provenance.packageSourceSha256).toMatch(/^[a-f0-9]{64}$/);
 
-		fileContents.set("src/index.ts", "export const src = 2;\n");
+		writeFileSync(join(fixtureRoot, "src/index.ts"), "export const src = 2;\n");
 		const changed = buildCloudSmokeEvidenceProvenance({
-			root: virtualRoot,
+			root: fixtureRoot,
 			gitRevision,
-			...virtualFs,
 		});
 		expect(changed.packageSourceSha256).not.toBe(provenance.packageSourceSha256);
 

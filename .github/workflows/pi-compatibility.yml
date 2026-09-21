@@ -1,0 +1,20 @@
+name: Pi compatibility
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pi-compatibility-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compatibility:
+    uses: fitchmultz/.github/.github/workflows/pi-compatibility.yml@aa1d1195d544c47075ef4a0a8716efbda04587f1 # v1.0.0
+    with:
+      automation-ref: aa1d1195d544c47075ef4a0a8716efbda04587f1 # v1.0.0

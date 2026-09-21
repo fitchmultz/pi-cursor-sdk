@@ -71,6 +71,60 @@ export function redactSecrets(text) {
 	return redacted;
 }
 
+/** JSON syntax is not secret material. Scan decoded scalar values with the same
+ * canonical rules, retaining key/value context for auth fields. Never regex-scrub
+ * a serialized document: escaped quotes, numeric tokens and scoped names break. */
+export function scanArtifactSecrets(path, content) {
+	if (!/\.jsonl?$/i.test(path) || isBinaryArtifactContent(content)) return scanForSecrets(content);
+	const text = String(content);
+	const documents = /\.jsonl$/i.test(path) ? text.split(/\r?\n/).filter((line) => line.trim()) : [text];
+	try {
+		for (const document of documents) JSON.parse(document);
+	} catch {
+		// Malformed evidence is never repaired. Scan its bytes and let the
+		// structural gate report it independently (without echoing input).
+		return scanForSecrets(content);
+	}
+	const violations = new Set();
+	const scan = (value) => scanForSecrets(value).forEach((violation) => violations.add(violation));
+	for (const document of documents) {
+		// Native JSON validation above owns grammar. Scan the original tokens, not
+		// the parsed object: duplicate members (including entire subtrees) survive
+		// in transported bytes even though JSON.parse overwrites them.
+		let key;
+		for (const match of document.matchAll(/("(?:[^"\\]|\\.)*")(\s*:)?|[{}\[\],]|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null/g)) {
+			const token = match[1] ?? match[0];
+			if ("{}[],".includes(token)) {
+				key = undefined;
+				continue;
+			}
+			// Decode string escapes, but retain number spelling (no rounding/overflow).
+			const value = match[1] ? JSON.parse(token) : token;
+			scan(value);
+			if (match[2]) key = value;
+			else {
+				// A space after ':' keeps syntax from looking like SCP credentials.
+				if (key !== undefined) scan(`${JSON.stringify(key)}: ${match[1] ? JSON.stringify(value) : token}`);
+				key = undefined;
+			}
+		}
+	}
+	return [...violations];
+}
+
+export function structuredArtifactViolations(path, content) {
+	if (!/\.jsonl?$/i.test(path)) return [];
+	const lines = /\.jsonl$/i.test(path) ? String(content).split(/\r?\n/) : [String(content)];
+	const violations = [];
+	for (const [index, line] of lines.entries()) {
+		if (/\.jsonl$/i.test(path) && !line.trim()) continue;
+		try { JSON.parse(line); } catch {
+			violations.push(/\.jsonl$/i.test(path) ? `invalid JSONL at line ${index + 1}` : "invalid JSON");
+		}
+	}
+	return violations;
+}
+
 export function isBinaryArtifactContent(value) {
 	return Buffer.isBuffer(value) && (!isUtf8(value) || value.includes(0));
 }

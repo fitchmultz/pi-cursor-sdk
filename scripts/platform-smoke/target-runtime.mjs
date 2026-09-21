@@ -11,6 +11,7 @@ import {
 } from "./artifact-bundle-contract.mjs";
 import { redactSecrets } from "./artifact-secrets.mjs";
 import {
+	scanArtifacts,
 	writeCommand,
 	writeExitCode,
 	writeManifest,
@@ -29,6 +30,12 @@ export function finalizeSuiteArtifacts(
 	summaryData,
 	expectedFiles,
 ) {
+	const malformed = scanArtifacts(suiteDir).filter(({ violation }) => violation.startsWith("invalid JSON"));
+	checks = [...checks, {
+		id: "structured-artifacts-parseable",
+		fn: () => malformed.length === 0,
+		error: malformed.map(({ file, violation }) => `${file}: ${violation}`).join("; "),
+	}];
 	const assertions = runAssertions(suiteDir, checks);
 	writeSummary(suiteDir, { ...summaryData, ok: assertions.ok });
 	const expected = assertions.ok

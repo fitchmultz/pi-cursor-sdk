@@ -4,7 +4,7 @@ import type { AssistantMessage, AssistantMessageEvent, Context } from "@earendil
 import {
 	ModelRegistry,
 	ModelRuntime,
-	type BuildSystemPromptOptions,
+	type NormalizedBuildSystemPromptOptions,
 	type ExtensionCommandContext,
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
@@ -21,10 +21,17 @@ function getSharedTestModelRegistry(): ModelRegistry {
 	return sharedTestModelRegistry;
 }
 
-export function createDefaultSystemPromptOptions(cwd: string): BuildSystemPromptOptions {
+export function createDefaultSystemPromptOptions(cwd: string): NormalizedBuildSystemPromptOptions {
 	return {
 		cwd,
 		selectedTools: ["read", "bash", "edit", "write"],
+		toolSnippets: {},
+		toolGuidelines: {},
+		promptGuidelines: [],
+		appendSystemPrompt: "",
+		sections: {},
+		contextFiles: [],
+		skills: [],
 	};
 }
 

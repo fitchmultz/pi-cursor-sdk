@@ -6,6 +6,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { scanArtifactSecrets } from "./artifact-secrets.mjs";
 import { resolve } from "node:path";
 
 import {
@@ -604,7 +605,8 @@ async function executeLiveSuite(config, targetName, suiteName, suiteDir, slug, l
 			},
 		}));
 	const violations = [
-		...scanForSecrets(result.stdout + result.stderr + terminalText + jsonlRaw).map((violation) => ({ file: "process-output", violation })),
+		...scanForSecrets(result.stdout + result.stderr + terminalText).map((violation) => ({ file: "process-output", violation })),
+		...scanArtifactSecrets(jsonlPath, jsonlRaw).map((violation) => ({ file: "artifacts/session.jsonl", violation })),
 		...bundle.violations,
 		...scanArtifacts(suiteDir),
 	];

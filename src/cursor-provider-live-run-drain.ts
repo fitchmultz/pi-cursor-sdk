@@ -181,14 +181,16 @@ function emitCursorNativeToolUseTurn(
 	const shouldTerminate = run.done && !run.finalText?.trim() && !cursorLiveRuns.peekEvent(run);
 	for (const tool of tools) {
 		const contentIndex = partial.content.length;
+		// Pi persists JSON arguments: keep the completed call identical to its wire delta.
+		const serializedArgs = JSON.stringify(tool.args);
 		partial.content.push({
 			type: "toolCall",
 			id: tool.id,
 			name: tool.toolName,
-			arguments: tool.args,
+			arguments: JSON.parse(serializedArgs),
 		});
 		stream.push({ type: "toolcall_start", contentIndex, partial });
-		stream.push({ type: "toolcall_delta", contentIndex, delta: JSON.stringify(tool.args), partial });
+		stream.push({ type: "toolcall_delta", contentIndex, delta: serializedArgs, partial });
 		const block = partial.content[contentIndex];
 		if (block.type === "toolCall") stream.push({ type: "toolcall_end", contentIndex, toolCall: block, partial });
 		if (recordCursorNativeToolDisplay({ ...tool, terminate: shouldTerminate })) {
@@ -237,14 +239,15 @@ function emitCursorBridgeToolUseTurn(
 ): void {
 	for (const request of requests) {
 		const contentIndex = partial.content.length;
+		const serializedArgs = JSON.stringify(request.args);
 		partial.content.push({
 			type: "toolCall",
 			id: request.piToolCallId,
 			name: request.piToolName,
-			arguments: request.args,
+			arguments: JSON.parse(serializedArgs),
 		});
 		stream.push({ type: "toolcall_start", contentIndex, partial });
-		stream.push({ type: "toolcall_delta", contentIndex, delta: JSON.stringify(request.args), partial });
+		stream.push({ type: "toolcall_delta", contentIndex, delta: serializedArgs, partial });
 		const block = partial.content[contentIndex];
 		if (block.type === "toolCall") stream.push({ type: "toolcall_end", contentIndex, toolCall: block, partial });
 	}

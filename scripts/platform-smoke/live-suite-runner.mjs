@@ -439,7 +439,9 @@ function writeJsonlArtifacts(artifactDir, sessionDir) {
 	const jsonlFiles = findJsonlFiles(sessionDir);
 	writeRedactedTextFile(join(artifactDir, "session-jsonl-files.txt"), jsonlFiles.join("\n") + (jsonlFiles.length ? "\n" : ""));
 	if (jsonlFiles[0]) {
-		writeRedactedTextFile(join(artifactDir, "session.jsonl"), readFileSync(jsonlFiles[0], "utf8"));
+		// The bundle boundary secret-scans structured evidence before transport.
+		// Text redaction here corrupts JSON escaping and numeric fields.
+		copyFileSync(jsonlFiles[0], join(artifactDir, "session.jsonl"));
 	}
 	return jsonlFiles;
 }

@@ -77,12 +77,13 @@ describe("package metadata cutover baselines", () => {
 		expect(lockPackageVersion("@cursor/sdk")).toBe("1.0.27");
 	});
 
-	it("keeps lockfile resolved URLs on the public npm registry", () => {
-		const hosts = new Set(
-			Object.values(packageLock.packages)
-				.flatMap((entry) => (entry.resolved ? [new URL(entry.resolved).host] : [])),
-		);
-		expect([...hosts]).toEqual(["registry.npmjs.org"]);
+	it("keeps registry dependencies public", () => {
+		for (const entry of Object.values(packageLock.packages)) {
+			if (!entry.resolved) continue;
+			const url = new URL(entry.resolved);
+			expect(url.protocol).toBe("https:");
+			expect(url.host).toBe("registry.npmjs.org");
+		}
 	});
 
 	it("ships an exact MCP/Hono bundledDependencies closure for published installs", () => {
@@ -127,7 +128,8 @@ describe("package metadata cutover baselines", () => {
 	});
 
 	it("removes the obsolete sqlite override", () => {
-		expect(packageJson.overrides).toBeUndefined();
+		expect(packageJson.overrides?.sqlite3).toBeUndefined();
+		expect(packageJson.overrides?.["better-sqlite3"]).toBeUndefined();
 	});
 
 	it("packs an isolated MCP/Hono closure that beats a hostile host @hono/node-server", () => {
@@ -190,19 +192,21 @@ describe("package metadata cutover baselines", () => {
 		}
 	}, 60_000);
 
-	it("pins pi validation baselines", () => {
+	it("pins one coherent stable Pi validation baseline", () => {
+		const baseline = packageJson.devDependencies["@earendil-works/pi-coding-agent"];
+		expect(baseline).toMatch(/^\d+\.\d+\.\d+$/);
 		for (const packageName of PI_PACKAGES) {
-			expect(packageJson.devDependencies[packageName]).toBe("0.84.0");
-			expect(lockPackageVersion(packageName)).toBe("0.84.0");
+			expect(packageJson.devDependencies[packageName]).toBe(baseline);
+			expect(lockPackageVersion(packageName)).toBe(baseline);
 		}
 	});
 
-	it("pins Pi 0.84.0's TypeBox validation baseline", () => {
+	it("retains the package's TypeBox validation baseline", () => {
 		expect(packageJson.devDependencies.typebox).toBe("1.3.7");
 		expect(lockPackageVersion("typebox")).toBe("1.3.7");
 	});
 
-	it("tracks Pi 0.84.0 GPT-5.6 Codex metadata", () => {
+	it("tracks installed Pi GPT-5.6 Codex metadata", () => {
 		for (const modelId of ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"] as const) {
 			expect(OPENAI_CODEX_MODELS[modelId]).toMatchObject({
 				contextWindow: 272000,

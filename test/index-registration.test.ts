@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createAssistantMessageEventStream, type AssistantMessageEvent } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, normalizeContext, type AssistantMessageEvent } from "@earendil-works/pi-ai";
 import {
 	createExtensionCommandContext,
 	createExtensionRegistrationPi,
@@ -243,7 +243,7 @@ describe("extension registration and discovery", () => {
 		await extensionFactory(pi);
 
 		expect(mockedStreamCursor).not.toHaveBeenCalled();
-		const stream = pi._registered[0].config.streamSimple!(makeModel("composer-2"), makeContext(), { apiKey: "test-key" });
+		const stream = pi._registered[0].config.streamSimple!(makeModel("composer-2"), normalizeContext(makeContext()), { apiKey: "test-key" });
 		const resultPromise = stream.result();
 		await Promise.resolve();
 		const message = makeAssistantMessage("done");

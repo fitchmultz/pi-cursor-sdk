@@ -2,6 +2,11 @@
 
 ## 0.3.9 - 2026-09-19
 
+### Fixed
+
+- Serialize replay tool-call arguments once at the Pi transcript boundary to satisfy Pi 0.86.1's JSON-only contract without sharing mutable SDK payloads.
+- Preserve secret-scanned JSON and JSONL smoke artifacts byte-for-byte, and fail qualification when retained structured evidence cannot be parsed.
+
 ### Changed
 
 - Restore the compiled `dist/index.js` Pi entrypoint and the pre-0.3.8 tool-argument handling. Released Pi 0.85.1 did not require the source-loader or newer transcript-type changes.

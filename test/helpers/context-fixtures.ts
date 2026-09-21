@@ -49,6 +49,9 @@ function createMinimalSessionManager(cwd: string, overrides: Partial<ExtensionCo
 		getLabel: vi.fn(() => undefined),
 		getBranch: vi.fn(() => []),
 		buildContextEntries: vi.fn(() => []),
+		buildSessionProjection: vi.fn(() => {
+			throw new Error("sessionManager.buildSessionProjection is not implemented in this test harness.");
+		}),
 		getHeader: vi.fn(() => null),
 		getEntries: vi.fn(() => []),
 		getEntriesRevision: vi.fn(() => 0),

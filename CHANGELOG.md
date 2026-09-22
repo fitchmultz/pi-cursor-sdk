@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.10 - 2026-09-22
+
+### Fixed
+
+- Align native Pi context, tool, and model registration fixtures with the current official and maintained-fork hosts. The provider runtime remains unchanged from 0.3.9.
+
 ## 0.3.9 - 2026-09-19
 
 ### Fixed

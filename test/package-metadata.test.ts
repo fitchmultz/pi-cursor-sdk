@@ -220,6 +220,7 @@ describe("package metadata cutover baselines", () => {
 		const spec = readFileSync(join(process.cwd(), "docs/cursor-model-ux-spec.md"), "utf8");
 		const grok45 = FALLBACK_MODEL_ITEMS.find((item) => item.id === "grok-4.5");
 		const grok46 = FALLBACK_MODEL_ITEMS.find((item) => item.id === "grok-4.6");
+		const grok47 = FALLBACK_MODEL_ITEMS.find((item) => item.id === "grok-4.7");
 
 		expect(grok45?.parameters?.map((parameter) => parameter.id)).toEqual(["effort", "fast"]);
 		expect(grok46?.parameters?.map((parameter) => parameter.id)).toEqual(["effort", "fast"]);
@@ -229,9 +230,26 @@ describe("package metadata cutover baselines", () => {
 			"high",
 			"xhigh",
 		]);
+		expect(grok47?.parameters?.map((parameter) => parameter.id)).toEqual(["context", "reasoning_effort", "fast"]);
+		expect(grok47?.parameters?.find((parameter) => parameter.id === "context")?.values?.map((value) => value.value)).toEqual([
+			"256k",
+			"500k",
+		]);
+		expect(grok47?.parameters?.find((parameter) => parameter.id === "reasoning_effort")?.values?.map((value) => value.value)).toEqual([
+			"low",
+			"medium",
+			"high",
+			"xhigh",
+		]);
+		expect(grok47?.variants?.find((variant) => variant.isDefault)?.params).toEqual([
+			{ id: "context", value: "500k" },
+			{ id: "reasoning_effort", value: "high" },
+			{ id: "fast", value: "true" },
+		]);
 		expect(FALLBACK_MODEL_ITEMS.some((item) => item.id === "grok-4.3")).toBe(false);
 		expect(spec).toContain("### `grok-4.5`");
 		expect(spec).toContain("### `grok-4.6`");
+		expect(spec).toContain("### `grok-4.7`");
 		expect(spec).not.toContain("grok-4.3");
 	});
 

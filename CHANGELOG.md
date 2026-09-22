@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Add Grok 4.7 catalog support, including 256k/500k context variants, fast/slow selections, pi-native thinking control through Cursor's `reasoning_effort` parameter, and model-scoped sparse selection params required by the launch-time local registry.
+
+### Changed
+
+- Refresh the 40-model Cursor fallback catalog and bundled context-window snapshot from the live `@cursor/sdk@1.0.27` runtime, including the currently observed 256k effective checkpoint limit for Grok 4.7's advertised 256k and 500k selections.
+
 ## 0.3.9 - 2026-09-19
 
 ### Fixed

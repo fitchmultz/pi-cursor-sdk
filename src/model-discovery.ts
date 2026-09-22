@@ -63,6 +63,7 @@ export interface CursorModelMetadata {
 	parameterIds: {
 		context: boolean;
 		reasoning: boolean;
+		reasoningEffort: boolean;
 		effort: boolean;
 		thinking: boolean;
 		fast: boolean;
@@ -112,9 +113,10 @@ function mapComparableLevel(
 
 function getThinkingLevelMap(item: ModelListItem): ThinkingLevelMap | undefined {
 	const reasoningParameter = getParameter(item, "reasoning");
+	const reasoningEffortParameter = getParameter(item, "reasoning_effort");
 	const effortParameter = getParameter(item, "effort");
 	const thinkingParameter = getParameter(item, "thinking");
-	const valueParameter = effortParameter ?? reasoningParameter ?? thinkingParameter;
+	const valueParameter = effortParameter ?? reasoningEffortParameter ?? reasoningParameter ?? thinkingParameter;
 	if (!valueParameter) return undefined;
 
 	if (valueParameter.id === "thinking" && hasBooleanValues(valueParameter)) {
@@ -133,6 +135,8 @@ function getThinkingLevelMap(item: ModelListItem): ThinkingLevelMap | undefined 
 		off:
 			getParameterValue(reasoningParameter, "none") ??
 			getParameterValue(reasoningParameter, "off") ??
+			getParameterValue(reasoningEffortParameter, "none") ??
+			getParameterValue(reasoningEffortParameter, "off") ??
 			getParameterValue(thinkingParameter, "false"),
 		minimal: mapComparableLevel(valueParameter, "minimal"),
 		low: mapComparableLevel(valueParameter, "low"),
@@ -233,6 +237,7 @@ function toMetadata(
 		parameterIds: {
 			context: getParameter(item, "context") !== undefined,
 			reasoning: getParameter(item, "reasoning") !== undefined,
+			reasoningEffort: getParameter(item, "reasoning_effort") !== undefined,
 			effort: getParameter(item, "effort") !== undefined,
 			thinking: getParameter(item, "thinking") !== undefined,
 			fast: getParameter(item, "fast") !== undefined,
@@ -315,10 +320,13 @@ function applyThinkingLevel(
 		if (metadata.parameterIds.thinking && mapped === "false") {
 			setParam(params, "thinking", mapped);
 			deleteParam(params, "effort");
+			deleteParam(params, "reasoning_effort");
 			return;
 		}
 		if (metadata.parameterIds.reasoning) {
 			setParam(params, "reasoning", mapped);
+		} else if (metadata.parameterIds.reasoningEffort) {
+			setParam(params, "reasoning_effort", mapped);
 		}
 		return;
 	}
@@ -326,6 +334,12 @@ function applyThinkingLevel(
 	if (metadata.parameterIds.effort) {
 		if (metadata.parameterIds.thinking) setParam(params, "thinking", "true");
 		setParam(params, "effort", mapped);
+		return;
+	}
+
+	if (metadata.parameterIds.reasoningEffort) {
+		if (metadata.parameterIds.thinking) setParam(params, "thinking", "true");
+		setParam(params, "reasoning_effort", mapped);
 		return;
 	}
 
@@ -339,6 +353,23 @@ function applyThinkingLevel(
 	}
 }
 
+const GROK_47_REGISTRY_DEFAULTS: Readonly<Record<string, string>> = {
+	context: "500k",
+	reasoning_effort: "high",
+	fast: "true",
+};
+
+function omitGrok47RegistryRejectedRedundantDefaults(
+	baseModelId: string,
+	params: ModelParameterValue[],
+): ModelParameterValue[] {
+	// Cursor.models.list() advertises complete Grok 4.7 variants, but local send
+	// rejects any param that repeats the catalog default. Keep the filter here so
+	// other models still send complete defaultParams.
+	if (baseModelId !== "grok-4.7") return params;
+	return params.filter((param) => GROK_47_REGISTRY_DEFAULTS[param.id] !== param.value);
+}
+
 export function buildCursorModelSelection(
 	modelId: string,
 	thinkingLevel: ModelThinkingLevel,
@@ -347,12 +378,13 @@ export function buildCursorModelSelection(
 	const metadata = getCursorModelMetadata(modelId);
 	if (!metadata) return { id: modelId };
 
-	const params = cloneParams(metadata.defaultParams);
+	let params = cloneParams(metadata.defaultParams);
 	applyThinkingLevel(metadata, params, thinkingLevel);
 
 	if (metadata.supportsFast && fastEnabled !== undefined) {
 		setParam(params, "fast", fastEnabled ? "true" : "false");
 	}
+	params = omitGrok47RegistryRejectedRedundantDefaults(metadata.baseModelId, params);
 
 	return params.length > 0 ? { id: metadata.selectionModelId, params } : { id: metadata.selectionModelId };
 }

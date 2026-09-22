@@ -1,8 +1,6 @@
 name: Pi compatibility
 
 on:
-  push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -15,6 +13,4 @@ concurrency:
 
 jobs:
   compatibility:
-    uses: fitchmultz/.github/.github/workflows/pi-compatibility.yml@fe049ea97a8c91d1a4c3a0958a85b37c7759dcc6 # v1.0.0
-    with:
-      automation-ref: fe049ea97a8c91d1a4c3a0958a85b37c7759dcc6 # v1.0.0
+    uses: ./.github/workflows/pi-compatibility-check.yml

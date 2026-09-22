@@ -681,6 +681,8 @@ Cursor native replay is a display enhancement for TUI sessions and structured JS
 
 The source qualification baseline is official Pi **0.86.1**, with optional wildcard host peers and Cursor SDK **1.0.27** unchanged. Run `npm ci --ignore-scripts` then `npm run check:compat` in an empty HOME/agent profile for credential-free qualification. This builds the manifest entry, runs existing type/unit/package checks, and tests the compiled provider's registration plus production prompt shaping against native Pi transcript/tool transitions. Replay arguments must match their JSON stream deltas. Tests use no live Cursor service.
 
+Pull-request CI runs that suite once, then checks the installed package offline with the oldest supported official Pi release, the current official release, and a source-built revision of the Pi fork. It checks both npm and Git installations without starting a Cursor model turn. The selected official version and fork commit are printed in the check log.
+
 This is not Cursor authentication, desktop/cloud execution, visual, or all-platform release proof. The existing `smoke:platform:all` and applicable `smoke:cloud` gates remain required; a passing compatibility check does not make a runtime change release-ready. Older advertised Pi/Node floors require their own matrix evidence.
 
 Run checks:

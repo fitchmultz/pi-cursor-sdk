@@ -76,6 +76,12 @@ describe("discoverModels", () => {
 				"grok-4.6",
 				"grok-4.6:fast",
 				"grok-4.6:slow",
+				"grok-4.7@256k",
+				"grok-4.7@256k:fast",
+				"grok-4.7@256k:slow",
+				"grok-4.7@500k",
+				"grok-4.7@500k:fast",
+				"grok-4.7@500k:slow",
 				"gpt-5.5@1m",
 				"gpt-5.5@272k",
 			]),
@@ -434,7 +440,7 @@ describe("discoverModels", () => {
 		});
 	});
 
-	it("does not encode reasoning, effort, or thinking into pi model IDs", async () => {
+	it("does not encode reasoning, reasoning effort, effort, or thinking into pi model IDs", async () => {
 		process.env.CURSOR_API_KEY = "test-key-123";
 		mockedList.mockResolvedValueOnce([
 			{
@@ -766,6 +772,88 @@ describe("discoverModels", () => {
 			high: "high",
 			xhigh: "xhigh",
 			max: "max",
+		});
+	});
+
+	it("maps Grok 4.7 reasoning_effort, context, and fast catalog controls", () => {
+		const grok47 = FALLBACK_MODEL_ITEMS.find(({ id }) => id === "grok-4.7");
+		if (!grok47) throw new Error("grok-4.7 fallback fixture missing");
+
+		const models = register([grok47]);
+
+		expect(models.map(({ id }) => id)).toEqual([
+			"grok-4.7@256k",
+			"grok-4.7@256k:fast",
+			"grok-4.7@256k:slow",
+			"grok-4.7@500k",
+			"grok-4.7@500k:fast",
+			"grok-4.7@500k:slow",
+		]);
+		expect(models.map(({ contextWindow }) => contextWindow)).toEqual([
+			256000,
+			256000,
+			256000,
+			256000,
+			256000,
+			256000,
+		]);
+		expect(models.every(({ reasoning }) => reasoning)).toBe(true);
+		expect(getCursorModelMetadata("grok-4.7@500k")).toMatchObject({
+			baseModelId: "grok-4.7",
+			context: "500k",
+			defaultFast: true,
+			thinkingLevelMap: {
+				off: null,
+				minimal: null,
+				low: "low",
+				medium: "medium",
+				high: "high",
+				xhigh: "xhigh",
+				max: null,
+			},
+			parameterIds: {
+				context: true,
+				reasoning: false,
+				reasoningEffort: true,
+				effort: false,
+				thinking: false,
+				fast: true,
+			},
+		});
+		expect(buildCursorModelSelection("grok-4.7@256k:slow", "xhigh")).toEqual({
+			id: "grok-4.7",
+			params: [
+				{ id: "context", value: "256k" },
+				{ id: "reasoning_effort", value: "xhigh" },
+				{ id: "fast", value: "false" },
+			],
+		});
+		expect(buildCursorModelSelection("grok-4.7@500k", "off")).toEqual({ id: "grok-4.7" });
+		expect(buildCursorModelSelection("grok-4.7@256k", "high", true)).toEqual({
+			id: "grok-4.7",
+			params: [{ id: "context", value: "256k" }],
+		});
+		expect(buildCursorModelSelection("grok-4.7@500k:slow", "xhigh")).toEqual({
+			id: "grok-4.7",
+			params: [
+				{ id: "reasoning_effort", value: "xhigh" },
+				{ id: "fast", value: "false" },
+			],
+		});
+	});
+
+	it("keeps complete default params for models other than Grok 4.7", () => {
+		const grok46 = FALLBACK_MODEL_ITEMS.find(({ id }) => id === "grok-4.6");
+		if (!grok46) throw new Error("grok-4.6 fallback fixture missing");
+
+		register([grok46]);
+
+		expect(buildCursorModelSelection("grok-4.6", "high")).toEqual({
+			id: "grok-4.6",
+			params: [
+				{ id: "effort", value: "high" },
+				{ id: "fast", value: "true" },
+			],
 		});
 	});
 

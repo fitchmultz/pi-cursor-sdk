@@ -80,6 +80,7 @@ describe("discoverModels model-list cache", () => {
 		expect(getCursorModelMetadata("claude-opus-4-8")?.parameterIds).toEqual({
 			context: false,
 			reasoning: false,
+			reasoningEffort: false,
 			effort: true,
 			thinking: true,
 			fast: false,

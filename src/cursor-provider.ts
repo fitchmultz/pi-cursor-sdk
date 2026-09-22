@@ -9,7 +9,6 @@ import {
 } from "@earendil-works/pi-ai";
 import {
 	cursorLiveRuns,
-	DEFAULT_CURSOR_NATIVE_REPLAY_IDLE_DISPOSE_MS,
 	getPendingCursorLiveRun,
 	hasTrailingUserMessagesAfterToolResults,
 	releaseAllPendingCursorLiveRunsForTests,
@@ -90,7 +89,6 @@ export function streamCursor(
 }
 
 export const __testUtils = {
-	DEFAULT_CURSOR_NATIVE_REPLAY_IDLE_DISPOSE_MS,
 	pendingCursorNativeRunCount: cursorLiveRuns.count,
 	getPendingCursorLiveRun,
 	getActiveCursorLiveRunForScope: cursorLiveRuns.getActiveForScope,

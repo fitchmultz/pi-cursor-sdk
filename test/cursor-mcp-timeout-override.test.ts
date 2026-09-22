@@ -207,6 +207,7 @@ describe("Cursor MCP timeout override", () => {
 			installCursorMcpToolTimeoutOverride: () => calls.push("install"),
 		}));
 		vi.doMock("../src/cursor-session-agent.js", () => ({
+			CURSOR_LOCAL_AGENT_IDLE_MS: 5 * 60 * 1000,
 			acquireSessionCursorAgent: async () => {
 				calls.push("acquire");
 				throw new Error("stop before Cursor agent creation");

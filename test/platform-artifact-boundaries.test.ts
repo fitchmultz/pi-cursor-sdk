@@ -283,9 +283,15 @@ while (true) {
 import { existsSync, renameSync } from "node:fs";
 const [watched, parent, escaped] = process.argv.slice(1);
 const wait = new Int32Array(new SharedArrayBuffer(4));
+process.stdout.write("ready\n");
 while (!existsSync(watched)) Atomics.wait(wait, 0, 0, 1);
 renameSync(parent, escaped);
-`, join(parent, "payload-0.txt"), parent, escaped], { stdio: "ignore" });
+`, join(parent, "payload-0.txt"), parent, escaped], { stdio: ["ignore", "pipe", "ignore"] });
+		await new Promise<void>((resolveReady, reject) => {
+			const timer = setTimeout(() => { mover.kill(); reject(new Error("directory mover did not start")); }, 2_000);
+			mover.stdout.once("data", () => { clearTimeout(timer); resolveReady(); });
+			mover.once("error", (error) => { clearTimeout(timer); reject(error); });
+		});
 
 		const result = extractPlatformArtifactBundle(out, stdout);
 		await new Promise<void>((resolveExit, reject) => {

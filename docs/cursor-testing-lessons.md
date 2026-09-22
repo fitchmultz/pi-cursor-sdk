@@ -28,31 +28,31 @@ Passing hundreds of unit tests did not prove that chain was safe. Regression cov
 
 When changing provider/runtime behavior, ask whether the bug spans **pi extension lifecycle**, **active tool state**, **provider streaming**, and **persisted JSONL**. If yes, add an integration-style unit test or live smoke coverage for that chain.
 
-## Dual-check invariant: `context.tools` vs pi active tools
+## Dual-check invariant: request tools vs pi active tools
 
 Native replay routing intentionally uses two layers:
 
 1. **Extension resync** (`before_agent_start`, `turn_start`) updates pi's active tool set via `syncRegisteredNativeCursorToolsForModel`. This fixes the common case where plan-mode execute strips `grep`/`find`/`cursor` before the next turn.
-2. **Provider routing** uses the **request tool snapshot** captured when `streamCursor()` starts (`getActiveContextToolNames` in `src/cursor-context-tools.ts`): legacy `context.tools` on stock Pi 0.84/0.85, or tools replayed by the host's public helpers on transcript-only Pi. An explicit empty snapshot is not an absent legacy snapshot. It does not read live `pi.getActiveTools()` mid-stream. The bridge intentionally retains its separate registry-owned surface.
+2. **Provider routing** uses the **request tool snapshot** captured when `streamCursor()` starts (`getActiveContextToolNames` in `src/cursor-context-tools.ts`): legacy `context.tools` on stock Pi 0.84/0.85, or tools replayed by the host's public helpers on Pi 0.87.0 transcript requests. An explicit empty snapshot is not an absent legacy snapshot. It does not read live `pi.getActiveTools()` mid-stream. The bridge intentionally retains its separate registry-owned surface.
 
-`src/cursor-native-replay-routing.ts` centralizes provider-side routing against the same `context.tools` snapshot:
+`src/cursor-native-replay-routing.ts` centralizes provider-side routing against the same request tool snapshot:
 
 - **Turn coordinator** calls `resolveNativeReplayDisposition()` per completed SDK tool → `queue_replay` (queue native `toolUse`), `inactive_trace` (`formatInactiveCursorReplayTrace()`), or `transcript_trace`.
 - **Live-run drain** calls `partitionNativeToolsByActiveContext()` on already-queued native tool batches → active tools become `toolUse`; inactive tools get trace only and the batch returns `"handled"` without `toolUse`.
 
 Disposition outcomes:
 
-- `queue_replay` — tool is in `context.tools` and a live run exists
-- `inactive_trace` — native replay tool missing from `context.tools`
+- `queue_replay` — tool is in the request snapshot and a live run exists
+- `inactive_trace` — native replay tool missing from the request snapshot
 - `transcript_trace` — native replay off or non-native tool
 
-If resync runs but `context.tools` is still stale (e.g. only `read` listed), the provider must **not** emit `toolUse` for inactive tools. `test/cursor-native-replay-stress.test.ts` covers that stale-snapshot path.
+If resync runs but the request tool snapshot is still stale (e.g. only `read` listed), the provider must **not** emit `toolUse` for inactive tools. `test/cursor-native-replay-stress.test.ts` covers that stale-snapshot path.
 
 ## Stock/transcript provider contract
 
-`test/cursor-provider-pi-context.test.ts` drives real `ModelRuntime` / `ModelRegistry` requests into `streamCursor`, with only Cursor SDK execution mocked. Run it against each supported host with all Pi peer imports pinned to that host (including nested native imports); a top-level package version alone is not resolution evidence. Cover stock 0.84.0, stock 0.85.1, and the transcript host. Transcript-only cases are not stock features and are skipped there.
+`test/cursor-provider-pi-context.test.ts` drives real `ModelRuntime` / `ModelRegistry` requests into `streamCursor`, with only Cursor SDK execution mocked. Run it against each supported host with all Pi peer imports pinned to that host (including nested native imports); a top-level package version alone is not resolution evidence. The current qualification target is official Pi 0.87.0 plus the maintained 0.87.0 fork; both use transcript-only provider requests. Older 0.84/0.85 hosts retain shorthand-context coverage and skip transcript-only cases.
 
-The test covers bootstrap/incremental prompts, empty-vs-absent request tools, native replay/drain, cloud fresh/bootstrap selection, and actual host prompt serialization for context files and skills. It is offline contract evidence, not a replacement for the required live platform/cloud release gates.
+The test covers bootstrap/incremental prompts, empty-vs-absent request tools, native replay/drain, cloud fresh/bootstrap selection, and actual host prompt serialization for context files and skills. `test/native-provider.test.mjs` also loads the compiled extension in a real Pi session and verifies canonical context edits and conversation filtering while retaining current instructions and tool state. It is offline contract evidence, not a replacement for the required live platform/cloud release gates.
 
 ## Auth: use `auth.json`, not only env
 
@@ -263,7 +263,7 @@ The script writes timestamped artifacts under `--out` (default `/tmp/pi-cursor-s
 
 Stdout prints artifact paths and summary counts only. Raw payloads stay on disk and may contain local paths, project text, tool args/results, or secrets — do not commit or share them.
 
-Hard repo rule: Cursor SDK behavior claims must come from the installed `@cursor/sdk` package and/or https://cursor.com/docs/sdk/typescript, not from memory or ad-hoc probes alone. Current cutover validation targets exact `@cursor/sdk@1.0.27` and Pi 0.84.0 local packages.
+Hard repo rule: Cursor SDK behavior claims must come from the installed `@cursor/sdk` package and/or https://cursor.com/docs/sdk/typescript, not from memory or ad-hoc probes alone. Current compatibility qualification targets exact `@cursor/sdk@1.0.27` and Pi 0.87.0 local packages.
 
 ## Pi provider SDK event capture
 
@@ -423,7 +423,7 @@ Start with whether pi stayed alive:
 
 Then inspect the failing assistant turn in `$SMOKE_DIR/session/*.jsonl`:
 
-1. **Error `toolResult` (`isError: true`) or error assistant message contains `Tool grep/cursor/find/ls not found`** — stale `context.tools` snapshot or plan-strip resync gap after plan-mode execute stripped active tools. Run `node scripts/validate-smoke-jsonl.mjs --replay-errors-only "$SMOKE_DIR/session"`. Optional: `display-decisions.jsonl` from `PI_CURSOR_SDK_EVENT_DEBUG=1` shows `inactive_trace` routing. Route to **#52** — not model text echo (those strings appear in persisted error records, not narrated `Tool call (` lines). See [Dual-check invariant](#dual-check-invariant-contexttools-vs-pi-active-tools).
+1. **Error `toolResult` (`isError: true`) or error assistant message contains `Tool grep/cursor/find/ls not found`** — stale request tool snapshot or plan-strip resync gap after plan-mode execute stripped active tools. Run `node scripts/validate-smoke-jsonl.mjs --replay-errors-only "$SMOKE_DIR/session"`. Optional: `display-decisions.jsonl` from `PI_CURSOR_SDK_EVENT_DEBUG=1` shows `inactive_trace` routing. Route to **#52** — not model text echo (those strings appear in persisted error records, not narrated `Tool call (` lines). See [Dual-check invariant](#dual-check-invariant-request-tools-vs-pi-active-tools).
 2. **`content` has `type: "toolCall"` blocks and matching `toolResult` rows** — pi executed or replayed tools; if the TUI still looked like plain text, capture a screenshot and pi version (possible pi TUI/display issue, not provider dispatch).
 3. **`content` is only `type: "text"` and text contains `Tool call (` / `cursor-replay-` / serialized arg keys** — model text echo of prompt transcript format; not #55, not #52 stale routing. Compare with `buildCursorPrompt()` output in the prior turn.
 4. **No `toolCall` blocks, no error toast, user expected real execution** — check whether names are replay-only (`cursor-replay-*`) or Cursor-native MCP; replay never re-runs work ([replay doc](./cursor-native-tool-replay.md)).

@@ -66,15 +66,22 @@ test("compiled provider registers and shapes native Pi transcript/tool transitio
     await rm(root, { recursive: true, force: true });
   });
   const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false } });
+  let filterContext = false;
   const loader = new DefaultResourceLoader({
     cwd: root, agentDir, settingsManager,
     noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
     additionalExtensionPaths: [fileURLToPath(new URL("../", import.meta.url))],
+    extensionFactories: [(pi) => {
+      pi.on("context", (event) => {
+        assert.ok(event.messages.every((message) => message.role !== "system"));
+        if (filterContext) return { messages: event.messages.slice(-1) };
+      });
+    }],
     systemPromptOverride: () => "NATIVE_CURSOR_SYSTEM_SENTINEL",
   });
   await loader.reload();
   assert.deepEqual(loader.getExtensions().errors, []);
-  assert.equal(loader.getExtensions().extensions.length, 1);
+  assert.equal(loader.getExtensions().extensions.length, 2);
   const modelRuntime = await ModelRuntime.create({
     credentials: new InMemoryCredentialStore(), modelsPath: null,
     modelsStorePath: join(agentDir, "models-store.json"), allowModelNetwork: false,
@@ -129,6 +136,28 @@ test("compiled provider registers and shapes native Pi transcript/tool transitio
     assert.deepEqual(requests[1].prompt.images, [], "old user images must not be resent");
     assert.match(requests[1].prompt.text, /User: second native request/);
     assert.match(requests[1].prompt.text, /Assistant: fixture answer/);
+
+    const original = session.sessionManager.getBranch().find((entry) =>
+      entry.type === "message" && entry.message.role === "user");
+    session.sessionManager.appendContextEdit(original.id, { content: "EDITED_NATIVE_INPUT" });
+    session.refreshContext();
+    await session.prompt("after context edit");
+    assert.match(requests[2].prompt.text, /EDITED_NATIVE_INPUT/);
+    assert.doesNotMatch(requests[2].prompt.text, /first native request/);
+    assert.equal(original.message.content[0].text, "first native request", "raw history stays intact");
+
+    filterContext = true;
+    await session.prompt("filtered request");
+    assert.equal(requests.length, 4);
+    assert.match(requests[3].prompt.text, /NATIVE_CURSOR_SYSTEM_SENTINEL/);
+    assert.match(requests[3].prompt.text, /User: filtered request/);
+    assert.doesNotMatch(requests[3].prompt.text, /EDITED_NATIVE_INPUT|fixture answer/);
+    assert.deepEqual(requests[3].resolved.tools.map((tool) => tool.name), ["contract_beta"]);
+    session.setActiveToolsByName([]);
+    await session.prompt("filtered request without tools");
+    assert.equal(requests.length, 5);
+    assert.match(requests[4].prompt.text, /NATIVE_CURSOR_SYSTEM_SENTINEL/);
+    assert.deepEqual(requests[4].resolved.tools, [], "removed tools stay absent after context filtering");
     assert.deepEqual(errors, []);
   } finally {
     await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });

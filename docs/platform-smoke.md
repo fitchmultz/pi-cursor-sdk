@@ -253,7 +253,7 @@ Package scripts:
 
 ```json
 {
-  "check:platform-smoke": "node --check platform-smoke.config.mjs && node --check <platform smoke scripts> && vitest run test/platform-artifact-boundaries.test.ts test/platform-smoke-artifact-transport.test.ts test/cloud-smoke-helpers.test.ts test/cursor-sdk-cloud-list-runs-contract.test.ts test/smoke-cli-package-contracts.test.ts test/smoke-tooling.test.ts",
+  "check:platform-smoke": "node --check platform-smoke.config.mjs && node --check <platform smoke scripts>",
   "smoke:platform": "node scripts/platform-smoke.mjs",
   "smoke:platform:doctor": "node scripts/platform-smoke.mjs doctor",
   "smoke:platform:macos": "node scripts/platform-smoke.mjs run --target macos",
@@ -495,8 +495,8 @@ Per target, `platform-build` must:
 
 1. Record `node --version` and assert the target Node major is at least `nodeValidationMajor`.
 2. Run `npm ci` in `extensionSourceRoot`.
-3. Run `npm run check:platform-smoke` on the target so config syntax, smoke harness syntax, invalid target/suite guards, and invariant tests fail before live Cursor calls.
-4. Run `npm test` on the target with the same target-local release-tag guard bypass.
+3. Run `npm run check:platform-smoke` on the target to check config and smoke harness syntax.
+4. Run `npm test` on the target with the same target-local release-tag guard bypass; this includes the smoke guards and invariant tests before live Cursor calls.
 5. Run `npm run typecheck`.
 6. Run `npm pack`.
 7. Create `testWorkspaceRoot` with deterministic fixture files copied from the repo.

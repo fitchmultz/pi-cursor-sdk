@@ -53,7 +53,6 @@ export interface CursorModelMetadata {
 	selectionModelId: string;
 	displayName: string;
 	defaultParams: ModelParameterValue[];
-	catalogDefaultParams: ModelParameterValue[];
 	context?: string;
 	contextWindow: number;
 	supportsFast: boolean;
@@ -215,7 +214,6 @@ function toMetadata(
 	piModelId: string,
 	selectionModelId: string,
 	defaultParams: ModelParameterValue[],
-	catalogDefaultParams: ModelParameterValue[],
 	context: string | undefined,
 	contextWindowCache: Map<string, number>,
 	contextWindowKeys: readonly string[],
@@ -229,7 +227,6 @@ function toMetadata(
 		selectionModelId,
 		displayName: item.displayName || item.id,
 		defaultParams: cloneParams(defaultParams),
-		catalogDefaultParams: cloneParams(catalogDefaultParams),
 		...(context ? { context } : {}),
 		contextWindow: getContextWindow(contextWindowCache, contextWindowKeys, context, item.id),
 		supportsFast: getParameter(item, "fast") !== undefined,
@@ -273,7 +270,6 @@ function registerModelItems(items: ModelListItem[]): ProviderModelConfig[] {
 			piModelId,
 			selectionModelId,
 			params,
-			defaultParams,
 			context,
 			contextWindowCache,
 			[piModelId, contextWindowKey, baseContextWindowKey],
@@ -293,7 +289,6 @@ export function getCursorModelMetadataEntries(): CursorModelMetadata[] {
 	return [...metadataByPiModelId.values()].map((metadata) => ({
 		...metadata,
 		defaultParams: cloneParams(metadata.defaultParams),
-		catalogDefaultParams: cloneParams(metadata.catalogDefaultParams),
 		...(metadata.thinkingLevelMap ? { thinkingLevelMap: { ...metadata.thinkingLevelMap } } : {}),
 		parameterIds: { ...metadata.parameterIds },
 	}));
@@ -358,17 +353,21 @@ function applyThinkingLevel(
 	}
 }
 
-function omitRegistryRejectedRedundantDefaults(
-	metadata: CursorModelMetadata,
+const GROK_47_REGISTRY_DEFAULTS: Readonly<Record<string, string>> = {
+	context: "500k",
+	reasoning_effort: "high",
+	fast: "true",
+};
+
+function omitGrok47RegistryRejectedRedundantDefaults(
+	baseModelId: string,
 	params: ModelParameterValue[],
 ): ModelParameterValue[] {
-	// At launch, Cursor.models.list() advertises complete Grok 4.7 variants, but
-	// local runs reject selections that repeat any catalog-default value. The same
-	// registry accepts every tested context/reasoning_effort/fast combination when
-	// only deviations from 500k/high/fast=true are sent. Keep this compatibility
-	// normalization model-scoped so variant-only defaults for other models remain.
-	if (metadata.baseModelId !== "grok-4.7") return params;
-	return params.filter((param) => getParamValue(metadata.catalogDefaultParams, param.id) !== param.value);
+	// Cursor.models.list() advertises complete Grok 4.7 variants, but local send
+	// rejects any param that repeats the catalog default. Keep the filter here so
+	// other models still send complete defaultParams.
+	if (baseModelId !== "grok-4.7") return params;
+	return params.filter((param) => GROK_47_REGISTRY_DEFAULTS[param.id] !== param.value);
 }
 
 export function buildCursorModelSelection(
@@ -385,7 +384,7 @@ export function buildCursorModelSelection(
 	if (metadata.supportsFast && fastEnabled !== undefined) {
 		setParam(params, "fast", fastEnabled ? "true" : "false");
 	}
-	params = omitRegistryRejectedRedundantDefaults(metadata, params);
+	params = omitGrok47RegistryRejectedRedundantDefaults(metadata.baseModelId, params);
 
 	return params.length > 0 ? { id: metadata.selectionModelId, params } : { id: metadata.selectionModelId };
 }

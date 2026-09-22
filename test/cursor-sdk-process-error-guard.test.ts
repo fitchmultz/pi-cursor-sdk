@@ -65,12 +65,17 @@ function runNodeProcessErrorProbe(body: string) {
 	);
 }
 
-// Reproduces the observed fatal shape: the SDK's spawned child exits while a large
-// stdin write is in flight, so Node emits a raw EPIPE 'error' with no listener.
+// Exit only after the large stdin write is pending. An earlier exit produces the
+// synchronous EPIPE stack that the guard intentionally leaves fatal.
 const realClosedPipeStdinWriteBody = `
+const { strict: assert } = await import("node:assert");
 const { spawn } = await import("node:child_process");
-const child = spawn(process.execPath, ["-e", "process.exit(0)"], { stdio: ["pipe", "ignore", "ignore"] });
+const child = spawn(process.execPath, ["-e", 'process.once("message", () => process.exit(0))'], {
+	stdio: ["pipe", "ignore", "ignore", "ipc"],
+});
 child.stdin.write("x".repeat(1 << 22));
+assert.ok(child.stdin.writableLength > 0, "Expected an in-flight child-stdin write");
+child.send("exit");
 `;
 
 function runBunProcessErrorProbe(body: string) {

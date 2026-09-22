@@ -10,8 +10,9 @@ export function createBuiltinToolInfo(
 	parameters: TSchema = Type.Object({}),
 	description = "",
 	promptGuidelines?: string[],
-): ToolInfo {
+): ToolInfo & { id: string } {
 	return {
+		id: name,
 		name,
 		description,
 		parameters,
@@ -26,8 +27,9 @@ export function createTestToolInfo(
 	parameters: TSchema = Type.Object({}),
 	description = `${name} tool`,
 	promptGuidelines?: string[],
-): ToolInfo {
+): ToolInfo & { id: string } {
 	return {
+		id: name,
 		name,
 		description,
 		parameters,

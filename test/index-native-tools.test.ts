@@ -12,6 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
 	createBuiltinToolInfo,
+	createTestToolInfo,
 	createExtensionTestContext,
 	getHarnessRegisteredTool,
 	makeHarnessModel,
@@ -645,9 +646,7 @@ describe("extension native Cursor tool replay", () => {
 		const ui = { notify, setStatus: vi.fn() };
 		const pi = createExtensionPi([
 			{
-				name: "read",
-				description: "hashline read",
-				parameters: Type.Object({}),
+				...createTestToolInfo("read", Type.Object({}), "hashline read"),
 				sourceInfo: {
 					source: "package",
 					path: "/opt/homebrew/lib/node_modules/pi-hashline-edit/index.ts",
@@ -701,9 +700,7 @@ describe("extension native Cursor tool replay", () => {
 		mockedDiscover.mockResolvedValueOnce([]);
 		const pi = createExtensionPi([
 			{
-				name: "read",
-				description: "hashline read",
-				parameters: Type.Object({}),
+				...createTestToolInfo("read", Type.Object({}), "hashline read"),
 				sourceInfo: {
 					source: "package",
 					path: "/opt/homebrew/lib/node_modules/pi-hashline-edit/index.ts",

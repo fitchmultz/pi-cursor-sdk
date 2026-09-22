@@ -115,6 +115,7 @@ function createMinimalExtensionContextInternal(overrides: ExtensionContextOverri
 		hasPendingSteeringMessages: vi.fn(() => false),
 		getPendingNextTurnCount: vi.fn(() => 0),
 		getPendingInputCount: vi.fn(() => 0),
+		getPendingToolCalls: vi.fn(() => []),
 		shutdown: vi.fn(),
 		getContextUsage: vi.fn(() => undefined),
 		getCompactionSettings: vi.fn(() => ({ ...DEFAULT_COMPACTION_SETTINGS })),

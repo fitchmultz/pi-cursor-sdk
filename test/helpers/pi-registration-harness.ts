@@ -9,6 +9,7 @@ import {
 	DEFAULT_ACTIVE_TOOL_NAMES,
 	DEFAULT_BUILTIN_TOOL_NAMES,
 	createBuiltinToolInfo,
+	createTestToolInfo,
 } from "./tool-fixtures.js";
 import type {
 	BridgePiHarness,
@@ -94,9 +95,7 @@ export function createPiHarness(options: PiHarnessOptions = {}): PiHarness {
 			for (const tool of initialTools) toolsByName.set(tool.name, tool);
 			for (const tool of tools) {
 				toolsByName.set(tool.name, {
-					name: tool.name,
-					description: tool.description,
-					parameters: tool.parameters,
+					...createTestToolInfo(tool.name, tool.parameters, tool.description),
 					sourceInfo: { source: "test", path: "pi-cursor-sdk-test", scope: "temporary", origin: "top-level" },
 				});
 			}

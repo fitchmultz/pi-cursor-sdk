@@ -11,10 +11,12 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { tmpdir, userInfo } from "node:os";
+import { dirname, join, win32 } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { parseOptionalEnvBoolean } from "./cursor-env-boolean.js";
 import { asRecord } from "./cursor-record-utils.js";
+import { validateStoreRootPath } from "./cursor-store-root-path.js";
 
 export const CURSOR_SDK_CONFIG_FILE = "cursor-sdk.json";
 
@@ -36,6 +38,7 @@ export const CURSOR_SANDBOX_ENV = "PI_CURSOR_SANDBOX";
 export const CURSOR_LOCAL_FORCE_ENV = "PI_CURSOR_LOCAL_FORCE";
 export const CURSOR_LOCAL_RESUME_ENV = "PI_CURSOR_LOCAL_RESUME";
 export const CURSOR_HTTP1_ENV = "PI_CURSOR_HTTP_1_1";
+export const CURSOR_STORE_ROOT_ENV = "PI_CURSOR_SDK_STATE_ROOT";
 
 export type CursorConfigSource = "cli" | "environment" | "project" | "user" | "session" | "model-alias" | "builtin";
 export type CursorConfigTrustLevel = "one-shot" | "environment" | "trusted-project" | "user" | "session" | "model-catalog" | "builtin";
@@ -73,6 +76,7 @@ export interface CursorSdkConfig {
 		force?: boolean;
 		resume?: boolean;
 		useHttp1ForAgent?: boolean;
+		storeRoot?: string;
 	};
 }
 
@@ -113,6 +117,7 @@ export interface CursorResolvedSdkConfig {
 		force: CursorResolvedSetting<boolean>;
 		resume: CursorResolvedSetting<boolean>;
 		useHttp1ForAgent: CursorResolvedSetting<boolean>;
+		storeRoot: CursorResolvedSetting<string | undefined>;
 	};
 }
 
@@ -280,6 +285,8 @@ export function parseCursorSdkConfig(value: unknown): CursorSdkConfig | undefine
 		if (typeof local.force === "boolean") parsedLocal.force = local.force;
 		if (typeof local.resume === "boolean") parsedLocal.resume = local.resume;
 		if (typeof local.useHttp1ForAgent === "boolean") parsedLocal.useHttp1ForAgent = local.useHttp1ForAgent;
+		const storeRoot = parseNonEmptyString(local.storeRoot);
+		if (storeRoot) parsedLocal.storeRoot = storeRoot;
 		const sandboxOptions = asRecord(local.sandboxOptions);
 		if (typeof sandboxOptions?.enabled === "boolean") parsedLocal.sandboxOptions = { enabled: sandboxOptions.enabled };
 		if (Object.keys(parsedLocal).length > 0) config.local = parsedLocal;
@@ -534,6 +541,78 @@ const LOCAL_ORDER: CursorFieldSource[] = ["cli", "environment", "project", "user
 const LOCAL_FORCE_ORDER: CursorFieldSource[] = ["cli", "environment", "builtin"];
 const HTTP1_ORDER: CursorFieldSource[] = ["session", "environment", "user", "builtin"];
 
+const SAFE_POSIX_USERNAME = /^[A-Za-z0-9._][A-Za-z0-9._-]*$/;
+
+export function isSafePosixStoreUsername(name: string): boolean {
+	return name.length > 0 && name.length <= 64 && SAFE_POSIX_USERNAME.test(name) && name !== "." && name !== "..";
+}
+
+function readProcessStoreIdentity(): { username?: string; uid?: number } {
+	try {
+		const info = userInfo();
+		return {
+			username: info.username?.trim() || undefined,
+			uid: typeof info.uid === "number" ? info.uid : process.getuid?.(),
+		};
+	} catch {
+		return { uid: process.getuid?.() };
+	}
+}
+
+function posixStoreUsername(identity: { username?: string; uid?: number }): string {
+	const username = identity.username?.trim() ?? "";
+	if (isSafePosixStoreUsername(username)) return username;
+	if (typeof identity.uid === "number") return `uid-${identity.uid}`;
+	throw new Error("Cannot determine a safe username for a recommended storeRoot");
+}
+
+/** Conventional explicit `local.storeRoot` on Unix (`/var/tmp/<user>/pi-cursor-sdk`) and Windows (`%LOCALAPPDATA%/pi-cursor-sdk`). */
+export function recommendedStoreRoot(
+	platform = process.platform,
+	env: NodeJS.ProcessEnv = process.env,
+	identity: { username?: string; uid?: number } = readProcessStoreIdentity(),
+): string {
+	if (platform === "win32") {
+		const base = env.LOCALAPPDATA?.trim();
+		const root = base && win32.isAbsolute(base) ? base : tmpdir();
+		return win32.join(root, "pi-cursor-sdk");
+	}
+	return join("/var/tmp", posixStoreUsername(identity), "pi-cursor-sdk");
+}
+
+function assertSafeAbsoluteStoreRoot(value: string, source: CursorConfigSource): void {
+	const issue = validateStoreRootPath(value);
+	if (issue === "relative") {
+		throw new Error(
+			`Cursor SDK local.storeRoot from ${source} must be an absolute directory, got "${value}"`,
+		);
+	}
+	if (issue === "filesystem-root") {
+		throw new Error(
+			`Cursor SDK local.storeRoot from ${source} must not be the filesystem root, got "${value}"`,
+		);
+	}
+	if (issue === "unsafe-segment") {
+		throw new Error(
+			`Cursor SDK local.storeRoot from ${source} must not contain "." or ".." path segments, got "${value}"`,
+		);
+	}
+}
+
+function resolveStoreRootField(values: CursorFieldValues<string | undefined>): CursorResolvedSetting<string | undefined> {
+	const environment = valueFrom("environment", values.environment);
+	if (environment) {
+		assertSafeAbsoluteStoreRoot(environment.value, environment.source);
+		return environment;
+	}
+	const user = valueFrom("user", values.user);
+	if (user) {
+		assertSafeAbsoluteStoreRoot(user.value, user.source);
+		return user;
+	}
+	return resolved("builtin", values.builtin);
+}
+
 function buildFieldLayers<T>(order: CursorFieldSource[], values: CursorFieldValues<T>): Array<CursorResolvedSetting<T> | undefined> {
 	return order.map((source) => (source === "builtin" ? resolved("builtin", values.builtin as T) : valueFrom(source, values[source])));
 }
@@ -605,13 +684,22 @@ export function cursorSdkConfigFromEnv(env: Record<string, string | undefined> =
 	const force = parseOptionalEnvBoolean(env[CURSOR_LOCAL_FORCE_ENV]);
 	const resume = parseOptionalEnvBoolean(env[CURSOR_LOCAL_RESUME_ENV]);
 	const useHttp1ForAgent = parseOptionalEnvBoolean(env[CURSOR_HTTP1_ENV]);
-	if (autoReview !== undefined || sandbox !== undefined || force !== undefined || resume !== undefined || useHttp1ForAgent !== undefined) {
+	const storeRoot = parseNonEmptyString(env[CURSOR_STORE_ROOT_ENV]);
+	if (
+		autoReview !== undefined ||
+		sandbox !== undefined ||
+		force !== undefined ||
+		resume !== undefined ||
+		useHttp1ForAgent !== undefined ||
+		storeRoot !== undefined
+	) {
 		config.local = {
 			...(autoReview !== undefined ? { autoReview } : {}),
 			...(sandbox !== undefined ? { sandboxOptions: { enabled: sandbox } } : {}),
 			...(force !== undefined ? { force } : {}),
 			...(resume !== undefined ? { resume } : {}),
 			...(useHttp1ForAgent !== undefined ? { useHttp1ForAgent } : {}),
+			...(storeRoot !== undefined ? { storeRoot } : {}),
 		};
 	}
 	return config;
@@ -783,6 +871,11 @@ export function resolveCursorSdkConfig(options: ResolveCursorSdkConfigOptions = 
 				environment: env.local?.useHttp1ForAgent,
 				user: user?.local?.useHttp1ForAgent,
 				builtin: false,
+			}),
+			storeRoot: resolveStoreRootField({
+				environment: env.local?.storeRoot,
+				user: user?.local?.storeRoot,
+				builtin: undefined,
 			}),
 		},
 	};

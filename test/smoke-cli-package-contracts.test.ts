@@ -350,6 +350,8 @@ if (!windows.includes("for($i=0;$i -lt 10") || !windows.includes("$w=$e.Replace(
 		expect(paths.has("scripts/platform-smoke/live-suite-runner.mjs")).toBe(true);
 		expect(paths.has("scripts/platform-smoke/local-resume-runner.mjs")).toBe(true);
 		expect(paths.has("scripts/platform-smoke/target-runtime.mjs")).toBe(true);
+		expect(paths.has("scripts/platform-smoke/store-root-evidence.mjs")).toBe(true);
+		expect(paths.has("scripts/platform-smoke/store-root-evidence.d.mts")).toBe(true);
 		expect(paths.has("scripts/platform-smoke/visual-evidence.mjs")).toBe(true);
 		for (const path of paths) {
 			if (!path.endsWith(".mjs")) continue;

@@ -1,18 +1,23 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Agent, createAgentPlatform, type LocalAgentStore } from "@cursor/sdk";
 import { describe, expect, it } from "vitest";
+import { CURSOR_STORE_ROOT_ENV } from "../src/cursor-config.js";
 import {
 	buildCursorSessionStateRoot,
+	ensurePersistentStoreRoot,
+	getCursorSessionStoreIdentities,
 	hashCursorSessionStoreScope,
+	hashWorkspaceCwd,
 	openCursorSessionStore,
 	openCursorSessionStoreForScope,
+	resolveSdkStateRoot,
 	__testUtils as storeTestUtils,
 } from "../src/cursor-session-store.js";
 
 describe("cursor session store identity", () => {
-	it("derives a stable session root below the SDK workspace state root", () => {
+	it("derives a stable session root below the workspace state root", () => {
 		const scopeKey = "/tmp/sessions/example.jsonl";
 		expect(hashCursorSessionStoreScope(scopeKey)).toBe("9983782212ce97faa33c17445f21670d");
 		expect(buildCursorSessionStateRoot("/sdk/workspace", scopeKey, true)).toBe(
@@ -166,6 +171,238 @@ describe("cursor session store identity", () => {
 		} finally {
 			await Promise.all([first.dispose(), second.dispose()]);
 			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("places persistent session stores under the resolved storeRoot, not the SDK home default", async () => {
+		const storeRoot = mkdtempSync(join(tmpdir(), "pi-cursor-store-root-"));
+		const cwd = mkdtempSync(join(tmpdir(), "pi-cursor-cwd-"));
+		storeTestUtils.setSdkOperations(undefined);
+		const previous = process.env[CURSOR_STORE_ROOT_ENV];
+		process.env[CURSOR_STORE_ROOT_ENV] = storeRoot;
+		try {
+			const scopeKey = "/tmp/sessions/example.jsonl";
+			const identities = await getCursorSessionStoreIdentities(cwd, scopeKey, true);
+			expect(identities.defaultStore.stateRoot).toBe(join(storeRoot, hashWorkspaceCwd(cwd)));
+			expect(identities.sessionStore.stateRoot).toBe(
+				join(storeRoot, hashWorkspaceCwd(cwd), "pi-sessions", hashCursorSessionStoreScope(scopeKey)),
+			);
+			if (process.platform !== "win32") {
+				expect(statSync(storeRoot).mode & 0o777).toBe(0o700);
+			}
+			const fileless = await getCursorSessionStoreIdentities(cwd, "__anonymous__", false);
+			expect(fileless.sessionStore.stateRoot).toContain(join(tmpdir(), "pi-cursor-sdk-"));
+			expect(fileless.sessionStore.stateRoot).toContain("pi-sessions");
+		} finally {
+			if (previous === undefined) delete process.env[CURSOR_STORE_ROOT_ENV];
+			else process.env[CURSOR_STORE_ROOT_ENV] = previous;
+			rmSync(storeRoot, { recursive: true, force: true });
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	it("resumes a recorded store identity when it matches the configured custom storeRoot", async () => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "pi-cursor-custom-resume-match-"));
+		const customStoreRoot = mkdtempSync(join(tmpdir(), "pi-cursor-custom-store-root-match-"));
+		storeTestUtils.setSdkOperations(undefined);
+		const previous = process.env[CURSOR_STORE_ROOT_ENV];
+		process.env[CURSOR_STORE_ROOT_ENV] = customStoreRoot;
+		try {
+			const scopeKey = "persisted-session";
+			const identities = await getCursorSessionStoreIdentities(workspaceRoot, scopeKey, true);
+			const selection = await openCursorSessionStoreForScope({
+				cwd: workspaceRoot,
+				scopeKey,
+				persistent: true,
+				hasResumeHandle: true,
+				resumeIdentity: identities.sessionStore,
+			});
+			expect(selection.resumeAttemptAllowed).toBe(true);
+			expect(selection.resumeFallback).toBe(false);
+			expect(selection.sessionStore.identity).toEqual(identities.sessionStore);
+			await selection.sessionStore.dispose();
+		} finally {
+			if (previous === undefined) delete process.env[CURSOR_STORE_ROOT_ENV];
+			else process.env[CURSOR_STORE_ROOT_ENV] = previous;
+			storeTestUtils.setSdkOperations(undefined);
+			rmSync(workspaceRoot, { recursive: true, force: true });
+			rmSync(customStoreRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("does not resume a recorded store identity against a configured custom storeRoot", async () => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "pi-cursor-custom-resume-"));
+		const customStoreRoot = mkdtempSync(join(tmpdir(), "pi-cursor-custom-store-root-"));
+		storeTestUtils.setSdkOperations(undefined);
+		const previous = process.env[CURSOR_STORE_ROOT_ENV];
+		process.env[CURSOR_STORE_ROOT_ENV] = customStoreRoot;
+		try {
+			const selection = await openCursorSessionStoreForScope({
+				cwd: workspaceRoot,
+				scopeKey: "persisted-session",
+				persistent: true,
+				hasResumeHandle: true,
+				resumeIdentity: {
+					version: 1,
+					stateRoot: "/home/user/.cursor/projects/example/sdk-agent-store/pi-sessions/deadbeef",
+				},
+			});
+			expect(selection.resumeAttemptAllowed).toBe(false);
+			expect(selection.resumeFallback).toBe(true);
+			expect(selection.sessionStore.identity.stateRoot).toContain("pi-sessions");
+			expect(selection.sessionStore.identity.stateRoot).not.toContain(".cursor/projects");
+			expect(selection.sessionStore.identity.stateRoot).toContain(hashWorkspaceCwd(workspaceRoot));
+			await selection.sessionStore.dispose();
+		} finally {
+			if (previous === undefined) delete process.env[CURSOR_STORE_ROOT_ENV];
+			else process.env[CURSOR_STORE_ROOT_ENV] = previous;
+			storeTestUtils.setSdkOperations(undefined);
+			rmSync(workspaceRoot, { recursive: true, force: true });
+			rmSync(customStoreRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("uses the SDK default state root when storeRoot is not configured", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "pi-cursor-sdk-default-root-"));
+		const isolatedDefaultStateRoot = async (workspaceCwd: string) =>
+			resolveSdkStateRoot(workspaceCwd, { env: {}, user: {} });
+		storeTestUtils.setSdkOperations({
+			getDefaultStateRoot: isolatedDefaultStateRoot,
+			openSqliteStore: async () =>
+				({ dispose: async () => {} }) as unknown as LocalAgentStore & { dispose(): Promise<void> },
+		});
+		const previous = process.env[CURSOR_STORE_ROOT_ENV];
+		delete process.env[CURSOR_STORE_ROOT_ENV];
+		try {
+			const identities = await getCursorSessionStoreIdentities(cwd, "session-a", true);
+			expect(identities.defaultStore.stateRoot).toBe(await isolatedDefaultStateRoot(cwd));
+			expect(identities.defaultStore.stateRoot).toContain(".cursor/projects");
+		} finally {
+			storeTestUtils.setSdkOperations(undefined);
+			if (previous === undefined) delete process.env[CURSOR_STORE_ROOT_ENV];
+			else process.env[CURSOR_STORE_ROOT_ENV] = previous;
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	it("normalizes cwd before hashing for a configured custom storeRoot", async () => {
+		const storeRoot = mkdtempSync(join(tmpdir(), "pi-cursor-store-root-normalize-"));
+		const cwd = mkdtempSync(join(tmpdir(), "pi-cursor-cwd-normalize-"));
+		const previous = process.env[CURSOR_STORE_ROOT_ENV];
+		process.env[CURSOR_STORE_ROOT_ENV] = storeRoot;
+		try {
+			const withSlash = await resolveSdkStateRoot(`${cwd}/`, { env: process.env, user: {} });
+			const withoutSlash = await resolveSdkStateRoot(cwd, { env: process.env, user: {} });
+			expect(withSlash).toBe(withoutSlash);
+			expect(withSlash).toBe(join(storeRoot, hashWorkspaceCwd(cwd)));
+		} finally {
+			if (previous === undefined) delete process.env[CURSOR_STORE_ROOT_ENV];
+			else process.env[CURSOR_STORE_ROOT_ENV] = previous;
+			rmSync(storeRoot, { recursive: true, force: true });
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	it.skipIf(process.getuid?.() === 0)("fails closed when the resolved storeRoot is not writable", async () => {
+		const parent = mkdtempSync(join(tmpdir(), "pi-cursor-ro-"));
+		chmodSync(parent, 0o500);
+		try {
+			expect(() => ensurePersistentStoreRoot(join(parent, "pi-cursor-sdk"))).toThrow(/not writable|cannot be used|refusing/);
+			await expect(
+				resolveSdkStateRoot("/tmp/project", {
+					env: { [CURSOR_STORE_ROOT_ENV]: join(parent, "pi-cursor-sdk") },
+					user: {},
+				}),
+			).rejects.toThrow(/not writable|cannot be used|refusing/);
+		} finally {
+			chmodSync(parent, 0o700);
+			rmSync(parent, { recursive: true, force: true });
+		}
+	});
+
+	it("does not chmod an unowned parent and restricts only the storeRoot leaf", () => {
+		const parent = mkdtempSync(join(tmpdir(), "pi-cursor-parent-mode-"));
+		chmodSync(parent, 0o755);
+		const storeRoot = join(parent, "pi-cursor-sdk");
+		try {
+			ensurePersistentStoreRoot(storeRoot);
+			expect(statSync(parent).mode & 0o777).toBe(0o755);
+			if (process.platform !== "win32") {
+				expect(statSync(storeRoot).mode & 0o777).toBe(0o700);
+			}
+		} finally {
+			chmodSync(parent, 0o700);
+			rmSync(parent, { recursive: true, force: true });
+		}
+	});
+
+	it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+		"does not create a persistent storeRoot for fileless acquisitions",
+		async () => {
+			const parent = mkdtempSync(join(tmpdir(), "pi-cursor-fileless-ro-"));
+			chmodSync(parent, 0o500);
+			storeTestUtils.setSdkOperations(undefined);
+			const previous = process.env[CURSOR_STORE_ROOT_ENV];
+			process.env[CURSOR_STORE_ROOT_ENV] = join(parent, "pi-cursor-sdk");
+			try {
+				const identities = await getCursorSessionStoreIdentities("/tmp/project", "__anonymous__", false);
+				expect(identities.sessionStore.stateRoot).toContain(join(tmpdir(), "pi-cursor-sdk-"));
+				expect(existsSync(join(parent, "pi-cursor-sdk"))).toBe(false);
+			} finally {
+				if (previous === undefined) delete process.env[CURSOR_STORE_ROOT_ENV];
+				else process.env[CURSOR_STORE_ROOT_ENV] = previous;
+				chmodSync(parent, 0o700);
+				rmSync(parent, { recursive: true, force: true });
+			}
+		},
+	);
+
+	it("rejects filesystem-root and parent-directory storeRoot paths", () => {
+		expect(() => ensurePersistentStoreRoot("relative-store")).toThrow(/absolute|usable|refusing/);
+		expect(() => ensurePersistentStoreRoot("/")).toThrow(/usable|refusing|root/);
+		expect(() => ensurePersistentStoreRoot("/var/tmp/foo/../bar")).toThrow(/usable|refusing|\.\./);
+	});
+
+	it.skipIf(process.platform === "win32")("rejects a storeRoot that is a symlink", () => {
+		const dir = mkdtempSync(join(tmpdir(), "pi-cursor-symlink-store-"));
+		const target = join(dir, "target");
+		const link = join(dir, "link");
+		mkdirSync(target);
+		symlinkSync(target, link);
+		try {
+			expect(() => ensurePersistentStoreRoot(link)).toThrow(/symlink|refusing/);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it.skipIf(process.platform === "win32")("rejects a symlink under a world-writable parent", () => {
+		const parent = mkdtempSync(join(tmpdir(), "pi-cursor-ww-parent-"));
+		const target = join(parent, "target");
+		const link = join(parent, "link");
+		mkdirSync(target);
+		symlinkSync(target, link);
+		chmodSync(parent, 0o1777);
+		try {
+			expect(() => ensurePersistentStoreRoot(join(link, "pi-cursor-sdk"))).toThrow(/symlink|refusing/);
+		} finally {
+			chmodSync(parent, 0o700);
+			rmSync(parent, { recursive: true, force: true });
+		}
+	});
+
+	it.skipIf(process.platform === "win32")("rejects a middle-path symlink component", () => {
+		const dir = mkdtempSync(join(tmpdir(), "pi-cursor-mid-symlink-"));
+		const base = join(dir, "base");
+		const target = join(dir, "target");
+		const link = join(base, "link");
+		mkdirSync(target);
+		mkdirSync(base);
+		symlinkSync(target, link);
+		try {
+			expect(() => ensurePersistentStoreRoot(join(link, "pi-cursor-sdk"))).toThrow(/symlink|refusing/);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
 		}
 	});
 });

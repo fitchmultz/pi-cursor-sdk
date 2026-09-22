@@ -11,6 +11,7 @@ interface PlatformSmokeScenario {
 	expectedJSONLResultToolOrder?: string[];
 	visualEvidence?: Array<Record<string, unknown>>;
 	requiredBridgeDiagnostics?: boolean | "abort";
+	storeRootRelative?: string;
 }
 
 interface PlatformSmokePromptScenario extends PlatformSmokeScenario {

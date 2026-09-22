@@ -116,6 +116,7 @@ start target session
   sync checkout once into extensionSourceRoot
   run platform-build
   run cursor-native-visual-matrix
+  run cursor-store-root-live
   run cursor-http1-live
   run cursor-bridge-visual-matrix
   run cursor-abort-cleanup
@@ -238,6 +239,7 @@ scripts/platform-smoke/render-ansi.mjs
 scripts/platform-smoke/scenarios.mjs
 scripts/platform-smoke/target-runtime.mjs
 scripts/platform-smoke/targets.mjs
+scripts/platform-smoke/store-root-evidence.mjs
 scripts/platform-smoke/visual-evidence.mjs
 scripts/platform-smoke/wrapped-line-match.mjs
 ```
@@ -299,6 +301,7 @@ export default {
   requiredSuites: [
     "platform-build",
     "cursor-native-visual-matrix",
+    "cursor-store-root-live",
     "cursor-http1-live",
     "cursor-bridge-visual-matrix",
     "cursor-abort-cleanup",
@@ -619,6 +622,31 @@ Required JSONL evidence:
 - final assistant message's last non-empty `text` part contains `NATIVE_MATRIX_OK`;
 - assistant usage fields are non-negative.
 
+### `cursor-store-root-live`
+
+Cursor calls: `1`.
+
+Required environment:
+
+```text
+PI_CURSOR_SETTING_SOURCES=none
+PI_CURSOR_SDK_STATE_ROOT=<absolute workspace path>/.platform-smoke/custom-store-root
+PI_CURSOR_NATIVE_TOOL_DISPLAY=0
+PI_CURSOR_REGISTER_NATIVE_TOOLS=0
+PI_CURSOR_PI_TOOL_BRIDGE=0
+PI_CURSOR_EXPOSE_BUILTIN_TOOLS=0
+PI_CURSOR_SDK_EVENT_DEBUG=1
+```
+
+Purpose:
+
+- prove a persisted local session writes SQLite under the configured custom `storeRoot` (`<storeRoot>/<sha256(cwd)[0:32]>/pi-sessions/...`);
+- prove the workspace test fixture does not create default-layout SQLite under `.cursor/projects` or `sdk-agent-store` (workspace-scoped negative check only; this lane does not assert that the host `~/.cursor` tree was untouched).
+
+Required final marker: `STORE_ROOT_OK`.
+
+Required artifacts: `artifacts/store-root-evidence.json` with `ok: true`, at least one `index.db` under configured `pi-sessions`, and no default-layout `index.db` anywhere under the workspace fixture directory.
+
 ### `cursor-http1-live`
 
 Cursor calls: `1`.
@@ -779,6 +807,7 @@ Per target maximum live Cursor invocations:
 
 ```text
 cursor-native-visual-matrix: 1
+cursor-store-root-live: 1
 cursor-http1-live: 1
 cursor-bridge-visual-matrix: 1
 cursor-abort-cleanup: 1
@@ -794,9 +823,9 @@ cursor-local-resume-default-dry-run: 3
 cursor-local-resume-cleanup: 4
 ```
 
-Maximum per target: `37` Cursor invocations.
+Maximum per target: `38` Cursor invocations.
 
-Maximum full gate: `111` Cursor invocations.
+Maximum full gate: `114` Cursor invocations.
 
 The merge gate is `npm run smoke:platform:all`; that script runs doctor first and then the matrix to preserve this budget. No suite adds a new Cursor invocation without updating this plan and the scenario source of truth (`scripts/platform-smoke/scenarios.mjs`, plus `scripts/platform-smoke/local-resume-suites.mjs` for local-resume lanes).
 

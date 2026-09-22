@@ -22,7 +22,8 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `src/cursor-provider-errors.ts` owns scrubbed Cursor SDK run failure detail, abort reason formatting, and provider error sanitization.
 - `src/cursor-provider-lazy.ts` owns the `streamSimple` wrapper that defers Cursor provider execution to invocation and converts provider runtime failures into stream errors; the provider module stays in Pi's static extension graph so host peers resolve through Pi's loader.
 - `src/cursor-session-scope.ts` owns pi session cwd, session file/id/name/generation scope keys, and `session_start` / `session_info_changed` registration for session-agent pooling, cloud agent names, and debug grouping.
-- `src/cursor-session-store.ts` owns per-session Cursor SDK SQLite store identity derivation, open/disposal, temporary fileless stores, and guarded removal.
+- `src/cursor-session-store.ts` owns per-session Cursor SDK SQLite store identity derivation, open/disposal, temporary fileless stores, guarded removal, and custom `local.storeRoot` / `PI_CURSOR_SDK_STATE_ROOT` isolation with fail-closed permission checks.
+- `src/cursor-store-root-path.ts` owns absolute `local.storeRoot` segment validation shared by config resolution and `ensurePersistentStoreRoot()`.
 - `src/cursor-http1.ts` owns branch-scoped local HTTP/1.1 session state, global-preference override tracking, and extension-owned SDK configuration/null reset.
 - `src/cursor-ripgrep-path.ts` owns bundled Cursor SDK platform ripgrep resolution and local-agent environment initialization.
 - `src/cursor-session-agent.ts` owns session-scoped SDK agent pooling, transport-aware pool identity, send-state commits, busy tracking for in-flight SDK `run.wait()` work, and scoped acquire/dispose state.

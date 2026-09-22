@@ -212,7 +212,7 @@ Cursor `context` becomes a pi-visible model variant because it changes pi's nati
 
 All Cursor SDK models should be treated as thinking-capable Cursor models. The `thinking` column in `pi --list-models` is narrower: it only means pi can control a Cursor SDK thinking parameter for that model.
 
-For models where Cursor exposes `reasoning`, `effort`, or boolean `thinking` parameters, pi's native thinking controls map to Cursor SDK params:
+For models where Cursor exposes `reasoning`, `reasoning_effort`, `effort`, or boolean `thinking` parameters, pi's native thinking controls map to Cursor SDK params:
 
 - `reasoning=none|low|medium|high|extra-high`
 - `effort=low|medium|high|xhigh|max`
@@ -226,7 +226,7 @@ For Claude models with both `thinking` and `effort`, pi thinking `off` sends `th
 
 In `pi --list-models`, `thinking=no` means pi cannot control the model's thinking level with `--thinking`, a final `:medium` model suffix, or shift+tab. It does not mean the Cursor model cannot think.
 
-Some Cursor SDK models do not expose a `reasoning`, `effort`, or `thinking` parameter for the extension to set. Cursor thinking is still enabled/supported by the model, and Cursor may still emit thinking deltas. The extension surfaces those deltas through pi's native thinking rendering when the SDK emits them.
+Some Cursor SDK models do not expose a `reasoning`, `reasoning_effort`, `effort`, or `thinking` parameter for the extension to set. Cursor thinking is still enabled/supported by the model, and Cursor may still emit thinking deltas. The extension surfaces those deltas through pi's native thinking rendering when the SDK emits them.
 
 ## Fast mode
 
@@ -527,7 +527,7 @@ See [Cursor testing lessons](docs/cursor-testing-lessons.md#cursor-sdk-event-cap
 
 If startup has no stored `/login` key or `CURSOR_API_KEY`, model discovery fails, or discovery returns no models, the extension registers a bundled fallback snapshot of the latest reviewed Cursor SDK model catalog and notifies interactive users when possible. Pi CLI `--api-key` remains available to provider turns but is not parsed independently during startup discovery.
 
-The fallback snapshot includes Grok 4.6, Composer 2.5 (`composer-2.5` and `composer-2-5`), Composer 2, Cursor's GPT-5.6 Luna/Sol/Terra models, Claude, Gemini, Grok 4.5, Kimi, and other model IDs exposed by the reviewed `Cursor.models.list()` output. Recommended local/smoke runs use `cursor/grok-4.6`. Pi's separate `openai-codex` catalog is owned by Pi itself; Pi 0.84.0 includes native `gpt-5.6-luna`, `gpt-5.6-sol`, and `gpt-5.6-terra` support. The exact checked-in Cursor snapshot lives in `src/cursor-fallback-models.generated.ts`. A dated maintainer capture documents the assistant-visible [Cursor system prompts and tool guidance](https://github.com/fitchmultz/pi-cursor-sdk/blob/main/docs/evidence/cursor-system-prompts-2026-08-02/README.md) for Grok 4.5, Opus 5, Fable 5, and the GPT-5.6 Sol/Terra/Luna family.
+The fallback snapshot includes Grok 4.7 and 4.6, Composer 2.5 (`composer-2.5` and `composer-2-5`), Composer 2, Cursor's GPT-5.6 Luna/Sol/Terra models, Claude, Gemini, Grok 4.5, Kimi, and other model IDs exposed by the reviewed `Cursor.models.list()` output. Recommended local/smoke runs use `cursor/grok-4.6`. Pi's separate `openai-codex` catalog is owned by Pi itself; Pi 0.84.0 includes native `gpt-5.6-luna`, `gpt-5.6-sol`, and `gpt-5.6-terra` support. The exact checked-in Cursor snapshot lives in `src/cursor-fallback-models.generated.ts`. A dated maintainer capture documents the assistant-visible [Cursor system prompts and tool guidance](https://github.com/fitchmultz/pi-cursor-sdk/blob/main/docs/evidence/cursor-system-prompts-2026-08-02/README.md) for Grok 4.5, Opus 5, Fable 5, and the GPT-5.6 Sol/Terra/Luna family.
 
 Actual Cursor runs still need a key from `/login`, `CURSOR_API_KEY`, or `--api-key`. If you add auth after startup, run `/cursor-refresh-models` to refresh the full live Cursor model catalog without restarting pi.
 

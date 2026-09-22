@@ -53,6 +53,7 @@ export interface CursorModelMetadata {
 	selectionModelId: string;
 	displayName: string;
 	defaultParams: ModelParameterValue[];
+	catalogDefaultParams: ModelParameterValue[];
 	context?: string;
 	contextWindow: number;
 	supportsFast: boolean;
@@ -63,6 +64,7 @@ export interface CursorModelMetadata {
 	parameterIds: {
 		context: boolean;
 		reasoning: boolean;
+		reasoningEffort: boolean;
 		effort: boolean;
 		thinking: boolean;
 		fast: boolean;
@@ -112,9 +114,10 @@ function mapComparableLevel(
 
 function getThinkingLevelMap(item: ModelListItem): ThinkingLevelMap | undefined {
 	const reasoningParameter = getParameter(item, "reasoning");
+	const reasoningEffortParameter = getParameter(item, "reasoning_effort");
 	const effortParameter = getParameter(item, "effort");
 	const thinkingParameter = getParameter(item, "thinking");
-	const valueParameter = effortParameter ?? reasoningParameter ?? thinkingParameter;
+	const valueParameter = effortParameter ?? reasoningEffortParameter ?? reasoningParameter ?? thinkingParameter;
 	if (!valueParameter) return undefined;
 
 	if (valueParameter.id === "thinking" && hasBooleanValues(valueParameter)) {
@@ -133,6 +136,8 @@ function getThinkingLevelMap(item: ModelListItem): ThinkingLevelMap | undefined 
 		off:
 			getParameterValue(reasoningParameter, "none") ??
 			getParameterValue(reasoningParameter, "off") ??
+			getParameterValue(reasoningEffortParameter, "none") ??
+			getParameterValue(reasoningEffortParameter, "off") ??
 			getParameterValue(thinkingParameter, "false"),
 		minimal: mapComparableLevel(valueParameter, "minimal"),
 		low: mapComparableLevel(valueParameter, "low"),
@@ -210,6 +215,7 @@ function toMetadata(
 	piModelId: string,
 	selectionModelId: string,
 	defaultParams: ModelParameterValue[],
+	catalogDefaultParams: ModelParameterValue[],
 	context: string | undefined,
 	contextWindowCache: Map<string, number>,
 	contextWindowKeys: readonly string[],
@@ -223,6 +229,7 @@ function toMetadata(
 		selectionModelId,
 		displayName: item.displayName || item.id,
 		defaultParams: cloneParams(defaultParams),
+		catalogDefaultParams: cloneParams(catalogDefaultParams),
 		...(context ? { context } : {}),
 		contextWindow: getContextWindow(contextWindowCache, contextWindowKeys, context, item.id),
 		supportsFast: getParameter(item, "fast") !== undefined,
@@ -233,6 +240,7 @@ function toMetadata(
 		parameterIds: {
 			context: getParameter(item, "context") !== undefined,
 			reasoning: getParameter(item, "reasoning") !== undefined,
+			reasoningEffort: getParameter(item, "reasoning_effort") !== undefined,
 			effort: getParameter(item, "effort") !== undefined,
 			thinking: getParameter(item, "thinking") !== undefined,
 			fast: getParameter(item, "fast") !== undefined,
@@ -265,6 +273,7 @@ function registerModelItems(items: ModelListItem[]): ProviderModelConfig[] {
 			piModelId,
 			selectionModelId,
 			params,
+			defaultParams,
 			context,
 			contextWindowCache,
 			[piModelId, contextWindowKey, baseContextWindowKey],
@@ -284,6 +293,7 @@ export function getCursorModelMetadataEntries(): CursorModelMetadata[] {
 	return [...metadataByPiModelId.values()].map((metadata) => ({
 		...metadata,
 		defaultParams: cloneParams(metadata.defaultParams),
+		catalogDefaultParams: cloneParams(metadata.catalogDefaultParams),
 		...(metadata.thinkingLevelMap ? { thinkingLevelMap: { ...metadata.thinkingLevelMap } } : {}),
 		parameterIds: { ...metadata.parameterIds },
 	}));
@@ -315,10 +325,13 @@ function applyThinkingLevel(
 		if (metadata.parameterIds.thinking && mapped === "false") {
 			setParam(params, "thinking", mapped);
 			deleteParam(params, "effort");
+			deleteParam(params, "reasoning_effort");
 			return;
 		}
 		if (metadata.parameterIds.reasoning) {
 			setParam(params, "reasoning", mapped);
+		} else if (metadata.parameterIds.reasoningEffort) {
+			setParam(params, "reasoning_effort", mapped);
 		}
 		return;
 	}
@@ -326,6 +339,12 @@ function applyThinkingLevel(
 	if (metadata.parameterIds.effort) {
 		if (metadata.parameterIds.thinking) setParam(params, "thinking", "true");
 		setParam(params, "effort", mapped);
+		return;
+	}
+
+	if (metadata.parameterIds.reasoningEffort) {
+		if (metadata.parameterIds.thinking) setParam(params, "thinking", "true");
+		setParam(params, "reasoning_effort", mapped);
 		return;
 	}
 
@@ -339,6 +358,19 @@ function applyThinkingLevel(
 	}
 }
 
+function omitRegistryRejectedRedundantDefaults(
+	metadata: CursorModelMetadata,
+	params: ModelParameterValue[],
+): ModelParameterValue[] {
+	// At launch, Cursor.models.list() advertises complete Grok 4.7 variants, but
+	// local runs reject selections that repeat any catalog-default value. The same
+	// registry accepts every tested context/reasoning_effort/fast combination when
+	// only deviations from 500k/high/fast=true are sent. Keep this compatibility
+	// normalization model-scoped so variant-only defaults for other models remain.
+	if (metadata.baseModelId !== "grok-4.7") return params;
+	return params.filter((param) => getParamValue(metadata.catalogDefaultParams, param.id) !== param.value);
+}
+
 export function buildCursorModelSelection(
 	modelId: string,
 	thinkingLevel: ModelThinkingLevel,
@@ -347,12 +379,13 @@ export function buildCursorModelSelection(
 	const metadata = getCursorModelMetadata(modelId);
 	if (!metadata) return { id: modelId };
 
-	const params = cloneParams(metadata.defaultParams);
+	let params = cloneParams(metadata.defaultParams);
 	applyThinkingLevel(metadata, params, thinkingLevel);
 
 	if (metadata.supportsFast && fastEnabled !== undefined) {
 		setParam(params, "fast", fastEnabled ? "true" : "false");
 	}
+	params = omitRegistryRejectedRedundantDefaults(metadata, params);
 
 	return params.length > 0 ? { id: metadata.selectionModelId, params } : { id: metadata.selectionModelId };
 }

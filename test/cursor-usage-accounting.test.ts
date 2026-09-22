@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 import { InteractionUpdateSchema, TurnEndedUpdateSchema } from "@cursor/sdk";
 import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
-import { calculateContextTokens } from "@earendil-works/pi-coding-agent";
+import { buildSessionContext, calculateContextTokens, convertToLlm } from "@earendil-works/pi-coding-agent";
 import {
 	applyCursorApproximateUsage,
 	applyCursorUsage,
@@ -297,7 +297,7 @@ describe("cursor usage accounting", () => {
 		expect(partial.usage.totalTokens).not.toBe(31);
 	});
 
-	it("rejects local turn occupancy at or above the latest compaction tokensBefore", () => {
+	it.each([50_150, 50_151])("accepts current local occupancy %i at or above the old tokensBefore", (totalTokens) => {
 		const model = makeModel();
 		const kept = makeAssistantMessage([{ type: "text", text: "Kept." }]);
 		kept.usage = {
@@ -319,15 +319,14 @@ describe("cursor usage accounting", () => {
 		const partial = makeAssistantMessage([{ type: "text", text: "Hi." }]);
 		applyCursorUsage(partial, model, context, 7, {
 			runtime: "local",
-			turn: { inputTokens: 50_100, outputTokens: 50, cacheReadTokens: 40_000, cacheWriteTokens: 100 },
+			turn: { inputTokens: totalTokens - 50, outputTokens: 50, cacheReadTokens: 40_000, cacheWriteTokens: 100 },
 			billed: { inputTokens: 80, outputTokens: 12, cacheReadTokens: 60, cacheWriteTokens: 1 },
 		});
 		expect(partial.usage.input).toBe(19);
 		expect(partial.usage.output).toBe(12);
 		expect(partial.usage.cacheRead).toBe(60);
 		expect(partial.usage.cacheWrite).toBe(1);
-		expect(partial.usage.totalTokens).toBeLessThan(50_150);
-		expect(partial.usage.totalTokens).toBe(estimateCursorContextTotalTokens(partial, model, context));
+		expect(partial.usage.totalTokens).toBe(totalTokens);
 	});
 
 	it("keeps post-compaction local turn occupancy when it is below tokensBefore", () => {
@@ -367,7 +366,7 @@ describe("cursor usage accounting", () => {
 		expect(partial.usage.totalTokens).toBeLessThan(model.contextWindow);
 	});
 
-	it("ignores pre-compaction occupancy and watermarks at or above tokensBefore", () => {
+	it("ignores retained assistant measurements at or before the compaction timestamp", () => {
 		const model = makeModel();
 		const prior = makeAssistantMessage([{ type: "text", text: "Prior." }]);
 		prior.usage = {
@@ -433,5 +432,68 @@ describe("cursor usage accounting", () => {
 		expect(partial.usage.cacheRead).toBe(0);
 		expect(partial.usage.totalTokens).toBeLessThan(model.contextWindow);
 		expect(partial.usage.totalTokens).not.toBe(1_132_478);
+	});
+
+	describe.each(["raw", "converted"])("%s Pi compaction context", (format) => {
+		function compactedContext(): Context {
+			const kept = makeAssistantMessage([{ type: "text", text: "Retained tool turn." }]);
+			kept.timestamp = 100;
+			kept.usage.totalTokens = 239_412;
+			const messages = buildSessionContext([
+				{ type: "message", id: "kept", parentId: null, timestamp: new Date(100).toISOString(), message: kept },
+				{
+					type: "compaction", id: "compact", parentId: "kept", timestamp: new Date(200).toISOString(),
+					summary: "Short summary.", firstKeptEntryId: "kept", tokensBefore: 240_866,
+				},
+			]).messages;
+			expect(messages.map((message) => [message.role, message.timestamp])).toEqual([
+				["compactionSummary", 200], ["assistant", 100],
+			]);
+			const converted = convertToLlm(messages);
+			expect(converted[0]).toMatchObject({ role: "user", timestamp: 200 });
+			return {
+				messages: format === "converted" ? converted : messages as Context["messages"],
+			};
+		}
+
+		it("drops the retained floor below tokensBefore instead of propagating it across turns", () => {
+			const model = { ...makeModel(), contextWindow: 256_000 };
+			const context = compactedContext();
+			for (let turn = 0; turn < 3; turn += 1) {
+				const partial = makeAssistantMessage([{ type: "text", text: "Continuing." }]);
+				partial.timestamp = 300 + turn;
+				applyCursorUsage(partial, model, context, 7);
+				expect(partial.usage.totalTokens).toBe(estimateCursorContextTotalTokens(partial, model, context));
+				expect(partial.usage.totalTokens).toBeLessThan(1_000);
+				context.messages.push(partial);
+			}
+		});
+
+		it("keeps a genuine post-compaction floor even when it grows past tokensBefore", () => {
+			const model = { ...makeModel(), contextWindow: 256_000 };
+			const context = compactedContext();
+			const measured = makeAssistantMessage([{ type: "text", text: "New measurement." }]);
+			measured.timestamp = 300;
+			measured.usage.totalTokens = 250_000;
+			context.messages.push(measured);
+			const partial = makeAssistantMessage([]);
+			partial.timestamp = 400;
+			applyCursorUsage(partial, model, context, 7);
+			expect(partial.usage.totalTokens).toBe(250_000);
+		});
+
+		it("keeps billed spend without resurrecting the retained occupancy floor", () => {
+			const model = { ...makeModel(), contextWindow: 256_000 };
+			const context = compactedContext();
+			const partial = makeAssistantMessage([]);
+			partial.timestamp = 300;
+			applyCursorUsage(partial, model, context, 7, {
+				runtime: "local",
+				billed: { inputTokens: 245_000, outputTokens: 100, cacheReadTokens: 240_000, cacheWriteTokens: 0 },
+			});
+			expect(partial.usage.totalTokens).toBe(estimateCursorContextTotalTokens(partial, model, context));
+			expect(partial.usage.totalTokens).toBeLessThan(1_000);
+			expect(partial.usage).toMatchObject({ input: 5_000, output: 100, cacheRead: 240_000 });
+		});
 	});
 });

@@ -129,15 +129,19 @@ function isCompatibleCursorAssistantMeasurement(assistant: AssistantMessage, mod
 	return assistant.api === model.api && assistant.provider === model.provider && assistant.model === model.id;
 }
 
-function getLatestCompactionBoundary(context: Context): { index: number; tokensBefore?: number } | undefined {
+function getLatestCompactionBoundary(context: Context): { index: number; timestamp?: number } | undefined {
 	for (let index = context.messages.length - 1; index >= 0; index -= 1) {
-		const message = context.messages[index] as { role?: string; tokensBefore?: number };
-		if (message.role !== "compactionSummary") continue;
-		const tokensBefore = message.tokensBefore;
-		return {
-			index,
-			tokensBefore: Number.isFinite(tokensBefore) && tokensBefore !== undefined && tokensBefore > 0 ? Math.floor(tokensBefore) : undefined,
+		const message = context.messages[index] as {
+			role?: string;
+			timestamp?: number;
+			content?: string | { type: string; text?: string }[];
 		};
+		const text = typeof message.content === "string" ? message.content : message.content?.[0]?.text;
+		// convertToLlm turns compactionSummary into a user message, retaining only its timestamp.
+		const convertedSummary = message.role === "user" &&
+			text?.startsWith("The conversation history before this point was compacted into the following summary:\n\n<summary>\n") &&
+			text.endsWith("\n</summary>");
+		if (message.role === "compactionSummary" || convertedSummary) return { index, timestamp: message.timestamp };
 	}
 	return undefined;
 }
@@ -151,11 +155,13 @@ function getLastAcceptedContextOccupancy(context: Context, model: Model<Api>): n
 		const assistant = message as AssistantMessage;
 		if (assistant.stopReason === "aborted" || assistant.stopReason === "error" || !assistant.usage) continue;
 		if (!isCompatibleCursorAssistantMeasurement(assistant, model)) continue;
+		// Pi places retained pre-compaction messages after the summary; array position is not chronology.
+		if (boundary && (boundary.timestamp === undefined || !Number.isFinite(boundary.timestamp) ||
+			!Number.isFinite(assistant.timestamp) || assistant.timestamp <= boundary.timestamp)) continue;
 		const { usage } = assistant;
 		const total =
 			usage.totalTokens || usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
 		if (!Number.isFinite(total) || total <= 0 || total > model.contextWindow) continue;
-		if (boundary?.tokensBefore !== undefined && total >= boundary.tokensBefore) continue;
 		return total;
 	}
 	return 0;
@@ -182,19 +188,13 @@ function applyCursorOccupancyEstimate(partial: AssistantMessage, model: Model<Ap
 	);
 }
 
-function isCurrentLocalOccupancy(turn: CursorSdkTurnUsage, model: Model<Api>, context: Context): boolean {
-	if (!isCursorSdkUsageSafeForPiMessage(turn, model)) return false;
-	const tokensBefore = getLatestCompactionBoundary(context)?.tokensBefore;
-	return tokensBefore === undefined || turn.inputTokens + turn.outputTokens < tokensBefore;
-}
-
 function applyResolvedCursorOccupancy(
 	partial: AssistantMessage,
 	model: Model<Api>,
 	context: Context,
 	localTurn: CursorSdkTurnUsage | undefined,
 ): void {
-	if (localTurn && isCurrentLocalOccupancy(localTurn, model, context)) {
+	if (localTurn && isCursorSdkUsageSafeForPiMessage(localTurn, model)) {
 		partial.usage.totalTokens = localTurn.inputTokens + localTurn.outputTokens;
 		return;
 	}

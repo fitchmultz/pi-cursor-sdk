@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Stop post-compaction occupancy floors from reusing retained pre-compaction measurements, including after Pi converts the summary to a user message. Use the compaction timestamp rather than comparing token totals, so genuine new context can grow past the old `tokensBefore` value without being discarded.
+
 ## 0.3.9 - 2026-09-19
 
 ### Fixed

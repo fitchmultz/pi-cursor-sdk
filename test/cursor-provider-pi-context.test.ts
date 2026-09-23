@@ -1,5 +1,5 @@
 import * as ai from "@earendil-works/pi-ai";
-import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { convertToLlm, ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Type } from "typebox";
 import {
@@ -75,6 +75,62 @@ describe("installed Pi provider context boundary", () => {
 		expect(mockedCreate).toHaveBeenCalledTimes(1);
 		expect(sdkSend.mock.calls[1][0].text).not.toContain("SYSTEM_SENTINEL");
 		expect(sdkSend.mock.calls[1][0].text).toContain("FOLLOWUP");
+	});
+
+	it("passes Pi's visible ! shell output before the next question to Cursor", async () => {
+		const sdkSend = mockSend();
+		const { received, send } = await boundary();
+		const input = { systemPrompt: "SYSTEM", tools: [], messages: [user] };
+		const firstResponse = await send(input);
+		const shell = {
+			role: "bashExecution" as const,
+			command: "pwd",
+			output: "/fixture/worktree",
+			exitCode: 0,
+			cancelled: false,
+			truncated: false,
+			timestamp: 3,
+		};
+		const shellText = "Ran `pwd`\n```\n/fixture/worktree\n```";
+		expect(convertToLlm([shell])).toEqual([
+			{ role: "user", content: [{ type: "text", text: shellText }], timestamp: shell.timestamp },
+		]);
+
+		await send({
+			...input,
+			messages: [user, firstResponse, shell as unknown as ai.Context["messages"][number], { ...user, content: "Where am I?", timestamp: 4 }],
+		});
+		expect(received[1].messages).toContainEqual(expect.objectContaining(shell));
+		const text = sdkSend.mock.calls[1][0].text;
+		expect(text).toContain(`User: ${shellText}`);
+		expect(text).toContain("User: Where am I?");
+		expect(text.indexOf(shellText)).toBeLessThan(text.indexOf("Where am I?"));
+	});
+
+	it("keeps Pi's !! shell output private and the next question incremental", async () => {
+		const sdkSend = mockSend();
+		const { send } = await boundary();
+		const input = { systemPrompt: "SYSTEM", tools: [], messages: [user] };
+		const firstResponse = await send(input);
+		const shell = {
+			role: "bashExecution" as const,
+			command: "pwd",
+			output: "/fixture/private",
+			exitCode: 0,
+			cancelled: false,
+			truncated: false,
+			excludeFromContext: true,
+			timestamp: 3,
+		};
+		expect(convertToLlm([shell])).toEqual([]);
+
+		await send({
+			...input,
+			messages: [user, firstResponse, shell as unknown as ai.Context["messages"][number], { ...user, content: "Follow up", timestamp: 4 }],
+		});
+		expect(mockedCreate).toHaveBeenCalledTimes(1);
+		expect(sdkSend.mock.calls[1][0].text).toContain("User: Follow up");
+		expect(sdkSend.mock.calls[1][0].text).not.toContain("/fixture/private");
 	});
 
 	it("keeps the empty request snapshot distinct from the bridge's registry-owned surface", async () => {

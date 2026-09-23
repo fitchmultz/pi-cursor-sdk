@@ -385,7 +385,11 @@ export function shouldBootstrapCursorContext(
 	for (let index = 0; index < previous.messageHashes.length; index += 1) {
 		if (current.messageHashes[index] !== previous.messageHashes[index]) return true;
 	}
-	return false;
+	// An incremental prompt carries only the latest new user message. Rebootstrap
+	// if additional model-visible input (such as ! shell output) would be lost.
+	const appended = normalizePiContextMessages(context.messages.slice(previous.messageHashes.length));
+	const appendedUsers = appended.filter((message) => message.role === "user");
+	return appended.length > 0 && (appendedUsers.length !== 1 || appended.at(-1)?.role !== "user");
 }
 
 /** @deprecated Use planCursorSessionSend() for send mode and shouldBootstrapCursorContext() for context-only checks. */

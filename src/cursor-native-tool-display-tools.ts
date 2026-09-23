@@ -42,7 +42,6 @@ type RenderResult = NonNullable<AnyToolDefinition["renderResult"]>;
 
 type NativeReplayStrategy = {
 	createDefinition: (cwd: string) => AnyToolDefinition;
-	missingReplayPolicy?: "block-file-mutation";
 	renderReplayCall?: (
 		args: Parameters<RenderCall>[0],
 		theme: Parameters<RenderCall>[1],
@@ -130,14 +129,12 @@ const NATIVE_CURSOR_TOOL_STRATEGIES: Record<BuiltinNativeCursorToolName, NativeR
 	bash: { createDefinition: (cwd) => createBashToolDefinition(cwd) as AnyToolDefinition },
 	edit: {
 		createDefinition: (cwd) => createEditToolDefinition(cwd) as AnyToolDefinition,
-		missingReplayPolicy: "block-file-mutation",
 		renderReplayCall: (args, theme, context) =>
 			renderNativeLookingCursorFileMutationCall("edit", args as Record<string, unknown>, theme, context.isPartial),
 		renderReplayResult: renderEditReplayResult,
 	},
 	write: {
 		createDefinition: (cwd) => createWriteToolDefinition(cwd) as AnyToolDefinition,
-		missingReplayPolicy: "block-file-mutation",
 		renderReplayCall: (args, theme, context) =>
 			renderNativeLookingCursorFileMutationCall("write", args as Record<string, unknown>, theme, context.isPartial),
 		renderReplayResult: renderWriteReplayResult,
@@ -178,8 +175,8 @@ export function wrapNativeCursorTool<TParams extends TSchema, TDetails, TState>(
 					terminate: cursorDisplay.terminate ?? true,
 				};
 			}
-			if (strategy?.missingReplayPolicy === "block-file-mutation" && isCursorReplayToolCallId(toolCallId)) {
-				throw new Error(`No recorded Cursor ${definition.name} result was available. This replay-only call does not execute file mutations.`);
+			if (isCursorReplayToolCallId(toolCallId)) {
+				throw new Error(`No recorded Cursor ${definition.name} result was available. This replay-only call does not execute work.`);
 			}
 			return getCurrentDefinition().execute(toolCallId, params, signal, onUpdate, ctx);
 		},

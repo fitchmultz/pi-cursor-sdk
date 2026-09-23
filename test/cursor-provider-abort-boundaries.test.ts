@@ -8,7 +8,7 @@ import { AgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { streamCursor, __testUtils } from "../src/cursor-provider.js";
 import {
-	asMockCursorRun, collectTextDeltas, getErrorEvent, makeContext, makeModel,
+	asMockCursorRun, collectEvents, collectTextDeltas, getDoneEvent, getErrorEvent, makeContext, makeModel,
 	mockCreatedAgent, registerNativeToolDisplayForTest, resetCursorProviderTestState,
 } from "./helpers/cursor-provider-harness.js";
 
@@ -24,6 +24,46 @@ describe("AbortSignal during native tool-batch drain", () => {
 		vi.restoreAllMocks();
 		await __testUtils.releaseAllPendingCursorLiveRunsForTests();
 		await __testUtils.resetSessionCursorAgents();
+	});
+
+	it.each([false, true])("keeps cancellation connected until the SDK run settles (finished=%s)", async (finished) => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		await registerNativeToolDisplayForTest([]);
+		const controller = new AbortController();
+		const finishSdk = gate();
+		const cancel = vi.fn(async () => { finishSdk.resolve(); });
+		const removeListener = vi.spyOn(controller.signal, "removeEventListener");
+		mockCreatedAgent({
+			send: vi.fn(async (_message: unknown, options: SendOptions = {}) => {
+				await options.onDelta?.({ update: {
+					type: "tool-call-completed", callId: "read-1", modelCallId: "model-1",
+					toolCall: { type: "read", args: { path: "fixture.txt" }, result: { status: "success", value: { content: "RECORDED", fileSize: 8, totalLines: 1 } } },
+				} });
+				return asMockCursorRun({
+					id: "run-1", agentId: "agent-1", status: "running",
+					wait: async () => {
+						await finishSdk.promise;
+						return { id: "run-1", status: "finished" as const, result: "done" };
+					},
+					cancel,
+				});
+			}),
+		});
+
+		try {
+			const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key", signal: controller.signal }));
+			expect(getDoneEvent(events).reason).toBe("toolUse");
+			expect(__testUtils.pendingCursorNativeRunCount()).toBe(1);
+			if (finished) {
+				removeListener.mockClear();
+				finishSdk.resolve();
+				await vi.waitFor(() => expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function)));
+			}
+			controller.abort();
+			expect(cancel).toHaveBeenCalledTimes(finished ? 0 : 1);
+		} finally {
+			finishSdk.resolve();
+		}
 	});
 
 	it.each([

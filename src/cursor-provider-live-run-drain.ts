@@ -30,13 +30,21 @@ import { partitionNativeToolsByActiveContext } from "./cursor-native-replay-rout
 import type { CursorSdkEventDebugRecorder } from "./cursor-sdk-event-debug.js";
 
 export const DEFAULT_CURSOR_NATIVE_REPLAY_IDLE_DISPOSE_MS = 5 * 60 * 1000;
+const CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV = "PI_CURSOR_LIVE_RUN_IDLE_DISPOSE_MS";
+
+export function parseCursorNativeReplayIdleDisposeMs(raw: string | undefined): number {
+	if (!raw || !/^[0-9]+$/.test(raw)) return DEFAULT_CURSOR_NATIVE_REPLAY_IDLE_DISPOSE_MS;
+	const value = Number(raw);
+	return value >= 1 && value <= 2147483647 ? value : DEFAULT_CURSOR_NATIVE_REPLAY_IDLE_DISPOSE_MS;
+}
+
 const CURSOR_NATIVE_REPLAY_TOOL_ID_PATTERN = /^(cursor-replay-\d+-\d+)-tool-\d+$/;
 
 interface CursorLiveTurnState {
 	emitter: CursorPartialContentEmitter;
 	emittedText: string;
 }
-let cursorNativeReplayIdleDisposeMs = DEFAULT_CURSOR_NATIVE_REPLAY_IDLE_DISPOSE_MS;
+let cursorNativeReplayIdleDisposeMsOverride: number | undefined;
 
 type CursorLiveRunDrainMode = "emit" | "chain_user_input";
 type CursorLiveRunDrainOutcome = "tool_use" | "stop" | "error" | "aborted" | "chain_user_input";
@@ -50,7 +58,8 @@ export async function abandonSessionCursorAgent(scopeKey: string | undefined): P
 }
 
 export const cursorLiveRuns = createCursorLiveRunCoordinator({
-	getIdleDisposeMs: () => cursorNativeReplayIdleDisposeMs,
+	getIdleDisposeMs: () =>
+		cursorNativeReplayIdleDisposeMsOverride ?? parseCursorNativeReplayIdleDisposeMs(process.env[CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV]),
 	deleteNativeToolDisplay: deleteCursorNativeToolDisplay,
 	abandonSessionAgent: (scopeKey) => abandonSessionCursorAgent(scopeKey),
 });
@@ -490,11 +499,11 @@ export async function drainExistingCursorLiveRunBeforeSend(
 }
 
 export function setCursorNativeReplayIdleDisposeMs(value: number): void {
-	cursorNativeReplayIdleDisposeMs = value;
+	cursorNativeReplayIdleDisposeMsOverride = value;
 }
 
 export function resetCursorNativeReplayIdleDisposeMs(): void {
-	cursorNativeReplayIdleDisposeMs = DEFAULT_CURSOR_NATIVE_REPLAY_IDLE_DISPOSE_MS;
+	cursorNativeReplayIdleDisposeMsOverride = undefined;
 }
 
 export async function releaseAllPendingCursorLiveRunsForTests(): Promise<void> {

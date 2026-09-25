@@ -158,10 +158,10 @@ describe("streamCursor session agent", () => {
 		const secondPrompt = mockSend.mock.calls[1]?.[0] as { text?: string };
 		expect(firstPrompt.text).toContain("Cursor SDK tool boundary:");
 		expect(firstPrompt.text).toContain("User: Hello");
-		expect(firstPrompt.text).toContain("prefer pi__mcp for MCP work and pi__subagent for delegation");
+		expect(firstPrompt.text).toContain("prefer pi__todo for todos and pi__subagent_spawn for delegation");
 		expect(secondPrompt.text).toContain("User: Follow up");
 		expect(secondPrompt.text).not.toContain("User: Hello");
-		expect(secondPrompt.text).toContain("prefer pi__mcp for MCP work and pi__subagent for delegation");
+		expect(secondPrompt.text).toContain("prefer pi__todo for todos and pi__subagent_spawn for delegation");
 	});
 
 	it("recreates the session agent after session-tree invalidation", async () => {

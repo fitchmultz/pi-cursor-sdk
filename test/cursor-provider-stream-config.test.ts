@@ -540,7 +540,7 @@ describe("streamCursor prompt and model config", () => {
 		expect(sentMessage.text).toContain("For exposed pi bridge tools");
 		expect(sentMessage.text).not.toContain("Use pi__cursor_ask_question");
 		expect(sentMessage.text).toContain("Pi bridge: call exposed pi__* MCP names");
-		expect(sentMessage.text).toContain("prefer pi__mcp for MCP work and pi__subagent for delegation");
+		expect(sentMessage.text).toContain("prefer pi__todo for todos and pi__subagent_spawn for delegation");
 		expect(sentMessage.text).toContain("pi__sem_reindex");
 	});
 

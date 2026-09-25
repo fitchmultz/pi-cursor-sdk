@@ -68,6 +68,17 @@ export function selectCursorBilledTurnUsage(
 	return { turn: sumCursorSdkTurnUsage(unseen.map((run) => run.usage)), runIds: unseen.map((run) => run.runId) };
 }
 
+export function resolveCursorSdkCompletedRunUsage(options: {
+	runtime: CursorRuntime;
+	billedUsageAvailable?: boolean;
+	turnUsageObserved?: boolean;
+	waitResultUsage?: unknown;
+	runUsage?: unknown;
+}): CursorSdkTurnUsage | undefined {
+	if (options.runtime !== "local" || options.billedUsageAvailable || options.turnUsageObserved) return undefined;
+	return readCursorSdkTurnUsage(options.waitResultUsage) ?? readCursorSdkTurnUsage(options.runUsage);
+}
+
 export async function fetchCursorSdkAgentUsage(
 	agent: SDKAgent,
 	options: { runtime: CursorRuntime; runId?: string },

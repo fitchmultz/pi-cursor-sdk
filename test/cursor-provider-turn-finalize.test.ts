@@ -50,6 +50,16 @@ function makeCloudPrepared(agent: SDKAgent): CursorProviderTurnPrepareResult {
 	} as unknown as CursorProviderTurnPrepareResult;
 }
 
+function makeLocalPrepared(agent: SDKAgent): CursorProviderTurnPrepareResult {
+	return {
+		...makeCloudPrepared(agent),
+		runtimeTarget: "local",
+		sessionAgentScopeKey: "test-session",
+		sessionAgentLease: { store: {} },
+		localForce: { value: false, source: "default" },
+	} as unknown as CursorProviderTurnPrepareResult;
+}
+
 describe("awaitFinalizeCursorRunOutcome", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
@@ -187,6 +197,44 @@ describe("awaitFinalizeCursorRunOutcome", () => {
 
 		expect(finalized.outcome.kind).toBe("finished");
 		expect(pi.appendEntry).toHaveBeenCalledTimes(1);
+	});
+
+	it("uses completed local run usage when getUsage has no billed run row", async () => {
+		const usage = {
+			inputTokens: 25_432,
+			outputTokens: 612,
+			cacheReadTokens: 24_000,
+			cacheWriteTokens: 123,
+			totalTokens: 50_167,
+		};
+		const agent = {
+			agentId: "agent-local",
+			getUsage: vi.fn().mockResolvedValue({ usage, runs: [] }),
+		} as unknown as SDKAgent;
+		const prepared = makeLocalPrepared(agent);
+
+		const finalized = await awaitFinalizeCursorRunOutcome({
+			run: {
+				id: "run-local",
+				agentId: "agent-local",
+				usage,
+				wait: vi.fn(),
+			} as unknown as Awaited<ReturnType<SDKAgent["send"]>>,
+			prepared,
+			cursorAgentMessageOffset: undefined,
+			modelId: "composer-2.5",
+			waitResult: { id: "run-local", status: "finished", result: "done", usage },
+			cacheContextWindow: false,
+		});
+
+		expect(finalized.outcome.kind).toBe("finished");
+		expect(prepared.runtime.billedTurnUsage).toBeUndefined();
+		expect(prepared.runtime.completedRunUsage).toEqual({
+			inputTokens: 25_432,
+			outputTokens: 612,
+			cacheReadTokens: 24_000,
+			cacheWriteTokens: 123,
+		});
 	});
 });
 

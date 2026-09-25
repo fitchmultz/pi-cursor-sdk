@@ -75,6 +75,7 @@ describe("cursor live-run accounting", () => {
 
 		expect(first.sdkTurnUsage).toEqual({ inputTokens: 25_432, outputTokens: 612, cacheReadTokens: 24_000, cacheWriteTokens: 123 });
 		expect(second.sdkTurnUsage).toBeUndefined();
+		expect(second.state.sdkTurnUsageObserved).toBe(true);
 	});
 
 	it("ignores nonmatching tool results without consuming them", () => {

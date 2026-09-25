@@ -7,6 +7,7 @@ export interface CursorLiveRunAccountingState {
 	promptInputTokensReported: boolean;
 	consumedToolResultIds: ReadonlySet<string>;
 	sdkTurnEnded: boolean;
+	sdkTurnUsageObserved: boolean;
 	sdkTurnUsage?: CursorSdkTurnUsage;
 }
 
@@ -23,6 +24,7 @@ export function createCursorLiveRunAccountingState(promptInputTokens: number): C
 		promptInputTokensReported: false,
 		consumedToolResultIds: new Set(),
 		sdkTurnEnded: false,
+		sdkTurnUsageObserved: false,
 	};
 }
 
@@ -30,7 +32,7 @@ export function recordCursorLiveSdkTurnEnded(
 	state: CursorLiveRunAccountingState,
 	sdkTurnUsage?: CursorSdkTurnUsage,
 ): CursorLiveRunAccountingState {
-	return { ...state, sdkTurnEnded: true, sdkTurnUsage };
+	return { ...state, sdkTurnEnded: true, sdkTurnUsageObserved: state.sdkTurnUsageObserved || sdkTurnUsage !== undefined, sdkTurnUsage };
 }
 
 export function takeCursorLiveSdkTurnUsage(state: CursorLiveRunAccountingState): {

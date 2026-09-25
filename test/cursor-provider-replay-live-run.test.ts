@@ -46,7 +46,7 @@ import { join } from "node:path";
 describe("streamCursor native replay live run", () => {
 	beforeEach(resetCursorProviderTestState);
 
-	it("uses bounded approximate usage on the final native replay stop turn when no turn-ended usage arrives", async () => {
+	it("uses completed run spend with bounded occupancy when no turn-ended usage arrives", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		const registeredTools: RegisteredTool[] = [];
 		await registerNativeToolDisplayForTest(registeredTools);
@@ -132,9 +132,10 @@ describe("streamCursor native replay live run", () => {
 
 		expect(replayDone.reason).toBe("stop");
 		expect(collectTextDeltas(replayEvents)).toBe("Final answer only.");
-		expect(replayDone.message.usage.cacheRead).toBe(0);
-		expect(replayDone.message.usage.cacheWrite).toBe(0);
-		expect(replayDone.message.usage.input).toBeLessThan(500);
+		expect(replayDone.message.usage.cacheRead).toBe(400);
+		expect(replayDone.message.usage.cacheWrite).toBe(10);
+		expect(replayDone.message.usage.input).toBe(90);
+		expect(replayDone.message.usage.output).toBe(50);
 		expect(replayDone.message.usage.totalTokens).toBeLessThan(500);
 	});
 

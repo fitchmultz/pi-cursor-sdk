@@ -5,6 +5,7 @@ import {
 	attachCursorSdkBilledTurnUsage,
 	fetchCursorSdkAgentUsage,
 	isCursorSdkClientMintedRunId,
+	resolveCursorSdkCompletedRunUsage,
 	selectCursorBilledTurnUsage,
 	sumCursorSdkTurnUsage,
 } from "../src/cursor-sdk-billed-usage.js";
@@ -42,6 +43,40 @@ describe("cursor billed usage selection", () => {
 			turn: turnB,
 			runIds: ["usage-b"],
 		});
+	});
+
+	it("falls back to completed local run usage when no billed row is available", () => {
+		expect(resolveCursorSdkCompletedRunUsage({
+			runtime: "local",
+			waitResultUsage: turnA,
+			runUsage: turnB,
+		})).toEqual(turnA);
+		expect(resolveCursorSdkCompletedRunUsage({
+			runtime: "local",
+			runUsage: turnB,
+		})).toEqual(turnB);
+	});
+
+	it("does not fall back when billed usage is available or for cloud runs", () => {
+		expect(resolveCursorSdkCompletedRunUsage({
+			runtime: "local",
+			billedUsageAvailable: true,
+			waitResultUsage: turnB,
+		})).toBeUndefined();
+		expect(resolveCursorSdkCompletedRunUsage({
+			runtime: "cloud",
+			waitResultUsage: turnA,
+			runUsage: turnB,
+		})).toBeUndefined();
+	});
+
+	it("does not duplicate completed run usage when turn-ended usage was already observed", () => {
+		expect(resolveCursorSdkCompletedRunUsage({
+			runtime: "local",
+			turnUsageObserved: true,
+			waitResultUsage: turnA,
+			runUsage: turnB,
+		})).toBeUndefined();
 	});
 
 	it("does not pass a local client-minted runId into getUsage", async () => {

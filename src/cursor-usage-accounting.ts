@@ -113,6 +113,7 @@ export interface CursorSdkUsageApplyOptions {
 	runtime: CursorRuntime;
 	turn?: CursorSdkTurnUsage;
 	billed?: CursorSdkTurnUsage;
+	completed?: CursorSdkTurnUsage;
 }
 
 export function applyCursorSdkUsage(partial: AssistantMessage, turnUsage: CursorSdkTurnUsage): void {
@@ -208,10 +209,10 @@ export function applyCursorUsage(
 	sessionInputTokens: number,
 	sdkUsage?: CursorSdkUsageApplyOptions,
 ): void {
-	const billed = sdkUsage?.billed;
+	const spend = sdkUsage?.billed ?? sdkUsage?.completed;
 	const localTurn = sdkUsage?.runtime === "local" ? sdkUsage.turn : undefined;
-	if (billed && isCursorSdkUsagePartitionSafe(billed, model)) {
-		applyCursorSdkUsage(partial, billed);
+	if (spend && isCursorSdkUsagePartitionSafe(spend, model)) {
+		applyCursorSdkUsage(partial, spend);
 		applyResolvedCursorOccupancy(partial, model, context, localTurn);
 		return;
 	}

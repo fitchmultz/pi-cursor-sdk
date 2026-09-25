@@ -269,7 +269,7 @@ Allowed fields:
 
 - event name
 - run-safe correlation IDs that are not endpoint path components
-- bridge/pi tool call IDs derived from the run-safe ID
+- bridge run IDs remain `cursor-pi-bridge-run-*`; provider-facing bridge/pi tool call IDs encode the same run UUID as 32 hex characters, use the `cursor-pi-bridge-<32 hex>-t<counter>` shape, and stay within the 64-character limit
 - hashed Cursor MCP call correlation IDs of the form `cursor-mcp-call-<8 hex chars>`
 - exposed pi/MCP tool name pairs
 - pending/queued/cancelled counts

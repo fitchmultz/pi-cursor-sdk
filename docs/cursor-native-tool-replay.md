@@ -13,11 +13,11 @@ This document is about replay. Replay is not execution and is not the local pi b
 
 | Surface | Names Cursor can call | Names pi shows | IDs | Execution behavior |
 | --- | --- | --- | --- | --- |
-| Local pi MCP bridge | Live MCP names such as `pi__sem_reindex`, only when exposed in the current run | Real pi tool names such as `sem_reindex` | Bridge run and tool IDs begin with `cursor-pi-bridge-*` | Real pi execution through normal pi `toolCall` / `toolResult` flow |
+| Local pi MCP bridge | Live MCP names such as `pi__sem_reindex`, only when exposed in the current run | Real pi tool names such as `sem_reindex` | Run IDs begin with `cursor-pi-bridge-run-*`; tool-call IDs use `cursor-pi-bridge-<32 hex>-t<counter>` and are capped at 64 characters | Real pi execution through normal pi `toolCall` / `toolResult` flow |
 | Cursor native tool replay | None; replay names are not callable tools | Native-compatible card names or neutral Cursor activity labels | Replay IDs begin with `cursor-replay-*` | Display-only recorded Cursor results; no re-run, file mutation, MCP call, or pi state mutation |
 | Cursor-native host tools/settings/plugins/MCP | Cursor SDK local-agent tool names, as provided by Cursor | Only replay cards or transcript summaries when reported by the SDK | Cursor SDK-owned IDs | Neither pi bridge nor replay execution; owned by the Cursor SDK local agent path |
 
-Replay labels, replay cards, and transcript tool names are display-only/context-only. Bridge MCP names are also not pi tool names: Cursor must call the exposed `pi__*` MCP name, while pi history and cards use the real pi tool name.
+Replay labels, replay cards, and transcript tool names are display-only/context-only. Bridge MCP names are also not pi tool names: Cursor must call the exposed `pi__*` MCP name, while pi history and cards use the real pi tool name. Older session state may contain UUID-separated bridge tool-call IDs; the runtime continues to recognize those legacy IDs when blocking stale calls.
 
 Cursor SDK `plan` mode (`--cursor-mode plan` or `/cursor-mode plan`) can make Cursor produce plan-oriented text and plan/todo activity. Replay still treats Cursor `createPlan`, `updateTodos`, task/mode, and related workflow activity as display-only Cursor activity. It does not switch pi into plan mode, mutate pi todos, or change pi active tools.
 

@@ -40,6 +40,20 @@ function recordEntry(agentId = cloudAgentId()): SessionEntry {
 	});
 }
 
+function hostPersistsCustomEntriesBeforeFirstResponse(): boolean {
+	const tempDir = mkdtempSync(join(tmpdir(), "cursor-cloud-pi-persistence-probe-"));
+	try {
+		const manager = SessionManager.create(tempDir, tempDir, { id: "cloud-lifecycle-persistence-probe" });
+		manager.appendCustomEntry(CLOUD_LIFECYCLE_ENTRY_TYPE, { probe: true });
+		return existsSync(manager.getSessionFile()!);
+	} finally {
+		rmSync(tempDir, { recursive: true, force: true });
+	}
+}
+
+// Official Pi defers the session file until the first assistant message; the fitchmultz/pi fork writes custom entries eagerly.
+const eagerCustomEntryHost = hostPersistsCustomEntriesBeforeFirstResponse();
+
 function resetCloudLifecycleTestState(): void {
 	cloudLifecycleTestUtils.reset();
 	cloudLifecycleTestUtils.setRuntimeApiKeyResolver(async () => "test-key");
@@ -105,12 +119,16 @@ describe("Cursor cloud lifecycle ledger", () => {
 		expect(order).toEqual(["pi-entry", "session-fsync"]);
 	});
 
-	it("tracks Pi's installed first-assistant persistence boundary", () => {
+	it("tracks Pi's installed custom-entry persistence boundary", () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "cursor-cloud-pi-session-"));
 		try {
 			const manager = SessionManager.create(tempDir, tempDir, { id: "cloud-lifecycle-contract" });
-			manager.appendCustomEntry(CLOUD_LIFECYCLE_ENTRY_TYPE, { contract: true });
-			expect(existsSync(manager.getSessionFile()!)).toBe(false);
+			const entryId = manager.appendCustomEntry(CLOUD_LIFECYCLE_ENTRY_TYPE, { contract: true });
+			if (!eagerCustomEntryHost) {
+				expect(existsSync(manager.getSessionFile()!)).toBe(false);
+				manager.appendMessage(makeAssistantMessage("persist session"));
+			}
+			expect(readFileSync(manager.getSessionFile()!, "utf8")).toContain(`"id":"${entryId}"`);
 		} finally {
 			rmSync(tempDir, { recursive: true, force: true });
 		}
@@ -176,7 +194,7 @@ describe("Cursor cloud lifecycle ledger", () => {
 		}
 	});
 
-	it("recovers a framed first-turn ledger across real timestamped SessionManager paths", async () => {
+	it.skipIf(eagerCustomEntryHost)("recovers a framed first-turn ledger across real timestamped SessionManager paths", async () => {
 		resetCloudLifecycleTestState();
 		const tempDir = mkdtempSync(join(tmpdir(), "cursor-cloud-lifecycle-"));
 		const sessionId = "first-turn-cloud-recovery";
@@ -235,6 +253,61 @@ describe("Cursor cloud lifecycle ledger", () => {
 			expect(archive).toHaveBeenCalledTimes(1);
 			expect(archive.mock.calls[0]?.[0]).toBe(cloudAgentId());
 			expect(readFileSync(ledgerPath, "utf8").trim().split(/\r?\n/)).toHaveLength(5);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	it.runIf(eagerCustomEntryHost)("anchors a framed first-turn ledger to the eagerly persisted Pi entry and claims it after resume", async () => {
+		resetCloudLifecycleTestState();
+		const tempDir = mkdtempSync(join(tmpdir(), "cursor-cloud-eager-lifecycle-"));
+		const sessionId = "first-turn-cloud-eager";
+		try {
+			const manager = SessionManager.create(tempDir, tempDir, { id: sessionId });
+			manager.appendMessage({ role: "user", content: "start cloud work", timestamp: 1 });
+			const sessionFile = manager.getSessionFile()!;
+			const sessionManager = {
+				getBranch: () => manager.getBranch(),
+				getSessionFile: () => sessionFile,
+				getSessionId: () => manager.getSessionId(),
+			};
+			const pi = createPiHarness();
+			pi.appendEntry.mockImplementation((customType, data) => manager.appendCustomEntry(customType, data));
+			registerCloudLifecycle(pi);
+			await pi.runSessionStart({ sessionManager });
+			const ledgerPath = cloudLifecycleTestUtils.durableLedgerPath(sessionFile, sessionId);
+			writeFileSync(ledgerPath, '{"partial":');
+
+			expect(recordCursorCloudLifecycleRun({ agentId: cloudAgentId(), branches: [] })).toBe(true);
+			const ledgerLines = readFileSync(ledgerPath, "utf8").trim().split(/\r?\n/);
+			if (process.platform !== "win32") expect(statSync(ledgerPath).mode & 0o777).toBe(0o600);
+			expect(ledgerLines[0]).toBe('{"partial":');
+			expect(JSON.parse(ledgerLines[1]!)).toMatchObject({
+				version: 1,
+				sessionId,
+				anchorEntryId: manager.getLeafId(),
+				action: "record",
+				agentId: cloudAgentId(),
+			});
+
+			resetCloudLifecycleTestState();
+			const resumed = SessionManager.open(sessionFile, tempDir);
+			const resumedSessionManager = {
+				getBranch: () => resumed.getBranch(),
+				getSessionFile: () => sessionFile,
+				getSessionId: () => resumed.getSessionId(),
+			};
+			const archive = vi.fn().mockResolvedValue(undefined);
+			cloudLifecycleTestUtils.setSdkOperations({ archive, delete: vi.fn() });
+			const resumedPi = createPiHarness();
+			resumedPi.appendEntry.mockImplementation((customType, data) => resumed.appendCustomEntry(customType, data));
+			registerCloudLifecycle(resumedPi);
+			await resumedPi.runSessionStart({ sessionManager: resumedSessionManager });
+			await resumedPi.runCommand("cursor-cloud", `archive ${cloudAgentId()}`, { sessionManager: resumedSessionManager });
+
+			expect(archive).toHaveBeenCalledTimes(1);
+			expect(archive.mock.calls[0]?.[0]).toBe(cloudAgentId());
+			expect(readFileSync(ledgerPath, "utf8").trim().split(/\r?\n/)).toHaveLength(4);
 		} finally {
 			rmSync(tempDir, { recursive: true, force: true });
 		}

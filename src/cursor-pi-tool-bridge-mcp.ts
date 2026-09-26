@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Context, ToolResultMessage } from "@earendil-works/pi-ai";
-import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, Tool } from "@modelcontextprotocol/server";
 import { buildCursorPiBridgeMcpToolDescription, CURSOR_PI_BRIDGE_MCP_TOOL_PREFIX } from "./cursor-bridge-contract.js";
 import type { CursorPiBridgeToolDefinition, CursorPiMcpInputSchema } from "./cursor-pi-tool-bridge-types.js";
 import { asRecord, stringifyUnknown } from "./cursor-record-utils.js";

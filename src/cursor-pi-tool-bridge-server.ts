@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
+import { createServer, type Server as HttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import type {
 	CursorPiToolBridge,
@@ -26,6 +26,7 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 	private readonly routes = new Map<string, CursorPiToolBridgeRunImpl>();
 	private httpServer?: HttpServer;
 	private listenPromise?: Promise<void>;
+	private serverLifecycle = Promise.resolve();
 
 	constructor(
 		pi: CursorPiToolBridgeSnapshotApi,
@@ -70,17 +71,27 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 	}
 
 	async registerRun(pathname: string, run: CursorPiToolBridgeRunImpl): Promise<string> {
-		await this.ensureHttpServer();
-		this.routes.set(pathname, run);
-		const address = this.getHttpServerAddress();
-		if (!address) throw new Error("Cursor pi tool bridge HTTP server is not listening");
-		return `http://${LOOPBACK_HOST}:${address.port}${pathname}`;
+		return this.serializeServerLifecycle(async () => {
+			await this.ensureHttpServer();
+			this.routes.set(pathname, run);
+			const address = this.getHttpServerAddress();
+			if (!address) throw new Error("Cursor pi tool bridge HTTP server is not listening");
+			return `http://${LOOPBACK_HOST}:${address.port}${pathname}`;
+		});
 	}
 
 	async unregisterRun(pathname: string, run: CursorPiToolBridgeRunImpl): Promise<void> {
-		if (this.routes.get(pathname) === run) this.routes.delete(pathname);
-		this.runs.delete(run);
-		if (this.routes.size === 0) await this.closeHttpServer();
+		await this.serializeServerLifecycle(async () => {
+			if (this.routes.get(pathname) === run) this.routes.delete(pathname);
+			this.runs.delete(run);
+			if (this.routes.size === 0) await this.closeHttpServer();
+		});
+	}
+
+	private serializeServerLifecycle<T>(operation: () => Promise<T>): Promise<T> {
+		const result = this.serverLifecycle.then(operation, operation);
+		this.serverLifecycle = result.then(() => undefined, () => undefined);
+		return result;
 	}
 
 	getHttpServerAddress(): AddressInfo | undefined {
@@ -112,16 +123,29 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 	}
 
 	private async ensureHttpServer(): Promise<void> {
-		if (this.httpServer) {
-			await this.listenPromise;
-			return;
-		}
-
-		const server = createServer((req, res) => {
-			void this.handleHttpRequest(req, res);
+		this.listenPromise ??= this.startHttpServer().catch((error: unknown) => {
+			this.httpServer = undefined;
+			this.listenPromise = undefined;
+			throw error;
 		});
+		await this.listenPromise;
+	}
+
+	private async startHttpServer(): Promise<void> {
+		const [{ getRequestListener }, { createMcpHonoApp }] = await Promise.all([
+			import("@hono/node-server"),
+			import("@modelcontextprotocol/hono"),
+		]);
+		const app = createMcpHonoApp({ host: LOOPBACK_HOST });
+		app.all("*", (context) => {
+			const parsedBody = (
+				context as typeof context & { get(key: "parsedBody"): unknown }
+			).get("parsedBody");
+			return this.handleHttpRequest(context.req.raw, parsedBody);
+		});
+		const server = createServer(getRequestListener(app.fetch));
 		this.httpServer = server;
-		this.listenPromise = new Promise<void>((resolve, reject) => {
+		await new Promise<void>((resolve, reject) => {
 			const onError = (error: Error) => {
 				server.off("listening", onListening);
 				reject(error);
@@ -134,10 +158,10 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 			server.once("listening", onListening);
 			server.listen(0, LOOPBACK_HOST);
 		});
-		await this.listenPromise;
 	}
 
 	private async closeHttpServer(): Promise<void> {
+		await this.listenPromise?.catch(() => undefined);
 		const server = this.httpServer;
 		if (!server) return;
 		this.httpServer = undefined;
@@ -164,25 +188,20 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 		});
 	}
 
-	private async handleHttpRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-		if (req.socket.localAddress !== LOOPBACK_HOST) {
-			res.writeHead(403, { "content-type": "application/json" }).end(JSON.stringify({ error: "Cursor pi tool bridge only accepts loopback requests" }));
-			return;
-		}
-
-		const url = new URL(req.url ?? "/", `http://${LOOPBACK_HOST}`);
+	private async handleHttpRequest(request: Request, parsedBody?: unknown): Promise<Response> {
+		const url = new URL(request.url);
 		const run = this.routes.get(url.pathname);
 		if (!run) {
-			res.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ error: "Cursor pi tool bridge endpoint not found" }));
-			return;
+			return Response.json({ error: "Cursor pi tool bridge endpoint not found" }, { status: 404 });
 		}
 
 		try {
-			await run.handleHttpRequest(req, res);
+			return await run.handleHttpRequest(request, parsedBody);
 		} catch (error) {
-			if (!res.headersSent) {
-				res.writeHead(500, { "content-type": "application/json" }).end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
-			}
+			return Response.json(
+				{ error: error instanceof Error ? error.message : String(error) },
+				{ status: 500 },
+			);
 		}
 	}
 }

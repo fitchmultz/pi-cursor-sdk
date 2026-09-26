@@ -24,6 +24,9 @@ import { writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+const emitProcessEvent = (event: string | symbol, ...args: unknown[]): boolean =>
+	(process.emit as (event: string | symbol, ...args: unknown[]) => boolean).call(process, event, ...args);
+
 function makeUnauthenticatedConnectError(): Error & { rawMessage: string; code: number } {
 	const error = new Error("[unauthenticated] Error") as Error & { rawMessage: string; code: number };
 	error.name = "ConnectError";
@@ -227,7 +230,7 @@ describe("streamCursor auth and abort", () => {
 				agentId: "agent-1",
 				status: "running",
 				wait: vi.fn().mockImplementation(async () => {
-					process.emit("uncaughtException", connectError, "uncaughtException");
+					emitProcessEvent("uncaughtException", connectError, "uncaughtException");
 					throw connectError;
 				}),
 			}),

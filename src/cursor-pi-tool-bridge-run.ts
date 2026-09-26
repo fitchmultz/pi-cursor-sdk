@@ -1,14 +1,11 @@
 import { randomUUID } from "node:crypto";
-import type { IncomingMessage, ServerResponse } from "node:http";
 import type { McpServerConfig } from "@cursor/sdk";
 import type { Context, ToolResultMessage } from "@earendil-works/pi-ai";
-import { Server as McpProtocolServer } from "@modelcontextprotocol/sdk/server/index.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
-	CallToolRequestSchema,
-	ListToolsRequestSchema,
 	type CallToolResult,
-} from "@modelcontextprotocol/sdk/types.js";
+	Server as McpProtocolServer,
+	WebStandardStreamableHTTPServerTransport,
+} from "@modelcontextprotocol/server";
 import { bridgeToolExecutionAbortTracker } from "./cursor-pi-tool-bridge-abort.js";
 import { MCP_ENDPOINT_ROOT, MCP_SERVER_NAME } from "./cursor-pi-tool-bridge-constants.js";
 import {
@@ -72,7 +69,7 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 	private debugRecorder: CursorPiToolBridgeRunOptions["debugRecorder"];
 	private liveRunHandlerDetached = false;
 	private mcpServer?: McpProtocolServer;
-	private mcpTransport?: StreamableHTTPServerTransport;
+	private mcpTransport?: WebStandardStreamableHTTPServerTransport;
 	private toolCallCounter = 0;
 	private disposed = false;
 
@@ -123,12 +120,11 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 		});
 	}
 
-	async handleHttpRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+	async handleHttpRequest(request: Request, parsedBody?: unknown): Promise<Response> {
 		if (this.disposed || !this.mcpTransport) {
-			res.writeHead(410, { "content-type": "application/json" }).end(JSON.stringify({ error: "Cursor pi tool bridge run is disposed" }));
-			return;
+			return Response.json({ error: "Cursor pi tool bridge run is disposed" }, { status: 410 });
 		}
-		await this.mcpTransport.handleRequest(req, res);
+		return this.mcpTransport.handleRequest(request, { parsedBody });
 	}
 
 	takeQueuedToolRequests(): CursorPiBridgeToolRequest[] {
@@ -248,15 +244,20 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 			{ name: "pi-cursor-sdk-tool-bridge", version: MCP_SERVER_VERSION },
 			{ capabilities: { tools: {} } },
 		);
-		const transport = new StreamableHTTPServerTransport({
+		const transport = new WebStandardStreamableHTTPServerTransport({
 			sessionIdGenerator: randomUUID,
 		});
 
-		server.setRequestHandler(ListToolsRequestSchema, async () => ({
+		server.setRequestHandler("tools/list", async () => ({
 			tools: this.snapshot.tools.map(snapshotToolToMcpTool),
 		}));
-		server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
-			return this.enqueueToolRequest(request.params.name, request.params.arguments, String(extra.requestId), extra.signal);
+		server.setRequestHandler("tools/call", async (request, context) => {
+			return this.enqueueToolRequest(
+				request.params.name,
+				request.params.arguments,
+				String(context.mcpReq.id),
+				context.mcpReq.signal,
+			);
 		});
 
 		this.mcpServer = server;

@@ -94,6 +94,7 @@ function probe(label, host, extension) {
 }
 
 try {
+  assert.equal(run("git", ["status", "--porcelain"], source, true), "", "Commit changes before compatibility qualification");
   const latest = JSON.parse(run("npm", ["view", "@earendil-works/pi-coding-agent", "dist-tags.latest", "--json"], source, true));
   assert.match(latest, /^\d+\.\d+\.\d+$/, "Official Pi latest must be a stable release");
 
@@ -108,7 +109,7 @@ try {
   run("git", ["clone", "--no-hardlinks", "--quiet", source, gitExtension]);
   run("npm", ["install", "--omit=dev", "--no-audit", "--no-fund"], gitExtension);
 
-  for (const version of new Set(["0.84.0", latest])) {
+  for (const version of new Set(["0.87.1", latest])) {
     const hostRoot = join(root, `official-${version}`);
     run("npm", ["install", "--prefix", hostRoot, "--omit=dev", "--ignore-scripts",
       "--no-audit", "--no-fund", `@earendil-works/pi-coding-agent@${version}`]);

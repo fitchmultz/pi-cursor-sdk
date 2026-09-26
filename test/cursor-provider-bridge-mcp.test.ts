@@ -547,7 +547,7 @@ describe("streamCursor bridge MCP", () => {
 			await vi.waitFor(() => expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0));
 			const error = await callErrorPromise;
 			expect(error).toBeInstanceOf(Error);
-			expect((error as Error).message).toMatch(/disposed|cancelled|MCP error/i);
+				expect((error as Error).message).toMatch(/disposed|cancelled|released|MCP error/i);
 			expect(mockDispose).toHaveBeenCalledTimes(1);
 		} finally {
 			await client.close().catch(() => undefined);

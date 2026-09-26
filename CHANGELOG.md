@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 - 2026-09-26
+
+### Breaking Changes
+
+- Require Node.js 24 and Pi 0.87.1, and replace the legacy MCP v1 bridge runtime with the stable MCP v2 server and Hono adapter packages.
+
+### Changed
+
+- Upgrade all direct dependencies to their latest stable releases, including Cursor SDK 1.0.32, TypeScript 7, Vitest 5, and Playwright 1.63.
+- Remove obsolete pre-Pi-0.86 context compatibility and the Cursor SDK closed-pipe workaround fixed upstream.
+
 ## 0.3.10 - 2026-09-22
 
 ### Fixed

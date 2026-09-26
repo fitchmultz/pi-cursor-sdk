@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { request as httpRequest } from "node:http";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { McpServerConfig } from "@cursor/sdk";
 import type { Context } from "@earendil-works/pi-ai";
 import type { ExtensionHandler, SessionShutdownEvent, ToolInfo } from "@earendil-works/pi-coding-agent";
@@ -29,6 +29,17 @@ function createToolInfo(name: string, description = `${name} description`, param
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function requestStatus(url: string, headers: Record<string, string>): Promise<number> {
+	return new Promise((resolve, reject) => {
+		const request = httpRequest(url, { method: "POST", headers }, (response) => {
+			response.resume();
+			resolve(response.statusCode ?? 0);
+		});
+		request.on("error", reject);
+		request.end();
+	});
 }
 
 async function waitForQueuedRequests(run: CursorPiToolBridgeRun) {
@@ -296,6 +307,48 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 			await client.close().catch(() => undefined);
 			await transport.close().catch(() => undefined);
 			await run.dispose();
+		}
+	});
+
+	it("rejects non-local Host and Origin headers before MCP request parsing", async () => {
+		const registry = __testUtils.createRegistry(
+			createBridgePiHarness({ active: ["read"], tools: [createToolInfo("read")] }),
+			{ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" },
+		);
+		const run = await registry.createRun();
+		const url = getCursorPiBridgeMcpUrl(run);
+		try {
+			expect(await requestStatus(url, { host: "attacker.example" })).toBe(403);
+			expect(await requestStatus(url, { origin: "https://attacker.example" })).toBe(403);
+		} finally {
+			await run.dispose();
+		}
+	});
+
+	it("shares and closes one loopback server for concurrent run creation", async () => {
+		const registry = __testUtils.createRegistry(
+			createBridgePiHarness({ active: ["read"], tools: [createToolInfo("read")] }),
+			{ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" },
+		);
+		const runs = await Promise.all([registry.createRun(), registry.createRun()]);
+		expect(new Set(runs.map((run) => new URL(getCursorPiBridgeMcpUrl(run)).port)).size).toBe(1);
+		expect(registry.getEndpointCount()).toBe(2);
+		await Promise.all(runs.map((run) => run.dispose()));
+		expect(registry.getHttpServerAddress()).toBeUndefined();
+	});
+
+	it("keeps a replacement registration listening while the last run tears down", async () => {
+		const registry = __testUtils.createRegistry(
+			createBridgePiHarness({ active: ["read"], tools: [createToolInfo("read")] }),
+			{ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" },
+		);
+		const first = await registry.createRun();
+		const [, second] = await Promise.all([first.dispose(), registry.createRun()]);
+		try {
+			expect(registry.getEndpointCount()).toBe(1);
+			expect(registry.getHttpServerAddress()).toBeDefined();
+		} finally {
+			await second.dispose();
 		}
 	});
 

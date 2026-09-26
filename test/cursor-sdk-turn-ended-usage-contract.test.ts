@@ -9,13 +9,11 @@ import {
 	isCursorSdkUsageSafeForPiMessage,
 	readCursorSdkTurnUsageFromUpdate,
 } from "../src/cursor-usage-accounting.js";
-import { readInstalledPackageVersion, resolveInstalledPackageRoot } from "./helpers/installed-package.js";
+import { resolveInstalledPackageRoot } from "./helpers/installed-package.js";
 import { makeModel } from "./helpers/pi-harness.js";
 
 const require = createRequire(import.meta.url);
 const sdkRoot = resolveInstalledPackageRoot("@cursor/sdk");
-const installedSdkVersion = readInstalledPackageVersion("@cursor/sdk");
-
 interface TurnEndedUsageContractFixture {
 	provenance: {
 		sdkPackage: string;
@@ -83,7 +81,6 @@ describe("installed Cursor SDK turn-ended usage contract", () => {
 	it("locks published SDK TokenUsage transform separately from observed raw turn-ended semantics", () => {
 		expect(fixture.provenance.sdkPackage).toBe("@cursor/sdk");
 		expect(fixture.provenance.sdkVersion).toBe("1.0.23");
-		expect(installedSdkVersion).toBe("1.0.27");
 		expect(fixture.provenance.issue).toContain("/issues/196");
 
 		const usageTypes = readFileSync(join(sdkRoot, "dist/esm/usage-types.d.ts"), "utf8");

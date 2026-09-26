@@ -50,7 +50,7 @@ If resync runs but `context.tools` is still stale (e.g. only `read` listed), the
 
 ## Stock/transcript provider contract
 
-`test/cursor-provider-pi-context.test.ts` drives real `ModelRuntime` / `ModelRegistry` requests into `streamCursor`, with only Cursor SDK execution mocked. Run it against each supported host with all Pi peer imports pinned to that host (including nested native imports); a top-level package version alone is not resolution evidence. Cover stock 0.84.0, stock 0.85.1, and the transcript host. Transcript-only cases are not stock features and are skipped there.
+`test/cursor-provider-pi-context.test.ts` drives real `ModelRuntime` / `ModelRegistry` requests into `streamCursor`, with only Cursor SDK execution mocked. Run it against each supported host with all Pi peer imports pinned to that host (including nested native imports); a top-level package version alone is not resolution evidence. Cover official Pi 0.87.1, official latest, and current `fitchmultz/pi` main. The currently validated local `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` packages are 0.87.1.
 
 The test covers bootstrap/incremental prompts, empty-vs-absent request tools, native replay/drain, cloud fresh/bootstrap selection, and actual host prompt serialization for context files and skills. It is offline contract evidence, not a replacement for the required live platform/cloud release gates.
 
@@ -211,6 +211,8 @@ Pass criteria:
 
 Run local checks first, then the local platform smoke gate before claiming release-ready for provider/runtime changes. Add `npm run smoke:cloud` for cloud-runtime changes:
 
+TypeScript 7 owns builds and type checks. `@typescript/typescript6` is dev-only for the AST architecture test because TypeScript 7 has no stable compiler API. Vitest 5 defaults `clearMocks` to `true`.
+
 ```bash
 npm test
 npm run typecheck
@@ -263,7 +265,7 @@ The script writes timestamped artifacts under `--out` (default `/tmp/pi-cursor-s
 
 Stdout prints artifact paths and summary counts only. Raw payloads stay on disk and may contain local paths, project text, tool args/results, or secrets — do not commit or share them.
 
-Hard repo rule: Cursor SDK behavior claims must come from the installed `@cursor/sdk` package and/or https://cursor.com/docs/sdk/typescript, not from memory or ad-hoc probes alone. Current cutover validation targets exact `@cursor/sdk@1.0.27` and Pi 0.84.0 local packages.
+Hard repo rule: Cursor SDK behavior claims must come from the installed `@cursor/sdk` package and/or https://cursor.com/docs/sdk/typescript, not from memory or ad-hoc probes alone. Current validation targets Node 24+, exact `@cursor/sdk@1.0.32`, official Pi 0.87.1/latest, and current `fitchmultz/pi` main.
 
 ## Pi provider SDK event capture
 
@@ -419,7 +421,7 @@ npm run debug:sdk-events -- \
 
 Start with whether pi stayed alive:
 
-0. **pi process exited / shell returned with an uncaught SDK transport error** — examples include `ConnectError` with `ETIMEDOUT`/`ECONNRESET` and `WriteIterableClosedError: WritableIterable is closed`. Current code keeps Connect/network suppression scoped to active provider turns; raw Cursor SDK `AbortError` DOMExceptions are suppressed while any provider turn or session process-error guard is active. The exact SDK-provenance closed-writable shape is guarded for the Pi session lifecycle because `@cursor/sdk` 1.0.23 controlled-exec can reject after the originating provider turn when it attempts to write a `throw` frame after its internal output iterable has already closed; Bun requires an explicit rejection listener because it bypasses the patched `process.emit` path. The observed raw `write EPIPE` uncaught exception (code `EPIPE`, syscall `write`, stack exactly the single async `WriteWrap.onWriteComplete` frame) from the SDK 1.0.23 local shell executor writing a spawned child's stdin without a stream error listener is guarded only while a local Cursor provider turn is active; containment marks that turn's pooled/resumable agent transport dead so the next acquire disposes it with a bounded wait and recreates it. Idle pooled agents do not suppress EPIPE, and the multi-frame synchronous write-path shape (piped stdout, dead terminal) stays fatal. The Windows sibling surfaces as `write EOF` and intentionally stays fatal because it does not match the observed Node EPIPE contract. Unrelated failures remain fatal. This proves the secondary process-killing write, not the earlier condition that first closed the SDK iterable. Treat a fresh process exit as a process-guard regression, capture the stack/session tail, and route it separately from #40 model text echo. If tools were mid-flight, note whether session JSONL ends abruptly and whether the final tool call lacks a result.
+0. **pi process exited / shell returned with an uncaught SDK transport error** — examples include `ConnectError` with `ETIMEDOUT`/`ECONNRESET` and `WriteIterableClosedError: WritableIterable is closed`. Current code keeps Connect/network suppression scoped to active provider turns; raw Cursor SDK `AbortError` DOMExceptions are suppressed while any provider turn or session process-error guard is active. The exact SDK-provenance closed-writable shape is guarded for the Pi session lifecycle because controlled-exec can reject after the originating provider turn when it attempts to write after its output iterable has closed; Bun requires an explicit rejection listener because it bypasses the patched `process.emit` path. The old raw child-stdin EPIPE workaround was removed because Cursor SDK fixed that path by 1.0.27. Unrelated failures remain fatal. Treat a fresh process exit as a process-guard regression, capture the stack/session tail, and route it separately from #40 model text echo. If tools were mid-flight, note whether session JSONL ends abruptly and whether the final tool call lacks a result.
 
 Then inspect the failing assistant turn in `$SMOKE_DIR/session/*.jsonl`:
 
@@ -439,7 +441,7 @@ rg '"type": "toolCall"|Tool call \(Cursor|cursor-replay-' "$SMOKE_DIR/session"/*
 
 ### When to file follow-ups
 
-- **#43/#107** — pi exited from an uncaught Cursor SDK transport failure (hard crash, not a scrubbed #55 toast). Observed Connect/network shapes remain guarded only during active provider turns. Raw SDK-provenance `AbortError` DOMExceptions are guarded while a provider turn or session guard is active; the exact local-turn `write EPIPE` shape remains scoped to active local provider turns and invalidates only that turn's local agent transport. The exact SDK-provenance `WriteIterableClosedError` is guarded for the Pi session lifecycle because controlled-exec can reject after a turn. Unrelated failures remain fatal, and new exits need stack/session evidence.
+- **#43/#107** — pi exited from an uncaught Cursor SDK transport failure (hard crash, not a scrubbed #55 toast). Observed Connect/network shapes remain guarded only during active provider turns. Raw SDK-provenance `AbortError` DOMExceptions are guarded while a provider turn or session guard is active, and the exact SDK-provenance `WriteIterableClosedError` is guarded for the Pi session lifecycle because controlled-exec can reject after a turn. The removed raw child-stdin EPIPE workaround must not be reintroduced without new current-SDK evidence. Unrelated failures remain fatal, and new exits need stack/session evidence.
 - **#55** — caught SDK run failure or abort with missing/opaque detail (already addressed on main for surfacing).
 - **#52** — stale/inactive native replay routing after plan-strip or stale `context.tools` snapshot (`Tool * not found` in JSONL, `inactive_trace` in `display-decisions.jsonl`); or maintainer needs an explicit "started X, never completed" debug line when JSONL shows no completion and no model text echo.
 - **New issue** — bridge dispatch failure with `[pi-cursor-sdk:bridge]` evidence, or proven provider bug with JSONL showing missing `toolCall` despite SDK `tool-call-completed` in `on-delta.jsonl` from `debug:provider-events` or `debug:sdk-events` artifacts.

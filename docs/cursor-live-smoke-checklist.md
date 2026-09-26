@@ -22,8 +22,9 @@ Use this manual checklist during development and debugging of Cursor provider/ru
 ```bash
 export SMOKE_DIR="/tmp/pi-cursor-sdk-live-smoke-$(date +%Y%m%dT%H%M%S)"
 mkdir -p "$SMOKE_DIR"
+node --version
 pi --version
-npm ls @cursor/sdk @earendil-works/pi-coding-agent @earendil-works/pi-ai @earendil-works/pi-tui
+npm ls @cursor/sdk @modelcontextprotocol/server @modelcontextprotocol/hono hono @hono/node-server @earendil-works/pi-coding-agent @earendil-works/pi-ai @earendil-works/pi-tui
 pi --approve -e . --list-models cursor
 ```
 
@@ -68,8 +69,9 @@ The replay scan flags only error `toolResult` / error assistant messages with `T
 
 Pass criteria:
 
-- `pi --version` reports Pi 0.84.0 for this cutover baseline.
-- `npm ls` shows `@cursor/sdk@1.0.27` and local `@earendil-works/*@0.84.0` packages.
+- `node --version` reports Node 24+.
+- `pi --version` reports official Pi 0.87.1 or the selected official-latest/current-`fitchmultz/pi` compatibility target.
+- `npm ls` shows exact `@cursor/sdk@1.0.32`; local `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` 0.87.1; and the bundled bridge runtime closure `@modelcontextprotocol/server@2.1.0`, `@modelcontextprotocol/hono@2.0.1`, `hono@4.13.9`, and `@hono/node-server@2.1.1`.
 - `cursor/grok-4.6` appears in the model list.
 - No Cursor key or auth token is printed.
 - If neither `~/.pi/agent/auth.json` cursor auth nor `CURSOR_API_KEY` is available, stop and report the live smoke as blocked.
@@ -126,7 +128,7 @@ Observe with `tmux capture-pane -pt "$SESSION"` or attach manually.
 Pass criteria:
 
 - Footer shows `(cursor) composer-2-5`. With `--cursor-no-fast`, Cursor fast mode is off and the Cursor extension status should show `cursor:local · fast:off`; ignore unrelated status text from other extensions.
-- The run uses Pi 0.84.0 `--session-id` successfully.
+- The run uses supported Pi `--session-id` successfully.
 - Assistant answer appears correctly.
 - `/session` shows one user and one assistant message for the simple run.
 - Persisted JSONL has one assistant message. If the screen appears duplicated, inspect JSONL before deciding whether it is a rendering bug.
@@ -134,7 +136,7 @@ Pass criteria:
 
 ## 4. Focused visual card/color rendering check
 
-This is the canonical inner-loop visual debug path for Cursor provider/runtime changes. It requires offscreen TUI visual inspection, not only JSONL or code review. Use Pi 0.84.0, `@cursor/sdk@1.0.27`, a fresh temporary session dir, Cursor SDK `plan` mode, native replay enabled, and the checked-in visual runner. The runner resolves `pi` by directly walking the parent `PATH`, uses `process.execPath` for Node, and prepends that Node directory for both prereq checks and tmux launches so `#!/usr/bin/env node` shims use the validated Node. The default matrix is native replay only: native replay registration is forced on, settings sources are `none`, the pi bridge is off, overlapping built-in pi tools are not exposed, and inherited Cursor SDK event-debug artifact env is cleared. With `--event-debug`, debug capture writes to a deterministic directory under `VISUAL_DIR`.
+This is the canonical inner-loop visual debug path for Cursor provider/runtime changes. It requires offscreen TUI visual inspection, not only JSONL or code review. Use Node 24+, official Pi 0.87.1 or another current compatibility target, exact `@cursor/sdk@1.0.32`, a fresh temporary session dir, Cursor SDK `plan` mode, native replay enabled, and the checked-in visual runner. The runner resolves `pi` by directly walking the parent `PATH`, uses `process.execPath` for Node, and prepends that Node directory for both prereq checks and tmux launches so `#!/usr/bin/env node` shims use the validated Node. The default matrix is native replay only: native replay registration is forced on, settings sources are `none`, the pi bridge is off, overlapping built-in pi tools are not exposed, and inherited Cursor SDK event-debug artifact env is cleared. With `--event-debug`, debug capture writes to a deterministic directory under `VISUAL_DIR`.
 
 ```bash
 VISUAL_DIR="$(mktemp -d /tmp/pi-cursor-sdk-1016-visual.XXXXXX)"

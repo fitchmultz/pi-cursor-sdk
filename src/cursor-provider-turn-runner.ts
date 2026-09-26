@@ -1,7 +1,6 @@
 import { CursorLiveRunAbortError } from "./cursor-live-run-coordinator.js";
 import { drainExistingCursorLiveRunBeforeSend } from "./cursor-provider-live-run-drain.js";
-import { invalidateSessionAgent } from "./cursor-session-agent.js";
-import { getCursorSessionCwd, getCursorSessionScopeKey } from "./cursor-session-scope.js";
+import { getCursorSessionCwd } from "./cursor-session-scope.js";
 import { installCursorSdkProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
 import type { CursorRuntime } from "./cursor-config.js";
 import { CursorSdkEventDebugSink } from "./cursor-sdk-event-debug.js";
@@ -79,14 +78,6 @@ export class CursorProviderTurnRunner {
 			const resolvedConfig = resolveCursorProviderTurnConfig(cwd);
 			this.runtimeTarget = resolvedConfig.runtime.value;
 			if (resolvedConfig.runtime.value === "local") {
-				// The observed local-executor closed-pipe EPIPE is contained only from this
-				// turn's pre-send live-run drain through run completion; for live runs the
-				// finalizer holds the guard until run.wait() settles. A hit marks
-				// this scope's pooled agent transport dead so the next acquire recreates it.
-				const localScopeKey = getCursorSessionScopeKey();
-				sdkProcessErrorGuard.containLocalTransportClosedPipe(() =>
-					invalidateSessionAgent(localScopeKey, { deadTransport: true }),
-				);
 				if (
 					(await drainExistingCursorLiveRunBeforeSend(stream, partial, model, context, options?.signal, this.sdkEventDebug)) ===
 					"stream_ended"

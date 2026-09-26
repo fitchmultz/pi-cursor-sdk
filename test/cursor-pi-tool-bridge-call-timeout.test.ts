@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { Type } from "typebox";
 import {
 	__testUtils,
@@ -91,7 +90,6 @@ describe("cursor pi tool bridge CallTool deadline", () => {
 			const clientAbort = new AbortController();
 			const callResult = client.callTool(
 				{ name: "pi__bash", arguments: { command: "sleep 30" } },
-				undefined,
 				{ signal: clientAbort.signal },
 			).catch((error: unknown) => error);
 			const request = await waitForQueuedRequest(run);

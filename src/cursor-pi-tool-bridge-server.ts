@@ -143,7 +143,7 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 			).get("parsedBody");
 			return this.handleHttpRequest(context.req.raw, parsedBody);
 		});
-		const server = createServer(getRequestListener(app.fetch));
+		const server = createServer(getRequestListener(app.fetch, { overrideGlobalObjects: false }));
 		this.httpServer = server;
 		await new Promise<void>((resolve, reject) => {
 			const onError = (error: Error) => {

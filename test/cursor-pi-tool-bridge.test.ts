@@ -330,7 +330,10 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 			createBridgePiHarness({ active: ["read"], tools: [createToolInfo("read")] }),
 			{ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" },
 		);
+		const { Request: GlobalRequest, Response: GlobalResponse } = globalThis;
 		const runs = await Promise.all([registry.createRun(), registry.createRun()]);
+		expect(globalThis.Request).toBe(GlobalRequest);
+		expect(globalThis.Response).toBe(GlobalResponse);
 		expect(new Set(runs.map((run) => new URL(getCursorPiBridgeMcpUrl(run)).port)).size).toBe(1);
 		expect(registry.getEndpointCount()).toBe(2);
 		await Promise.all(runs.map((run) => run.dispose()));

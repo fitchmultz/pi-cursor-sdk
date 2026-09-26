@@ -13,6 +13,9 @@ import {
 import { streamCursor } from "../src/cursor-provider.js";
 import { __testUtils as cursorSdkProcessGuardTestUtils } from "../src/cursor-sdk-process-error-guard.js";
 
+const emitProcessEvent = (event: string | symbol, ...args: unknown[]): boolean =>
+	(process.emit as (event: string | symbol, ...args: unknown[]) => boolean).call(process, event, ...args);
+
 function trackUnhandledRejections(): { rejections: unknown[]; restore: () => void } {
 	const rejections: unknown[] = [];
 	const onUnhandledRejection = (reason: unknown) => {
@@ -150,7 +153,7 @@ describe("streamCursor connect timeout boundary", () => {
 			agentId: "agent-1",
 			status: "running",
 			wait: vi.fn().mockImplementation(async () => {
-				process.emit("uncaughtException", connectError, "uncaughtException");
+				emitProcessEvent("uncaughtException", connectError, "uncaughtException");
 				throw connectError;
 			}),
 			cancel: vi.fn(),
@@ -187,7 +190,7 @@ describe("streamCursor connect timeout boundary", () => {
 			agentId: "agent-1",
 			status: "running",
 			wait: vi.fn().mockImplementation(async () => {
-				process.emit("uncaughtException", connectError, "uncaughtException");
+				emitProcessEvent("uncaughtException", connectError, "uncaughtException");
 				throw connectError;
 			}),
 			cancel: vi.fn(),

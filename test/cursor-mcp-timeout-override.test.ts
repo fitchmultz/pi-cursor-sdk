@@ -177,8 +177,8 @@ describe("Cursor MCP timeout override", () => {
 		expect(sdkMcpBundle).toContain('withName("McpSdkClient.getTools")');
 		expect(sdkMcpBundle).toContain('this.client.listTools({cursor:e})');
 		expect(sdkProtocolBundle).toContain('this.request({method:"initialize"');
-		expect(sdkProtocolBundle).toContain('_setupTimeout(e,t,n,s,i=!1)');
-		expect(sdkProtocolBundle).toContain('timeoutId:setTimeout(s,t)');
+		expect(sdkProtocolBundle).toContain('_setupTimeout(e,t,s,n,i=!1)');
+		expect(sdkProtocolBundle).toContain('timeoutId:setTimeout(n,t)');
 	});
 
 	it("recognizes the Cursor SDK MCP tool-call timeout stack shape", () => {

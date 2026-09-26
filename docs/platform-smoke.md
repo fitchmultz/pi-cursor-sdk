@@ -140,7 +140,7 @@ The target session fails fast. The release-gate path handles one target at a tim
 Runtime budget is part of the contract:
 
 - `smoke:platform:doctor` never calls Cursor.
-- `platform-build` runs once per target and is the only suite that performs the full local CI/build/typecheck/package gate. Its target invocations raise only Vitest's default per-test timeout to 15 seconds for host-contention headroom; normal `npm test` keeps the 5-second default, and explicit longer integration-test timeouts still apply.
+- `platform-build` runs once per target and is the only suite that performs the full local CI/build/typecheck/package gate. TypeScript 7 owns builds and package type checks; dev-only `@typescript/typescript6` is used only by the AST architecture test because TypeScript 7 has no stable compiler API. Vitest 5 defaults `clearMocks` to `true`. Target invocations raise only Vitest's default per-test timeout to 15 seconds for host-contention headroom; normal `npm test` keeps the 5-second default, and explicit longer integration-test timeouts still apply.
 - Live suites reuse the target checkout and prepared `node_modules` when run after `platform-build`; they do not repeat `npm ci` in a target-session release run. Their interactive Pi process sets `PI_OFFLINE=1` to skip unrelated startup catalog/update probes; the scenario's explicit Cursor provider turn remains live. The PTY launches Pi's JavaScript entry with direct Node argv so multiline prompts remain one positional message on every target.
 - Live and local-resume suites share one target-local packed-install prep directory per target-session release run. The first such suite runs `npm pack` and `npm install --no-save <tarball>` once. Visual/abort suites install that packed path with `pi install --approve -l`; local-resume lanes pass the same packed package path to their source-tree smoke harness instead of loading the checkout extension.
 - Visual coverage is batched into one native prompt, one focused HTTP/1.1 transport prompt, one bridge prompt, and one abort/cleanup prompt per target. Do not split the card matrices into one prompt per card.
@@ -308,8 +308,8 @@ export default {
     install: "Homebrew package or PLATFORM_SMOKE_CRABBOX override",
     minVersion: "0.26.0",
   },
-  ubuntuContainerImage: "pi-cursor-sdk-platform-node:24.16-root",
-  ubuntuContainerBaseImage: "cimg/node:24.16",
+  ubuntuContainerImage: "pi-cursor-sdk-platform-node:24.21-root",
+  ubuntuContainerBaseImage: "cimg/node:24.21",
   nodeValidationMajor: 24,
   windowsParallels: {
     sourceVm: "pi-extension-windows-template",
@@ -319,7 +319,7 @@ export default {
 };
 ```
 
-`ubuntuContainerBaseImage` is the Ubuntu 24.04 Node 24 base with the current glibc baseline for native test dependencies. The runner builds the local `ubuntuContainerImage` wrapper with only `USER root` changed before warmup because Crabbox 0.36.0 must install SSH/Git/rsync/curl during bootstrap and `cimg/node` defaults to an unprivileged user. An explicit `PLATFORM_SMOKE_UBUNTU_IMAGE` bypasses that build and must already support Crabbox bootstrap. `nodeValidationMajor: 24` is the release-smoke validation baseline. It does not change the package engine by itself. A separate compatibility lane can test Node 22.19 later; this required gate validates Node 24 on every target.
+`ubuntuContainerBaseImage` is `cimg/node:24.21`, the Ubuntu 24.04 Node 24 base with the current glibc baseline for native test dependencies. The runner builds the local `ubuntuContainerImage` wrapper with only `USER root` changed before warmup because Crabbox 0.36.0 must install SSH/Git/rsync/curl during bootstrap and `cimg/node` defaults to an unprivileged user. An explicit `PLATFORM_SMOKE_UBUNTU_IMAGE` bypasses that build and must already support Crabbox bootstrap. Package 0.4.0 requires Node 24+, and this gate validates Node 24 on macOS, Ubuntu, and Windows.
 
 `windowsParallels` records this repo's default shared Windows template contract. Environment overrides may point at a temporary candidate template during infrastructure work, but release runs should use the shared `pi-extension-windows-template` / `crabbox-ready` baseline unless this document is updated.
 

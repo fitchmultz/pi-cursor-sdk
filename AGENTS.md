@@ -61,9 +61,9 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `src/cursor-pi-tool-bridge-types.ts` owns shared bridge/MCP type contracts.
 - `src/cursor-env-boolean.ts` owns canonical env boolean parsing (default and tri-state optional) for bridge diagnostics, flags, and native replay gating.
 - `src/cursor-live-run-coordinator.ts` owns live Cursor run registry/scope matching, queued events, drain leases, idle disposal timers, and release cleanup.
-- `src/cursor-pi-tool-bridge.ts` re-exports bridge registration and snapshot helpers; exposes active pi tools to local Cursor agents through a per-run loopback MCP bridge.
+- `src/cursor-pi-tool-bridge.ts` re-exports bridge registration and snapshot helpers; exposes active pi tools to local Cursor agents through a per-run loopback stable MCP v2 bridge.
 - `src/cursor-pi-tool-bridge-snapshot.ts` owns bridge snapshot building, env gating, and surface signatures.
-- `src/cursor-pi-tool-bridge-server.ts` owns loopback HTTP routing and run endpoint registry for bridge runs.
+- `src/cursor-pi-tool-bridge-server.ts` owns loopback Hono HTTP routing, `Host`/`Origin` validation, and run endpoint registry for bridge runs.
 - `src/cursor-pi-tool-bridge-run.ts` owns MCP transport setup, pending bridge calls, pi tool dispatch, cancellation, and run lifecycle.
 - `src/cursor-pi-tool-bridge-abort.ts` owns bridge pi tool execution abort tracking and process signal handling.
 - `src/cursor-pi-tool-bridge-diagnostics.ts` owns bridge debug diagnostics serialization and stderr logging.
@@ -74,7 +74,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `src/cursor-native-tool-display-registration.ts` owns native replay tool registration and model-scoped activation.
 - `src/cursor-native-replay-routing.ts` owns canonical native replay disposition (`queue_replay` / `inactive_trace` / `transcript_trace`) and context-tool partitioning for drain.
 - `src/cursor-native-replay-trace.ts` owns inactive native replay trace formatting (`title: summary`).
-- `src/cursor-pi-context.ts` owns the stock/transcript Pi context boundary; it uses optional public host replay helpers, not a local replay implementation.
+- `src/cursor-pi-context.ts` owns the stock/transcript Pi context boundary; it uses Pi 0.87.1's required public replay helpers, not a local replay implementation.
 - `src/cursor-context-tools.ts` owns request tool snapshots at provider stream start (legacy tools or replayed transcript declarations), distinct from the registry-owned bridge snapshot.
 - `src/cursor-display-text.ts` owns shared single-line sanitization and 240-char truncation for replay/trace display.
 - `src/cursor-native-tool-display-replay.ts` owns replay card rendering and diff/preview formatting.
@@ -103,6 +103,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 ## Operating rules
 
 - Prefer the smallest change that preserves the current pi user contract.
+- Package 0.4.0 requires Node 24+ and official Pi 0.87.1+. Compatibility targets are official Pi 0.87.1/latest and current `fitchmultz/pi` main; optional Pi and TypeBox peer ranges stay `"*"` per Pi guidance.
 - Treat Cursor SDK model metadata as the source of truth for model IDs, parameters, variants, thinking controls, and context variants. Do not hardcode new model-specific behavior unless it is a documented fallback.
 - HARD REPO RULE: never guess what the Cursor SDK outputs, expects, or does. Always verify Cursor SDK behavior against the installed `@cursor/sdk` package and/or the official TypeScript SDK docs at `https://cursor.com/docs/sdk/typescript` before making claims or implementation changes.
 - Contract-test external behavior before relying on it: when code depends on Cursor SDK/pi runtime payloads, timing, lifecycle, errors, usage accounting, or tool/event shapes, add or update a focused test that asserts the observed installed-package/docs/captured-fixture contract and fails if that contract drifts. Do not replace this with mocks based on guesses.
@@ -116,6 +117,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 ## Setup and commands
 
 - Install dependencies: `npm install` (runs `prepare`, which compiles `src/` into `dist/` — the manifest entry pi loads)
+- Use Node 24+. The platform smoke baseline is Node 24 on macOS, Ubuntu, and Windows.
 - Build after editing `src/`: `npm run build` — required before any direct `pi -e .` run, or pi loads the previous build. The cloud/steering/local-resume/provider-debug launchers rebuild automatically (even when run directly with `node scripts/...`), `smoke:live`/`smoke:visual`/`smoke:isolated` build via their npm scripts, and `smoke:platform*` builds inside its packed installs; only direct `pi -e .` runs need a manual build.
 - Run tests: `npm test`
 - Typecheck (src + tests): `npm run typecheck`
@@ -131,11 +133,14 @@ There is no lint or format script in `package.json` at this time.
 
 ## Coding conventions
 
+- TypeScript 7 builds and checks package types. `@typescript/typescript6` is dev-only for the AST architecture test because TypeScript 7 has no stable compiler API.
 - TypeScript is ESM with `moduleResolution: "NodeNext"`; keep `.js` extensions on local relative imports.
 - Keep strict TypeScript types. Avoid `any` except in tests or when narrowing untyped external SDK data.
+- Vitest 5 defaults `clearMocks` to `true`; do not depend on mock state leaking between tests.
 - Keep provider runtime code side-effect-light. Do not write secrets, and do not let cache or discovery failures break response streaming unless the run cannot proceed safely.
 - Add or update tests for behavior changes in `src/`. Prefer focused unit tests over live Cursor calls.
 - If dependency versions change, update `package-lock.json` with npm. Do not manually edit generated dependency output.
+- The bridge runtime closure is bundled and pinned to `@modelcontextprotocol/server@2.1.0`, `@modelcontextprotocol/hono@2.0.1`, `hono@4.13.9`, and `@hono/node-server@2.1.1`. `@cursor/sdk@1.0.32` remains an exact unbundled dependency.
 - Do not commit `dist/`, `coverage/`, `.env*`, `.pi/`, or package tarballs.
 
 ## Validation and done criteria
@@ -211,7 +216,7 @@ Keep this file concise and repo-specific. Update it when commands, package layou
 This is a `pi` provider extension (not a server/web app). "Running the app" means launching `pi` with this extension loaded. Standard commands live in `## Setup and commands`; only the non-obvious caveats are below.
 
 - Dependencies install with `npm install` (this triggers `prepare`, which compiles `src/` to `dist/`; the pi manifest loads `dist/index.js`). After editing `src/`, run `npm run build` before any `pi -e .` run or the extension loads the previous build.
-- Node: `engines` requires `>=22.19.0`. Prefer a compliant Node on `PATH` for tests and live `pi` (for example `nvm use 22.22.2`). Older Node may run some commands but is unsupported.
+- Node: `engines` requires `>=24`. Use Node 24 on `PATH` for tests and live `pi`. Older Node is unsupported.
 - `CURSOR_API_KEY` is provided as a cloud-agent secret, so live Cursor runs and full live model discovery work without `/login`. `npm test`, `npm run typecheck`, and `npm pack --dry-run` need no key.
 - Run the extension locally with `./node_modules/.bin/pi -e . --model cursor/grok-4.6` (the bare `pi` is not on `PATH`). Add `--approve` for interactive sessions; print-mode smoke: `./node_modules/.bin/pi -e . --model cursor/grok-4.6 --cursor-no-fast --no-session -p "..."`.
 - Cold-start gotcha: the *first* Cursor SDK run in a fresh VM can take several minutes (SDK/transport warm-up); subsequent runs complete in ~10s. Warm up with one throwaway run before any timing-sensitive or recorded demo, and don't treat a slow first run as a hang.

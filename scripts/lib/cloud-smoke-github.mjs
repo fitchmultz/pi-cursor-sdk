@@ -4,6 +4,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 120_000;
+const GITHUB_CLI_PATTERN = /^[A-Za-z0-9_./-]+$/;
 export const CLOUD_SMOKE_REPO_NAME_PREFIX = "pi-cursor-cloud-smoke-";
 export const CLOUD_SMOKE_OWNERSHIP_TOKEN_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const OWNED_REPO_NAME_PATTERN = /^[^/]+\/pi-cursor-cloud-smoke-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
@@ -12,6 +13,12 @@ function fail(message, details = "") {
 	const error = new Error(message);
 	error.details = details;
 	throw error;
+}
+
+function githubCli(options = {}) {
+	const command = String(options.githubCli ?? process.env.CURSOR_CLOUD_SMOKE_GH_CLI ?? "gh").trim();
+	if (!GITHUB_CLI_PATTERN.test(command)) fail("Cursor cloud smoke GitHub CLI must be one executable path without spaces");
+	return command;
 }
 
 export function cloudSmokeRepositoryDescription(ownershipToken) {
@@ -63,7 +70,7 @@ export function runTimedCommand(commandName, commandArgs, options = {}) {
 }
 
 export function authenticatedGitArgs(commandArgs) {
-	return ["-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential", ...commandArgs];
+	return ["-c", "credential.helper=", "-c", `credential.helper=!${githubCli()} auth git-credential`, ...commandArgs];
 }
 
 function isTransientCommandFailure(error) {
@@ -109,7 +116,7 @@ function explicitHttpStatus(stdout) {
 
 function readRepositoryOwnership(fullName, options = {}) {
 	const run = options.spawnSync ?? spawnSync;
-	const probe = run("gh", ["api", "-i", `repos/${fullName}`], {
+	const probe = run(githubCli(options), ["api", "-i", `repos/${fullName}`], {
 		cwd: options.cwd,
 		env: options.env ?? process.env,
 		encoding: "utf8",
@@ -159,7 +166,7 @@ function probeRepositoryOwnership(fullName, options = {}) {
 function verifyOwnedRepository(repo, options = {}) {
 	const owned = assertOwnedThrowawayRepositoryHandle(repo);
 	const command = options.runCommand ?? ((name, args, opts = {}) => runTimedCommand(name, args, { ...opts, spawnSync: options.spawnSync }));
-	const view = JSON.parse(runRetryableCommand(command, "gh", ["repo", "view", owned.fullName, "--json", "isPrivate,description"], {
+	const view = JSON.parse(runRetryableCommand(command, githubCli(options), ["repo", "view", owned.fullName, "--json", "isPrivate,description"], {
 		cwd: options.cwd,
 		label: "verify throwaway repository ownership marker",
 	}, options));
@@ -175,9 +182,10 @@ export function createThrowawayRepository(artifactRoot, onOwned, options = {}) {
 	const ownershipToken = String(randomUUID()).toLowerCase();
 	if (!CLOUD_SMOKE_OWNERSHIP_TOKEN_PATTERN.test(ownershipToken)) fail("cloud smoke ownership token must be a lowercase UUID");
 	const cwd = options.cwd;
+	const gh = githubCli(options);
 
-	command("gh", ["auth", "status"], { cwd, label: "gh auth status" });
-	const owner = command("gh", ["api", "user", "--jq", ".login"], { cwd, label: "read gh user" });
+	command(gh, ["auth", "status"], { cwd, label: "gh auth status" });
+	const owner = command(gh, ["api", "user", "--jq", ".login"], { cwd, label: "read gh user" });
 	if (!owner) fail("gh auth did not return a GitHub login");
 	const name = `${CLOUD_SMOKE_REPO_NAME_PREFIX}${ownershipToken}`;
 	const fullName = `${owner}/${name}`.toLowerCase();
@@ -196,7 +204,7 @@ export function createThrowawayRepository(artifactRoot, onOwned, options = {}) {
 	let createError;
 	for (let attempt = 1; attempt <= attempts; attempt += 1) {
 		try {
-			command("gh", ["repo", "create", fullName, "--private", "--description", description], {
+			command(gh, ["repo", "create", fullName, "--private", "--description", description], {
 				cwd,
 				label: "create private throwaway repository",
 			});
@@ -229,7 +237,7 @@ export function createThrowawayRepository(artifactRoot, onOwned, options = {}) {
 	onOwned?.(repo);
 	verifyOwnedRepository(repo, options);
 
-	command("gh", ["repo", "clone", fullName, seedDir], { cwd, label: "clone throwaway repository" });
+	command(gh, ["repo", "clone", fullName, seedDir], { cwd, label: "clone throwaway repository" });
 	command("git", ["config", "user.name", "pi-cursor-sdk cloud smoke"], { cwd: seedDir });
 	command("git", ["config", "user.email", "pi-cursor-sdk-cloud-smoke@invalid.example"], { cwd: seedDir });
 	command("git", ["switch", "-c", "main"], { cwd: seedDir });
@@ -237,7 +245,7 @@ export function createThrowawayRepository(artifactRoot, onOwned, options = {}) {
 	command("git", ["add", "README.md"], { cwd: seedDir });
 	command("git", ["commit", "-m", "seed main"], { cwd: seedDir });
 	command("git", authenticatedGitArgs(["push", "-u", "origin", "main"]), { cwd: seedDir });
-	runRetryableCommand(command, "gh", ["repo", "edit", fullName, "--default-branch", "main"], { cwd, label: "set throwaway default branch" }, options);
+	runRetryableCommand(command, gh, ["repo", "edit", fullName, "--default-branch", "main"], { cwd, label: "set throwaway default branch" }, options);
 	for (const branch of ["starting-ref", "direct-push"]) {
 		command("git", ["switch", "-c", branch, "main"], { cwd: seedDir });
 		writeFile(join(seedDir, `${branch}.txt`), `${branch} seed\n`);
@@ -263,13 +271,14 @@ export function deleteThrowawayRepository(repo, options = {}) {
 	const sleep = options.sleep ?? ((ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms));
 	const attempts = options.verificationAttempts ?? 5;
 	const cwd = options.cwd;
+	const gh = githubCli(options);
 
 	// Re-check remote ownership marker before any destructive delete.
 	verifyOwnedRepository(owned, options);
 	let deleteError;
 	for (let attempt = 1; attempt <= attempts; attempt += 1) {
 		try {
-			command("gh", ["repo", "delete", owned.fullName, "--yes"], { cwd, label: "delete throwaway repository" });
+			command(gh, ["repo", "delete", owned.fullName, "--yes"], { cwd, label: "delete throwaway repository" });
 			deleteError = undefined;
 			break;
 		} catch (error) {
@@ -285,7 +294,7 @@ export function deleteThrowawayRepository(repo, options = {}) {
 	if (deleteError) throw deleteError;
 	let output = "";
 	for (let attempt = 1; attempt <= attempts; attempt += 1) {
-		const probe = run("gh", ["api", "-i", `repos/${owned.fullName}`], {
+		const probe = run(gh, ["api", "-i", `repos/${owned.fullName}`], {
 			cwd,
 			env: options.env ?? process.env,
 			encoding: "utf8",
@@ -322,7 +331,7 @@ export function validatePrUrl(repo, prUrl, options = {}) {
 	) {
 		fail("cloud report returned a PR URL outside the throwaway repository", prUrl);
 	}
-	const result = JSON.parse(command("gh", ["pr", "view", prUrl, "--json", "url,state"], {
+	const result = JSON.parse(command(githubCli(options), ["pr", "view", prUrl, "--json", "url,state"], {
 		cwd: options.cwd,
 		label: "validate reported PR URL",
 	}));

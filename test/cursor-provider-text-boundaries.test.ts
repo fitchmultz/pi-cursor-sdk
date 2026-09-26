@@ -14,7 +14,7 @@ import { readInstalledPackageVersion } from "./helpers/installed-package.js";
 type TextCallback =
 	| { channel: "onDelta"; args: Parameters<NonNullable<SendOptions["onDelta"]>>[0] }
 	| { channel: "onStep"; args: Parameters<NonNullable<SendOptions["onStep"]>>[0] };
-const fixture = JSON.parse(readFileSync(new URL("./fixtures/cursor-cloud-text-boundaries-1.0.27.json", import.meta.url), "utf8")) as {
+const fixture = JSON.parse(readFileSync(new URL("./fixtures/cursor-text-boundaries-1.0.32.json", import.meta.url), "utf8")) as {
 	sdkVersion: string;
 	callbacks: TextCallback[];
 	result: string;
@@ -66,8 +66,6 @@ describe("Cursor completed assistant-message boundaries", () => {
 
 	it.each(["cloud", "local", "local-live"])("preserves captured progress and exact final text in %s output", async (runtime) => {
 		expect(readInstalledPackageVersion("@cursor/sdk")).toBe(fixture.sdkVersion);
-		expect(messages).toHaveLength(5);
-		expect(fixture.callbacks.filter((callback) => callback.channel === "onDelta")).toHaveLength(10);
 		expect(messages.at(-1)).toBe(fixture.result);
 		if (runtime === "cloud") {
 			process.env.PI_CURSOR_RUNTIME = "cloud";
@@ -85,13 +83,13 @@ describe("Cursor completed assistant-message boundaries", () => {
 		expect(done.message.content.filter((block) => block.type === "text").map((block) => block.text)).toEqual(
 			messages.map((message, index) => index < messages.length - 1 ? `${message}\n\n` : message),
 		);
-		expect(getFinalAssistantText(done.message)).toBe("NO_MARKER");
+		expect(getFinalAssistantText(done.message)).toBe(fixture.result);
 		// The smoke uses this actual host RPC accessor, which concatenates text blocks.
 		const rpcText = AgentSession.prototype.getLastAssistantText.call({ messages: [done.message] } as AgentSession);
 		expect(rpcText).toBe(messages.join("\n\n"));
 		expect(rpcText?.split(/\r?\n/).filter((line) => line.trim()).at(-1)).toBe("NO_MARKER");
-		expect(events.filter((event) => event.type === "text_start")).toHaveLength(5);
-		expect(events.filter((event) => event.type === "text_end")).toHaveLength(5);
+		expect(events.filter((event) => event.type === "text_start")).toHaveLength(messages.length);
+		expect(events.filter((event) => event.type === "text_end")).toHaveLength(messages.length);
 	});
 
 	it("does not separate token chunks or append whitespace after the only message", async () => {

@@ -1,6 +1,5 @@
 import { expect, vi } from "vitest";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 
 // Mock @cursor/sdk before importing the module under test
 vi.mock("@cursor/sdk", () => {
@@ -237,7 +236,7 @@ export function getCreatedAgentOptions(callIndex = 0): CursorAgentCreateOptions 
 }
 
 export function createMockAgentPlatform(
-	loadLatest = vi.fn().mockResolvedValue(undefined),
+	loadLatest: CursorAgentPlatformForTest["checkpointStore"]["loadLatest"] = vi.fn().mockResolvedValue(undefined),
 ): CursorAgentPlatformForTest {
 	return {
 		checkpointStore: {

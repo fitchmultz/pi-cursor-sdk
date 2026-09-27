@@ -23,7 +23,8 @@ function getSharedTestModelRegistry(): ModelRegistry {
 }
 
 export function createDefaultSystemPromptOptions(cwd: string): NormalizedBuildSystemPromptOptions {
-	return {
+	// Return-type checking supports the official and fork fixture superset.
+	const options = {
 		cwd,
 		selectedTools: ["read", "bash", "edit", "write"],
 		toolSnippets: {},
@@ -31,9 +32,11 @@ export function createDefaultSystemPromptOptions(cwd: string): NormalizedBuildSy
 		promptGuidelines: [],
 		appendSystemPrompt: "",
 		sections: {},
+		sectionTools: {},
 		contextFiles: [],
 		skills: [],
 	};
+	return options;
 }
 
 function createMinimalSessionManager(cwd: string, overrides: Partial<ExtensionContext["sessionManager"]> = {}): ExtensionContext["sessionManager"] {

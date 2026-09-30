@@ -8,6 +8,7 @@ import {
 	type NormalizedBuildSystemPromptOptions,
 	type ExtensionCommandContext,
 	type ExtensionContext,
+	type ExtensionToolContext,
 } from "@earendil-works/pi-coding-agent";
 import { makeModel } from "./model-fixtures.js";
 import type { ExtensionCommandContextOverrides, ExtensionContextOverrides } from "./pi-harness-types.js";
@@ -98,7 +99,7 @@ function createMinimalExtensionUi(): ExtensionContext["ui"] {
 	} satisfies ExtensionContext["ui"];
 }
 
-function createMinimalExtensionContextInternal(overrides: ExtensionContextOverrides = {}): ExtensionContext {
+function createMinimalExtensionContextInternal(overrides: ExtensionContextOverrides = {}): ExtensionToolContext {
 	const cwd = overrides.cwd ?? process.cwd();
 	const base = {
 		ui: createMinimalExtensionUi(),
@@ -118,13 +119,15 @@ function createMinimalExtensionContextInternal(overrides: ExtensionContextOverri
 		hasPendingSteeringMessages: vi.fn(() => false),
 		getPendingNextTurnCount: vi.fn(() => 0),
 		getPendingInputCount: vi.fn(() => 0),
-		getPendingToolCalls: vi.fn(() => []),
 		shutdown: vi.fn(),
 		getContextUsage: vi.fn(() => undefined),
 		getCompactionSettings: vi.fn(() => ({ ...DEFAULT_COMPACTION_SETTINGS })),
-		newContext: vi.fn(),
 		compact: vi.fn(),
 		getSystemPrompt: vi.fn(() => ""),
+		tools: [],
+		executeTool: vi.fn(async () => {
+			throw new Error("Nested tool execution requires a native session in this test harness.");
+		}),
 	};
 	return {
 		...base,
@@ -143,7 +146,7 @@ function createMinimalExtensionContextInternal(overrides: ExtensionContextOverri
 function createMinimalExtensionCommandContextInternal(
 	overrides: ExtensionCommandContextOverrides = {},
 ): ExtensionCommandContext {
-	const base = createMinimalExtensionContextInternal(overrides) as ExtensionCommandContext;
+	const base = createMinimalExtensionContextInternal(overrides);
 	return {
 		...base,
 		...overrides,
@@ -166,7 +169,7 @@ function createMinimalExtensionCommandContextInternal(
 	};
 }
 
-export function createExtensionTestContext(ctxOverrides: ExtensionContextOverrides = {}): ExtensionContext {
+export function createExtensionTestContext(ctxOverrides: ExtensionContextOverrides = {}): ExtensionToolContext {
 	return createMinimalExtensionContextInternal(ctxOverrides);
 }
 

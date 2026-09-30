@@ -23,6 +23,8 @@ try {
 		renameSync(temporary, evidencePath);
 		process.stdout.write("COMMITTED\n");
 	} else {
+		// Production finalization follows async work, not a cold event-loop turn.
+		await new Promise((resolve) => setTimeout(resolve, 1));
 		process.stdout.write("FINALIZING\n");
 	}
 	waitForRelease();

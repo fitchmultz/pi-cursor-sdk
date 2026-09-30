@@ -1,5 +1,7 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
+import type { ProviderModelConfig as PiProviderModelConfig } from "@earendil-works/pi-coding-agent";
+
+type ProviderModelConfig = Extract<PiProviderModelConfig, { reasoning: boolean }>;
 
 export function makeModel(id = "test-model"): Model<"cursor-sdk"> {
 	return {

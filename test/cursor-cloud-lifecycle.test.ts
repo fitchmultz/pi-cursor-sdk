@@ -51,7 +51,7 @@ function hostPersistsCustomEntriesBeforeFirstResponse(): boolean {
 	}
 }
 
-// Official Pi defers the session file until the first assistant message; the fitchmultz/pi fork writes custom entries eagerly.
+// Setup-only custom entries can differ by host; both current hosts persist the first user message.
 const eagerCustomEntryHost = hostPersistsCustomEntriesBeforeFirstResponse();
 
 function resetCloudLifecycleTestState(): void {
@@ -194,14 +194,16 @@ describe("Cursor cloud lifecycle ledger", () => {
 		}
 	});
 
-	it.skipIf(eagerCustomEntryHost)("recovers a framed first-turn ledger across real timestamped SessionManager paths", async () => {
+	it("recovers a legacy fileless ledger across real timestamped SessionManager paths", async () => {
 		resetCloudLifecycleTestState();
 		const tempDir = mkdtempSync(join(tmpdir(), "cursor-cloud-lifecycle-"));
 		const sessionId = "first-turn-cloud-recovery";
 		try {
-			const firstManager = SessionManager.create(tempDir, tempDir, { id: sessionId });
+			// Model the legacy crash-before-persistence boundary without undoing the
+			// current host's first-user persistence guarantee.
+			const firstManager = SessionManager.inMemory(tempDir, { id: sessionId });
 			firstManager.appendMessage({ role: "user", content: "start cloud work", timestamp: 1 });
-			const firstSessionFile = firstManager.getSessionFile()!;
+			const firstSessionFile = SessionManager.create(tempDir, tempDir, { id: sessionId }).getSessionFile()!;
 			const firstSessionManager = {
 				getBranch: () => firstManager.getBranch(),
 				getSessionFile: () => firstSessionFile,
@@ -258,7 +260,7 @@ describe("Cursor cloud lifecycle ledger", () => {
 		}
 	});
 
-	it.runIf(eagerCustomEntryHost)("anchors a framed first-turn ledger to the eagerly persisted Pi entry and claims it after resume", async () => {
+	it("anchors a framed first-user ledger to the persisted Pi entry and reads it after resume", async () => {
 		resetCloudLifecycleTestState();
 		const tempDir = mkdtempSync(join(tmpdir(), "cursor-cloud-eager-lifecycle-"));
 		const sessionId = "first-turn-cloud-eager";
@@ -313,7 +315,7 @@ describe("Cursor cloud lifecycle ledger", () => {
 		}
 	});
 
-	it("claims a fileless first-turn record on its original branch but not a sibling", async () => {
+	it("keeps first-turn records on their original branch and not a sibling", async () => {
 		resetCloudLifecycleTestState();
 		const tempDir = mkdtempSync(join(tmpdir(), "cursor-cloud-first-turn-branch-"));
 		try {

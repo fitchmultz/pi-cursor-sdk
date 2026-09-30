@@ -139,7 +139,7 @@ describe("AbortSignal during native tool-batch drain", () => {
 			const session = SessionManager.create(root, root);
 			session.appendMessage({ role: "user", content: "probe", timestamp: 1 });
 			session.appendMessage(error.error);
-			const rows = readFileSync(session.getSessionFile()!, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+			const rows = readFileSync(session.getSessionFile()!, "utf8").split("\n").filter((line) => line.trim()).map((line) => JSON.parse(line));
 			const persisted = rows.find((row) => row.type === "message" && row.message.role === "assistant").message as AssistantMessage;
 			const rpcText = AgentSession.prototype.getLastAssistantText.call({ messages: [persisted] } as AgentSession);
 			expect({

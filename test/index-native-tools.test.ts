@@ -235,7 +235,7 @@ describe("extension native Cursor tool replay", () => {
 			);
 
 			const rendered = component?.render(120).join("\n") ?? "";
-			expect(rendered).toContain(`Cursor image generation saved ${imagePath}`);
+			expect(rendered.replace(/\s+/g, "")).toContain(`Cursor image generation saved ${imagePath}`.replace(/\s+/g, ""));
 			expect(rendered).toContain("[Image: badge.png [image/png] 1x1]");
 		} finally {
 			resetCapabilitiesCache();

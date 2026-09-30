@@ -51,7 +51,7 @@ If pi started without a key, run `/cursor-refresh-models` after `/login` to refr
 ## Requirements
 
 - Node.js 24+
-- pi-cursor-sdk 0.4.0 requires official Pi 0.87.1 or later. Official Pi 0.87.1/latest and current `fitchmultz/pi` main are compatibility targets; the currently validated local `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` packages are 0.87.1
+- pi-cursor-sdk 0.4.0 requires official Pi 0.87.1 or later. Official Pi 0.87.1/latest and current `fitchmultz/pi` main are compatibility targets; the exact development `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` packages are 0.99.1
 - optional Pi and TypeBox peer metadata uses `"*"` ranges per Pi package guidance
 - a Cursor SDK API key saved through `/login`, available as `CURSOR_API_KEY`, or passed with pi's `--api-key`
 
@@ -681,7 +681,7 @@ Cursor native replay is a display enhancement for TUI sessions and structured JS
 
 ## Development
 
-The source qualification baseline is official Pi **0.87.1**, with official Pi latest and current `fitchmultz/pi` main as compatibility targets, optional wildcard Pi/TypeBox host peers, and exact Cursor SDK **1.0.32**. The currently validated local Pi packages are `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` 0.87.1. Run `npm ci --ignore-scripts` then `npm run check:compat` in an empty HOME/agent profile for credential-free qualification. This builds the manifest entry, runs existing type/unit/package checks, and tests the compiled provider's registration plus production prompt shaping against native Pi transcript/tool transitions. Replay arguments must match their JSON stream deltas. Tests use no live Cursor service.
+The source qualification baseline is official Pi **0.99.1**, with official Pi latest and current `fitchmultz/pi` main as compatibility targets, optional wildcard Pi/TypeBox host peers, and exact Cursor SDK **1.0.32**. The exact development Pi cohort is 0.99.1, with host TypeBox 1.3.27. Run `npm ci --ignore-scripts` then `npm run check:compat` in an empty HOME/agent profile for credential-free qualification. This builds the manifest entry, runs existing type/unit/package checks, and tests the compiled provider's registration plus production prompt shaping against native Pi transcript/tool transitions. Replay arguments must match their JSON stream deltas. A second native contract runs the registered Cursor provider with only its external SDK transport/storage substituted: real loopback bridge execution, display-only replay, persisted usage, incremental sends, tree navigation, compaction, request-boundary steering, abort and reload/disposal. Tests use no live Cursor service.
 
 TypeScript 7 builds and checks package types. `@typescript/typescript6` is dev-only and used solely by the AST architecture test because TypeScript 7 does not expose a stable compiler API. Vitest 5 runs with `clearMocks: true` by default.
 

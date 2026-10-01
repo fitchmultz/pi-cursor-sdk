@@ -46,6 +46,7 @@ export interface CursorProviderTurnSendMeta {
 interface CursorProviderTurnRuntimeBase {
 	turnCoordinator: CursorSdkTurnCoordinator;
 	billedTurnUsage?: CursorSdkTurnUsage;
+	completedRunUsage?: CursorSdkTurnUsage;
 }
 
 /**

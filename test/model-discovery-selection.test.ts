@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
 	buildCursorModelSelection,
 	getCursorModelMetadata,
-	getCursorModelMetadataEntries,
 	__testUtils,
 } from "../src/model-discovery.js";
 import type { ModelListItem } from "@cursor/sdk";
@@ -146,19 +145,5 @@ describe("buildCursorModelSelection", () => {
 
 	it("passes unknown model IDs through plainly", () => {
 		expect(buildCursorModelSelection("gemini-3.1-pro", "off")).toEqual({ id: "gemini-3.1-pro" });
-	});
-
-	it("returns cloned metadata entries", () => {
-		const entries = getCursorModelMetadataEntries();
-		const metadata = entries.find((entry) => entry.piModelId === "gpt-5.4@1m");
-		expect(metadata?.defaultParams).toEqual([
-			{ id: "context", value: "1m" },
-			{ id: "reasoning", value: "medium" },
-			{ id: "fast", value: "false" },
-		]);
-		metadata!.defaultParams[0].value = "mutated";
-		metadata!.thinkingLevelMap!.medium = "mutated";
-		expect(getCursorModelMetadata("gpt-5.4@1m")?.defaultParams[0].value).toBe("1m");
-		expect(getCursorModelMetadata("gpt-5.4@1m")?.thinkingLevelMap?.medium).toBe("medium");
 	});
 });

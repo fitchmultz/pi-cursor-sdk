@@ -48,7 +48,7 @@ export function getCursorToolTailGuardText(
 ): string {
 	return [
 		isCursorLeanEnabled()
-			? "For project commands through pi__bash, use explicit `cd` to the repo path."
+			? "For project shell commands, use explicit `cd` to the repo path."
 			: "Shell: use explicit `cd` to repo path for project commands; session cwd may differ from tool args.",
 		options.includePlanModeGuidance === false
 			? undefined

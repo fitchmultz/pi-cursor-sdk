@@ -11,6 +11,21 @@ export const CURSOR_TOOL_MANIFEST_ENV = "PI_CURSOR_TOOL_MANIFEST";
 export const CURSOR_HOST_TOOL_MANIFEST_SUMMARY =
 	"read/shell/search/edit/write and other host tools when Cursor exposes them";
 
+function buildCodeModeRoutingLines(snapshot: CursorPiToolBridgeSnapshot): string[] {
+	const executeName = snapshot.piToolNameToMcpToolName.get("codemode_execute");
+	if (!executeName) return [];
+	// CodeMode's catalog, not Pi's inactive set, determines indirect availability.
+	const lines = [
+		`- CodeMode can expose Pi tools that have no direct pi__* name; call catalog tools inside ${executeName} as await tools[name](input), using their declared input schemas. A missing direct bash tool does not by itself mean shell access is unavailable.`,
+	];
+	const searchName = snapshot.piToolNameToMcpToolName.get("codemode_search");
+	if (searchName) {
+		lines.push(`- If shell access is needed and bash is not directly exposed, use ${searchName} with query "bash" to get its availability and schema, then execute it through ${executeName} if found. Use exact-name lookups for read/edit/write when needed; reuse schemas already provided instead of searching again.`);
+	}
+	lines.push("- Do not narrate routine tool discovery or speculate about missing tools. Start the task's relevant inspection; report a capability limitation only after checking the available routes.");
+	return lines;
+}
+
 export function resolveCursorToolManifestEnabled(
 	env: Record<string, string | undefined> = process.env,
 ): boolean {
@@ -43,6 +58,7 @@ export function buildCursorToolManifestText(options: {
 		} else {
 			const names = [...bridgeTools.map((tool) => tool.mcpToolName)].sort().join(", ");
 			lines.push(`- Pi bridge: call exposed pi__* MCP names (${names}); pi shows real pi names.`);
+			if (options.bridgeSnapshot) lines.push(...buildCodeModeRoutingLines(options.bridgeSnapshot));
 		}
 	}
 	lines.push("- Not callable: cursor-replay-* IDs, pi history names, transcript labels.");

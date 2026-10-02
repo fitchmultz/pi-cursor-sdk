@@ -1,5 +1,11 @@
-import { expect, vi } from "vitest";
+import { afterEach, expect, vi } from "vitest";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
 
 // Mock @cursor/sdk before importing the module under test
 vi.mock("@cursor/sdk", () => {
@@ -359,6 +365,14 @@ export const cursorModelItems: ModelListItem[] = [
 ];
 
 export async function resetCursorProviderTestState(): Promise<void> {
+	// The SDK mock does not cover direct REST reporting; only the real loopback bridge needs transport.
+	vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (input, init) => {
+		const url = new URL(input instanceof Request ? input.url : String(input));
+		if (url.hostname !== "127.0.0.1") {
+			throw new Error("External fetch is disabled in offline provider tests");
+		}
+		return originalFetch(input, init);
+	}));
 	vi.useRealTimers();
 	installCursorSessionStoreMock();
 	cloudLifecycleTestUtils.reset();

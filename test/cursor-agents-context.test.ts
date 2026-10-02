@@ -13,6 +13,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 
 import type { BeforeAgentStartEvent, BuildSystemPromptOptions, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Context } from "@earendil-works/pi-ai";
+import * as piAi from "@earendil-works/pi-ai";
 import {
 	classifyContextFileOverlap,
 	CURSOR_PRESERVE_PI_AGENTS_MD_ENV,
@@ -130,13 +131,20 @@ describe("pi project_context serialization helpers", () => {
 		);
 	});
 
+	it("serializes the self-contained transcript project_context section", () => {
+		expect(serializePiProjectContextSection([PROJECT_FILE], "transcript")).toBe(
+			'<project_context>\nProject-specific instructions and guidelines:\n\n<project_instructions path="/repo/AGENTS.md">\nProject guidance\n</project_instructions>\n</project_context>',
+		);
+	});
+
 	it("matches installed pi buildSystemPrompt project_context output", () => {
 		const prompt = loadInstalledPiBuildSystemPrompt()({
 			cwd: "/repo",
 			contextFiles: [GLOBAL_FILE, PROJECT_FILE],
 			selectedTools: [],
 		});
-		expect(getProjectContextSection(prompt)).toBe(serializePiProjectContextSection([GLOBAL_FILE, PROJECT_FILE]));
+		const format = "getCurrentSystemPrompt" in piAi ? "transcript" : "legacy";
+		expect(getProjectContextSection(prompt).trim()).toBe(serializePiProjectContextSection([GLOBAL_FILE, PROJECT_FILE], format).trim());
 	});
 });
 

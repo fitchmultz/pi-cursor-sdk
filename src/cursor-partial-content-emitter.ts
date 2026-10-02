@@ -1,6 +1,7 @@
 import type { AssistantMessage, AssistantMessageEventStream } from "@earendil-works/pi-ai";
 
 const DEFAULT_THINKING_TRACE_MAX_CHARS = 50000;
+export const CURSOR_TEXT_MESSAGE_SEPARATOR = "\n\n";
 
 export interface CursorPartialContentEmitterOptions {
 	stream: AssistantMessageEventStream;
@@ -12,6 +13,7 @@ export interface CursorPartialContentEmitterOptions {
 export class CursorPartialContentEmitter {
 	private thinkingContentIndex = -1;
 	private textContentIndex = -1;
+	private textMessageCompleted = false;
 	private activityTraceChars = 0;
 	private activityTraceTruncated = false;
 
@@ -86,10 +88,21 @@ export class CursorPartialContentEmitter {
 		});
 	}
 
+	completeTextMessage(): void {
+		// Defer the separator until more text arrives: an exact final answer must
+		// not gain trailing whitespace. A fresh Pi tool-use turn needs no prefix.
+		this.textMessageCompleted = this.partial.content.some((block) => block.type === "text" && block.text.length > 0);
+	}
+
 	appendTextDelta(delta: string, options?: { closeThinking?: boolean }): void {
 		const closeThinking = options?.closeThinking ?? this.mutuallyExclusive;
 		if (closeThinking) this.closeThinking();
 		if (!delta) return;
+		if (this.textMessageCompleted) {
+			this.textMessageCompleted = false;
+			this.appendTextDelta(CURSOR_TEXT_MESSAGE_SEPARATOR, { closeThinking: false });
+			this.closeText();
+		}
 		if (this.textContentIndex < 0) {
 			this.textContentIndex = this.partial.content.length;
 			this.partial.content.push({ type: "text", text: "" });

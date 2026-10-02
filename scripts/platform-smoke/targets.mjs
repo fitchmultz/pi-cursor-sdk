@@ -6,6 +6,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { scanArtifactSecrets } from "./artifact-secrets.mjs";
 import { resolve } from "node:path";
 
 import {
@@ -22,7 +23,7 @@ export { isSafePlatformBundlePath as isSafeBundlePath } from "./artifacts.mjs";
 import { getScenario } from "./scenarios.mjs";
 import { warmupLease, runOnLease, stopLease } from "./crabbox-runner.mjs";
 import { renderAll } from "./render-ansi.mjs";
-import { assertRequiredCards, detectCards, writeCardArtifacts } from "./card-detect.mjs";
+import { assertRequiredCards } from "./card-detect.mjs";
 import { collectVisualEvidence } from "./visual-evidence.mjs";
 import { extractContentText, extractFinalTextContent } from "./jsonl-text.mjs";
 import { executeLocalResumeSuite } from "./local-resume-runner.mjs";
@@ -530,7 +531,6 @@ async function executeLiveSuite(config, targetName, suiteName, suiteDir, slug, l
 	const terminalAnsi = resolve(liveArtifactDir, "terminal.ansi");
 	const terminalTxt = resolve(liveArtifactDir, "terminal.txt");
 	let renderResult = { pngOk: false };
-	let cards = [];
 	if (existsSync(terminalAnsi)) {
 		renderResult = await renderAll(terminalAnsi, liveArtifactDir, {
 			label: `${targetName}-${suiteName}`,
@@ -539,17 +539,12 @@ async function executeLiveSuite(config, targetName, suiteName, suiteDir, slug, l
 			sessionId: `${targetName}-${suiteName}`,
 		});
 	}
-	if (existsSync(terminalTxt)) {
-		cards = detectCards(readFileSync(terminalTxt, "utf8"));
-		writeCardArtifacts(liveArtifactDir, cards);
-	}
 
 	const statusPath = resolve(liveArtifactDir, "live-status.json");
 	const status = readJson(statusPath);
 	const terminalText = existsSync(terminalTxt) ? readFileSync(terminalTxt, "utf8") : "";
 	const jsonlPath = resolve(liveArtifactDir, "session.jsonl");
 	const jsonlRaw = existsSync(jsonlPath) ? readFileSync(jsonlPath, "utf8") : "";
-	const cardChecks = assertRequiredCards(liveArtifactDir, cards, scenario?.requiredCards ?? []);
 	const jsonlToolNames = collectJsonlToolNames(jsonlRaw);
 	const jsonlResults = collectJsonlToolResults(jsonlRaw);
 	const usageChecks = collectUsageChecks(jsonlRaw);
@@ -585,14 +580,13 @@ async function executeLiveSuite(config, targetName, suiteName, suiteDir, slug, l
 		{ id: "bridge-diagnostic-request-resolved", fn: () => bridgeDiagnostics.some((event) => event.event === "request_resolved") },
 	] : [];
 	const visualEvidenceSpecs = scenario?.visualEvidence ?? [];
-	const visualEvidence = existsSync(resolve(liveArtifactDir, "terminal.html"))
-		? await collectVisualEvidence({
-			htmlPath: resolve(liveArtifactDir, "terminal.html"),
-			pngPath: resolve(liveArtifactDir, "terminal.full.png"),
-			outDir: liveArtifactDir,
-			specs: visualEvidenceSpecs,
-		})
-		: { ok: false, checks: [{ id: "visual-html-present", ok: false, error: "terminal.html missing" }] };
+	const visualEvidence = await collectVisualEvidence({
+		htmlPath: resolve(liveArtifactDir, "terminal.html"),
+		pngPath: resolve(liveArtifactDir, "terminal.full.png"),
+		outDir: liveArtifactDir,
+		specs: visualEvidenceSpecs,
+	});
+	const cardChecks = assertRequiredCards(liveArtifactDir, visualEvidence.cards, scenario?.requiredCards ?? []);
 	const visualEvidenceResultChecks = visualEvidenceSpecs
 		.filter((spec) => spec.jsonlResultId)
 		.map((spec) => ({
@@ -604,7 +598,8 @@ async function executeLiveSuite(config, targetName, suiteName, suiteDir, slug, l
 			},
 		}));
 	const violations = [
-		...scanForSecrets(result.stdout + result.stderr + terminalText + jsonlRaw).map((violation) => ({ file: "process-output", violation })),
+		...scanForSecrets(result.stdout + result.stderr + terminalText).map((violation) => ({ file: "process-output", violation })),
+		...scanArtifactSecrets(jsonlPath, jsonlRaw).map((violation) => ({ file: "artifacts/session.jsonl", violation })),
 		...bundle.violations,
 		...scanArtifacts(suiteDir),
 	];

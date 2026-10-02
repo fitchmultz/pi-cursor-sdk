@@ -18,7 +18,7 @@ import {
 	boundedFileSnapshot, openRegularFileNoFollow, walkArtifactTree,
 	writeBundleSpillFile, writeExtractedFiles,
 } from "./artifact-fs-safety.mjs";
-import { isBinaryArtifactContent, redactArtifactText, redactSecrets, scanForSecrets } from "./artifact-secrets.mjs";
+import { isBinaryArtifactContent, redactSecrets, scanArtifactSecrets, scanForSecrets, structuredArtifactViolations } from "./artifact-secrets.mjs";
 
 export {
 	MAX_BUNDLE_AGGREGATE_BYTES, MAX_BUNDLE_FILE_BYTES, MAX_BUNDLE_FILE_COUNT,
@@ -29,7 +29,7 @@ export {
 	isCanonicalPlatformBundlePath,
 };
 export { openRegularFileNoFollow };
-export { isBinaryArtifactContent, redactArtifactText, redactSecrets, scanForSecrets };
+export { isBinaryArtifactContent, redactSecrets, scanForSecrets };
 
 const PLATFORM_SMOKE_RUN_DIR_PATTERN = /^run-(\d+)-[a-z0-9]+$/i;
 const HOURS_TO_MS = 60 * 60 * 1000;
@@ -182,7 +182,7 @@ export function scanArtifacts(dir) {
 				failures.push({ file, violation: `artifact scan ${snapshot.reason}` });
 				return;
 			}
-			for (const violation of scanForSecrets(snapshot.content)) findings.push({ file, violation });
+			for (const violation of [...scanArtifactSecrets(path, snapshot.content), ...structuredArtifactViolations(path, snapshot.content)]) findings.push({ file, violation });
 		},
 	});
 	return failures.length > 0 ? failures : findings;
@@ -265,7 +265,7 @@ export function buildPlatformArtifactBundle(root, pathPrefix = "") {
 				return;
 			}
 			const { content } = snapshot;
-			for (const violation of scanForSecrets(content)) findings.push({ file, violation });
+			for (const violation of scanArtifactSecrets(path, content)) findings.push({ file, violation });
 			if (pathViolations.length > 0 || !shouldTransportBundleFile(canonicalRoot, path, pathPrefix)) return;
 			if (isBinaryArtifactContent(content)) {
 				limitReasons.push("binary-content");
@@ -308,7 +308,7 @@ function validatePlatformArtifactBundle(bundle) {
 		aggregateBytes += file.size;
 		if (aggregateBytes > MAX_BUNDLE_AGGREGATE_BYTES) return undefined;
 		const content = decodeCanonicalBase64(file.contentBase64, file.size);
-		if (!content || content.length !== file.size || isBinaryArtifactContent(content) || scanForSecrets(content).length > 0) return undefined;
+		if (!content || content.length !== file.size || isBinaryArtifactContent(content) || scanArtifactSecrets(file.path, content).length > 0) return undefined;
 		files.push({ path: file.path, content });
 	}
 	for (const path of paths) {
@@ -406,10 +406,12 @@ export function extractPlatformArtifactBundle(outputDir, stdout) {
 
 	const files = [];
 	const violations = [];
-	let aggregateBytes = 0;
+	let structuredValid = true;
 	for (const file of decodedFiles) {
 		const text = file.content.toString("utf8");
-		violations.push(...scanForSecrets(file.content).map((violation) => ({ file: file.path, violation })));
+		const malformed = structuredArtifactViolations(file.path, file.content);
+		structuredValid &&= malformed.length === 0;
+		violations.push(...malformed.map((violation) => ({ file: file.path, violation })));
 		if (file.path.endsWith("redaction-violations.json")) {
 			try {
 				const parsed = JSON.parse(text);
@@ -418,16 +420,13 @@ export function extractPlatformArtifactBundle(outputDir, stdout) {
 				})));
 			} catch {}
 		}
-		try {
-			const content = Buffer.from(redactArtifactText(file.path, text));
-			aggregateBytes += content.length;
-			if (content.length > MAX_BUNDLE_FILE_BYTES || aggregateBytes > MAX_BUNDLE_AGGREGATE_BYTES) return failed;
-			files.push({ path: file.path, content });
-		} catch { return failed; }
+		// validatePlatformArtifactBundle already secret-scanned these bytes.
+		// Keep even malformed evidence verbatim for diagnosis; never repair it.
+		files.push({ path: file.path, content: /\.jsonl?$/i.test(file.path) ? file.content : Buffer.from(redactSecrets(text)) });
 	}
 
 	const succeeded = writeExtractedFiles(outputDir, files);
-	return succeeded ? { ok: true, violations } : failed;
+	return succeeded ? { ok: structuredValid, violations } : failed;
 }
 
 function collectFiles(root) {

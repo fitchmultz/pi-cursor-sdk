@@ -114,9 +114,21 @@ export function serializePiProjectInstructionsBlock(file: PiAgentsContextFile): 
 	return `${PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX}${file.path}">\n${file.content}\n${PI_PROJECT_INSTRUCTIONS_CLOSE}\n\n`;
 }
 
-/** Exact pi `buildSystemPrompt()` serialization for the full project context section. */
-export function serializePiProjectContextSection(contextFiles: readonly PiAgentsContextFile[]): string {
+/** The two supported Pi project-context serializations; legacy includes outer spacing. */
+export function serializePiProjectContextSection(
+	contextFiles: readonly PiAgentsContextFile[],
+	format: "legacy" | "transcript" = "legacy",
+): string {
 	if (contextFiles.length === 0) return "";
+	if (format === "transcript") {
+		return [
+			"<project_context>",
+			"Project-specific instructions and guidelines:",
+			"",
+			contextFiles.map((file) => serializePiProjectInstructionsBlock(file).trimEnd()).join("\n\n"),
+			"</project_context>",
+		].join("\n");
+	}
 	return `${PI_PROJECT_CONTEXT_OPEN}${contextFiles.map(serializePiProjectInstructionsBlock).join("")}${PI_PROJECT_CONTEXT_CLOSE}`;
 }
 
@@ -138,12 +150,16 @@ export function removePiAgentsContextFromSystemPrompt(
 	}
 	if (!removedAny) return systemPrompt;
 
-	const originalSection = serializePiProjectContextSection(contextFiles);
-	const start = systemPrompt.indexOf(originalSection);
-	if (start < 0) return systemPrompt;
-
-	const replacementSection = serializePiProjectContextSection(retainedContextFiles);
-	return systemPrompt.slice(0, start) + replacementSection + systemPrompt.slice(start + originalSection.length);
+	// Match only the exact known files in either supported serialization; never
+	// strip arbitrary user-authored XML or neighboring custom sections.
+	for (const format of ["legacy", "transcript"] as const) {
+		const originalSection = serializePiProjectContextSection(contextFiles, format);
+		const start = systemPrompt.indexOf(originalSection);
+		if (start < 0) continue;
+		const replacementSection = serializePiProjectContextSection(retainedContextFiles, format);
+		return systemPrompt.slice(0, start) + replacementSection + systemPrompt.slice(start + originalSection.length);
+	}
+	return systemPrompt;
 }
 
 export function resolveCursorFacingSystemPrompt(

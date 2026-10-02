@@ -41,6 +41,7 @@ export function createThrowawayRepository(
 	onOwned?: (repo: CloudSmokeOwnedRepository) => void,
 	options?: {
 		cwd?: string;
+		githubCli?: string;
 		randomUUID?: () => string;
 		runCommand?: (commandName: string, commandArgs: readonly string[], options?: Record<string, unknown>) => string;
 		spawnSync?: typeof import("node:child_process").spawnSync;
@@ -57,6 +58,7 @@ export function deleteThrowawayRepository(
 	repo: CloudSmokeOwnedRepository | { fullName: string; ownershipToken: string; description: string; repoUrl?: string; seedDir?: string },
 	options?: {
 		cwd?: string;
+		githubCli?: string;
 		env?: NodeJS.ProcessEnv;
 		timeoutMs?: number;
 		verificationAttempts?: number;
@@ -72,6 +74,7 @@ export function validatePrUrl(
 	prUrl: string,
 	options?: {
 		cwd?: string;
+		githubCli?: string;
 		runCommand?: (commandName: string, commandArgs: readonly string[], options?: Record<string, unknown>) => string;
 		spawnSync?: typeof import("node:child_process").spawnSync;
 	},

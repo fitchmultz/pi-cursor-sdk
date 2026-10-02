@@ -8,6 +8,7 @@
 import { spawn } from "node:child_process";
 import { writeFileSync, appendFileSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 
 const COLS = 150;
 const ROWS = 45;
@@ -27,7 +28,6 @@ export async function capturePTY(dir, command, opts = {}) {
 	const txtPath = resolve(dir, "terminal.txt");
 
 	let ansiBuffer = "";
-	let txtBuffer = "";
 
 	function appendEvent(event) {
 		appendFileSync(eventsPath, JSON.stringify(event) + "\n");
@@ -35,8 +35,6 @@ export async function capturePTY(dir, command, opts = {}) {
 	function appendOutput(data) {
 		const text = typeof data === "string" ? data : data.toString();
 		ansiBuffer += text;
-		// Strip ANSI for plain text
-		txtBuffer += stripANSI(text);
 	}
 
 	// Try node-pty first
@@ -79,7 +77,7 @@ export async function capturePTY(dir, command, opts = {}) {
 		});
 
 		writeFileSync(ansiPath, ansiBuffer);
-		writeFileSync(txtPath, txtBuffer);
+		writeFileSync(txtPath, stripVTControlCharacters(ansiBuffer));
 
 		return { code: code ?? (signal ? 1 : 0), signal, ansiPath, txtPath, eventsPath };
 	} else {
@@ -111,15 +109,10 @@ export async function capturePTY(dir, command, opts = {}) {
 		});
 
 		writeFileSync(ansiPath, ansiBuffer);
-		writeFileSync(txtPath, txtBuffer);
+		writeFileSync(txtPath, stripVTControlCharacters(ansiBuffer));
 
 		return { code: code ?? (signal ? 1 : 0), signal, ansiPath, txtPath, eventsPath };
 	}
-}
-
-/** Strip ANSI escape sequences from a string. */
-function stripANSI(str) {
-	return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").replace(/\x1b\][^\x07]*\x07/g, "");
 }
 
 /** Self-test: can we create a simple PTY? */

@@ -7,6 +7,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 
 import { buildTerminalHtml, writeTerminalScreenshot } from "../lib/cursor-visual-render.mjs";
 
@@ -14,14 +15,10 @@ const COLS = 150;
 const ROWS = 45;
 const HISTORY_LINES = 3_000;
 
-function stripANSI(text) {
-	return text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "");
-}
-
 /** Render terminal.ansi to terminal.html using the shared xterm.js renderer. */
 export async function renderHTML(ansiPath, htmlPath, options = {}) {
 	const ansi = readFileSync(ansiPath, "utf8");
-	const plain = options.plain ?? stripANSI(ansi);
+	const plain = options.plain ?? stripVTControlCharacters(ansi);
 	const html = buildTerminalHtml({
 		ansi,
 		plain,

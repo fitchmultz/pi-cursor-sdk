@@ -1,4 +1,5 @@
-import type { BuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
+import type { NormalizedBuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
+import { createDefaultSystemPromptOptions } from "./context-fixtures.js";
 import {
 	PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX,
 	serializePiProjectContextSection,
@@ -11,8 +12,8 @@ export { PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX, serializePiProjectContextSection, 
 export function makeSystemPromptOptions(
 	contextFiles: PiAgentsContextFile[],
 	cwd = "/repo",
-): BuildSystemPromptOptions {
-	return { cwd, contextFiles, selectedTools: [] };
+): NormalizedBuildSystemPromptOptions {
+	return { ...createDefaultSystemPromptOptions(cwd), contextFiles, selectedTools: [] };
 }
 
 /** Minimal pi-like system prompt containing only the project_context subset this feature owns. */

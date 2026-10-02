@@ -1,4 +1,5 @@
 import type { Context, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { getCursorConversationMessages, resolveCursorPiContext } from "./cursor-pi-context.js";
 import type { AgentModeOption, ModelSelection, SDKAgent } from "@cursor/sdk";
 import { configureCursorSdkHttp1 } from "./cursor-http1.js";
 import { installCursorMcpToolTimeoutOverride } from "./cursor-mcp-timeout-override.js";
@@ -80,11 +81,15 @@ interface PrepareCursorProviderTurnContext extends PrepareCursorProviderTurnPara
 
 function buildCursorCloudPromptContext(context: Context, handoff: "fresh" | "bootstrap" | "never"): Context {
 	if (handoff === "bootstrap") return context;
-	for (let index = context.messages.length - 1; index >= 0; index -= 1) {
-		const message = context.messages[index];
-		if (message.role === "user") return { ...context, messages: [message] };
+	// Fresh cloud runs omit history, not the current Pi instructions. Replay before
+	// selecting the user message, otherwise transcript-only inputs lose the prompt.
+	const current = resolveCursorPiContext(context);
+	const messages = getCursorConversationMessages(context);
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		const message = messages[index];
+		if (message.role === "user") return { ...current, messages: [message] };
 	}
-	return { ...context, messages: context.messages.slice(-1) };
+	return { ...current, messages: messages.slice(-1) };
 }
 
 const CLOUD_SEND_PLAN: CursorSessionSendPlan = { mode: "bootstrap", resetAgent: false, reason: "initial" };
@@ -135,7 +140,7 @@ async function prepareCursorCloudProviderTurn(
 					repo: resolvedConfig.cloud.repo.value,
 					branch: resolvedConfig.cloud.branch.value,
 				}),
-			hasPriorContext: context.messages.length > 1,
+			hasPriorContext: getCursorConversationMessages(context).length > 1,
 		});
 		if (!preflight.ok) throw new Error(formatCursorCloudPreflightError(preflight));
 		if (getPendingCursorLiveRun(context) || getActiveCursorLiveRunForCurrentScope()) {

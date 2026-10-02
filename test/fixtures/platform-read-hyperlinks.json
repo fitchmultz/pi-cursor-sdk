@@ -1,0 +1,12 @@
+[
+  {
+    "lane": "native",
+    "ansi": "\u001b[2K\u001b[48;2;40;50;40m \u001b[38;2;212;212;212m\u001b[1mread\u001b[22m\u001b[39m \u001b]8;;file:///qa/package.json\u001b\\\u001b[38;2;138;190;183mpackage.json\u001b[39m\u001b]8;;\u001b\\\u001b[38;2;128;128;128m \u00b7 local file preview\u001b[39m                                                                                                               \u001b[49m\u001b[0m\u001b]8;;\u0007\r\r\n",
+    "captureSha256": "a183b6e2095761dab37f10e428a659dfbfb5099c30b46924636152d308aa3b07"
+  },
+  {
+    "lane": "bridge",
+    "ansi": "\u001b[2K\u001b[48;2;40;40;50m \u001b[38;2;212;212;212m\u001b[1mread\u001b[22m\u001b[39m \u001b]8;;file:///qa/package.json\u001b\\\u001b[38;2;138;190;183m./package.json\u001b[39m\u001b]8;;\u001b\\                                                                                                                                  \u001b[49m\u001b[0m\u001b]8;;\u0007\r\r\n",
+    "captureSha256": "90136b380f7374c21db954933961f753326fb90748bc1dce667bed004fe39de7"
+  }
+]

@@ -1,5 +1,5 @@
 import type { MockedFunction } from "vitest";
-import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
+import type { ImageContent, JsonValue, TextContent } from "@earendil-works/pi-ai";
 import type {
 	ExtensionAPI,
 	ExtensionCommandContext,
@@ -25,7 +25,8 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
 
-export type RegisteredTool = ToolDefinition<TSchema, unknown, unknown>;
+// Replay fixtures store tool results in Pi's JSON transcript, not arbitrary host objects.
+export type RegisteredTool = ToolDefinition<TSchema, JsonValue | undefined, unknown>;
 
 export type ExtensionContextOverrides = Omit<Partial<ExtensionContext>, "sessionManager" | "ui"> & {
 	sessionManager?: Partial<ExtensionContext["sessionManager"]>;

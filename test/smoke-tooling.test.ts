@@ -273,15 +273,85 @@ try {
 		expect(invalidSuite.stderr).toContain("platform-build");
 	});
 
+	it("preserves captured OSC-8 read labels and content exactly as xterm renders them", () => {
+		const code = String.raw`
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { stripVTControlCharacters } from "node:util";
+import { detectCards, assertRequiredCards } from "./scripts/platform-smoke/card-detect.mjs";
+const { Terminal } = createRequire(import.meta.url)("@xterm/xterm");
+const captures = JSON.parse(readFileSync("test/fixtures/platform-read-hyperlinks.json", "utf8"));
+for (const { lane, ansi } of captures) {
+  const term = new Terminal({ cols: 150, rows: 45, allowProposedApi: true });
+  try {
+    const split = ansi.indexOf("\x1b\\") + 1;
+    await new Promise(resolve => term.write(ansi.slice(0, split), resolve));
+    await new Promise(resolve => term.write(ansi.slice(split), resolve));
+    const visible = term.buffer.active.getLine(0).translateToString(true);
+    // Independent terminal interpretation, not a second regular-expression stripper.
+    assert.equal(stripVTControlCharacters(ansi).trim(), visible.trim());
+    const required = lane === "native" ? ["read"] : ["read", "bridge-read-success"];
+    assert(assertRequiredCards(".", detectCards([visible]), required).every(c => c.ok));
+    // BEL and ST are both valid OSC terminators; neither may eat visible content.
+    term.reset();
+    await new Promise(resolve => term.write(ansi.replaceAll("\x1b\\", "\x07"), resolve));
+    assert.equal(term.buffer.active.getLine(0).translateToString(true), visible);
+  } finally { term.dispose(); }
+}
+const content = captures[0].ansi + '  "name": "pi-cursor-sdk"\r\n' + captures[1].ansi + 'ENOENT: no such file\r\n';
+const plain = stripVTControlCharacters(content);
+assert(plain.includes('"name": "pi-cursor-sdk"'));
+const term = new Terminal({ cols: 150, rows: 45, allowProposedApi: true });
+try {
+  await new Promise(resolve => term.write(content, resolve));
+  const lines = Array.from({ length: term.buffer.active.length }, (_, i) => term.buffer.active.getLine(i).translateToString(true));
+  assert(lines.some(line => line.includes('"name": "pi-cursor-sdk"')));
+  assert(assertRequiredCards(".", detectCards(lines), ["read", "bridge-read-success", "bridge-read-failure"]).every(c => c.ok));
+} finally { term.dispose(); }
+assert.equal(detectCards(['1. call pi__read on ./package.json', 'read ./other.json']).length, 0);
+console.log("captured-osc8-read-cards-ok");
+`;
+		const result = run(process.execPath, ["--input-type=module", "-e", code]);
+		expect(result.status, result.stderr).toBe(0);
+		expect(result.stdout).toContain("captured-osc8-read-cards-ok");
+	});
+
+	it("preserves captured OSC-8 read labels in HTML fallback", () => {
+		const code = String.raw`
+import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { stripVTControlCharacters } from "node:util";
+import { renderHTML } from "./scripts/platform-smoke/render-ansi.mjs";
+const root = mkdtempSync(join(tmpdir(), "platform-osc8-capture-"));
+try {
+  const [{ ansi }] = JSON.parse(readFileSync("test/fixtures/platform-read-hyperlinks.json", "utf8"));
+  const rawPath = join(root, "terminal.ansi");
+  writeFileSync(rawPath, ansi);
+  const plain = stripVTControlCharacters(ansi);
+  const html = join(root, "terminal.html");
+  await renderHTML(rawPath, html);
+  const fallback = JSON.parse(readFileSync(html, "utf8").match(/const fallbackText = (.*);/)[1]);
+  assert.equal(fallback, plain);
+  console.log("osc8-html-fallback-ok");
+} finally { rmSync(root, { recursive: true, force: true }); }
+`;
+		const result = run(process.execPath, ["--input-type=module", "-e", code]);
+		expect(result.status, result.stderr).toBe(0);
+		expect(result.stdout).toContain("osc8-html-fallback-ok");
+	});
+
 	it("keeps card and bundle evidence checks strict against prompt/path false positives", () => {
 		const code = String.raw`
 import { detectCards, assertRequiredCards } from "./scripts/platform-smoke/card-detect.mjs";
 import { isSafeBundlePath } from "./scripts/platform-smoke/targets.mjs";
-const promptOnly = detectCards("1. call pi__read on ./package.json\n2. grep ./README.md\n");
-const rendered = detectCards("read /workspace/pi-cursor-sdk/package.json\ngrep /pi-cursor-sdk/ in C:/workspace/README.md\nbridge visual smoke\nENOENT: no such file or directory\ncursor:local · fast:off · http1\ngrok-4.6\n");
-const wrapped = detectCards("read /workspace/very-long-test-workspace/package.js\non\n");
-const wrappedMidToken = detectCards("read /workspace/very-long-test-workspace/package.j\nson\n");
-const localPreview = detectCards("read package.json · local file preview\n");
+const promptOnly = detectCards(["1. call pi__read on ./package.json", "2. grep ./README.md"]);
+const rendered = detectCards("read /workspace/pi-cursor-sdk/package.json\ngrep /pi-cursor-sdk/ in C:/workspace/README.md\nbridge visual smoke\nENOENT: no such file or directory\ncursor:local · fast:off · http1\ngrok-4.6\n".split("\n"));
+const wrapped = detectCards(["read /workspace/very-long-test-workspace/package.js", "on"]);
+const wrappedMidToken = detectCards(["read /workspace/very-long-test-workspace/package.j", "son"]);
+const localPreview = detectCards(["read package.json · local file preview"]);
 const checks = assertRequiredCards(".", rendered, ["bridge-read-success", "grep", "bridge-shell-success", "bridge-read-failure", "http1-status", "footer-status"]);
 const wrappedChecks = assertRequiredCards(".", wrapped, ["bridge-read-success"]);
 const wrappedMidTokenChecks = assertRequiredCards(".", wrappedMidToken, ["bridge-read-success"]);

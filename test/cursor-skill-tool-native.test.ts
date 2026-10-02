@@ -9,7 +9,7 @@ import {
 	SettingsManager,
 	type Skill,
 } from "@earendil-works/pi-coding-agent";
-import { createAssistantMessageEventStream, type AssistantMessage, type Context } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, getCurrentSystemPrompt, getCurrentTools, type AssistantMessage, type Context } from "@earendil-works/pi-ai";
 import { registerCursorSkillTool } from "../src/cursor-skill-tool.js";
 import { computeCursorContextFingerprint } from "../src/context.js";
 import { planCursorSessionSend } from "../src/cursor-session-send-policy.js";
@@ -80,9 +80,9 @@ it("keeps native Pi prompts stable after lazy skill activation without losing th
 		const content = activation?.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
 		expect(content).toContain("Follow the proof skill instructions.");
 		expect(content).toContain(`Skill directory: ${root}`);
-		expect(captured[0].tools?.find((tool) => tool.name === "cursor_activate_skill")?.description).toContain("Load full pi Agent Skill instructions");
-		expect(captured[0].systemPrompt).toContain("call pi__cursor_activate_skill with the skill name");
-		expect(captured[2].systemPrompt).toBe(captured[0].systemPrompt);
+		expect(getCurrentTools(captured[0].messages).find((tool) => tool.name === "cursor_activate_skill")?.description).toContain("Load full pi Agent Skill instructions");
+		expect(getCurrentSystemPrompt(captured[0].messages)).toContain("call pi__cursor_activate_skill with the skill name");
+		expect(getCurrentSystemPrompt(captured[2].messages)).toBe(getCurrentSystemPrompt(captured[0].messages));
 		expect(planCursorSessionSend({
 			bootstrapped: true, incrementalSendCount: 0,
 			contextFingerprint: computeCursorContextFingerprint(captured[0]),

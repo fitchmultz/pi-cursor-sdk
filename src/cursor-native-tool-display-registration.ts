@@ -32,6 +32,9 @@ type CursorNativeToolRegistryApi = CursorNativeToolActivationApi & Pick<Extensio
 
 export interface CursorNativeToolDisplayExtensionApi extends CursorNativeToolRegistryApi, CursorModelLifecycleExtensionApi {}
 
+// Pi filters getAllTools even after registration; new/reloaded extensions receive a new API.
+const filteredRegistrations = new WeakMap<CursorNativeToolRegistryApi, Set<NativeCursorToolName>>();
+
 function hasNonBuiltinTool(pi: Pick<ExtensionAPI, "getAllTools">, toolName: NativeCursorToolName): boolean {
 	const existingTool = pi.getAllTools().find((tool) => tool.name === toolName);
 	return existingTool !== undefined && existingTool.sourceInfo.source !== "builtin";
@@ -45,10 +48,16 @@ function registerNativeCursorToolsFromSet(
 	pi: CursorNativeToolRegistryApi,
 	toolNames: readonly NativeCursorToolName[],
 ): NativeCursorToolName[] {
+	let filteredToolNames = filteredRegistrations.get(pi);
+	if (!filteredToolNames) {
+		filteredToolNames = new Set();
+		filteredRegistrations.set(pi, filteredToolNames);
+	}
 	const newlySkippedToolNames: NativeCursorToolName[] = [];
 	for (const toolName of toolNames) {
+		if (registeredNativeToolSources.has(toolName) || filteredToolNames.has(toolName)) continue;
 		if (hasNonBuiltinTool(pi, toolName)) {
-			if (!registeredNativeToolSources.has(toolName) && !skippedNativeToolNames.has(toolName)) {
+			if (!skippedNativeToolNames.has(toolName)) {
 				skippedNativeToolNames.add(toolName);
 				newlySkippedToolNames.push(toolName);
 			}
@@ -57,6 +66,7 @@ function registerNativeCursorToolsFromSet(
 		registerNativeCursorTool(pi, toolName);
 		const registeredTool = pi.getAllTools().find((tool) => tool.name === toolName);
 		if (registeredTool) registeredNativeToolSources.set(toolName, registeredTool.sourceInfo);
+		else filteredToolNames.add(toolName);
 	}
 	return newlySkippedToolNames;
 }

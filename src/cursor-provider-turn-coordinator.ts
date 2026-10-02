@@ -1,5 +1,6 @@
 import type { AssistantMessage, AssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { InteractionUpdate } from "@cursor/sdk";
+import { CURSOR_TEXT_MESSAGE_SEPARATOR } from "./cursor-partial-content-emitter.js";
 import type { CursorLiveRun } from "./cursor-live-run-coordinator.js";
 import { cursorLiveRuns } from "./cursor-provider-live-run-drain.js";
 import { truncateCursorDisplayLine } from "./cursor-display-text.js";
@@ -65,6 +66,7 @@ export class CursorSdkTurnCoordinator {
 	private readonly lifecycleEmitter: CursorToolLifecycleEmitter;
 	private readonly contentEmitter;
 	private sdkTurnUsage?: CursorSdkTurnUsage;
+	private hasPendingTextMessage = false;
 
 	constructor(options: CursorSdkTurnCoordinatorOptions) {
 		this.stream = options.stream;
@@ -153,6 +155,7 @@ export class CursorSdkTurnCoordinator {
 			cursorLiveRuns.recordSdkTurnEnded(this.liveRun, sdkTurnUsage);
 		}
 		if (update.type === "text-delta") {
+			if (update.text) this.hasPendingTextMessage = true;
 			this.textDeltas.push(update.text);
 			if (this.liveRun) {
 				cursorLiveRuns.queueEvent(this.liveRun, { type: "text-delta", text: update.text });
@@ -247,6 +250,18 @@ export class CursorSdkTurnCoordinator {
 
 	handleStep(stepEnvelope: unknown): void {
 		const stepType = getField(stepEnvelope, "type");
+		if (stepType === "assistantMessage") {
+			// SDK onStep completes a message; onDelta chunks within it are tokens,
+			// not separate messages. Keep the boundary in both output and final-text
+			// deduplication, without replaying the completed step's text a second time.
+			if (this.hasPendingTextMessage) {
+				this.hasPendingTextMessage = false;
+				this.textDeltas.push(CURSOR_TEXT_MESSAGE_SEPARATOR);
+				if (this.liveRun) cursorLiveRuns.queueEvent(this.liveRun, { type: "text-completed" });
+				else this.contentEmitter.completeTextMessage();
+			}
+			return;
+		}
 		const step = getField(stepEnvelope, "message") ? stepEnvelope : undefined;
 		const rawStepToolCall = getField(step, "message");
 		if (stepType !== "toolCall") return;

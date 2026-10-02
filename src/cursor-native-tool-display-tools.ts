@@ -32,7 +32,6 @@ import {
 } from "./cursor-native-tool-display-replay.js";
 import {
 	consumeCursorNativeToolDisplay,
-	isCursorFileMutationToolName,
 	isCursorReplayToolCallId,
 } from "./cursor-native-tool-display-state.js";
 
@@ -177,8 +176,7 @@ export function wrapNativeCursorTool<TParams extends TSchema, TDetails, TState>(
 				};
 			}
 			if (isCursorReplayToolCallId(toolCallId)) {
-				const action = isCursorFileMutationToolName(definition.name) ? "file mutations" : "work directly";
-				throw new Error(`No recorded Cursor ${definition.name} result was available. This replay-only call does not execute ${action}.`);
+				throw new Error(`No recorded Cursor ${definition.name} result was available. This replay-only call does not execute work.`);
 			}
 			return getCurrentDefinition().execute(toolCallId, params, signal, onUpdate, ctx);
 		},

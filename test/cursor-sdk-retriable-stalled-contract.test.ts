@@ -1,10 +1,8 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { isCursorSdkConnectionStalledError, sanitizeCursorProviderError } from "../src/cursor-provider-errors.js";
-import { readInstalledPackageVersion, resolveInstalledPackageRoot } from "./helpers/installed-package.js";
+import { readInstalledPackageDistText, readInstalledPackageVersion } from "./helpers/installed-package.js";
 
-const sdkRoot = resolveInstalledPackageRoot("@cursor/sdk");
 const installedSdkVersion = readInstalledPackageVersion("@cursor/sdk");
 
 interface RetriableStalledContractFixture {
@@ -45,17 +43,14 @@ function makeFixtureRetriableStalledError(
 }
 
 const fixture = JSON.parse(
-	readFileSync(new URL("./fixtures/cursor-sdk-retriable-stalled-1.0.27.json", import.meta.url), "utf8"),
+	readFileSync(new URL("./fixtures/cursor-sdk-retriable-stalled-1.0.32.json", import.meta.url), "utf8"),
 ) as RetriableStalledContractFixture;
 
 describe("installed Cursor SDK RetriableError connection-stalled contract", () => {
-	it("matches installed @cursor/sdk 1.0.27 source markers and classifier shape", () => {
+	it("matches installed @cursor/sdk 1.0.32 source markers and classifier shape", () => {
 		expect(fixture.provenance.sdkPackage).toBe("@cursor/sdk");
 		expect(fixture.provenance.sdkVersion).toBe(installedSdkVersion);
-		expect(installedSdkVersion).toBe("1.0.27");
-
-		const sourcePath = join(sdkRoot, "dist/esm/357.js");
-		const source = readFileSync(sourcePath, "utf8");
+		const source = readInstalledPackageDistText("@cursor/sdk");
 		for (const marker of fixture.sourceMarkers) {
 			expect(source).toContain(marker);
 		}

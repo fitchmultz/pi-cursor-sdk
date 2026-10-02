@@ -75,8 +75,8 @@ function makeCursorSdkStallAbortWrapperConnectError(): Error & { rawMessage: str
 		"    at ConnectError.from (file:///repo/node_modules/@connectrpc/connect/dist/esm/connect-error.js:69:24)\n" +
 		"    at connectErrorFromNodeReason (file:///repo/node_modules/@connectrpc/connect-node/dist/esm/node-error.js:52:29)\n" +
 		"    at Object.reject (file:///repo/node_modules/@connectrpc/connect-node/dist/esm/node-universal-client.js:293:63)\n" +
-		"    at AbortSignal.r (file:///repo/node_modules/@cursor/sdk/dist/esm/996.js:1:5705)\n" +
-		"    at Y.onStall (file:///repo/node_modules/@cursor/sdk/dist/esm/357.js:1:75246)";
+		"    at AbortSignal.r (file:///repo/node_modules/@cursor/sdk/dist/esm/34.js:1:5705)\n" +
+		"    at Y.onStall (file:///repo/node_modules/@cursor/sdk/dist/esm/34.js:1:75246)";
 	const error = new Error("[unknown] [canceled] This operation was aborted") as Error & {
 		rawMessage: string;
 		code: number;
@@ -89,7 +89,7 @@ function makeCursorSdkStallAbortWrapperConnectError(): Error & { rawMessage: str
 	error.stack =
 		"ConnectError: [unknown] [canceled] This operation was aborted\n" +
 		"    at a.from (file:///repo/node_modules/@cursor/sdk/dist/esm/index.js:1:1125976)\n" +
-		"    at file:///repo/node_modules/@cursor/sdk/dist/esm/996.js:1:5832";
+		"    at file:///repo/node_modules/@cursor/sdk/dist/esm/34.js:1:5832";
 	return error;
 }
 
@@ -108,7 +108,7 @@ function makeCursorSdkConnectionStalledRetriableError(
 	error.cause = cause;
 	error.stack =
 		`RetriableError: ${message}\n` +
-		"    at fe (file:///repo/node_modules/@cursor/sdk/dist/esm/357.js:1:62073)\n" +
+		"    at Q (file:///repo/node_modules/@cursor/sdk/dist/esm/34.js:1:62073)\n" +
 		"    at file:///repo/node_modules/@cursor/sdk/dist/esm/index.js:1:1125976";
 	return error;
 }

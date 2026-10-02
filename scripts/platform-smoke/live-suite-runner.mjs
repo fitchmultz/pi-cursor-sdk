@@ -13,8 +13,8 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSy
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { pathToFileURL } from "node:url";
-import { redactArtifactText, writePlatformArtifactBundle } from "./artifacts.mjs";
+import { stripVTControlCharacters } from "node:util";
+import { redactSecrets, writePlatformArtifactBundle } from "./artifacts.mjs";
 import { extractContentText, jsonlHasAssistantFinalTextMarker } from "./jsonl-text.mjs";
 import { getScenario, renderPrompt } from "./scenarios.mjs";
 
@@ -25,7 +25,7 @@ const COLS = 150;
 const ROWS = 45;
 
 function writeRedactedTextFile(path, text) {
-	writeFileSync(path, redactArtifactText(path, text ?? ""));
+	writeFileSync(path, redactSecrets(text ?? ""));
 }
 
 function usage() {
@@ -238,10 +238,6 @@ function prepareSharedPackedInstall(prepDir, logDir, artifactDir, packageName) {
 	return prepared;
 }
 
-function stripANSI(text) {
-	return text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "");
-}
-
 function ptySpawnCommand(args) {
 	const cliEntry = resolve(process.cwd(), "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
 	if (!existsSync(cliEntry)) throw new Error(`Pi CLI entry not found: ${cliEntry}`);
@@ -279,7 +275,6 @@ async function runPtyPi({ artifactDir, ptyCommand, env, cwd, sessionDir, finalMa
 	}
 
 	let ansi = "";
-	let plain = "";
 	const events = [];
 	const startedAt = Date.now();
 	const { file, args } = ptyCommand;
@@ -298,7 +293,6 @@ async function runPtyPi({ artifactDir, ptyCommand, env, cwd, sessionDir, finalMa
 	let exitEvent;
 	child.onData((data) => {
 		ansi += data;
-		plain += stripANSI(data);
 		events.push({ type: "output", elapsedMs: Date.now() - startedAt, bytes: data.length });
 	});
 	child.onExit((event) => {
@@ -314,7 +308,9 @@ async function runPtyPi({ artifactDir, ptyCommand, env, cwd, sessionDir, finalMa
 	let abortObserved = false;
 	const abortStartedPath = join(cwd, ".debug", "platform-smoke", "abort-started.txt");
 	while (Date.now() - startedAt < waitMs) {
-		const currentPlain = plain;
+		// PTY chunks may split an OSC-8 link. Strip the complete captured stream,
+		// not individual chunks, and preserve the label between open/close links.
+		const currentPlain = stripVTControlCharacters(ansi);
 		const responsePlain = currentPlain.slice(responseStartOffset);
 		if (finalMarker && responsePlain.includes(finalMarker)) finalMarkerSeen = true;
 		if (finalMarkerSeen && sessionJsonlMeetsRequirements(sessionDir, scenario) && sessionJsonlHasAssistantMarker(sessionDir, finalMarker)) {
@@ -365,6 +361,7 @@ async function runPtyPi({ artifactDir, ptyCommand, env, cwd, sessionDir, finalMa
 	await waitForSessionJsonl(sessionDir, null, startedAt, events);
 	await delay(1_000);
 
+	const plain = stripVTControlCharacters(ansi);
 	writeRedactedTextFile(join(artifactDir, "terminal.ansi"), ansi);
 	writeRedactedTextFile(join(artifactDir, "terminal.txt"), plain);
 	writeFileSync(join(artifactDir, "pty.events.jsonl"), events.map((event) => JSON.stringify(event)).join("\n") + "\n");
@@ -438,12 +435,14 @@ function findJsonlFiles(root) {
 	return out;
 }
 
-export function writeJsonlArtifacts(artifactDir, sessionDir) {
+function writeJsonlArtifacts(artifactDir, sessionDir) {
 	const jsonlFiles = findJsonlFiles(sessionDir);
-	if (jsonlFiles[0]) {
-		writeRedactedTextFile(join(artifactDir, "session.jsonl"), readFileSync(jsonlFiles[0], "utf8"));
-	}
 	writeRedactedTextFile(join(artifactDir, "session-jsonl-files.txt"), jsonlFiles.join("\n") + (jsonlFiles.length ? "\n" : ""));
+	if (jsonlFiles[0]) {
+		// The bundle boundary secret-scans structured evidence before transport.
+		// Text redaction here corrupts JSON escaping and numeric fields.
+		copyFileSync(jsonlFiles[0], join(artifactDir, "session.jsonl"));
+	}
 	return jsonlFiles;
 }
 
@@ -606,13 +605,11 @@ async function main() {
 	if (!ok) process.exitCode = 1;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-	main()
-		.then(() => {
-			process.exit(process.exitCode ?? 0);
-		})
-		.catch((error) => {
-			console.error(error instanceof Error ? error.message : String(error));
-			process.exit(1);
-		});
-}
+main()
+	.then(() => {
+		process.exit(process.exitCode ?? 0);
+	})
+	.catch((error) => {
+		console.error(error instanceof Error ? error.message : String(error));
+		process.exit(1);
+	});

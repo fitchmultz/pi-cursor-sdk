@@ -1,23 +1,71 @@
 # Changelog
 
-## 0.3.7 - 2026-09-05
+## Unreleased
 
 ### Fixed
 
-- Re-register native replay wrappers on every model sync so bash replay cards cannot re-execute host commands after `/new`, `/resume`, or a session switch (#203). Registration was process-once, but pi rebuilds its tool registry back to the builtins, so session 2+ replayed through the real `bash`.
-- Fail closed for every `cursor-replay-*` call with no recorded display, not only the `edit` and `write` ids covered by `block-file-mutation`.
-- Check the current tool owner after session changes: leave newly loaded third-party wrappers untouched and use activity transcripts until native replay can safely resume.
-- Apply configured `models.json` cost rates to Cursor's existing mapped token usage with pi's native pricing helper. Default rates remain zero; token attribution and Cursor billed amounts are unchanged (#230, #231; thanks @TianZuo555).
-- Resolve the installed Cursor SDK native parser package before shared SDK initialization, so separate Pi launcher/extension trees can use the vendored Bash parser. Preserve explicit `CURSOR_TREE_SITTER_VENDOR_DIR` overrides (#232).
-- Preserve bounded, scrubbed structured error details and causes in provider/discovery failures. Stop blaming API keys for module-loading failures or ambiguous session-authentication errors; retain explicit bad-key guidance (#228, #233, #247). This does not fix the reported compiled Bun/embedded-host loading failures or establish hour-idle session recovery.
-- Keep bridge tool-call IDs within provider limits while preserving unique IDs and matching results (#237; thanks @gwatkins-arista).
-- Keep skill activation callable with its catalog and descriptions intact while the system prompt stays stable (#244).
-- Map SDK `reasoning_effort` controls to pi thinking levels so Gemini 3.8 Flash honors low, medium, and high without changing its SDK default.
+- Restore native replay wrapper ownership after `/new`, `/resume`, reloads, and session switches without replacing third-party tools (#203).
+- Apply configured `models.json` cost rates to mapped token usage with Pi's native pricing helper; default rates and Cursor billed amounts are unchanged (#230, #231; thanks @TianZuo555).
+- Resolve the installed Cursor SDK native parser package before SDK initialization, preserving explicit `CURSOR_TREE_SITTER_VENDOR_DIR` overrides (#232).
+- Improve diagnostics with bounded, scrubbed structured errors and causes without diagnosing loader or ambiguous session-authentication failures as invalid API keys. The underlying compiled/embedded-host and idle-session failures reported in #228, #233, and #247 remain open.
+- Bound bridge tool-call IDs while preserving unique calls and matching results (#237; thanks @gwatkins-arista).
+- Keep skill activation callable with its catalog/descriptions intact and a stable system prompt (#244).
+- Map SDK `reasoning_effort` controls to Pi thinking without changing SDK defaults.
+
+## 0.4.0 - 2026-09-26
+
+### Breaking Changes
+
+- Require Node.js 24 and Pi 0.87.1, and replace the legacy MCP v1 bridge runtime with the stable MCP v2 server and Hono adapter packages.
 
 ### Changed
 
-- Refresh the bundled Cursor catalog from SDK metadata: add Claude Fable 5.1 and Gemini 3.8 Flash, remove Grok 4.5, and include 1M-context fast variants for GPT-5.6 Luna, Sol, and Terra. Existing default selections remain unchanged.
-- Use the existing conservative 200,000-token fallback for Gemini 3.8 Flash, whose catalog has no context size; this is not a new checkpoint measurement. Remove the obsolete Grok 4.5 context entries while preserving all retained values.
+- Upgrade all direct dependencies to their latest stable releases, including Cursor SDK 1.0.32, TypeScript 7, Vitest 5, and Playwright 1.63.
+- Remove obsolete pre-Pi-0.86 context compatibility and the Cursor SDK closed-pipe workaround fixed upstream.
+
+## 0.3.10 - 2026-09-22
+
+### Fixed
+
+- Align native Pi context, tool, and model registration fixtures with the current official and maintained-fork hosts. The provider runtime remains unchanged from 0.3.9.
+
+## 0.3.9 - 2026-09-19
+
+### Fixed
+
+- Serialize replay tool-call arguments once at the Pi transcript boundary to satisfy Pi 0.86.1's JSON-only contract without sharing mutable SDK payloads.
+- Preserve secret-scanned JSON and JSONL smoke artifacts byte-for-byte, and fail qualification when retained structured evidence cannot be parsed.
+
+### Changed
+
+- Restore the compiled `dist/index.js` Pi entrypoint and the pre-0.3.8 tool-argument handling. Released Pi 0.85.1 did not require the source-loader or newer transcript-type changes.
+- Remove the additional source-host compatibility matrix, probes, and compaction qualification added with 0.3.8. Keep the terminal capture detector fix, which corrects QA evidence rather than runtime rendering.
+- Extension filters changed for 0.3.8 must target `dist/index.js` again. Keep exclusions for both entrypoints when disabling Cursor across versions; see README's “Existing extension filters”.
+
+## 0.3.8 - 2026-09-19
+
+### Fixed
+
+- Narrow SDK replay and MCP bridge arguments to JSON objects before emitting Pi tool calls, preserving valid payloads without serialization or casts. This supports Pi's tightened transcript types and reports non-JSON arguments before dispatch.
+- Compile source and test fixtures against published Pi 0.85.1, pinned official source, and the fork. Native packed-host checks require common provider, replay, and runtime behavior on every host. The fork additionally qualifies legacy `SystemMessage.replace` checkpoints; current official Pi removed that host feature, which is not required by this extension.
+- Load the already-shipped TypeScript source graph through Pi's native loader so provider streams and replay helpers remain host-owned even with local Pi peer packages installed. Keep compiled output for scripts and programmatic consumers.
+- Preserve hyperlink text and split terminal control sequences when checking platform-smoke read cards, using Node's terminal-control stripping rather than a custom regular expression.
+
+### Changed
+
+- Native source loading fixes host peer identity at the cost of more initial startup/load work. On macOS/Node 24.21.0/Pi fork `90e6`, three fresh-process, warm-cache loader runs measured 0.85–1.24 s for source versus 0.08–0.13 s for dist; these are not TUI startup timings or guarantees for other environments or repeated `/reload`.
+- **Filter migration required:** update old dist-targeting extension filters to preserve include/exclude intent (`+dist/index.js` → `+src/index.ts`, `-dist/index.js` → `-src/index.ts`, `!dist/**` → `!src/**`). The old exclusion alone no longer disables Cursor; retain `-dist/index.js` alongside `-src/index.ts` for rollback. See README's “Existing extension filters”; settings are not rewritten automatically.
+
+## 0.3.7 - 2026-09-16
+
+### Fixed
+
+- Preserve completed Cursor SDK assistant-message boundaries in streamed and persisted output: separate progress messages from the next message without splitting token chunks, duplicating the SDK final result, or adding whitespace to an exact final answer. Carry boundaries through local native-replay drain as well as direct/cloud turns.
+
+- Support transcript-only Pi provider requests via the host's public replay helpers, without requiring those exports on stock Pi 0.84.0 or 0.85.1. Preserve current instructions, section updates, and explicit empty replay-tool snapshots.
+- Fingerprint replayed instructions and tool definitions plus individual system-message content/section/tool deltas, so unchanged transcripts stay incremental and changed context reboots correctly.
+- Preserve current Pi instructions in fresh cloud prompts, and ignore system updates when finding pending replay/bridge tool results and steering input.
+- Handle Pi's XML-wrapped tool/rule/skill sections and project-context serialization without duplicating local rules or skill catalogs. Cloud keeps project instructions and omits the local skill catalog.
 
 ## 0.3.6 - 2026-08-18
 

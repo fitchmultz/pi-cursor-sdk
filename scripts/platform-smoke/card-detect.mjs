@@ -34,24 +34,16 @@ const CARD_PATTERNS = [
 	{ id: "footer-status", pattern: /\bgrok-4\.6\b|\bcomposer-2-5\b|\bcomposer-2\.5\b/i },
 ];
 
-function cleanLine(line) {
-	return line
-		.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
-		.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
-		.replace(/\r/g, "");
-}
-
 function matchesCardAt(lines, index, card) {
 	return matchesWrappedLineAt(lines, index, card.pattern, card.wrappedPattern);
 }
 
 /**
- * Detect stable rendered evidence regions in terminal text.
+ * Detect stable evidence regions in canonical rendered xterm buffer lines.
  *
  * Returns an array of { id, label, startLine, endLine }.
  */
-export function detectCards(txtContent) {
-	const lines = txtContent.split("\n").map(cleanLine);
+export function detectCards(lines) {
 	const cards = [];
 	const seen = new Set();
 

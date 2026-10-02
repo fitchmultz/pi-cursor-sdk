@@ -165,3 +165,94 @@ it.each(["named", "unnamed"])("tracks the real %s tool owner across native new/r
 		rmSync(root, { recursive: true, force: true });
 	}
 }, 30_000);
+
+it.each([
+	{ label: "allowlist", tools: ["read", "bash"] },
+	{ label: "exclusions", excludeTools: ["grep", "find", "ls", "cursor", "edit", "write"] },
+	{ label: "no-tools", noTools: "all" as const },
+])("registers filtered replay wrappers once per native extension API ($label)", async ({ label, ...toolOptions }) => {
+	const root = mkdtempSync(join(tmpdir(), "cursor-filtered-registration-"));
+	const agentDir = join(root, "agent");
+	const model = makeModel("offline");
+	const alternateModel = makeModel("alternate");
+	const registrations: Array<{ count: number }> = [];
+	const extensionErrors: unknown[] = [];
+	let providerRequests = 0;
+	function cursor(api: ExtensionAPI) {
+		const registration = { count: 0 };
+		registrations.push(registration);
+		const registerTool = api.registerTool;
+		api.registerTool = (...args) => {
+			registration.count++;
+			registerTool(...args);
+		};
+		api.registerProvider("cursor", {
+			api: "cursor-sdk", baseUrl: "http://unused.invalid", apiKey: "offline-test-only",
+			models: [makeProviderModelConfig(model.id), makeProviderModelConfig(alternateModel.id)],
+			streamSimple(selectedModel) {
+				providerRequests++;
+				const message = { ...makeAssistantMessage("OK"), model: selectedModel.id };
+				const stream = createAssistantMessageEventStream();
+				queueMicrotask(() => {
+					stream.push({ type: "start", partial: message });
+					stream.push({ type: "done", reason: "stop", message });
+					stream.end();
+				});
+				return stream;
+			},
+		});
+		registerCursorNativeToolDisplay(api);
+	}
+	const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
+		const services = await createAgentSessionServices({
+			cwd, agentDir,
+			settingsManager: SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false }, enableInstallTelemetry: false }),
+			resourceLoaderOptions: {
+				noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
+				extensionFactories: [cursor],
+			},
+		});
+		const result = await createAgentSessionFromServices({ services, sessionManager, sessionStartEvent, model, ...toolOptions });
+		return { ...result, services, diagnostics: services.diagnostics };
+	};
+	const runtime = await createAgentSessionRuntime(createRuntime, {
+		cwd: root, agentDir, sessionManager: SessionManager.create(root, join(root, "sessions")),
+	});
+	const bind = (session: AgentSession) => session.bindExtensions({ mode: "json", onError: error => extensionErrors.push(error) });
+	runtime.setRebindSession(bind);
+	async function check() {
+		// Count the real API registrations, including names omitted by native getAllTools.
+		const registration = registrations.at(-1)!;
+		const initialCount = registration.count;
+		expect(initialCount).toBeGreaterThan(0);
+		expect(runtime.session.getAllTools().some(tool => tool.name === "cursor")).toBe(false);
+		if (label === "allowlist") expect(runtime.session.getAllTools().map(tool => tool.name).sort()).toEqual(["bash", "read"]);
+		for (let index = 0; index < 200; index++) await runtime.session.setModel(index % 2 ? model : alternateModel);
+		expect(registration.count).toBe(initialCount);
+		await runtime.session.prompt("First filtered turn");
+		await runtime.session.prompt("Second filtered turn");
+		expect(registration.count).toBe(initialCount);
+	}
+	try {
+		await bind(runtime.session);
+		await check();
+		const firstFile = runtime.session.sessionManager.getSessionFile()!;
+		let previousRegistration = registrations.at(-1);
+		await runtime.session.reload();
+		expect(registrations.at(-1)).not.toBe(previousRegistration);
+		await check();
+		previousRegistration = registrations.at(-1);
+		expect(await runtime.newSession()).toEqual({ cancelled: false });
+		expect(registrations.at(-1)).not.toBe(previousRegistration);
+		await check();
+		previousRegistration = registrations.at(-1);
+		expect(await runtime.switchSession(firstFile)).toEqual({ cancelled: false });
+		expect(registrations.at(-1)).not.toBe(previousRegistration);
+		await check();
+		expect(providerRequests).toBe(8);
+		expect(extensionErrors).toEqual([]);
+	} finally {
+		await runtime.dispose();
+		rmSync(root, { recursive: true, force: true });
+	}
+}, 30_000);

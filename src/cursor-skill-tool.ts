@@ -18,7 +18,7 @@ import { resolveEffectiveCursorConfigForContext } from "./cursor-runtime-state.j
 export const CURSOR_ACTIVATE_SKILL_TOOL_NAME = "cursor_activate_skill";
 export const CURSOR_ACTIVATE_SKILL_MCP_NAME = "pi__cursor_activate_skill";
 
-const AVAILABLE_SKILLS_SECTION_PATTERN = /\n\nThe following skills provide specialized instructions for specific tasks\.[\s\S]*?<\/available_skills>/;
+const AVAILABLE_SKILLS_SECTION_PATTERN = /<skills>\nThe following skills provide specialized instructions for specific tasks\.[\s\S]*?<\/available_skills>\n<\/skills>|\n\nThe following skills provide specialized instructions for specific tasks\.[\s\S]*?<\/available_skills>/;
 const MAX_SKILL_RESOURCES = 80;
 const RESOURCE_DIR_NAMES = ["scripts", "references", "assets"] as const;
 

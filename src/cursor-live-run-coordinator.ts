@@ -1,4 +1,5 @@
 import type { Context, ToolResultMessage } from "@earendil-works/pi-ai";
+import { getCursorConversationMessages } from "./cursor-pi-context.js";
 import type { SDKAgent } from "@cursor/sdk";
 import {
 	consumeCursorLiveToolResults,
@@ -27,6 +28,7 @@ export type CursorLiveQueuedEvent =
 	| { type: "thinking-delta"; text: string }
 	| { type: "thinking-completed" }
 	| { type: "text-delta"; text: string }
+	| { type: "text-completed" }
 	| { type: "tool"; tool: CursorNativeToolDisplayItem }
 	| { type: "bridge-tool"; request: CursorPiBridgeToolRequest };
 
@@ -155,16 +157,17 @@ interface CursorLiveRunPrivateState {
 }
 
 export function hasTrailingUserMessagesAfterToolResults(context: Context): boolean {
-	let index = context.messages.length - 1;
+	const messages = getCursorConversationMessages(context);
+	let index = messages.length - 1;
 	let sawTrailingUser = false;
-	while (index >= 0 && context.messages[index]?.role === "user") {
+	while (index >= 0 && messages[index]?.role === "user") {
 		sawTrailingUser = true;
 		index -= 1;
 	}
 	if (!sawTrailingUser) return false;
 
 	let sawToolResult = false;
-	while (index >= 0 && context.messages[index]?.role === "toolResult") {
+	while (index >= 0 && messages[index]?.role === "toolResult") {
 		sawToolResult = true;
 		index -= 1;
 	}
@@ -418,13 +421,14 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 		},
 
 		getPendingFromContext(context, getReplayId): CursorLiveRun | undefined {
-			let index = context.messages.length - 1;
-			while (index >= 0 && context.messages[index]?.role === "user") {
+			const messages = getCursorConversationMessages(context);
+			let index = messages.length - 1;
+			while (index >= 0 && messages[index]?.role === "user") {
 				index -= 1;
 			}
 
 			for (; index >= 0; index -= 1) {
-				const message = context.messages[index];
+				const message = messages[index];
 				if (message.role !== "toolResult") break;
 				const replayId = getReplayId(message.toolCallId);
 				if (replayId) {

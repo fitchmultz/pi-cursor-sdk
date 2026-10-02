@@ -12,6 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
 	createBuiltinToolInfo,
+	createTestToolInfo,
 	createExtensionTestContext,
 	getHarnessRegisteredTool,
 	makeHarnessModel,
@@ -234,7 +235,7 @@ describe("extension native Cursor tool replay", () => {
 			);
 
 			const rendered = component?.render(120).join("\n") ?? "";
-			expect(rendered).toContain(`Cursor image generation saved ${imagePath}`);
+			expect(rendered.replace(/\s+/g, "")).toContain(`Cursor image generation saved ${imagePath}`.replace(/\s+/g, ""));
 			expect(rendered).toContain("[Image: badge.png [image/png] 1x1]");
 		} finally {
 			resetCapabilitiesCache();
@@ -645,9 +646,7 @@ describe("extension native Cursor tool replay", () => {
 		const ui = { notify, setStatus: vi.fn() };
 		const pi = createExtensionPi([
 			{
-				name: "read",
-				description: "hashline read",
-				parameters: Type.Object({}),
+				...createTestToolInfo("read", Type.Object({}), "hashline read"),
 				sourceInfo: {
 					source: "package",
 					path: "/opt/homebrew/lib/node_modules/pi-hashline-edit/index.ts",
@@ -701,9 +700,7 @@ describe("extension native Cursor tool replay", () => {
 		mockedDiscover.mockResolvedValueOnce([]);
 		const pi = createExtensionPi([
 			{
-				name: "read",
-				description: "hashline read",
-				parameters: Type.Object({}),
+				...createTestToolInfo("read", Type.Object({}), "hashline read"),
 				sourceInfo: {
 					source: "package",
 					path: "/opt/homebrew/lib/node_modules/pi-hashline-edit/index.ts",
@@ -768,7 +765,7 @@ describe("extension native Cursor tool replay", () => {
 					undefined,
 					createExtensionTestContext({ cwd: dir }),
 				),
-			).rejects.toThrow("replay-only call does not execute work directly");
+			).rejects.toThrow("replay-only call does not execute work");
 			expect(readFileSync(markerPath, "utf-8")).toBe("");
 
 			recordCursorNativeToolDisplay({

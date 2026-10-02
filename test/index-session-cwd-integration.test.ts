@@ -51,6 +51,7 @@ vi.mock("@cursor/sdk", () => ({
 }));
 
 import { Agent, Cursor, type SDKAgent } from "@cursor/sdk";
+import { normalizeContext } from "@earendil-works/pi-ai";
 import extensionFactory from "../src/index.js";
 import { discoverModels } from "../src/model-discovery.js";
 import { __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
@@ -105,7 +106,7 @@ describe("extension session cwd integration", () => {
 			const streamSimple = pi._registered[0]?.config.streamSimple;
 			expect(streamSimple).toBe(streamCursorLazy);
 
-			await collectEvents(streamSimple!(makeModel("composer-2.5"), makeContext(), { apiKey: "test-key" }));
+			await collectEvents(streamSimple!(makeModel("composer-2.5"), normalizeContext(makeContext()), { apiKey: "test-key" }));
 
 			expect(mockedAgentCreate).toHaveBeenCalledWith(
 				expect.objectContaining({

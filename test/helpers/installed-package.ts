@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { globSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
@@ -30,4 +30,12 @@ export function readInstalledPackageVersion(packageName: string): string {
 		throw new Error(`could not resolve installed version for ${packageName}`);
 	}
 	return packageJson.version;
+}
+
+export function readInstalledPackageDistText(packageName: string): string {
+	const packageRoot = resolveInstalledPackageRoot(packageName);
+	return globSync("dist/**/*.{js,cjs,mjs}", { cwd: packageRoot })
+		.sort()
+		.map((path) => readFileSync(join(packageRoot, path), "utf8"))
+		.join("\n");
 }

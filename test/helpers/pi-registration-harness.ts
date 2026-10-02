@@ -9,6 +9,7 @@ import {
 	DEFAULT_ACTIVE_TOOL_NAMES,
 	DEFAULT_BUILTIN_TOOL_NAMES,
 	createBuiltinToolInfo,
+	createTestToolInfo,
 } from "./tool-fixtures.js";
 import type {
 	BridgePiHarness,
@@ -40,6 +41,8 @@ export function createPiHarness(options: PiHarnessOptions = {}): PiHarness {
 	const tools: RegisteredTool[] = [];
 	const initialTools =
 		options.initialTools ?? [...DEFAULT_BUILTIN_TOOL_NAMES].map((name) => createBuiltinToolInfo(name));
+	// Native getAllTools returns the extension's sourceInfo object, not a clone.
+	const sourceInfo: ToolInfo["sourceInfo"] = { source: "test", path: "pi-cursor-sdk-test", scope: "temporary", origin: "top-level" };
 	let activeToolNames = [...(options.activeTools ?? DEFAULT_ACTIVE_TOOL_NAMES)];
 
 	const resolveFlagValue = (name: string): boolean | string | undefined => {
@@ -94,10 +97,8 @@ export function createPiHarness(options: PiHarnessOptions = {}): PiHarness {
 			for (const tool of initialTools) toolsByName.set(tool.name, tool);
 			for (const tool of tools) {
 				toolsByName.set(tool.name, {
-					name: tool.name,
-					description: tool.description,
-					parameters: tool.parameters,
-					sourceInfo: { source: "test", path: "pi-cursor-sdk-test", scope: "temporary", origin: "top-level" },
+					...createTestToolInfo(tool.name, tool.parameters, tool.description),
+					sourceInfo,
 				});
 			}
 			return [...toolsByName.values()];

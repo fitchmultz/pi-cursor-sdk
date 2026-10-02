@@ -397,7 +397,7 @@ it("replays Cursor grep activity through native grep display", async () => {
 					undefined,
 					createExtensionTestContext(),
 				),
-			).rejects.toThrow("replay-only call does not execute file mutations");
+			).rejects.toThrow("replay-only call does not execute work");
 			expect(readFileSync(targetPath, "utf-8")).toBe("old\n");
 
 			resolveRun({ id: "run-1", status: "finished", result: "Done." });
@@ -685,7 +685,7 @@ it("replays Cursor grep activity through native grep display", async () => {
 
 			await expect(
 				writeTool!.execute("cursor-replay-1-1-tool-998", { path: targetPath, content: "mutated\n" }, undefined, undefined, createExtensionTestContext()),
-			).rejects.toThrow("replay-only call does not execute file mutations");
+			).rejects.toThrow("replay-only call does not execute work");
 			expect(readFileSync(targetPath, "utf-8")).toBe("old\n");
 
 			resolveRun({ id: "run-1", status: "finished", result: "Done." });

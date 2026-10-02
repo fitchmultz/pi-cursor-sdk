@@ -15,6 +15,9 @@ import {
 } from "../src/cursor-provider-live-run-drain.js";
 import { __testUtils as cursorSdkProcessGuardTestUtils } from "../src/cursor-sdk-process-error-guard.js";
 
+const emitProcessEvent = (event: string | symbol, ...args: unknown[]): boolean =>
+	(process.emit as (event: string | symbol, ...args: unknown[]) => boolean).call(process, event, ...args);
+
 function makeAgent(agentId = "agent-1"): SDKAgent {
 	return { agentId } as SDKAgent;
 }
@@ -317,7 +320,7 @@ describe("cursor live run coordinator", () => {
 		const run = startRun(coordinator, { scopeKey: "scope-abort" });
 		const sdkCancelError = makeCursorSdkAbortConnectError();
 		const sdkCancel = vi.fn().mockImplementation(async () => {
-			process.emit("uncaughtException", sdkCancelError, "uncaughtException");
+			emitProcessEvent("uncaughtException", sdkCancelError, "uncaughtException");
 			throw sdkCancelError;
 		});
 		coordinator.attachSdkRun(run, { cancel: sdkCancel });

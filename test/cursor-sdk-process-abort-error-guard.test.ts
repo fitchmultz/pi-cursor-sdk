@@ -4,12 +4,15 @@ import {
 	installCursorSdkSessionProcessErrorGuard,
 } from "../src/cursor-sdk-process-error-guard.js";
 
+const emitProcessEvent = (event: string | symbol, ...args: unknown[]): boolean =>
+	(process.emit as (event: string | symbol, ...args: unknown[]) => boolean).call(process, event, ...args);
+
 function makeCursorSdkStalledRepeatedlyRetriableError(): Error {
 	const error = new Error("Connection stalled repeatedly");
 	error.name = "RetriableError";
 	error.stack =
 		"RetriableError: Connection stalled repeatedly\n" +
-		"    at fe (/repo/node_modules/@cursor/sdk/dist/esm/357.js:1:62073)";
+		"    at Q (/repo/node_modules/@cursor/sdk/dist/esm/34.js:1:62073)";
 	return error;
 }
 
@@ -17,8 +20,8 @@ function makeCursorSdkRawAbortDomException(): DOMException {
 	const error = new DOMException("This operation was aborted", "AbortError");
 	error.stack =
 		"AbortError: This operation was aborted\n" +
-		"    at AbortSignal.abort (/repo/node_modules/@cursor/sdk/dist/esm/996.js:1:5705)\n" +
-		"    at Y.onStall (/repo/node_modules/@cursor/sdk/dist/esm/357.js:1:75246)";
+		"    at AbortSignal.abort (/repo/node_modules/@cursor/sdk/dist/esm/34.js:1:5705)\n" +
+		"    at Y.onStall (/repo/node_modules/@cursor/sdk/dist/esm/34.js:1:75246)";
 	return error;
 }
 
@@ -36,8 +39,8 @@ function processListenerCalled(event: "uncaughtException" | "unhandledRejection"
 	const listener = () => { called = true; };
 	process.once(event, listener);
 	try {
-		if (event === "uncaughtException") process.emit(event, error as Error, "uncaughtException");
-		else process.emit(event, error, Promise.resolve());
+		if (event === "uncaughtException") emitProcessEvent(event, error as Error, "uncaughtException");
+		else emitProcessEvent(event, error, Promise.resolve());
 		return called;
 	} finally {
 		process.removeListener(event, listener);

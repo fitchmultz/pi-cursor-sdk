@@ -1,3 +1,4 @@
+import type { SourceInfo } from "@earendil-works/pi-coding-agent";
 import type { CursorPiToolDisplay } from "./cursor-transcript-utils.js";
 import { parseOptionalEnvBoolean } from "./cursor-env-boolean.js";
 
@@ -9,7 +10,7 @@ export interface CursorNativeToolDisplayItem extends CursorPiToolDisplay {
 export const NATIVE_CURSOR_TOOL_DISPLAY_ENV = "PI_CURSOR_NATIVE_TOOL_DISPLAY";
 export const NATIVE_CURSOR_TOOL_REGISTRATION_ENV = "PI_CURSOR_REGISTER_NATIVE_TOOLS";
 
-export const registeredNativeToolNames = new Set<string>();
+export const registeredNativeToolSources = new Map<string, SourceInfo>();
 export const skippedNativeToolNames = new Set<string>();
 export const nativeToolResults = new Map<string, CursorNativeToolDisplayItem>();
 
@@ -35,19 +36,19 @@ export function setCursorNativeToolDisplayRuntimeRequested(requested: boolean): 
 }
 
 export function isCursorNativeToolDisplayEnabled(): boolean {
-	return registeredNativeToolNames.size > 0;
+	return registeredNativeToolSources.size > 0;
 }
 
 export function isCursorNativeToolDisplayRuntimeEnabled(): boolean {
-	return nativeToolDisplayRuntimeRequested && readBooleanEnv(NATIVE_CURSOR_TOOL_DISPLAY_ENV) !== false && registeredNativeToolNames.size > 0;
+	return nativeToolDisplayRuntimeRequested && readBooleanEnv(NATIVE_CURSOR_TOOL_DISPLAY_ENV) !== false && registeredNativeToolSources.size > 0;
 }
 
 export function canRenderCursorToolNatively(toolName: string): boolean {
-	return registeredNativeToolNames.has(toolName);
+	return registeredNativeToolSources.has(toolName);
 }
 
 export function isRegisteredCursorNativeToolName(toolName: string): boolean {
-	return registeredNativeToolNames.has(toolName);
+	return registeredNativeToolSources.has(toolName);
 }
 
 export function recordCursorNativeToolDisplay(item: CursorNativeToolDisplayItem): boolean {
@@ -78,11 +79,11 @@ export const __testUtils = {
 	nativeToolResultCount: () => nativeToolResults.size,
 	registerNativeToolNameForTests(toolName: string): void {
 		nativeToolDisplayRuntimeRequested = true;
-		registeredNativeToolNames.add(toolName);
+		registeredNativeToolSources.set(toolName, { path: "test", source: "inline", scope: "temporary", origin: "top-level" });
 	},
 	reset(): void {
 		nativeToolDisplayRuntimeRequested = false;
-		registeredNativeToolNames.clear();
+		registeredNativeToolSources.clear();
 		skippedNativeToolNames.clear();
 		nativeToolResults.clear();
 	},

@@ -8,6 +8,7 @@ import {
 	type NormalizedBuildSystemPromptOptions,
 	type ExtensionCommandContext,
 	type ExtensionContext,
+	type ExtensionToolContext,
 } from "@earendil-works/pi-coding-agent";
 import { makeModel } from "./model-fixtures.js";
 import type { ExtensionCommandContextOverrides, ExtensionContextOverrides } from "./pi-harness-types.js";
@@ -23,7 +24,8 @@ function getSharedTestModelRegistry(): ModelRegistry {
 }
 
 export function createDefaultSystemPromptOptions(cwd: string): NormalizedBuildSystemPromptOptions {
-	return {
+	// Return-type checking supports the official and fork fixture superset.
+	const options = {
 		cwd,
 		selectedTools: ["read", "bash", "edit", "write"],
 		toolSnippets: {},
@@ -31,9 +33,11 @@ export function createDefaultSystemPromptOptions(cwd: string): NormalizedBuildSy
 		promptGuidelines: [],
 		appendSystemPrompt: "",
 		sections: {},
+		sectionTools: {},
 		contextFiles: [],
 		skills: [],
 	};
+	return options;
 }
 
 function createMinimalSessionManager(cwd: string, overrides: Partial<ExtensionContext["sessionManager"]> = {}): ExtensionContext["sessionManager"] {
@@ -46,6 +50,8 @@ function createMinimalSessionManager(cwd: string, overrides: Partial<ExtensionCo
 		getLeafId: vi.fn(() => null),
 		getLeafEntry: vi.fn(() => undefined),
 		getEntry: vi.fn(() => undefined),
+		getEntryMetadata: vi.fn(() => undefined),
+		iterateEntryMetadata: vi.fn(() => []),
 		getLabel: vi.fn(() => undefined),
 		getBranch: vi.fn(() => []),
 		buildContextEntries: vi.fn(() => []),
@@ -95,7 +101,7 @@ function createMinimalExtensionUi(): ExtensionContext["ui"] {
 	} satisfies ExtensionContext["ui"];
 }
 
-function createMinimalExtensionContextInternal(overrides: ExtensionContextOverrides = {}): ExtensionContext {
+function createMinimalExtensionContextInternal(overrides: ExtensionContextOverrides = {}): ExtensionToolContext {
 	const cwd = overrides.cwd ?? process.cwd();
 	const base = {
 		ui: createMinimalExtensionUi(),
@@ -118,9 +124,12 @@ function createMinimalExtensionContextInternal(overrides: ExtensionContextOverri
 		shutdown: vi.fn(),
 		getContextUsage: vi.fn(() => undefined),
 		getCompactionSettings: vi.fn(() => ({ ...DEFAULT_COMPACTION_SETTINGS })),
-		newContext: vi.fn(),
 		compact: vi.fn(),
 		getSystemPrompt: vi.fn(() => ""),
+		tools: [],
+		executeTool: vi.fn(async () => {
+			throw new Error("Nested tool execution requires a native session in this test harness.");
+		}),
 	};
 	return {
 		...base,
@@ -139,7 +148,7 @@ function createMinimalExtensionContextInternal(overrides: ExtensionContextOverri
 function createMinimalExtensionCommandContextInternal(
 	overrides: ExtensionCommandContextOverrides = {},
 ): ExtensionCommandContext {
-	const base = createMinimalExtensionContextInternal(overrides) as ExtensionCommandContext;
+	const base = createMinimalExtensionContextInternal(overrides);
 	return {
 		...base,
 		...overrides,
@@ -162,7 +171,7 @@ function createMinimalExtensionCommandContextInternal(
 	};
 }
 
-export function createExtensionTestContext(ctxOverrides: ExtensionContextOverrides = {}): ExtensionContext {
+export function createExtensionTestContext(ctxOverrides: ExtensionContextOverrides = {}): ExtensionToolContext {
 	return createMinimalExtensionContextInternal(ctxOverrides);
 }
 

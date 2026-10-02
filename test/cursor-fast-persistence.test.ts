@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -372,10 +372,17 @@ describe("Cursor fast preference persistence", () => {
 		manager.appendMessage({ role: "user", content: "hello", timestamp: 1 });
 		manager.appendMessage(makeAssistantMessage("ready"));
 		const sessionFile = manager.getSessionFile()!;
-		rmSync(sessionFile);
+		const savedSessionFile = `${sessionFile}.saved`;
+		renameSync(sessionFile, savedSessionFile);
 		mkdirSync(sessionFile);
 
-		expect(() => manager.appendCustomEntry(__testUtils.FAST_ENTRY_TYPE, { modelId: "composer-2", fast: false })).toThrow();
+		try {
+			expect(() => manager.appendCustomEntry(__testUtils.FAST_ENTRY_TYPE, { modelId: "composer-2", fast: false })).toThrow();
+		} finally {
+			// Restore the same journal before reading; native managers may refresh it from disk.
+			rmSync(sessionFile, { recursive: true });
+			renameSync(savedSessionFile, sessionFile);
+		}
 		expect(manager.getBranch()).toEqual(expect.arrayContaining([
 			expect.objectContaining({
 				type: "custom",

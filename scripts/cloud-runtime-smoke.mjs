@@ -96,6 +96,7 @@ The no-flag release gate creates and deletes one private throwaway GitHub reposi
 Environment:
   CURSOR_API_KEY                    Required for cloud runs and verified agent cleanup.
   CURSOR_CLOUD_SMOKE_TIMEOUT_MS     Timeout in ms per lane (default: 300000).
+  CURSOR_CLOUD_SMOKE_GH_CLI         GitHub CLI executable (default: gh).
   CURSOR_CLOUD_SMOKE_ENV_TYPE       Optional context-matrix Cursor env type: cloud, pool, or machine.
   CURSOR_CLOUD_SMOKE_ENV_NAME       Optional context-matrix env name, used only with type.
   CURSOR_CLOUD_SMOKE_KEEP_ARTIFACTS Keep temp artifacts after success when set to 1.

@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fingerprintApiKey, saveModelListCache } from "../src/model-list-cache.js";
 import type { ModelListItem } from "@cursor/sdk";
@@ -32,7 +32,7 @@ function isTypeOnlyExport(node: ts.ExportDeclaration, isJavaScript: boolean): bo
 		: node.exportClause.elements.every((element) => element.isTypeOnly);
 }
 
-const PI_HOST_PEER_PREFIXES = ["@earendil-works/pi-", "@mariozechner/pi-"] as const;
+const PI_HOST_PEER_PREFIXES = ["@earendil-works/pi-"] as const;
 const PI_HOST_PEER_ROOTS = ["@sinclair/typebox", "typebox"] as const;
 
 function isPiHostPeer(specifier: string): boolean {
@@ -63,6 +63,20 @@ function isAllowedCursorSdkDynamicImport(relativePath: string, specifier: string
 	);
 }
 
+function isMcpRuntimeSpecifier(specifier: string): boolean {
+	return specifier.startsWith("@modelcontextprotocol/") || specifier === "@hono/node-server";
+}
+
+function isAllowedMcpRuntimeImport(relativePath: string, specifier: string): boolean {
+	return (
+		relativePath.endsWith("src/cursor-pi-tool-bridge-run.ts")
+		&& specifier === "@modelcontextprotocol/server"
+	) || (
+		relativePath.endsWith("src/cursor-pi-tool-bridge-server.ts")
+		&& (specifier === "@modelcontextprotocol/hono" || specifier === "@hono/node-server")
+	);
+}
+
 function collectRuntimeSdkEdges(paths: string[] = sourceFiles(join(process.cwd(), "src"))): string[] {
 	const offenders: string[] = [];
 	for (const path of paths) {
@@ -74,7 +88,7 @@ function collectRuntimeSdkEdges(paths: string[] = sourceFiles(join(process.cwd()
 				if (specifier && isCursorSdkSpecifier(specifier)) {
 					offenders.push(`${relativePath}:${source.getLineAndCharacterOfPosition(node.getStart()).line + 1}: runtime import ${specifier}`);
 				}
-				if (specifier?.startsWith("@modelcontextprotocol/sdk/") && !relativePath.endsWith("src/cursor-pi-tool-bridge-run.ts")) {
+				if (specifier && isMcpRuntimeSpecifier(specifier) && !isAllowedMcpRuntimeImport(relativePath, specifier)) {
 					offenders.push(`${relativePath}:${source.getLineAndCharacterOfPosition(node.getStart()).line + 1}: runtime import ${specifier}`);
 				}
 				if (specifier === "./cursor-pi-tool-bridge-run.js") {
@@ -86,7 +100,7 @@ function collectRuntimeSdkEdges(paths: string[] = sourceFiles(join(process.cwd()
 				if (specifier && isCursorSdkSpecifier(specifier)) {
 					offenders.push(`${relativePath}:${source.getLineAndCharacterOfPosition(node.getStart()).line + 1}: runtime export ${specifier}`);
 				}
-				if (specifier?.startsWith("@modelcontextprotocol/sdk/")) {
+				if (specifier && isMcpRuntimeSpecifier(specifier)) {
 					offenders.push(`${relativePath}:${source.getLineAndCharacterOfPosition(node.getStart()).line + 1}: runtime export ${specifier}`);
 				}
 			}
@@ -96,6 +110,9 @@ function collectRuntimeSdkEdges(paths: string[] = sourceFiles(join(process.cwd()
 					const specifier = argument.text;
 					if (isCursorSdkSpecifier(specifier) && !isAllowedCursorSdkDynamicImport(relativePath, specifier)) {
 						offenders.push(`${relativePath}:${source.getLineAndCharacterOfPosition(node.getStart()).line + 1}: dynamic import ${specifier} outside runtime loader`);
+					}
+					if (isMcpRuntimeSpecifier(specifier) && !isAllowedMcpRuntimeImport(relativePath, specifier)) {
+						offenders.push(`${relativePath}:${source.getLineAndCharacterOfPosition(node.getStart()).line + 1}: dynamic import ${specifier} outside bridge runtime`);
 					}
 				}
 			}
@@ -441,13 +458,13 @@ describe("Cursor SDK lazy runtime imports", () => {
 		const srcDir = join(tmpAgentDir, "src");
 		mkdirSync(srcDir);
 		writeFileSync(join(srcDir, "entry.mts"), 'void import("./target.mjs");\n');
-		writeFileSync(join(srcDir, "target.mts"), 'import "@mariozechner/pi-mts";\n');
+		writeFileSync(join(srcDir, "target.mts"), 'import "@earendil-works/pi-mts";\n');
 		writeFileSync(join(srcDir, "edge.tsx"), 'void import("@earendil-works/pi-tsx");\n');
 		writeFileSync(join(srcDir, "edge.cts"), 'require("@earendil-works/pi-cts");\n');
 
 		const findings = collectUnsafeHostPeerLoads(sourceFiles(srcDir)).join("\n");
 		expect(findings).toContain("./target.mjs reaches");
-		expect(findings).toContain("@mariozechner/pi-mts");
+		expect(findings).toContain("@earendil-works/pi-mts");
 		expect(findings).toContain("native host-peer specifier @earendil-works/pi-tsx");
 		expect(findings).toContain("CommonJS .cts source is unsupported by the host-peer guard");
 	});
@@ -460,11 +477,11 @@ describe("Cursor SDK lazy runtime imports", () => {
 		mkdirSync(sharedDir);
 		writeFileSync(join(srcDir, "entry.ts"), 'import "../shared/edge.cjs";\n');
 		writeFileSync(join(sharedDir, "edge.js"), 'void import("@earendil-works/pi-shared-js");\n');
-		writeFileSync(join(sharedDir, "edge.cjs"), 'require("@mariozechner/pi-shared-cjs");\n');
+		writeFileSync(join(sharedDir, "edge.cjs"), 'require("@earendil-works/pi-shared-cjs");\n');
 
 		const findings = collectUnsafeHostPeerLoads(runtimeModuleFiles(srcDir, sharedDir)).join("\n");
 		expect(findings).toContain("native host-peer specifier @earendil-works/pi-shared-js");
-		expect(findings).toContain("native host-peer specifier @mariozechner/pi-shared-cjs");
+		expect(findings).toContain("native host-peer specifier @earendil-works/pi-shared-cjs");
 		expect(findings).toContain("CommonJS .cjs shared runtime is unsupported by the host-peer guard");
 	});
 
@@ -478,7 +495,7 @@ describe("Cursor SDK lazy runtime imports", () => {
 		writeFileSync(fixturePath, [
 			'import type NodeModule = require("node:module");',
 			'import type LegacyModule = require("module");',
-			'import type LegacyPi = require("@mariozechner/pi-ai");',
+			'import type LegacyPi = require("@earendil-works/pi-ai");',
 			'type LoaderLiteral = "module";',
 			'type PeerLiteral = "@earendil-works/pi-ai";',
 		].join("\n"));
@@ -587,10 +604,10 @@ describe("Cursor SDK lazy runtime imports", () => {
 			'import ImportEqualsHelper = require("../shared/import-equals-helper.mjs");',
 			'const runtimeRequire = Module.createRequire(import.meta.url);',
 			'runtimeRequire.resolve("@earendil-works/pi-default-create-require");',
-			'const indirectPeer = "@mariozechner/pi-indirect-require";',
+			'const indirectPeer = "@earendil-works/pi-indirect-require";',
 			'runtimeRequire(indirectPeer);',
 			'void import("@earendil-works/pi-ai/compat");',
-			'void import("@mariozechner/pi-tui/components");',
+			'void import("@earendil-works/pi-tui/components");',
 			'void import("@earendil-works/pi-future/runtime");',
 			'void import("typebox");',
 			'void import("@sinclair/typebox/value");',
@@ -608,19 +625,19 @@ describe("Cursor SDK lazy runtime imports", () => {
 		writeFileSync(join(nestedSharedDir, "host.mjs"), 'import { Text } from "@earendil-works/pi-tui/components";\nexport { Text };\n');
 		writeFileSync(join(sharedDir, "broken.mjs"), 'export { missing } from "./missing.mjs";\n');
 		writeFileSync(join(sharedDir, "empty-import.mjs"), 'import {} from "@earendil-works/pi-empty-import";\n');
-		writeFileSync(join(sharedDir, "empty-export.mjs"), 'export {} from "@mariozechner/pi-empty-export";\n');
-		writeFileSync(join(sharedDir, "import-equals-helper.mjs"), 'import {} from "@mariozechner/pi-import-equals-helper";\n');
+		writeFileSync(join(sharedDir, "empty-export.mjs"), 'export {} from "@earendil-works/pi-empty-export";\n');
+		writeFileSync(join(sharedDir, "import-equals-helper.mjs"), 'import {} from "@earendil-works/pi-import-equals-helper";\n');
 		writeFileSync(join(srcDir, "empty-import.ts"), 'import {} from "@earendil-works/pi-empty-ts-import";\n');
-		writeFileSync(join(srcDir, "empty-export.ts"), 'export {} from "@mariozechner/pi-empty-ts-export";\n');
+		writeFileSync(join(srcDir, "empty-export.ts"), 'export {} from "@earendil-works/pi-empty-ts-export";\n');
 
 		const findings = collectUnsafeHostPeerLoads(runtimeModuleFiles(srcDir, sharedDir)).join("\n");
 		expect(findings).toContain("native module loader node:module outside src/cursor-ripgrep-path.ts");
 		expect(findings).toContain("native module loader module outside src/cursor-ripgrep-path.ts");
 		expect(findings).toContain("runtime import-equals ../shared/import-equals-helper.mjs");
 		expect(findings).toContain("native host-peer specifier @earendil-works/pi-default-create-require");
-		expect(findings).toContain("native host-peer specifier @mariozechner/pi-indirect-require");
+		expect(findings).toContain("native host-peer specifier @earendil-works/pi-indirect-require");
 		expect(findings).toContain("native host-peer specifier @earendil-works/pi-ai/compat");
-		expect(findings).toContain("native host-peer specifier @mariozechner/pi-tui/components");
+		expect(findings).toContain("native host-peer specifier @earendil-works/pi-tui/components");
 		expect(findings).toContain("native host-peer specifier @earendil-works/pi-future/runtime");
 		expect(findings).toContain("native host-peer specifier typebox");
 		expect(findings).toContain("native host-peer specifier @sinclair/typebox/value");
@@ -631,9 +648,9 @@ describe("Cursor SDK lazy runtime imports", () => {
 		expect(findings).toContain("../shared/empty-import.mjs reaches");
 		expect(findings).toContain("@earendil-works/pi-empty-import");
 		expect(findings).toContain("../shared/empty-export.mjs reaches");
-		expect(findings).toContain("@mariozechner/pi-empty-export");
+		expect(findings).toContain("@earendil-works/pi-empty-export");
 		expect(findings).not.toContain("@earendil-works/pi-empty-ts-import");
-		expect(findings).not.toContain("@mariozechner/pi-empty-ts-export");
+		expect(findings).not.toContain("@earendil-works/pi-empty-ts-export");
 		expect(findings).toContain("non-literal dynamic import");
 		expect(findings).toContain("unresolved relative dynamic import ./missing.js");
 	});

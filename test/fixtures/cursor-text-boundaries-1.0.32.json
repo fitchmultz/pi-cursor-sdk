@@ -1,0 +1,122 @@
+{
+  "fixtureKind": "reduced-captured-local-assistant-message-boundaries",
+  "sdkVersion": "1.0.32",
+  "sourceCapture": {
+    "date": "2026-09-26",
+    "lane": "local direct SDK run",
+    "model": "grok-4.6",
+    "onDeltaSha256": "b06c48ce825bff00640d14dc8b56ac9e108f5419adb0e42be22b56f1649f61a1",
+    "onStepSha256": "8ed44e951faf59392e43a8a08b7afadc9dc7fed350135ed40b79d839915d8b64",
+    "waitResultSha256": "05b89b4f797696e82464339a1ab16c81bf45b5aab3daa520e0db8d7103662dd2",
+    "reduction": "Only text-delta and completed assistantMessage callbacks retained; no token boundaries or message text changed. Tool/thinking payloads and identifiers omitted."
+  },
+  "callbacks": [
+    {
+      "elapsedMs": 10335,
+      "channel": "onDelta",
+      "args": {
+        "update": {
+          "type": "text-delta",
+          "text": "Reading `package.json` first."
+        }
+      }
+    },
+    {
+      "elapsedMs": 10454,
+      "channel": "onStep",
+      "args": {
+        "step": {
+          "type": "assistantMessage",
+          "message": {
+            "text": "Reading `package.json` first."
+          }
+        }
+      }
+    },
+    {
+      "elapsedMs": 11980,
+      "channel": "onDelta",
+      "args": {
+        "update": {
+          "type": "text-delta",
+          "text": "Read `package.json`: `pi-cursor-sdk` 0.4"
+        }
+      }
+    },
+    {
+      "elapsedMs": 11980,
+      "channel": "onDelta",
+      "args": {
+        "update": {
+          "type": "text-delta",
+          "text": ".0, Node `>=24`, `@cursor/sdk` 1.0.32. Next: `"
+        }
+      }
+    },
+    {
+      "elapsedMs": 11981,
+      "channel": "onDelta",
+      "args": {
+        "update": {
+          "type": "text-delta",
+          "text": "README.md`."
+        }
+      }
+    },
+    {
+      "elapsedMs": 12057,
+      "channel": "onStep",
+      "args": {
+        "step": {
+          "type": "assistantMessage",
+          "message": {
+            "text": "Read `package.json`: `pi-cursor-sdk` 0.4.0, Node `>=24`, `@cursor/sdk` 1.0.32. Next: `README.md`."
+          }
+        }
+      }
+    },
+    {
+      "elapsedMs": 15075,
+      "channel": "onDelta",
+      "args": {
+        "update": {
+          "type": "text-delta",
+          "text": "Read"
+        }
+      }
+    },
+    {
+      "elapsedMs": 15075,
+      "channel": "onDelta",
+      "args": {
+        "update": {
+          "type": "text-delta",
+          "text": " `README.md`: pi provider for Cursor models via local `@cursor/sdk` 1.0.32, Node "
+        }
+      }
+    },
+    {
+      "elapsedMs": 15075,
+      "channel": "onDelta",
+      "args": {
+        "update": {
+          "type": "text-delta",
+          "text": "24+, Pi 0.87.1.\nNO_MARKER"
+        }
+      }
+    },
+    {
+      "elapsedMs": 15076,
+      "channel": "onStep",
+      "args": {
+        "step": {
+          "type": "assistantMessage",
+          "message": {
+            "text": "Read `README.md`: pi provider for Cursor models via local `@cursor/sdk` 1.0.32, Node 24+, Pi 0.87.1.\nNO_MARKER"
+          }
+        }
+      }
+    }
+  ],
+  "result": "Read `README.md`: pi provider for Cursor models via local `@cursor/sdk` 1.0.32, Node 24+, Pi 0.87.1.\nNO_MARKER"
+}

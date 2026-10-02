@@ -4,7 +4,31 @@
 
 ### Fixed
 
+- Restore native replay wrapper ownership after `/new`, `/resume`, reloads, and session switches without replacing third-party tools (#203).
+- Apply configured `models.json` cost rates to mapped token usage with Pi's native pricing helper; default rates and Cursor billed amounts are unchanged (#230, #231; thanks @TianZuo555).
+- Resolve the installed Cursor SDK native parser package before SDK initialization, preserving explicit `CURSOR_TREE_SITTER_VENDOR_DIR` overrides (#232).
+- Improve diagnostics with bounded, scrubbed structured errors and causes without diagnosing loader or ambiguous session-authentication failures as invalid API keys. The underlying compiled/embedded-host and idle-session failures reported in #228, #233, and #247 remain open.
+- Bound bridge tool-call IDs while preserving unique calls and matching results (#237; thanks @gwatkins-arista).
+- Keep skill activation callable with its catalog/descriptions intact and a stable system prompt (#244).
+- Map SDK `reasoning_effort` controls to Pi thinking without changing SDK defaults.
 - Stop post-compaction occupancy floors from reusing retained pre-compaction measurements, including after Pi converts the summary to a user message. Use the compaction timestamp rather than comparing token totals, so genuine new context can grow past the old `tokensBefore` value without being discarded.
+
+## 0.4.0 - 2026-09-26
+
+### Breaking Changes
+
+- Require Node.js 24 and Pi 0.87.1, and replace the legacy MCP v1 bridge runtime with the stable MCP v2 server and Hono adapter packages.
+
+### Changed
+
+- Upgrade all direct dependencies to their latest stable releases, including Cursor SDK 1.0.32, TypeScript 7, Vitest 5, and Playwright 1.63.
+- Remove obsolete pre-Pi-0.86 context compatibility and the Cursor SDK closed-pipe workaround fixed upstream.
+
+## 0.3.10 - 2026-09-22
+
+### Fixed
+
+- Align native Pi context, tool, and model registration fixtures with the current official and maintained-fork hosts. The provider runtime remains unchanged from 0.3.9.
 
 ## 0.3.9 - 2026-09-19
 

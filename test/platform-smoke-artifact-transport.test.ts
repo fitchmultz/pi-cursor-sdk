@@ -635,8 +635,8 @@ try {
 			PLATFORM_ARTIFACT_BUNDLE_START,
 		} = await import(artifactsModule);
 		const out = mkdtempSync(join(tmpdir(), "bundle-extract-limits-"));
-		const envelope = (value: unknown) => {
-			const compressed = gzipSync(Buffer.from(JSON.stringify(value)));
+		const envelope = (value: unknown, whitespaceBytes = 0) => {
+			const compressed = gzipSync(Buffer.from(" ".repeat(whitespaceBytes) + JSON.stringify(value)));
 			return `${PLATFORM_ARTIFACT_BUNDLE_START}\n${JSON.stringify({
 				encoding: "gzip-base64",
 				size: compressed.length,
@@ -645,22 +645,39 @@ try {
 			})}\n${PLATFORM_ARTIFACT_BUNDLE_END}\n`;
 		};
 		try {
-			expect(extractPlatformArtifactBundle(out, envelope({ files: [], padding: "x".repeat(MAX_INFLATED_BUNDLE_JSON_BYTES) })).ok).toBe(false);
+			// Legal JSON whitespace exceeds only the gunzip cap, not the bundle schema.
+			expect(extractPlatformArtifactBundle(out, envelope({ files: [] }, MAX_INFLATED_BUNDLE_JSON_BYTES)).ok).toBe(false);
+			expect(readdirSync(out)).toEqual([]);
 			expect(extractPlatformArtifactBundle(out, envelope({
 				files: Array.from({ length: MAX_BUNDLE_FILE_COUNT + 1 }, (_, index) => ({
 					path: `count/${index}.txt`, contentBase64: "", size: 0,
 				})),
 			})).ok).toBe(false);
-			expect(extractPlatformArtifactBundle(out, envelope({
-				files: Array.from({ length: Math.floor(MAX_BUNDLE_AGGREGATE_BYTES / MAX_BUNDLE_FILE_BYTES) + 1 }, (_, index) => ({
-					path: `aggregate/${index}.bin`, contentBase64: "", size: MAX_BUNDLE_FILE_BYTES,
-				})),
-			})).ok).toBe(false);
+			expect(readdirSync(out)).toEqual([]);
+			const content = Buffer.alloc(MAX_BUNDLE_FILE_BYTES - 1, 65);
+			const contentBase64 = content.toString("base64");
+			const files = Array.from({ length: Math.floor(MAX_BUNDLE_AGGREGATE_BYTES / content.length) }, (_, index) => ({
+				path: `aggregate/${index}.txt`, contentBase64, size: content.length,
+			}));
+			const tail = Buffer.alloc(MAX_BUNDLE_AGGREGATE_BYTES - files.length * content.length + 1, 65);
+			expect(extractPlatformArtifactBundle(out, envelope({ files: [
+				...files, { path: "aggregate/tail.txt", contentBase64: tail.toString("base64"), size: tail.length },
+			] })).ok).toBe(false);
+			expect(readdirSync(out)).toEqual([]);
 			expect(extractPlatformArtifactBundle(out, envelope({ files: [
 				{ path: "partial/first.txt", contentBase64: Buffer.from("first").toString("base64"), size: 5 },
 				{ path: "partial/second.txt", contentBase64: "not-base64", size: 3 },
 			] })).ok).toBe(false);
 			expect(existsSync(join(out, "partial", "first.txt"))).toBe(false);
+			expect(readdirSync(out)).toEqual([]);
+
+			// The large members are otherwise valid; Windows controllers reject nonempty extraction.
+			expect(extractPlatformArtifactBundle(out, envelope({ files }, 1)).ok).toBe(process.platform !== "win32");
+			if (process.platform !== "win32") {
+				for (const file of files) expect(readFileSync(join(out, file.path)).equals(content)).toBe(true);
+			} else {
+				expect(readdirSync(out)).toEqual([]);
+			}
 		} finally {
 			rmSync(out, { recursive: true, force: true });
 		}

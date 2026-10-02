@@ -636,7 +636,7 @@ try {
 		} = await import(artifactsModule);
 		const out = mkdtempSync(join(tmpdir(), "bundle-extract-limits-"));
 		const envelope = (value: unknown, whitespaceBytes = 0) => {
-			const compressed = gzipSync(Buffer.from(" ".repeat(whitespaceBytes) + JSON.stringify(value)));
+			const compressed = gzipSync(Buffer.from(" ".repeat(whitespaceBytes) + JSON.stringify(value)), { level: 1 });
 			return `${PLATFORM_ARTIFACT_BUNDLE_START}\n${JSON.stringify({
 				encoding: "gzip-base64",
 				size: compressed.length,

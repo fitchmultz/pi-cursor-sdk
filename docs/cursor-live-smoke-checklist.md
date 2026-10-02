@@ -1,10 +1,10 @@
 # Cursor Live Smoke Checklist
 
-> **Platform Smoke:** The required local cross-platform release gate is `npm run smoke:platform:all`; it runs doctor first. Cloud-runtime changes also require `npm run smoke:cloud`. See [docs/platform-smoke.md](./platform-smoke.md) for the full contract. The manual checks below remain useful inner-loop/debug tools but are not the required release gate.
+> **Cost-conscious verification:** Offline/faux checks first; reuse exact-input retained evidence. Use only the smallest meaningful changed-behavior live check on one representative environment when real-service proof is necessary. Docs/metadata-only changes need no paid runs. The full `smoke:platform:all` matrix is optional. No paid Cloud testing for generic PRs/releases; only explicitly Cursor Cloud-focused PRs/issues may select necessary focused Cloud proof. Automated Cursor PR reviews continue unchanged. See [docs/platform-smoke.md](./platform-smoke.md).
 
 ## Purpose
 
-Use this manual checklist during development and debugging of Cursor provider/runtime changes. Unit tests and mocks are necessary, but they are not enough for this extension. See [Cursor testing lessons](./cursor-testing-lessons.md) for auth/isolated-harness pitfalls and the plan-mode replay regression that motivated recent hardening. For release readiness, run the local platform gate in [docs/platform-smoke.md](./platform-smoke.md), plus `npm run smoke:cloud` for cloud-runtime changes; this checklist is inner-loop evidence only.
+Use this checklist as a menu, not a mandatory campaign. Select only behavior that changed and needs new real-service evidence after offline/faux checks and retained-proof reuse. Do not run host matrices merely for matrix coverage or automatically retry paid failures. See [Cursor testing lessons](./cursor-testing-lessons.md) for isolated-harness and replay pitfalls. Selected checks keep their distinct assertions, persisted evidence, visual proof, and cleanup requirements; do not claim unobserved coverage.
 
 ## Inner-loop rule
 
@@ -13,8 +13,8 @@ Use this manual checklist during development and debugging of Cursor provider/ru
 - Use the local extension under test: `pi --approve -e . --cursor-no-fast --model cursor/grok-4.6`.
 - Use a temporary `--session-dir` for every run.
 - Do not paste or commit Cursor API keys, raw session contents with secrets, endpoint URLs, or local private paths.
-- If an inner-loop check fails, stop and fix or use [docs/platform-smoke.md](./platform-smoke.md) as the release-blocking source of truth. Do not treat this checklist as a narrower replacement for the platform gate.
-- Do not narrow the smoke scope to the apparent code diff. Treat provider reality, TUI behavior, bridge behavior, replay behavior, diagnostics safety, abort/cancel cleanup, usage accounting, packaging, and cleanup as in scope for every Cursor provider/runtime release.
+- If a selected check fails, retain evidence and diagnose offline before choosing a repair or a necessary follow-up call. No automatic paid retries.
+- Scope new live calls to changed behavior that needs real-service proof; retain valid proof for unchanged behavior. Do not run every checklist section or the full matrix as a routine commit/release step.
 - A check is passed only when the visible TUI/output, stderr diagnostics, and persisted JSONL agree with the expected behavior.
 
 ## Prerequisites
@@ -65,7 +65,7 @@ node scripts/validate-smoke-jsonl.mjs --replay-errors-only "$SMOKE_DIR/session-s
 
 The replay scan flags only error `toolResult` / error assistant messages with `Tool grep/cursor/find/ls not found`, not successful reads of docs that mention those strings. See [Cursor testing lessons](./cursor-testing-lessons.md#what-counts-as-a-replay-failure).
 
-`npm run smoke:live` is a helper only; it polls the section 3 TUI for answer/footer evidence and then cleans up the tmux session, but it does not replace the canonical rendered-PNG visual review in section 4. Run the relevant helper `--self-test` (`smoke:live`, `smoke:visual`, `smoke:steering`, or `smoke:isolated`) when changing sealed PATH or env wrappers. Release readiness requires the platform smoke gate. Run focused manual checks below when debugging detailed visual TUI behavior, bridge, standalone native replay, abort/cancel, packaging, cleanup, or any touched runtime surface before rerunning the platform gate.
+`npm run smoke:live` is a helper only; it polls the section 3 TUI for answer/footer evidence and then cleans up the tmux session, but it does not replace the canonical rendered-PNG visual review in section 4. Run the relevant helper `--self-test` (`smoke:live`, `smoke:visual`, `smoke:steering`, or `smoke:isolated`) when changing sealed PATH or env wrappers. For changed behavior needing new live evidence, select the relevant manual check or existing single-suite/single-target platform run, not both by default. The comprehensive matrix is optional.
 
 Pass criteria:
 
@@ -136,7 +136,7 @@ Pass criteria:
 
 ## 4. Focused visual card/color rendering check
 
-This is the canonical inner-loop visual debug path for Cursor provider/runtime changes. It requires offscreen TUI visual inspection, not only JSONL or code review. Use Node 24+, official Pi 0.87.1 or another current compatibility target, exact `@cursor/sdk@1.0.32`, a fresh temporary session dir, Cursor SDK `plan` mode, native replay enabled, and the checked-in visual runner. The runner resolves `pi` by directly walking the parent `PATH`, uses `process.execPath` for Node, and prepends that Node directory for both prereq checks and tmux launches so `#!/usr/bin/env node` shims use the validated Node. The default matrix is native replay only: native replay registration is forced on, settings sources are `none`, the pi bridge is off, overlapping built-in pi tools are not exposed, and inherited Cursor SDK event-debug artifact env is cleared. With `--event-debug`, debug capture writes to a deterministic directory under `VISUAL_DIR`.
+This is a visual debug menu for changed card/color behavior requiring new live evidence. Select only the relevant category below, or reuse a batched existing platform suite; do not execute the entire list by default. It requires offscreen TUI visual inspection, not only JSONL or code review. Use Node 24+, official Pi 0.87.1 or another current compatibility target, exact `@cursor/sdk@1.0.32`, a fresh temporary session dir, Cursor SDK `plan` mode, native replay enabled, and the checked-in visual runner. The runner resolves `pi` by directly walking the parent `PATH`, uses `process.execPath` for Node, and prepends that Node directory for both prereq checks and tmux launches so `#!/usr/bin/env node` shims use the validated Node. The default matrix is native replay only: native replay registration is forced on, settings sources are `none`, the pi bridge is off, overlapping built-in pi tools are not exposed, and inherited Cursor SDK event-debug artifact env is cleared. With `--event-debug`, debug capture writes to a deterministic directory under `VISUAL_DIR`.
 
 ```bash
 VISUAL_DIR="$(mktemp -d /tmp/pi-cursor-sdk-1016-visual.XXXXXX)"
@@ -185,7 +185,7 @@ npm run smoke:visual -- "${VISUAL_ARGS[@]}" \
   --prompt 'Stay in Cursor plan mode. If Cursor exposes plan, todo, task, or mode activity for this request, use that capability to outline a tiny unit test without editing files. Otherwise answer with a concise numbered plan. Do not use shell or file mutation tools.'
 ```
 
-By default, `npm run smoke:visual` writes `.ansi`, `.txt`, `.html`, `.png`, and `.jsonl.path` artifacts. If Playwright Chromium is unavailable in an agent-harness run, rerun with `--no-screenshot`, open the generated `.html` with `agent_browser`, save a PNG screenshot, and record that PNG path beside the runner artifacts. To visually audit bridge behavior or ambient Cursor settings, opt in with `--bridge`, `--bridge --expose-builtin-tools`, or `--setting-sources <value>` and label that evidence separately; do not count those opt-in runs as default native replay matrix proof.
+By default, `npm run smoke:visual` writes `.ansi`, `.txt`, `.html`, `.png`, and `.jsonl.path` artifacts. Check browser availability before a paid run. If PNG rendering fails but ANSI/HTML evidence was retained, render that retained evidence with the canonical browser/xterm path and save a PNG; do not repeat the model call merely to produce a screenshot. To visually audit bridge behavior or ambient Cursor settings, opt in with `--bridge`, `--bridge --expose-builtin-tools`, or `--setting-sources <value>` and label that evidence separately; do not count those opt-in runs as default native replay matrix proof.
 
 Expected proof for each category is defined in [Cursor Native Tool Visual Audit Workflow](./cursor-native-tool-visual-audit.md). Do not mark a category passed because the prompt was sent. A category passes only when the PNG shows the expected card and the JSONL shows the expected completed `toolCall` / `toolResult` pair with the expected `isError` state.
 
@@ -193,7 +193,7 @@ Pass criteria:
 
 - PNG screenshots exist for every claimed card category, not only text/JSONL logs.
 - JSONL paths exist for every claimed card category.
-- Required cutover categories have matching PNG + JSONL proof from the default native replay matrix: read, grep/search, find/glob, list, shell success, write, edit/diff, and true read failure.
+- Each selected changed category has matching PNG + JSONL proof; retained exact-input proof covers unchanged categories. Do not claim unobserved categories.
 - Native-looking read/search/find/list/shell/write/edit cards use intended pi card styling.
 - Shell success is not red/error-styled; stdout is readable.
 - Edit/diff previews show red/green added/removed colors and readable paths.
@@ -316,7 +316,7 @@ Pass criteria:
 
 ## 9. Long-running bridge and abort/cancel
 
-Use this focused check when debugging abort cleanup. The platform smoke gate is the release-blocking source of truth for every Cursor provider/runtime release.
+Select this check only when changed abort cleanup needs new real-service evidence; otherwise reuse valid retained proof. Keep process, bridge, and persisted-session cleanup assertions intact.
 
 Use a harmless long-running command and interrupt it after the bridge request is queued:
 
@@ -385,7 +385,7 @@ Pass criteria:
 
 ## Coverage gaps this checklist makes explicit
 
-Everything in this section is in scope when using this checklist for Cursor provider/runtime debugging. Release readiness still comes from the platform smoke gate:
+Use this list to choose meaningful changed-behavior coverage, not to trigger a full paid replay. Prefer offline contracts and valid retained evidence:
 
 - Long-running bridged tool abort/cancel cleanup.
 - Native replay cards beyond read, especially shell/edit/write cards, when those renderers change.
@@ -395,4 +395,4 @@ Everything in this section is in scope when using this checklist for Cursor prov
 - Ambient Cursor setting-source behavior when startup filtering or local Cursor settings handling changes.
 - Model discovery aliases/context variants when model-discovery code or Cursor SDK versions change.
 
-If any surface has no adequate platform or focused live check, add that coverage before release instead of assuming mocks cover reality.
+If changed behavior needs real-service proof and neither retained evidence nor an existing focused check covers it, report the specific gap and choose the smallest meaningful check. Do not assume mocks prove service behavior or make unrelated optional lanes a release requirement.

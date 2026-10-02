@@ -84,14 +84,16 @@ class SmokeFailure extends Error {
 }
 
 function printHelp() {
-	console.log(`Required live Cursor cloud release smoke for pi-cursor-sdk.
+	console.log(`Explicit Cursor Cloud-focused live smoke for pi-cursor-sdk.
+
+No paid Cloud testing for generic PRs/releases. Only PRs/issues explicitly focused on Cursor Cloud may select necessary focused Cloud proof after offline checks and retained-evidence reuse. Automated Cursor PR reviews continue unchanged. The multi-lane matrix is optional, not an unconditional ship gate; no automatic paid retries.
 
 Usage:
   npm run smoke:cloud
   npm run smoke:cloud:context
   node scripts/cloud-runtime-smoke.mjs [--context-matrix]
 
-The no-flag release gate creates and deletes one private throwaway GitHub repository and runs named lanes for cancel, explicit repo/startingRef branch reporting, direct push, missing branch failure, lifecycle delete, and account-conditional artifacts/raw usage. It requires current gh auth with private-repo create/push/delete access and Cursor Cloud access to that repository.
+The optional no-flag matrix creates and deletes one private throwaway GitHub repository and runs named lanes for cancel, explicit repo/startingRef branch reporting, direct push, missing branch failure, lifecycle delete, and account-conditional artifacts/raw usage. It requires current gh auth with private-repo create/push/delete access and Cursor Cloud access to that repository.
 
 Environment:
   CURSOR_API_KEY                    Required for cloud runs and verified agent cleanup.

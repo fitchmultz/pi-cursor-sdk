@@ -1,16 +1,16 @@
 # Cursor Native Tool Visual Audit Workflow
 
-> **Platform Smoke (new):** The required cross-platform release gate includes a deterministic visual card matrix across all targets. See [docs/platform-smoke.md](./platform-smoke.md) for the required cards, assertion contract, and platform-matrix budget.
+> **Cost-conscious verification:** Start offline/faux and reuse exact-input retained evidence. For changed visual behavior needing new live proof, select the smallest meaningful check on one representative environment. The comprehensive [platform matrix](./platform-smoke.md) is optional; no full paid campaign replay, matrix-only host coverage, or automatic paid retries. No paid Cloud testing for generic PRs/releases; only explicitly Cursor Cloud-focused PRs/issues may select necessary focused Cloud proof. Automated Cursor PR reviews continue unchanged. Selected visual checks keep their PNG, JSONL, and cleanup contracts.
 
 This workflow is the canonical repo path for verifying Cursor SDK tool replay the way a human sees it in pi's interactive TUI, without stealing macOS focus.
 
-Use it before accepting replay-card commits or PRs, and for every Cursor provider/runtime release where TUI card/color behavior could regress. Text logs and JSONL are necessary, but they are not enough when the claim is visual parity: always keep PNGs for the exact prompt, and keep before/after PNGs when reviewing a rendering change.
+Use it when changed replay-card behavior needs new visual proof not covered by offline rendering contracts or valid retained evidence. Text logs and JSONL are not enough for visual-parity claims: keep PNGs for the exact prompt, and before/after PNGs for a rendering comparison. Reuse a valid retained baseline instead of paying to recreate it.
 
 Current validation baseline: Node 24+, exact `@cursor/sdk@1.0.32`, official Pi 0.87.1/latest and current `fitchmultz/pi` main. Development Pi packages `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` are exact 0.99.1, with host TypeBox 1.3.27. Optional published Pi and TypeBox peer dependencies use `"*"` ranges per Pi guidance.
 
 ## Cursor SDK 1.0.17 / pi 0.79.0 cutover visual record
 
-Record the required cutover validation here or in the final release handoff. The default matrix is native replay only: the runner forces native replay registration on, forces Cursor setting sources off, disables the pi bridge, disables overlapping built-in pi tool exposure, and clears inherited Cursor SDK event-debug artifact env. With `--event-debug`, debug capture writes to a deterministic directory under the visual output directory. Do not commit raw ANSI logs, screenshots, terminal recordings, debug artifacts, or `.debug/visual-smoke` scratch files.
+This section retains historical cutover requirements, not a new mandatory paid campaign. For current changes, select only necessary changed categories and reuse valid retained proof. The default matrix is native replay only: the runner forces native replay registration on, forces Cursor setting sources off, disables the pi bridge, disables overlapping built-in pi tool exposure, and clears inherited Cursor SDK event-debug artifact env. With `--event-debug`, debug capture writes to a deterministic directory under the visual output directory. Do not commit raw ANSI logs, screenshots, terminal recordings, debug artifacts, or `.debug/visual-smoke` scratch files.
 
 | Field | Required value / evidence |
 | --- | --- |
@@ -36,7 +36,7 @@ Required prompt matrix for this cutover:
 | `read-missing` | `Use only your file read tool to read .debug/visual-smoke/does-not-exist.txt. Then explain the result. Do not use shell, grep, glob, find, ls, edit, or write.` | `toolCall.name=read`, `toolResult.toolName=read`, `isError=true` | True failure is visible, bounded, and distinct from neutral Cursor activity |
 | `workflow-activity` | `Stay in Cursor plan mode. If Cursor exposes plan, todo, task, or mode activity for this request, use that capability to outline a tiny unit test without editing files. Otherwise answer with a concise numbered plan. Do not use shell or file mutation tools.` | Optional: completed `cursor` activity whose details/source identify `createPlan`, `updateTodos`, `task`, or mode activity. If absent, record this category as not exercised. | Optional: neutral Cursor workflow activity is neutral, not red, and does not mutate pi plan/todo state. If absent, do not claim this visual category passed. |
 
-Do not mark a category passed because the prompt was sent. A category passes only when the PNG shows the expected card and the JSONL shows the expected completed `toolCall` / `toolResult` pair. If Cursor chooses a different tool, rerun with a tighter prompt or record that the category was not exercised.
+Do not mark a category passed because the prompt was sent. A category passes only when the PNG shows the expected card and the JSONL shows the expected completed `toolCall` / `toolResult` pair. If Cursor chooses a different tool, record the category as not exercised and diagnose offline; do not automatically rerun.
 
 ## When to use this
 
@@ -63,7 +63,7 @@ The canonical workflow is now offscreen and browser-rendered:
 5. Save PNG screenshots with `agent_browser` when the harness is available, or Playwright directly when running outside that harness.
 6. Inspect the session JSONL for exact persisted `toolCall` / `toolResult` data.
 
-This is the best default focused visual-debug path because it exercises the real pi TUI, captures card class/color/label/order/truncation issues before users see them, avoids desktop focus stealing, and leaves reviewable artifacts. Use visible Terminal/Ghostty screenshots only for terminal-specific or pixel-level bugs that cannot be judged through browser-rendered ANSI. The cross-platform release gate remains [Platform Smoke](./platform-smoke.md).
+This is the best default focused visual-debug path because it exercises the real pi TUI, captures card class/color/label/order/truncation issues before users see them, avoids desktop focus stealing, and leaves reviewable artifacts. Use visible Terminal/Ghostty screenshots only for terminal-specific or pixel-level bugs that cannot be judged through browser-rendered ANSI. See [Platform Smoke](./platform-smoke.md) for focused suite selection and the optional comprehensive matrix.
 
 ## Tool stack
 
@@ -120,7 +120,7 @@ The runner writes the `.png` through Playwright by default. In the pi agent harn
 
 ## Before/after comparison
 
-Use a clean worktree for the baseline and the active worktree for the candidate change:
+Reuse an exact-input retained baseline when available. Only if a necessary comparison has no valid retained baseline, use a clean worktree for it and the active worktree for the candidate change:
 
 ```bash
 BASE=/tmp/pi-cursor-visual-review
@@ -137,7 +137,7 @@ git worktree add --detach "$BEFORE_WT" "$BASE_COMMIT"
 ln -s "$AFTER_WT/node_modules" "$BEFORE_WT/node_modules"
 ```
 
-Then run the same prompt against both extension dirs:
+Run only the missing side of the comparison; the following commands illustrate each side, not an unconditional two-call requirement:
 
 ```bash
 npm run smoke:visual -- \

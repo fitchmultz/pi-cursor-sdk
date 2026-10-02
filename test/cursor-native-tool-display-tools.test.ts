@@ -4,6 +4,7 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import * as replay from "../src/cursor-native-tool-display-replay.js";
 import { wrapNativeCursorTool } from "../src/cursor-native-tool-display-tools.js";
+import { getCursorNativeToolDisplayState } from "../src/cursor-native-tool-display-state.js";
 import { createExtensionTestContext } from "./helpers/pi-harness.js";
 import { createRenderContext, createRenderOptions, createRenderTheme } from "./helpers/render-fixtures.js";
 
@@ -18,7 +19,7 @@ describe("wrapNativeCursorTool", () => {
 			parameters,
 			execute,
 		};
-		const wrapped = wrapNativeCursorTool(definition, () => definition);
+		const wrapped = wrapNativeCursorTool(definition, () => definition, getCursorNativeToolDisplayState());
 		const signal = new AbortController().signal;
 		const context = createExtensionTestContext();
 
@@ -44,7 +45,7 @@ describe("wrapNativeCursorTool", () => {
 			execute: vi.fn(async () => ({ content: [], details: undefined })),
 			renderResult: delegateRenderResult,
 		};
-		const wrapped = wrapNativeCursorTool(definition, () => definition);
+		const wrapped = wrapNativeCursorTool(definition, () => definition, getCursorNativeToolDisplayState());
 		const theme = createRenderTheme();
 
 		wrapped.renderResult?.(

@@ -12,6 +12,7 @@ import {
 	runCursorCloudLifecycleCommand,
 } from "../src/cursor-cloud-lifecycle.js";
 import { MAX_CLOUD_REPORT_BRANCHES } from "../src/cursor-cloud-reporting.js";
+import * as sdkRuntime from "../src/cursor-sdk-runtime.js";
 import { createPiHarness, makeAssistantMessage, type PiHarness } from "./helpers/pi-harness.js";
 
 function lifecycleEntry(id: string, data: Record<string, unknown>): SessionEntry {
@@ -134,6 +135,49 @@ describe("Cursor cloud lifecycle ledger", () => {
 		}
 	});
 
+	it.each(["archive", "delete"] as const)("keeps %s intent and result in A's durable journal across auth/SDK awaits", async (action) => {
+		resetCloudLifecycleTestState();
+		const tempDir = mkdtempSync(join(tmpdir(), "cursor-cloud-command-owners-"));
+		try {
+			const makeOwner = (id: string) => {
+				const manager = SessionManager.create(tempDir, tempDir, { id });
+				manager.appendMessage({ role: "user", content: id, timestamp: 1 });
+				const pi = createPiHarness();
+				pi.appendEntry.mockImplementation((type, data) => { manager.appendCustomEntry(type, data); });
+				registerCloudLifecycle(pi);
+				return { pi, manager, sessionManager: { getBranch: () => manager.getBranch(), getSessionFile: () => manager.getSessionFile(), getSessionId: () => manager.getSessionId() } };
+			};
+			const a = makeOwner("command-A");
+			await a.pi.runSessionStart({ sessionManager: a.sessionManager });
+			expect(recordCursorCloudLifecycleRun({ agentId: cloudAgentId(), branches: [] })).toBe(true);
+			const authEntered = Promise.withResolvers<void>();
+			const auth = Promise.withResolvers<string>();
+			cloudLifecycleTestUtils.setRuntimeApiKeyResolver(() => { authEntered.resolve(); return auth.promise; });
+			const sdkEntered = Promise.withResolvers<void>();
+			const sdk = Promise.withResolvers<void>();
+			const operation = vi.fn(() => { sdkEntered.resolve(); return sdk.promise; });
+			cloudLifecycleTestUtils.setSdkOperations({ archive: operation, delete: operation });
+			const command = a.pi.runCommand("cursor-cloud", `${action} ${cloudAgentId()}${action === "delete" ? " --yes" : ""}`, { sessionManager: a.sessionManager });
+			await authEntered.promise;
+			const b = makeOwner("command-B");
+			await b.pi.runSessionStart({ sessionManager: b.sessionManager });
+			const beforeB = readFileSync(b.manager.getSessionFile()!, "utf8");
+			auth.resolve("test-key");
+			await sdkEntered.promise;
+			await b.pi.runSessionStart({ sessionManager: b.sessionManager });
+			sdk.resolve();
+			await command;
+			const journal = readFileSync(cloudLifecycleTestUtils.durableLedgerPath(a.manager.getSessionFile()!, a.manager.getSessionId()), "utf8")
+				.trim().split("\n").map((line) => JSON.parse(line) as { action: string; sessionId: string; sessionFile: string });
+			expect(journal.map((entry) => entry.action)).toEqual(["record", `${action}_intent`, action]);
+			expect(journal.every((entry) => entry.sessionId === a.manager.getSessionId() && entry.sessionFile === a.manager.getSessionFile())).toBe(true);
+			expect(readFileSync(b.manager.getSessionFile()!, "utf8")).toBe(beforeB);
+			expect(() => readFileSync(cloudLifecycleTestUtils.durableLedgerPath(b.manager.getSessionFile()!, b.manager.getSessionId()))).toThrow();
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	it("rejects lifecycle recording without a durable session", () => {
 		resetCloudLifecycleTestState();
 		const pi = createPiHarness();
@@ -141,6 +185,50 @@ describe("Cursor cloud lifecycle ledger", () => {
 
 		expect(recordCursorCloudLifecycleRun({ agentId: cloudAgentId(), branches: [] })).toBe(false);
 		expect(pi.appendEntry).not.toHaveBeenCalled();
+	});
+
+	it("rechecks the original public branch after asynchronous SDK preparation before recording an intent", async () => {
+		resetCloudLifecycleTestState();
+		const tempDir = mkdtempSync(join(tmpdir(), "cursor-cloud-prepare-authority-"));
+		try {
+			const manager = SessionManager.create(tempDir, tempDir);
+			manager.appendMessage(makeAssistantMessage("persist original owner"));
+			const unrecordedLeaf = manager.getLeafId()!;
+			const sessionManager = {
+				getBranch: () => manager.getBranch(),
+				getSessionFile: () => manager.getSessionFile(),
+				getSessionId: () => manager.getSessionId(),
+			};
+			const pi = createPiHarness();
+			pi.appendEntry.mockImplementation((type, data) => { manager.appendCustomEntry(type, data); });
+			registerCloudLifecycle(pi);
+			await pi.runSessionStart({ sessionManager });
+			expect(recordCursorCloudLifecycleRun({ agentId: cloudAgentId(), branches: [] })).toBe(true);
+			const path = cloudLifecycleTestUtils.durableLedgerPath(manager.getSessionFile()!, manager.getSessionId());
+			const before = readFileSync(path, "utf8");
+			const sdk = await import("@cursor/sdk");
+			const archive = vi.spyOn(sdk.Agent, "archive").mockResolvedValue(undefined);
+			const entered = Promise.withResolvers<void>();
+			const prepared = Promise.withResolvers<sdkRuntime.CursorSdkModule>();
+			const load = vi.spyOn(sdkRuntime, "loadCursorSdk").mockImplementation(() => {
+				entered.resolve();
+				return prepared.promise;
+			});
+			try {
+				const command = pi.runCommand("cursor-cloud", `archive ${cloudAgentId()}`, { sessionManager });
+				await entered.promise;
+				manager.branch(unrecordedLeaf);
+				prepared.resolve(sdk);
+				await command;
+				expect(archive).not.toHaveBeenCalled();
+				expect(readFileSync(path, "utf8")).toBe(before);
+			} finally {
+				load.mockRestore();
+				archive.mockRestore();
+			}
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
 	});
 
 	it.skipIf(process.platform === "win32")("rejects a symlinked lifecycle journal without reading or modifying its target", async () => {

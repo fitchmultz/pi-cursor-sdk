@@ -1,12 +1,12 @@
 # Cursor Testing Lessons
 
-> **Platform Smoke:** The required local cross-platform release gate is `npm run smoke:platform:all`; cloud-runtime changes additionally require `npm run smoke:cloud`. See [the platform smoke runbook](./platform-smoke.md). For portable guidance, see the [implementation reference](./platform-smoke-implementation.md#portability-to-other-pi-extensions) and the repo-local `docs/pi-extension-platform-testing.md` from a Crabbox checkout. The live smoke checklist remains useful for inner-loop development but is not the release gate.
+> **Cost-conscious verification:** Offline/faux checks first; reuse exact-input retained evidence. Only changed behavior needing new real-service proof warrants the smallest meaningful live check on one representative environment. Docs/metadata-only changes need no paid runs. No full paid campaign replay, matrix-only host coverage, or automatic paid retries. No paid Cloud testing for generic PRs/releases; only explicitly Cursor Cloud-focused PRs/issues may select a necessary focused Cloud check. Automated Cursor PR reviews continue unchanged. `npm run smoke:platform:all` is optional comprehensive coverage. See [the platform smoke runbook](./platform-smoke.md) and its [implementation reference](./platform-smoke-implementation.md#portability-to-other-pi-extensions).
 
 ## Purpose
 
 This document records maintainer testing lessons for `pi-cursor-sdk`. It complements unit tests and the [Cursor live smoke checklist](./cursor-live-smoke-checklist.md). Use it when adding regression coverage, debugging false-green releases, or building isolated smoke harnesses.
 
-For a **minimal one-session dogfood pass** (baseline env, one native + one bridge call, JSONL ID patterns, bootstrap manifest, edit diff card), use the [Cursor dogfood checklist](./cursor-dogfood-checklist.md) as inner-loop evidence before running the platform smoke gate.
+For a **minimal one-session dogfood pass** (baseline env, one native + one bridge call, JSONL ID patterns, bootstrap manifest, edit diff card), use the [Cursor dogfood checklist](./cursor-dogfood-checklist.md) only when its selected changed behavior needs new live proof; do not follow it with a full paid matrix by default.
 
 ## Core lesson: integration-shaped bugs beat unit mocks
 
@@ -52,7 +52,7 @@ If resync runs but `context.tools` is still stale (e.g. only `read` listed), the
 
 `test/cursor-provider-pi-context.test.ts` drives real `ModelRuntime` / `ModelRegistry` requests into `streamCursor`, with only Cursor SDK execution mocked. Run it against each supported host with all Pi peer imports pinned to that host (including nested native imports); a top-level package version alone is not resolution evidence. Cover official Pi 0.87.1, official latest, and current `fitchmultz/pi` main. The exact development Pi cohort is 0.99.1, with host TypeBox 1.3.27.
 
-The test covers bootstrap/incremental prompts, empty-vs-absent request tools, native replay/drain, cloud fresh/bootstrap selection, and actual host prompt serialization for context files and skills. `test/native-cursor-flow.test.mjs` additionally exercises the compiled extension through the real loader and registered Cursor provider, substituting only the external SDK transport/storage. It verifies actual bridge tool execution, replay without file access, persisted usage/lineage, tree, compaction, queued steering, abort and reload/disposal. Explicit `tools` is now an allowlist, not merely an initial active set; use `defaultTools` for a native fixture that allows replay wrappers to activate. It is offline contract evidence, not a replacement for the required live platform/cloud release gates.
+The test covers bootstrap/incremental prompts, empty-vs-absent request tools, native replay/drain, cloud fresh/bootstrap selection, and actual host prompt serialization for context files and skills. `test/native-cursor-flow.test.mjs` additionally exercises the compiled extension through the real loader and registered Cursor provider, substituting only the external SDK transport/storage. It verifies actual bridge tool execution, replay without file access, persisted usage/lineage, tree, compaction, queued steering, abort and reload/disposal. Explicit `tools` is now an allowlist, not merely an initial active set; use `defaultTools` for a native fixture that allows replay wrappers to activate. It is offline contract evidence. Add live proof only for changed behavior that still needs real-service evidence under the cost policy above; do not rerun unchanged live lanes or infer full live coverage from offline tests.
 
 ## Auth: use `auth.json`, not only env
 
@@ -132,6 +132,7 @@ Every live check should use its own `--session-dir` under the isolated tree. Do 
 | Inherited shell env | mise/profile hooks hung or polluted runs | Use `env -i ... MISE_DISABLE=1` for isolated pi calls |
 | No per-check timeout | One stuck prompt blocked entire harness | Wrap each live check with timeout/watchdog |
 | stdout-only assertions | Missed replay failures persisted only in JSONL | Scan JSONL for `Tool grep/cursor/find/ls not found` |
+| Unspecified “visible” marker source | Conversation recall became an empty-workspace search | Specify conversation history only, with no tools or file inspection; compare actual send payload and SDK events before blaming history loss |
 | Naive JSONL substring scan | Successful `read` of docs mentioning replay errors looked like failures | `validate-smoke-jsonl.mjs` only flags error `toolResult` / error assistant messages |
 | Plan strip only on first turn | Under-tested multi-turn resync | Shim strips on every `turn_start`; stress multi-turn separately |
 | Assuming env auth equals pi auth | False "blocked" or false "pass" in CI-like shells | Check `auth.json` provider keys explicitly when needed |
@@ -181,11 +182,11 @@ The compaction poison fixture mirrors the observed failure shape: one assistant 
 
 Plan-strip live smoke can make Cursor `read` testing docs that *document* replay failure strings. A naive whole-record JSON scan reported four failures from one successful `read` toolResult (`isError: false`).
 
-When changing replay scan logic:
+For changed replay scan logic, use offline checks and valid exact-input retained evidence first. These are selectable evidence criteria, not a mandatory paid checklist:
 
-1. Update `scripts/validate-smoke-jsonl.mjs`
-2. Add/adjust cases in `test/validate-smoke-jsonl.test.ts` (error toolResult must still fail; successful read of doc text must pass)
-3. Re-run `npm run smoke:isolated` on a packed temp install before release
+1. Update `scripts/validate-smoke-jsonl.mjs` for the intended scanner behavior.
+2. Add/adjust cases in `test/validate-smoke-jsonl.test.ts` (error toolResult must still fail; successful read of doc text must pass).
+3. Use offline packed-install checks (`SKIP_LIVE=1 npm run smoke:isolated`) or valid exact-input retained proof for packaging/replay evidence. Only if the changed behavior still needs real-service proof, select the smallest meaningful existing live check on one representative environment; do not automatically run the full paid `npm run smoke:isolated` sequence. Keep the selected check's replay assertions, persisted JSONL, visual proof when relevant, and cleanup intact.
 
 ## Plan-mode regression scenario
 
@@ -209,7 +210,7 @@ Pass criteria:
 
 ## Local validation ladder
 
-Run local checks first, then the local platform smoke gate before claiming release-ready for provider/runtime changes. Add `npm run smoke:cloud` for cloud-runtime changes:
+Run offline checks first, then reuse retained proof whose tested inputs are unchanged. If changed behavior still needs real-service proof, choose one existing meaningful check on a representative environment. Do not run every command below as a paid ladder; docs/metadata-only changes need zero paid runs.
 
 TypeScript 7 owns builds and type checks. `@typescript/typescript6` is dev-only for the AST architecture test because TypeScript 7 has no stable compiler API. Vitest 5 defaults `clearMocks` to `true`.
 
@@ -217,12 +218,25 @@ TypeScript 7 owns builds and type checks. `@typescript/typescript6` is dev-only 
 npm test
 npm run typecheck
 npm pack --dry-run
-SKIP_LIVE=1 npm run smoke:isolated
-npm run smoke:isolated            # inner-loop helper; requires auth.json or CURSOR_API_KEY
-npm run smoke:live                # inner-loop partial tmux checklist subset
-npm run smoke:platform:doctor
+SKIP_LIVE=1 npm run smoke:isolated # offline helper
+```
+
+Only when changed behavior requires new local service proof, select the relevant existing suite (example: restart) and one representative target:
+
+```bash
+node scripts/platform-smoke.mjs run --target macos --suite cursor-local-resume-restart
+```
+
+Optional comprehensive coverage, not a default ship step:
+
+```bash
 npm run smoke:platform:all
-npm run smoke:cloud              # required for cloud-runtime changes
+```
+
+Only for a PR/issue explicitly focused on Cursor Cloud, and only if this coverage is necessary (the multi-lane matrix is not mandatory):
+
+```bash
+npm run smoke:cloud
 ```
 
 After changing `scripts/validate-smoke-jsonl.mjs` or replay scan expectations, also run:
@@ -231,16 +245,18 @@ After changing `scripts/validate-smoke-jsonl.mjs` or replay scan expectations, a
 npm test -- test/validate-smoke-jsonl.test.ts
 ```
 
-Then use the [Cursor live smoke checklist](./cursor-live-smoke-checklist.md) only for focused inner-loop surfaces the scripts do not cover (bridge MCP, abort/cancel, full TUI observation, packaging review, cleanup) before rerunning the local platform smoke gate and, for cloud-runtime changes, `npm run smoke:cloud`.
+Use the [Cursor live smoke checklist](./cursor-live-smoke-checklist.md) as a menu for necessary changed-behavior proof the selected script does not cover, not a full paid campaign. Keep distinct behavior assertions, persisted evidence, visual inspection when relevant, and cleanup intact. Diagnose failures offline; no automatic paid retries.
 
 ## What belongs in CI vs platform/manual smoke
 
 - **CI / default `npm test`:** mocked provider tests, extension lifecycle tests, JSONL validator tests, script syntax/help checks. No live Cursor calls.
-- **Local platform release gate:** `npm run smoke:platform:all` (runs doctor first). Requires real Cursor auth and cross-platform Crabbox setup.
-- **Cloud runtime release gate:** `npm run smoke:cloud` for PRs that touch actual cloud runtime execution.
-- **Focused manual smoke:** `npm run smoke:isolated`, `npm run smoke:live`, and selected live-checklist sections for inner-loop debugging of behavior mocks cannot reproduce.
+- **Focused local live proof:** a necessary existing single-suite/single-target check for changed behavior only. Reuse valid retained proof instead of repeating unchanged lanes.
+- **Comprehensive local matrix:** `npm run smoke:platform:all` (doctor first), optional rather than an unconditional commit/release gate.
+- **Cloud testing exception:** no paid Cloud testing for generic PRs/releases. Only PRs/issues explicitly focused on Cursor Cloud may select a necessary focused Cloud check. Cloud file touch alone does not qualify; the multi-lane `npm run smoke:cloud` is not mandatory. Run/evidence and agent/repository cleanup contracts remain intact.
+- **Automated Cursor PR reviews:** continue unchanged; do not disable them or introduce extra push/review churn for testing.
+- **Manual helpers:** `smoke:isolated`, `smoke:live`, and selected checklist sections are available, but run only the smallest necessary check.
 
-If platform smoke auth or target setup is unavailable, report the release as **blocked**, not skipped-ready.
+If a selected necessary live check lacks auth or setup, report that specific proof gap, not a pass. Optional unselected matrix lanes do not block landing.
 
 ## Cursor SDK event capture probe
 

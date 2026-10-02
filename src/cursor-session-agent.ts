@@ -3,11 +3,12 @@ import type { AgentModeOption, LocalAgentOptions, LocalAgentStore, ModelSelectio
 import type { Context } from "@earendil-works/pi-ai";
 import {
 	getRegisteredCursorPiToolBridge,
+	type CursorPiToolBridge,
 	type CursorPiBridgeToolRequest,
 	type CursorPiToolBridgeRun,
 } from "./cursor-pi-tool-bridge.js";
 import { computeCursorContextFingerprint } from "./context.js";
-import { getCursorSessionFile, getCursorSessionScopeGeneration, getCursorSessionScopeKey } from "./cursor-session-scope.js";
+import { getCursorSessionFile, getCursorSessionScopeGeneration, getCursorSessionScopeKey, type CursorTurnScope } from "./cursor-session-scope.js";
 import {
 	getMatchingCursorSessionAgentResumeHandle,
 	persistCursorSessionAgentResumeHandle,
@@ -121,6 +122,8 @@ function rethrowSupersededWhenReplacedByDifferentPoolKey(scopeKey: string, poolK
 }
 
 interface SessionCursorAgentCreateParams {
+	scope?: CursorTurnScope;
+	bridge?: CursorPiToolBridge;
 	apiKey: string;
 	agentMode: AgentModeOption;
 	cwd: string;
@@ -205,8 +208,7 @@ function buildApiKeyPoolKeyFingerprint(apiKey: string): string {
 	return createHash("sha256").update(apiKey).digest("hex").slice(0, 16);
 }
 
-function buildBridgePoolKeySuffix(): string {
-	const registeredBridge = getRegisteredCursorPiToolBridge();
+function buildBridgePoolKeySuffix(registeredBridge: CursorPiToolBridge | undefined): string {
 	if (!registeredBridge) return "bridge:absent";
 	return registeredBridge.getToolSurfaceSignature();
 }
@@ -224,7 +226,7 @@ function buildSessionAgentPoolKey(scopeKey: string, params: SessionCursorAgentCr
 				? "http1:on"
 				: "http1:off",
 		buildApiKeyPoolKeyFingerprint(params.apiKey),
-		buildBridgePoolKeySuffix(),
+		buildBridgePoolKeySuffix("bridge" in params ? params.bridge : getRegisteredCursorPiToolBridge()),
 	].join("\0");
 }
 
@@ -309,7 +311,7 @@ function commitSessionAgentSendForLease(
 			poolKey: entry.poolKey,
 			sendState: entry.sendState,
 			storeIdentity: entry.sessionStore.identity,
-		});
+		}, scopeKey);
 	}
 }
 
@@ -445,7 +447,7 @@ async function createSessionAgentEntry(
 	let bridgeRun: CursorPiToolBridgeRun | undefined;
 	let sessionStore: OpenCursorSessionStore | undefined;
 	try {
-		const registeredBridge = getRegisteredCursorPiToolBridge();
+		const registeredBridge = params.bridge;
 		if (registeredBridge) {
 			bridgeRun = await registeredBridge.createRun({
 				onToolRequest: params.onBridgeToolRequest,
@@ -466,7 +468,7 @@ async function createSessionAgentEntry(
 			createAgent ??= sdk.Agent.create;
 			resumeAgent ??= sdk.Agent.resume;
 		}
-		const resumeHandle = resumeEligible ? getMatchingCursorSessionAgentResumeHandle(resolvedPoolKey) : undefined;
+		const resumeHandle = resumeEligible ? getMatchingCursorSessionAgentResumeHandle(resolvedPoolKey, scopeKey) : undefined;
 		const storeSelection = await openCursorSessionStoreForScope({
 			cwd: params.cwd,
 			scopeKey,
@@ -546,9 +548,10 @@ export function invalidateSessionAgent(
 	if (options?.deadTransport) deadTransportScopeKeys.add(scopeKey);
 }
 
-export async function acquireSessionCursorAgent(params: SessionCursorAgentCreateParams): Promise<SessionCursorAgentLease> {
-	const scopeKey = getCursorSessionScopeKey();
-	const persistentStore = getCursorSessionFile() !== undefined;
+export async function acquireSessionCursorAgent(input: SessionCursorAgentCreateParams): Promise<SessionCursorAgentLease> {
+	const params = { ...input, bridge: "bridge" in input ? input.bridge : getRegisteredCursorPiToolBridge() };
+	const scopeKey = params.scope?.scopeKey ?? getCursorSessionScopeKey();
+	const persistentStore = (params.scope ? params.scope.sessionFile : getCursorSessionFile()) !== undefined;
 
 	while (true) {
 		assertScopeAcceptsAcquire(scopeKey);

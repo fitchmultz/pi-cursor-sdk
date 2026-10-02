@@ -208,8 +208,8 @@ try {
 		expect(platformSmoke).not.toContain("Promise.all(targetRuns)");
 		expect(platformSmoke).toContain("Run one or more comma-separated targets sequentially");
 		const docs = readFileSync("docs/platform-smoke.md", "utf8");
-		expect(docs).toContain("release-gate entrypoint runs required targets sequentially");
-		expect(docs).toContain("Total wall time is therefore additive across required targets");
+		expect(docs).toContain("comprehensive entrypoint runs configured targets sequentially");
+		expect(docs).toContain("comprehensive path handles one target at a time");
 	});
 
 	it("passes live prompts through Pi's interactive initial-message contract", () => {

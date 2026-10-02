@@ -8,6 +8,7 @@ export interface NativeReplayRoutingInput {
 	toolName: string;
 	useNativeToolReplay: boolean;
 	activeToolNames?: ReadonlySet<string>;
+	registeredToolNames?: ReadonlySet<string>;
 	hasLiveRun: boolean;
 }
 
@@ -20,7 +21,7 @@ export function isNativeToolActiveInContext(toolName: string, activeToolNames?: 
  * Extension resync (pi active tools) is separate; this uses context.tools snapshot only.
  */
 export function resolveNativeReplayDisposition(input: NativeReplayRoutingInput): NativeReplayDisposition {
-	if (!input.useNativeToolReplay || !canRenderCursorToolNatively(input.toolName)) {
+	if (!input.useNativeToolReplay || !(input.registeredToolNames?.has(input.toolName) ?? canRenderCursorToolNatively(input.toolName))) {
 		return "transcript_trace";
 	}
 	if (isNativeToolActiveInContext(input.toolName, input.activeToolNames) && input.hasLiveRun) {

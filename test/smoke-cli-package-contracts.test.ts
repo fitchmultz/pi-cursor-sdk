@@ -45,7 +45,7 @@ describe("smoke CLI and package contracts", () => {
 
 		if (process.platform !== "win32") {
 			expect(liveHelp!.status).toBe(0);
-			expect(liveHelp!.stdout).toContain("retry-empty-output");
+			expect(liveHelp!.stdout).toContain("single attempt; no automatic paid retries");
 			expect(liveHelp!.stdout).toContain("--self-test");
 			expect(isolatedHelp!.status).toBe(0);
 			expect(isolatedHelp!.stdout).toContain("plan-strip");

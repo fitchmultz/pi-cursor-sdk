@@ -110,11 +110,11 @@ describe("cursor live run coordinator", () => {
 		]);
 
 		expect(hasTrailingUserMessagesAfterToolResults(context)).toBe(true);
-		expect(coordinator.getPendingFromContext(context, replayIdFromToolCallId)).toBe(run);
+		expect(coordinator.getPendingFromContext(context, replayIdFromToolCallId, run.sessionAgentScopeKey)).toBe(run);
 
 		await coordinator.release(run);
 
-		expect(coordinator.getPendingFromContext(context, replayIdFromToolCallId)).toBeUndefined();
+		expect(coordinator.getPendingFromContext(context, replayIdFromToolCallId, run.sessionAgentScopeKey)).toBeUndefined();
 	});
 
 	it("drops bridge events whose pending call expired before tool emission", () => {
@@ -351,6 +351,6 @@ describe("cursor live run coordinator", () => {
 			{ role: "toolResult", toolCallId: "pi-call-1", toolName: "read", content: [], isError: false, timestamp: 2 },
 		]);
 
-		expect(coordinator.getPendingFromContext(context, replayIdFromToolCallId)).toBe(run);
+		expect(coordinator.getPendingFromContext(context, replayIdFromToolCallId, run.sessionAgentScopeKey)).toBe(run);
 	});
 });

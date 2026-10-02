@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Isolate concurrent and nested in-process Cursor sessions, including direct compaction/tree/bug-report streams, bridge/replay state, pooled agents, storage, journals, and debug artifacts (#217, #234). Native request-header ownership receipts reject mismatched shared ModelRuntime calls with recovery guidance rather than choosing a sibling.
+- Keep cloud archive/delete authority, intents, and results in the command's originating session branch across auth/SDK waits and owner reload/shutdown; unstarted child reload/shutdown no longer closes a parent's live pool.
 - Restore native replay wrapper ownership after `/new`, `/resume`, reloads, and session switches without replacing third-party tools (#203).
 - Apply configured `models.json` cost rates to mapped token usage with Pi's native pricing helper; default rates and Cursor billed amounts are unchanged (#230, #231; thanks @TianZuo555).
 - Resolve the installed Cursor SDK native parser package before SDK initialization, preserving explicit `CURSOR_TREE_SITTER_VENDOR_DIR` overrides (#232).

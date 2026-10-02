@@ -20,13 +20,18 @@ export {
 	cursorSessionResumeTestUtils,
 };
 
+const bindings: PiHarness[] = [];
+
 export function createExtensionPi(
 	initialTools?: PiHarnessOptions["initialTools"],
 ): PiHarness & CursorExtensionRegistrationPi {
-	return createExtensionRegistrationPi(initialTools ? { initialTools } : undefined);
+	const pi = createExtensionRegistrationPi(initialTools ? { initialTools } : undefined);
+	bindings.push(pi);
+	return pi;
 }
 
 export async function resetIndexExtensionTestState(): Promise<void> {
+	for (const pi of bindings.splice(0)) await pi.runSessionShutdown({ reason: "quit" });
 	vi.clearAllMocks();
 	installCursorSessionStoreMock();
 	delete process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY;

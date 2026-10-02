@@ -29,6 +29,7 @@ export interface CursorTurnDisplayRouterOptions {
 	liveRun?: CursorLiveRun;
 	useNativeToolReplay: boolean;
 	activeToolNames?: ReadonlySet<string>;
+	registeredToolNames?: ReadonlySet<string>;
 	nativeReplayId: string;
 	contentEmitter: CursorPartialContentEmitter;
 	debugRecorder?: CursorSdkEventDebugRecorder;
@@ -44,6 +45,7 @@ export class CursorTurnDisplayRouter {
 	private readonly liveRun?: CursorLiveRun;
 	private readonly useNativeToolReplay: boolean;
 	private readonly activeToolNames?: ReadonlySet<string>;
+	private readonly registeredToolNames?: ReadonlySet<string>;
 	private readonly nativeReplayId: string;
 	private readonly contentEmitter: CursorPartialContentEmitter;
 	private readonly debugRecorder?: CursorSdkEventDebugRecorder;
@@ -57,6 +59,7 @@ export class CursorTurnDisplayRouter {
 		this.liveRun = options.liveRun;
 		this.useNativeToolReplay = options.useNativeToolReplay;
 		this.activeToolNames = options.activeToolNames;
+		this.registeredToolNames = options.registeredToolNames;
 		this.nativeReplayId = options.nativeReplayId;
 		this.contentEmitter = options.contentEmitter;
 		this.debugRecorder = options.debugRecorder;
@@ -75,6 +78,7 @@ export class CursorTurnDisplayRouter {
 			toolName: display.toolName,
 			useNativeToolReplay: this.useNativeToolReplay,
 			activeToolNames: this.activeToolNames,
+			registeredToolNames: this.registeredToolNames,
 			hasLiveRun: this.liveRun !== undefined,
 		});
 
@@ -122,6 +126,7 @@ export class CursorTurnDisplayRouter {
 			toolName: display.toolName,
 			useNativeToolReplay: this.useNativeToolReplay,
 			activeToolNames: this.activeToolNames,
+			registeredToolNames: this.registeredToolNames,
 			hasLiveRun: this.liveRun !== undefined,
 		});
 

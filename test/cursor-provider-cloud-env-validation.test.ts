@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { inspectCursorCloudLocalState } from "../src/cursor-cloud-local-state.js";
 import { registerCursorRuntimeControls } from "../src/cursor-state.js";
+import { registerCursorSessionScope } from "../src/cursor-session-scope.js";
 import { streamCursor } from "../src/cursor-provider.js";
 import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
 import {
@@ -147,6 +148,7 @@ describe("streamCursor cloud request validation", () => {
 
 	it("rejects an all-invalid --cursor-cloud-env request before SDK calls", async () => {
 		const pi = createPiHarness({ flagValues: { "cursor-cloud-env": "bad-name,CURSOR_SECRET,9INVALID" } });
+		registerCursorSessionScope(pi);
 		registerCursorRuntimeControls(pi);
 		await pi.runSessionStart({ model: makeModel("gpt-5.5@1m") });
 		const send = vi.fn();

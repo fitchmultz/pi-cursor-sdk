@@ -8,7 +8,7 @@ import { serializeCursorPiToolBridgeDiagnostic } from "./cursor-pi-tool-bridge-d
 import type { CursorPiBridgeToolRequest } from "./cursor-pi-tool-bridge-types.js";
 import type { CursorLiveQueuedEvent } from "./cursor-live-run-coordinator.js";
 import { asRecord } from "./cursor-record-utils.js";
-import { getCursorSessionFile } from "./cursor-session-scope.js";
+import { getCursorSessionScopeSnapshot, type CursorTurnScope } from "./cursor-session-scope.js";
 import { parseEnvBoolean } from "./cursor-env-boolean.js";
 import {
 	ARTIFACTS,
@@ -58,6 +58,7 @@ export interface CursorSdkDisplayDecisionRecord {
 }
 
 export interface CursorSdkEventDebugSinkOptions {
+	scope?: CursorTurnScope;
 	cwd: string;
 	modelId: string;
 	provider: string;
@@ -250,6 +251,7 @@ export class CursorSdkEventDebugSink {
 		timeline: {} as Record<string, number>,
 		errors: 0,
 	};
+	private readonly sessionFile: string | undefined;
 	private metadata: Record<string, unknown>;
 	private readonly jsonlBuffers = new Map<string, string[]>();
 	private readonly jsonlBufferBytes = new Map<string, number>();
@@ -263,8 +265,9 @@ export class CursorSdkEventDebugSink {
 	static maybeCreate(options: CursorSdkEventDebugSinkOptions): CursorSdkEventDebugSink | undefined {
 		const env = options.env ?? process.env;
 		if (!resolveCursorSdkEventDebugEnabled(env)) return undefined;
-		const allocation = allocateCursorSdkEventDebugTurn(options.cwd, env);
-		return new CursorSdkEventDebugSink(allocation, options, env);
+		const scope = options.scope ?? getCursorSessionScopeSnapshot();
+		const allocation = allocateCursorSdkEventDebugTurn(options.cwd, env, scope);
+		return new CursorSdkEventDebugSink(allocation, { ...options, scope }, env);
 	}
 
 	private constructor(
@@ -278,6 +281,7 @@ export class CursorSdkEventDebugSink {
 		this.sessionKey = allocation.sessionKey;
 		this.pinnedRun = allocation.pinnedRun;
 		this.env = env;
+		this.sessionFile = options.scope?.sessionFile;
 		this.metadata = {
 			capturedAt: new Date().toISOString(),
 			modelId: options.modelId,
@@ -285,7 +289,7 @@ export class CursorSdkEventDebugSink {
 			cwd: options.cwd,
 			sessionDir: allocation.sessionDir,
 			sessionKey: allocation.sessionKey,
-			sessionFile: getCursorSessionFile(),
+			sessionFile: this.sessionFile,
 			turn: allocation.turn,
 			pinnedRun: allocation.pinnedRun,
 			artifacts: ARTIFACTS,
@@ -452,7 +456,7 @@ export class CursorSdkEventDebugSink {
 	}
 
 	private capturePiSessionSnapshot(): { copied: boolean; sessionFile?: string; reason?: string } {
-		const sessionFile = getCursorSessionFile();
+		const sessionFile = this.sessionFile;
 		if (!sessionFile) {
 			return { copied: false, reason: "session file unknown" };
 		}
@@ -509,7 +513,7 @@ export class CursorSdkEventDebugSink {
 			artifactDir: this.artifactDir,
 			sessionDir: this.sessionDir,
 			sessionKey: this.sessionKey,
-			sessionFile: getCursorSessionFile(),
+			sessionFile: this.sessionFile,
 			turn: this.turn,
 			elapsedMs: Date.now() - this.startedAt,
 			counts: {

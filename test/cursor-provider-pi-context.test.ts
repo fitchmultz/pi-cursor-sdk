@@ -8,6 +8,7 @@ import {
 	registerNativeToolDisplayForTest, type CursorDeltaHandler,
 	connectMcpClient, getCreatedAgentOptions, getPiToolsMcpUrlFromAgentCreateOptions,
 } from "./helpers/cursor-provider-harness.js";
+import { registerCursorNativeToolDisplayState, __testUtils as nativeToolDisplayTestUtils } from "../src/cursor-native-tool-display-state.js";
 import { streamCursor, __testUtils } from "../src/cursor-provider.js";
 import { buildCursorPrompt, computeCursorContextFingerprint, shouldBootstrapCursorContext } from "../src/context.js";
 import { getActiveContextToolNames } from "../src/cursor-context-tools.js";
@@ -149,7 +150,9 @@ describe("installed Pi provider context boundary", () => {
 		await registerNativeToolDisplayForTest([]);
 		process.env.PI_CURSOR_TOOL_MANIFEST = "1";
 		const sdkSend = mockSend();
-		registerBridgeForProviderTest({ active: [tool.name, "read", "cursor"], tools: [tool.name, "read", "cursor", "inactive"].map((name) => createTestToolInfo(name, tool.parameters)) });
+		const { pi } = registerBridgeForProviderTest({ active: [tool.name, "read", "cursor"], tools: [tool.name, "read", "cursor", "inactive"].map((name) => createTestToolInfo(name, tool.parameters)) });
+		registerCursorNativeToolDisplayState(pi);
+		nativeToolDisplayTestUtils.registerNativeToolNameForTests("cursor", pi);
 		const { send } = await boundary();
 		expect((await send({ systemPrompt: "BRIDGE_SYSTEM", tools: [tool], messages: [user] })).stopReason).toBe("stop");
 		const { client, transport } = await connectMcpClient(getPiToolsMcpUrlFromAgentCreateOptions(getCreatedAgentOptions()));

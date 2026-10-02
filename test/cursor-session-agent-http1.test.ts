@@ -37,6 +37,7 @@ describe("Cursor session agent HTTP/1.1 pooling", () => {
 		const pi = createEventHarness();
 		registerCursorSessionAgentLifecycle(pi);
 		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/test.jsonl");
+		await pi.runSessionStart({ cwd: "/tmp/project", sessionManager: { getSessionFile: () => "/tmp/sessions/test.jsonl" } });
 		configureCursorSdkHttp1(
 			{ Cursor: { configure } },
 			{ value: true, source: "environment", trustLevel: "environment" },

@@ -9,7 +9,7 @@ import {
 	registerCursorSessionAgentResume,
 	__testUtils as resumeTestUtils,
 } from "../src/cursor-session-agent-resume.js";
-import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
+import { registerCursorSessionScope, __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
 import { resetCursorProviderTestState } from "./helpers/cursor-provider-harness.js";
 import { createPiHarness } from "./helpers/pi-harness.js";
 
@@ -76,7 +76,10 @@ describe("prepareCursorSessionForCompaction", () => {
 
 	it("drops a pending resume handle and suppresses persist for the summarizer send", async () => {
 		const scopeKey = "/tmp/sessions/test.jsonl";
-		cursorSessionScopeTestUtils.set("/tmp/project", scopeKey);
+		const pi = createPiHarness();
+		registerCursorSessionScope(pi);
+		registerCursorSessionAgentResume(pi);
+		await pi.runSessionStart({ cwd: "/tmp/project", sessionManager: { getSessionFile: () => scopeKey, getSessionId: () => "session-1" } });
 		persistCursorSessionAgentResumeHandle({
 			runtime: "local",
 			agentId: "agent-summarizer",
@@ -102,10 +105,11 @@ describe("prepareCursorSessionForCompaction", () => {
 
 	it("keeps persist suppressed across turn_end during compaction", async () => {
 		const scopeKey = "/tmp/sessions/test.jsonl";
-		cursorSessionScopeTestUtils.set("/tmp/project", scopeKey);
-		await prepareCursorSessionForCompaction(scopeKey);
 		const pi = createPiHarness();
+		registerCursorSessionScope(pi);
 		registerCursorSessionAgentResume(pi);
+		await pi.runSessionStart({ cwd: "/tmp/project", sessionManager: { getSessionFile: () => scopeKey, getSessionId: () => "session-1" } });
+		await prepareCursorSessionForCompaction(scopeKey);
 		persistCursorSessionAgentResumeHandle({
 			runtime: "local",
 			agentId: "agent-summarizer",

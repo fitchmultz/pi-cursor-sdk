@@ -1,6 +1,6 @@
 # Platform Smoke Implementation Reference
 
-Back to the canonical [Platform Smoke Gate runbook](./platform-smoke.md) for release commands, required targets and suites, artifacts, assertions, security, and the release bar.
+Back to the canonical [Platform Smoke runbook](./platform-smoke.md) for cost-conscious verification, focused suite selection, optional comprehensive targets/suites, artifacts, assertions, security, and the release bar. Offline/faux checks and exact-input retained evidence come first; only necessary changed-behavior proof warrants the smallest live check on one representative environment. No paid Cloud testing for generic PRs/releases; only explicitly Cursor Cloud-focused PRs/issues may select a necessary focused Cloud check. Automated Cursor PR reviews continue unchanged.
 
 This document records detailed detector, registry, command-rendering, implementation-history, replacement, and portability material. The phase plan is retained as implementation history, not as active release instructions.
 
@@ -26,7 +26,7 @@ Meaningful gap closed: earlier card assertions could pass when the prompt mentio
 
 ## Registry visual classification
 
-The implementation must classify every `CURSOR_TOOL_PRESENTATION_SPECS` entry from `src/cursor-tool-presentation-registry.ts` as required or excluded for the release visual gate. A validation check fails when a registry entry lacks classification.
+The implementation must classify every `CURSOR_TOOL_PRESENTATION_SPECS` entry from `src/cursor-tool-presentation-registry.ts` as required or excluded for the optional comprehensive visual matrix. A validation check fails when a registry entry lacks classification.
 
 Required deterministic cards:
 
@@ -178,8 +178,10 @@ Update:
 
 They must state:
 
-- required local release gate is `npm run smoke:platform:all`;
-- cloud-runtime changes additionally require `npm run smoke:cloud`;
+- offline/faux checks and exact-input retained proof come first; new live proof is limited to the smallest meaningful changed-behavior check on one representative environment;
+- `npm run smoke:platform:all` is an optional comprehensive matrix, not an unconditional commit/release gate;
+- no paid Cloud testing for generic PRs/releases; only explicitly Cursor Cloud-focused PRs/issues may select necessary focused Cloud proof, with unchanged run/evidence and cleanup contracts;
+- no full paid campaign replay, matrix-only host coverage, or automatic paid retries; automated Cursor PR reviews continue unchanged;
 - legacy smoke scripts are inner-loop/debug helpers;
 - `tmux` visual smoke is not the canonical cross-platform gate.
 
@@ -197,7 +199,7 @@ Replace or redesign this platform runner if any of these become true:
 - The full gate exceeds the fixed Cursor invocation budget.
 - Node 24 + `node-pty` cannot be made reliable on Windows native.
 
-If the gate is replaced, document the new cross-platform release process before removing this one. Existing local smoke scripts remain inner-loop/debug helpers, not release gates.
+If the runner is replaced, document the new verification process before removing it. Keep offline cross-platform contracts and selected-suite evidence fidelity; the comprehensive paid matrix is optional, not a default ship step.
 
 ## Portability to other pi extensions
 

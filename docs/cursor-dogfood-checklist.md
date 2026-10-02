@@ -1,6 +1,6 @@
 # Cursor dogfood checklist
 
-Short maintainer checklist for **minimal-surface** validation after prompt, bridge, replay, or manifest changes. This is the fast path from pi-cursor-composer dogfood sessions—not a substitute for the required [platform smoke gate](./platform-smoke.md).
+Short maintainer menu for **minimal-surface** validation after prompt, bridge, replay, or manifest changes. Start with offline/faux checks and reuse exact-input retained evidence. Only changed behavior needing new real-service proof warrants a selected exercise on one representative environment; docs/metadata-only changes need no paid runs. The [platform smoke matrix](./platform-smoke.md) is optional, not a routine ship step. No full paid campaign replay or automatic paid retries. No paid Cloud testing for generic PRs/releases; only explicitly Cursor Cloud-focused PRs/issues may select necessary focused Cloud proof. Automated Cursor PR reviews continue unchanged.
 
 ## Minimal environment
 
@@ -60,6 +60,6 @@ Canonical visual evidence: `npm run smoke:visual` (see [Cursor native tool visua
 ## Related docs
 
 - [Cursor tool surfaces in pi](./cursor-tool-surfaces.md) — three namespaces and discoverability
-- [Platform smoke gate](./platform-smoke.md) — required cross-platform release gate
+- [Platform smoke](./platform-smoke.md) — focused selection and optional comprehensive matrix
 - [Cursor live smoke checklist](./cursor-live-smoke-checklist.md) — inner-loop/manual debug checks
 - [Cursor testing lessons](./cursor-testing-lessons.md) — auth, JSONL scans, plan-mode traps

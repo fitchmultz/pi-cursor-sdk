@@ -36,9 +36,10 @@ import {
 import { streamCursor, __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
 import { estimateCursorPromptMessageTokens } from "../src/context.js";
 import { registerCursorRuntimeControls } from "../src/cursor-state.js";
+import { registerCursorSessionScope } from "../src/cursor-session-scope.js";
 import { __testUtils as sessionAgentTestUtils } from "../src/cursor-session-agent.js";
 import { __testUtils as cursorPiToolBridgeTestUtils } from "../src/cursor-pi-tool-bridge.js";
-import { __testUtils as nativeToolDisplayTestUtils } from "../src/cursor-native-tool-display-state.js";
+import { registerCursorNativeToolDisplayState, __testUtils as nativeToolDisplayTestUtils } from "../src/cursor-native-tool-display-state.js";
 import type { Context } from "@earendil-works/pi-ai";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -48,6 +49,7 @@ import { convertPiContentToMcpContent } from "../src/cursor-pi-tool-bridge-mcp.j
 
 async function setCursorModeForBridgeTest(mode: "agent" | "plan"): Promise<void> {
 	const pi = createPiHarness({ flagValues: { "cursor-mode": mode } });
+	registerCursorSessionScope(pi);
 	registerCursorRuntimeControls(pi);
 	await pi.runSessionStart({ model: makeModel("composer-2") });
 }
@@ -309,12 +311,13 @@ describe("streamCursor bridge MCP", () => {
 		await cursorProviderTestUtils.resetSessionCursorAgents();
 		delete process.env.PI_CURSOR_PI_TOOL_BRIDGE;
 		delete process.env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS;
-		nativeToolDisplayTestUtils.registerNativeToolNameForTests("cursor");
 		vi.clearAllMocks();
-		registerBridgeForProviderTest({
+		const { pi } = registerBridgeForProviderTest({
 			active: ["cursor"],
 			tools: [createTestToolInfo("cursor")],
 		});
+		registerCursorNativeToolDisplayState(pi);
+		nativeToolDisplayTestUtils.registerNativeToolNameForTests("cursor", pi);
 		mockCreatedAgent({
 			agentId: "agent-2",
 			send: mockSend,

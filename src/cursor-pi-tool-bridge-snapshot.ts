@@ -63,7 +63,7 @@ export function buildCursorPiToolBridgeSnapshot(
 
 	for (const tool of allTools) {
 		if (!activeToolNames.has(tool.name)) continue;
-		if (isExcludedFromCursorBridgeExposure(tool.name) && isRegisteredCursorNativeToolName(tool.name)) continue;
+		if (isExcludedFromCursorBridgeExposure(tool.name) && isRegisteredCursorNativeToolName(tool.name, pi)) continue;
 		if (!exposeOverlappingBuiltins && isOverlappingCursorNativePiToolName(tool.name)) continue;
 
 		const mcpToolName = createMcpToolName(tool.name, usedMcpToolNames);

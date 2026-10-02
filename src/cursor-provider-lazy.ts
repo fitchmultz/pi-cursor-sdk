@@ -7,7 +7,7 @@ import {
 	type Model,
 	type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
-import { streamCursor } from "./cursor-provider.js";
+import { streamCursor, type CursorProviderOwnership } from "./cursor-provider.js";
 import { sanitizeCursorProviderError } from "./cursor-provider-errors.js";
 
 function makeProviderRuntimeErrorMessage(model: Model<Api>, error: unknown, apiKey?: string): AssistantMessage {
@@ -31,22 +31,28 @@ function makeProviderRuntimeErrorMessage(model: Model<Api>, error: unknown, apiK
 	};
 }
 
-export function streamCursorLazy(
-	model: Model<Api>,
-	context: Context,
-	options?: SimpleStreamOptions,
-): AssistantMessageEventStream {
-	const outer = createAssistantMessageEventStream();
-	queueMicrotask(async () => {
-		try {
-			for await (const event of streamCursor(model, context, options)) {
-				outer.push(event);
-			}
-		} catch (error) {
+export function createCursorLazyStream(capture: (options?: SimpleStreamOptions) => CursorProviderOwnership) {
+	return (model: Model<Api>, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream => {
+		const outer = createAssistantMessageEventStream();
+		const fail = (error: unknown) => {
 			const message = makeProviderRuntimeErrorMessage(model, error, options?.apiKey);
 			outer.push({ type: "error", reason: "error", error: message });
 			outer.end(message);
+		};
+		let ownership: CursorProviderOwnership;
+		try {
+			ownership = capture(options);
+		} catch (error) {
+			fail(error);
+			return outer;
 		}
-	});
-	return outer;
+		queueMicrotask(async () => {
+			try {
+				for await (const event of streamCursor(model, context, options, ownership)) outer.push(event);
+			} catch (error) {
+				fail(error);
+			}
+		});
+		return outer;
+	};
 }

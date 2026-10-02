@@ -1,6 +1,5 @@
 import { CursorLiveRunAbortError } from "./cursor-live-run-coordinator.js";
 import { drainExistingCursorLiveRunBeforeSend } from "./cursor-provider-live-run-drain.js";
-import { getCursorSessionCwd } from "./cursor-session-scope.js";
 import { installCursorSdkProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
 import type { CursorRuntime } from "./cursor-config.js";
 import { CursorSdkEventDebugSink } from "./cursor-sdk-event-debug.js";
@@ -65,21 +64,23 @@ export class CursorProviderTurnRunner {
 
 		try {
 			this.throwIfAborted();
-			const cwd = getCursorSessionCwd();
+			const { scope } = this.params;
+			const cwd = scope.cwd;
 			this.sdkEventDebug = CursorSdkEventDebugSink.maybeCreate({
 				cwd,
 				modelId: model.id,
 				provider: model.provider,
+				scope,
 			});
 			sdkEventDebugRef.current = this.sdkEventDebug;
 			this.sdkEventDebug?.recordContextSnapshot(context);
 			// Resolved once here, before any drain await, so the drain decision and the
 			// prepare dispatch below always act on the same config snapshot.
-			const resolvedConfig = resolveCursorProviderTurnConfig(cwd);
+			const resolvedConfig = resolveCursorProviderTurnConfig(cwd, scope.projectTrusted, scope.scopeKey);
 			this.runtimeTarget = resolvedConfig.runtime.value;
 			if (resolvedConfig.runtime.value === "local") {
 				if (
-					(await drainExistingCursorLiveRunBeforeSend(stream, partial, model, context, options?.signal, this.sdkEventDebug)) ===
+					(await drainExistingCursorLiveRunBeforeSend(stream, partial, model, context, options?.signal, this.sdkEventDebug, scope.scopeKey)) ===
 					"stream_ended"
 				) {
 					return;

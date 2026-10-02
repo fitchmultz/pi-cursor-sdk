@@ -43,6 +43,7 @@ export interface CursorSdkTurnCoordinatorOptions {
 	liveRun?: CursorLiveRun;
 	useNativeToolReplay: boolean;
 	activeToolNames?: ReadonlySet<string>;
+	registeredToolNames?: ReadonlySet<string>;
 	nativeReplayId: string;
 	textDeltas: string[];
 	debugRecorder?: CursorSdkEventDebugRecorder;
@@ -86,6 +87,7 @@ export class CursorSdkTurnCoordinator {
 			liveRun: options.liveRun,
 			useNativeToolReplay: options.useNativeToolReplay,
 			activeToolNames: options.activeToolNames,
+			registeredToolNames: options.registeredToolNames,
 			nativeReplayId: options.nativeReplayId,
 			contentEmitter: this.contentEmitter,
 			debugRecorder: options.debugRecorder,

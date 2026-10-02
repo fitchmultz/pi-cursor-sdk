@@ -175,7 +175,8 @@ export async function awaitFinalizeCursorRunOutcome(params: AwaitFinalizeCursorR
 			recordCursorCloudReportingError(params.sdkEventDebug, error, apiKey);
 		}
 		try {
-			recordCursorCloudLifecycleRun(report, { apiKey });
+			if (params.prepared.recordCloudLifecycle) params.prepared.recordCloudLifecycle(report, apiKey);
+			else recordCursorCloudLifecycleRun(report, { apiKey });
 		} catch (error) {
 			recordCursorCloudReportingError(params.sdkEventDebug, error, apiKey);
 		}

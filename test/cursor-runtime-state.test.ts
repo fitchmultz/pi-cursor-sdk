@@ -14,6 +14,7 @@ import { CURSOR_CLOUD_ACK_DISCLOSURE } from "../src/cursor-runtime-state.js";
 import {
 	__testUtils as cursorSessionScopeTestUtils,
 	registerCursorSessionScope,
+	getCursorSessionScopeSnapshot,
 } from "../src/cursor-session-scope.js";
 import { __testUtils as modelDiscoveryTestUtils } from "../src/model-discovery.js";
 import {
@@ -28,6 +29,7 @@ import {
 	mockedCreate,
 	resetCursorProviderTestState,
 } from "./helpers/cursor-provider-harness.js";
+import { captureCursorCloudLifecycleRecorder } from "../src/cursor-cloud-lifecycle.js";
 import { streamCursor } from "../src/cursor-provider.js";
 
 const RUNTIME_ENV_NAMES = [
@@ -240,6 +242,7 @@ describe("Cursor cloud runtime state", () => {
 
 	it("preserves invalid CLI cloud environment type for cloud preflight", async () => {
 		const pi = createPiHarness({ flagValues: { "cursor-cloud-env-type": "poll" } });
+		registerCursorSessionScope(pi);
 		registerCursorRuntimeControls(pi);
 		await pi.runSessionStart({ model: makeModel("gpt-5.5@1m") });
 		expect(getCursorCliConfig().cloud?.environment).toEqual({ type: "poll" });
@@ -627,12 +630,14 @@ describe("Cursor cloud model selection", () => {
 				"cursor-cloud-ack": true,
 				[flag]: true,
 			} });
+			registerCursorSessionScope(pi);
 			registerCursorRuntimeControls(pi);
 			await pi.runSessionStart({ model: makeModel(modelId) });
 			await collectEvents(streamCursor(makeModel(modelId), {
 				systemPrompt: "Be helpful.",
 				messages: [{ role: "user", content: "hello", timestamp: 1 }],
-			}, { apiKey: "test-key" }));
+			}, { apiKey: "test-key" }, { scope: getCursorSessionScopeSnapshot(pi), bridge: undefined, recordCloudLifecycle: captureCursorCloudLifecycleRecorder(pi) }));
+			await pi.runSessionShutdown({ reason: "quit" });
 		}
 
 		expect(mockedCreate.mock.calls.map(([options]) =>

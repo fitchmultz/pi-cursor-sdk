@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { matchesWrappedLineAt } from "./wrapped-line-match.mjs";
+import { detectCards, writeCardArtifacts } from "./card-detect.mjs";
 
 function pngSize(path) {
 	try {
@@ -39,6 +40,7 @@ export function findVisualEvidenceItems(lines, specs = []) {
 
 export async function collectVisualEvidence({ htmlPath, pngPath, outDir, specs = [] }) {
 	mkdirSync(outDir, { recursive: true });
+	let cards = [];
 	const evidence = {
 		ok: false,
 		htmlPath,
@@ -52,8 +54,9 @@ export async function collectVisualEvidence({ htmlPath, pngPath, outDir, specs =
 
 	if (!existsSync(htmlPath)) {
 		evidence.checks.push({ id: "visual-html-present", ok: false, error: "terminal.html missing" });
+		writeCardArtifacts(outDir, cards);
 		writeFileSync(resolve(outDir, "visual-evidence.json"), JSON.stringify(evidence, null, 2));
-		return evidence;
+		return { ...evidence, cards };
 	}
 
 	let browser;
@@ -99,6 +102,7 @@ export async function collectVisualEvidence({ htmlPath, pngPath, outDir, specs =
 			}
 			return out;
 		});
+		cards = detectCards(lines);
 
 		for (const item of findVisualEvidenceItems(lines, specs)) {
 			if (item.ok) {
@@ -133,6 +137,7 @@ export async function collectVisualEvidence({ htmlPath, pngPath, outDir, specs =
 		evidence.checks.push({ id: `visual-evidence-${item.id}`, ok: item.ok === true, line: item.line, screenshot: item.screenshot, pattern: item.pattern, error: item.error });
 	}
 	evidence.ok = evidence.checks.every((check) => check.ok);
+	writeCardArtifacts(outDir, cards);
 	writeFileSync(resolve(outDir, "visual-evidence.json"), JSON.stringify(evidence, null, 2));
-	return evidence;
+	return { ...evidence, cards };
 }

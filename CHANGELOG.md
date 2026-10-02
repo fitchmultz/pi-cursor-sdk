@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Restore native replay wrapper ownership after `/new`, `/resume`, reloads, and session switches without replacing third-party tools (#203).
+- Apply configured `models.json` cost rates to mapped token usage with Pi's native pricing helper; default rates and Cursor billed amounts are unchanged (#230, #231; thanks @TianZuo555).
+- Resolve the installed Cursor SDK native parser package before SDK initialization, preserving explicit `CURSOR_TREE_SITTER_VENDOR_DIR` overrides (#232).
+- Improve diagnostics with bounded, scrubbed structured errors and causes without diagnosing loader or ambiguous session-authentication failures as invalid API keys. The underlying compiled/embedded-host and idle-session failures reported in #228, #233, and #247 remain open.
+- Bound bridge tool-call IDs while preserving unique calls and matching results (#237; thanks @gwatkins-arista).
+- Keep skill activation callable with its catalog/descriptions intact and a stable system prompt (#244).
+- Map SDK `reasoning_effort` controls to Pi thinking without changing SDK defaults.
+
 ## 0.4.0 - 2026-09-26
 
 ### Breaking Changes

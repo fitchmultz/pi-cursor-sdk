@@ -50,6 +50,8 @@ function createMinimalSessionManager(cwd: string, overrides: Partial<ExtensionCo
 		getLeafId: vi.fn(() => null),
 		getLeafEntry: vi.fn(() => undefined),
 		getEntry: vi.fn(() => undefined),
+		getEntryMetadata: vi.fn(() => undefined),
+		iterateEntryMetadata: vi.fn(() => []),
 		getLabel: vi.fn(() => undefined),
 		getBranch: vi.fn(() => []),
 		buildContextEntries: vi.fn(() => []),

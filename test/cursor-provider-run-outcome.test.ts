@@ -75,13 +75,13 @@ describe("cursor-provider-run-outcome", () => {
 
 	it("uses the runtime target for terminal auth guidance", () => {
 		const cloud = resolveCursorRunOutcome({
-			waitResult: makeWaitResult("error", "Unauthorized"),
+			waitResult: makeWaitResult("error", "Invalid API key"),
 			textDeltas: [],
 			emittedText: "",
 			runtimeTarget: "cloud",
 		});
 		const local = resolveCursorRunOutcome({
-			waitResult: makeWaitResult("error", "Unauthorized"),
+			waitResult: makeWaitResult("error", "Invalid API key"),
 			textDeltas: [],
 			emittedText: "",
 			runtimeTarget: "local",

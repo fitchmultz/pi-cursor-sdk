@@ -41,6 +41,8 @@ export function createPiHarness(options: PiHarnessOptions = {}): PiHarness {
 	const tools: RegisteredTool[] = [];
 	const initialTools =
 		options.initialTools ?? [...DEFAULT_BUILTIN_TOOL_NAMES].map((name) => createBuiltinToolInfo(name));
+	// Native getAllTools returns the extension's sourceInfo object, not a clone.
+	const sourceInfo: ToolInfo["sourceInfo"] = { source: "test", path: "pi-cursor-sdk-test", scope: "temporary", origin: "top-level" };
 	let activeToolNames = [...(options.activeTools ?? DEFAULT_ACTIVE_TOOL_NAMES)];
 
 	const resolveFlagValue = (name: string): boolean | string | undefined => {
@@ -96,7 +98,7 @@ export function createPiHarness(options: PiHarnessOptions = {}): PiHarness {
 			for (const tool of tools) {
 				toolsByName.set(tool.name, {
 					...createTestToolInfo(tool.name, tool.parameters, tool.description),
-					sourceInfo: { source: "test", path: "pi-cursor-sdk-test", scope: "temporary", origin: "top-level" },
+					sourceInfo,
 				});
 			}
 			return [...toolsByName.values()];

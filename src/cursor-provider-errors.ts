@@ -6,14 +6,14 @@ import { scrubSensitiveText } from "./cursor-sensitive-text.js";
 export const MISSING_CURSOR_API_KEY_MESSAGE =
 	"Cursor SDK runs require a Cursor SDK API key. Cursor Agent CLI/Desktop login is not reused. Run /login -> Use an API key -> Cursor, set CURSOR_API_KEY before starting pi, or restart pi with --api-key.";
 const GENERIC_CURSOR_SDK_ERROR_MESSAGE =
-	"Cursor SDK request failed. The Cursor SDK API key may be missing, invalid, or unauthorized. Cursor Agent CLI/Desktop login is not reused. Run /login -> Use an API key -> Cursor, verify CURSOR_API_KEY, or pass --api-key, then retry.";
+	"Cursor SDK request failed without further error details.";
 const AUTH_CURSOR_SDK_ERROR_MESSAGE =
 	"Cursor SDK request failed because the Cursor SDK API key may be invalid or unauthorized. Cursor Agent CLI/Desktop login is not reused. Run /login -> Use an API key -> Cursor, verify CURSOR_API_KEY, or pass --api-key, then retry.";
 const CLOUD_AUTH_CURSOR_SDK_ERROR_MESSAGE =
 	"Cursor Cloud Agents request failed because Cloud API authentication rejected the API key. Use a user API key from Cursor Dashboard -> API Keys or a service account API key from Team settings; Team Admin API keys are not supported as Cursor Cloud Agents credentials. Configure the key with /login -> Use an API key -> Cursor, CURSOR_API_KEY, or --api-key, then retry.";
 // Keep "Network error" aligned with pi's agent-level retry classifier.
 const NETWORK_CURSOR_SDK_ERROR_MESSAGE =
-	"Network error: Cursor SDK request failed during network or service I/O. Check your connection; pi will retry automatically when auto-retry is enabled.";
+	"Network error: Cursor SDK request failed during network or service I/O. Check your connection.";
 
 // Keep this phrase aligned with pi's agent-level retry classifier (`provider.?returned.?error`).
 const RETRYABLE_CURSOR_RUN_FAILURE_PREFIX = "Provider returned error: Cursor SDK run failed";
@@ -349,26 +349,46 @@ export function resolveCursorSdkAbortCause(options: {
 	return "unknown";
 }
 
+function formatErrorDetail(error: unknown, apiKey: string | undefined, depth = 0): string {
+	if (depth >= 3) return "";
+	const record = asRecord(error);
+	const message = typeof error === "string" ? error : getErrorStringField(record, "message") ?? "";
+	const name = getErrorStringField(record, "name");
+	const code = getErrorEvidenceField(error, record, "code");
+	const scrub = (text: string, limit: number) => scrubSensitiveText(text, apiKey).trim().slice(0, limit);
+	const scrubbed = [
+		name && name !== "Error" ? `${scrub(name, 120)}:` : "",
+		code ? `(code: ${scrub(code, 120)})` : "",
+		scrub(message, 1600),
+	].filter(Boolean).join(" ");
+	const cause = record?.cause === undefined ? "" : formatErrorDetail(record.cause, apiKey, depth + 1);
+	return cause ? `${scrubbed}\nCaused by: ${cause}` : scrubbed;
+}
+
 export function sanitizeCursorProviderError(
 	error: unknown,
 	apiKey?: string,
 	runtimeTarget?: CursorRuntime,
 ): string {
 	const record = asRecord(error);
-	const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+	const message = typeof error === "string" ? error : getErrorStringField(record, "message") ?? "";
 	if (message === MISSING_CURSOR_API_KEY_MESSAGE) return MISSING_CURSOR_API_KEY_MESSAGE;
-	const scrubbed = scrubSensitiveText(message, apiKey).trim();
+	const scrubbed = formatErrorDetail(error, apiKey);
+	// A loader failure is not an auth rejection, even inside an authentication wrapper.
+	if (/\b(?:ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|ResolveMessage)\b|Cannot find (?:module|package)|does not provide an export named/i.test(scrubbed)) return scrubbed;
 	const integrationMessage = runtimeTarget === "cloud"
-		? formatIntegrationNotConnectedError(error, record, scrubbed, apiKey)
+		? formatIntegrationNotConnectedError(error, record, scrubSensitiveText(message, apiKey).trim(), apiKey)
 		: undefined;
 	if (integrationMessage) return integrationMessage;
 	const connectClassification = classifyCursorConnectError(error);
 	if (
 		(runtimeTarget === "cloud" && getErrorName(error, record) === "AuthenticationError") ||
-		connectClassification?.kind === "unauthenticated" ||
-		isLikelyAuthError(scrubbed)
+		/\b(?:invalid|revoked|expired|missing) (?:user )?api key\b|\bapi key (?:is )?(?:invalid|revoked|expired|missing)\b/i.test(scrubbed)
 	) {
 		return runtimeTarget === "cloud" ? CLOUD_AUTH_CURSOR_SDK_ERROR_MESSAGE : AUTH_CURSOR_SDK_ERROR_MESSAGE;
+	}
+	if (connectClassification?.kind === "unauthenticated" || isLikelyAuthError(scrubbed)) {
+		return `Cursor SDK authentication failed. ${scrubbed}`;
 	}
 	if (connectClassification?.kind === "network" || isCursorSdkConnectionStalledError(error) || isLikelyNetworkTimeout(scrubbed)) return NETWORK_CURSOR_SDK_ERROR_MESSAGE;
 	if (isGenericCursorRunFailureMessage(scrubbed)) return RETRYABLE_CURSOR_RUN_FAILURE_PREFIX;

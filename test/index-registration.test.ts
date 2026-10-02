@@ -203,7 +203,10 @@ describe("extension registration and discovery", () => {
 			"write",
 		]);
 		expect(pi._tools.find((tool) => tool.name === CURSOR_ASK_QUESTION_TOOL_NAME)?.promptSnippet).toContain("clarifying question");
-		expect(pi._tools.find((tool) => tool.name === CURSOR_ACTIVATE_SKILL_TOOL_NAME)?.promptSnippet).toContain("Agent Skill");
+		const skillTool = pi._tools.find((tool) => tool.name === CURSOR_ACTIVATE_SKILL_TOOL_NAME);
+		expect(skillTool?.description).toContain("Agent Skill");
+		expect(skillTool?.promptSnippet).toBeUndefined();
+		expect(skillTool?.promptGuidelines).toBeUndefined();
 		const replayTool = pi._tools.find((tool) => tool.name === "cursor");
 		expect(replayTool?.promptSnippet).toBeUndefined();
 		expect(replayTool?.promptGuidelines).toBeUndefined();

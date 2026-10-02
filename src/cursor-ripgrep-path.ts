@@ -4,16 +4,26 @@ import { dirname, isAbsolute, join } from "node:path";
 
 const RIPGREP_ENV = "CURSOR_RIPGREP_PATH";
 
-export function resolveBundledCursorRipgrepPath(
+export function resolveCursorSdkPlatformPackageDirectory(
 	fromModuleUrl: string | URL = import.meta.url,
 ): string | undefined {
 	try {
 		const require = createRequire(fromModuleUrl);
-		const platformPackage = `@cursor/sdk-${process.platform}-${process.arch}`;
 		const sdkEntry = require.resolve("@cursor/sdk");
-		const packageDirectory = dirname(
-			require.resolve(`${platformPackage}/package.json`, { paths: [dirname(sdkEntry)] }),
-		);
+		return dirname(require.resolve(`@cursor/sdk-${process.platform}-${process.arch}/package.json`, {
+			paths: [dirname(sdkEntry)],
+		}));
+	} catch {
+		return undefined;
+	}
+}
+
+export function resolveBundledCursorRipgrepPath(
+	fromModuleUrl: string | URL = import.meta.url,
+): string | undefined {
+	const packageDirectory = resolveCursorSdkPlatformPackageDirectory(fromModuleUrl);
+	if (!packageDirectory) return undefined;
+	try {
 		const ripgrepPath = join(packageDirectory, "bin", process.platform === "win32" ? "rg.exe" : "rg");
 		accessSync(ripgrepPath, constants.X_OK);
 		return ripgrepPath;

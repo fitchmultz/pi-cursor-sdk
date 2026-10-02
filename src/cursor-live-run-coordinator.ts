@@ -11,7 +11,7 @@ import {
 	type CursorLiveToolResultConsumption,
 } from "./cursor-live-run-accounting.js";
 import type { CursorSdkTurnUsage } from "./cursor-usage-accounting.js";
-import type { CursorNativeToolDisplayItem } from "./cursor-native-tool-display-state.js";
+import type { CursorNativeToolDisplayItem, CursorNativeToolDisplayState } from "./cursor-native-tool-display-state.js";
 import type { CursorPiBridgeToolRequest, CursorPiToolBridgeRun } from "./cursor-pi-tool-bridge.js";
 import { getCursorSessionScopeKey } from "./cursor-session-scope.js";
 import type { CursorSdkEventDebugRecorder } from "./cursor-sdk-event-debug.js";
@@ -59,6 +59,7 @@ export interface CursorLiveRun {
 	abortMessage?: string;
 	chainUserInputAfterCompletion: boolean;
 	debugRecorder?: CursorSdkEventDebugRecorder;
+	nativeDisplay?: CursorNativeToolDisplayState;
 }
 
 export interface CursorLiveRunCreateParams {
@@ -70,6 +71,7 @@ export interface CursorLiveRunCreateParams {
 	promptInputTokens: number;
 	textDeltas?: string[];
 	debugRecorder?: CursorSdkEventDebugRecorder;
+	nativeDisplay?: CursorNativeToolDisplayState;
 }
 
 export interface CursorLiveRunCoordinatorDeps {
@@ -96,7 +98,7 @@ export interface CursorLiveRunCoordinator {
 	consumeToolResults(run: CursorLiveRun, context: Context, getReplayId: CursorReplayIdResolver): CursorLiveToolResultConsumption;
 	takeTurnInputTokens(run: CursorLiveRun, toolResultInputTokens: number): number;
 	takeSdkTurnUsage(run: CursorLiveRun): CursorSdkTurnUsage | undefined;
-	getPendingFromContext(context: Context, getReplayId: CursorReplayIdResolver): CursorLiveRun | undefined;
+	getPendingFromContext(context: Context, getReplayId: CursorReplayIdResolver, scopeKey: string): CursorLiveRun | undefined;
 	getActiveForScope(scopeKey?: string): CursorLiveRun | undefined;
 	isReady(run: CursorLiveRun): boolean;
 	waitForProgress(run: CursorLiveRun, signal?: AbortSignal): Promise<void>;
@@ -293,6 +295,7 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 				bridgeRun: params.bridgeRun,
 				sessionBridgeRun: params.sessionBridgeRun,
 				sessionAgentScopeKey,
+				nativeDisplay: params.nativeDisplay,
 				accounting: createCursorLiveRunAccountingState(params.promptInputTokens),
 				pendingEvents: [],
 				textDeltas: params.textDeltas ?? [],
@@ -420,7 +423,9 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 			return taken.sdkTurnUsage;
 		},
 
-		getPendingFromContext(context, getReplayId): CursorLiveRun | undefined {
+		getPendingFromContext(context, getReplayId, scopeKey): CursorLiveRun | undefined {
+			const run = getUndisposed(pendingRunIdsByScopeKey.get(scopeKey));
+			if (!run) return undefined;
 			const messages = getCursorConversationMessages(context);
 			let index = messages.length - 1;
 			while (index >= 0 && messages[index]?.role === "user") {
@@ -430,15 +435,7 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 			for (; index >= 0; index -= 1) {
 				const message = messages[index];
 				if (message.role !== "toolResult") break;
-				const replayId = getReplayId(message.toolCallId);
-				if (replayId) {
-					const replayRun = getUndisposed(replayId);
-					if (replayRun) return replayRun;
-				}
-				for (const run of pendingRuns.values()) {
-					if (run.disposed) continue;
-					if (run.bridgeRun?.hasPendingPiToolCallId(message.toolCallId)) return run;
-				}
+				if (matchesCursorLiveRunToolResult(run, message, getReplayId)) return run;
 			}
 			return undefined;
 		},

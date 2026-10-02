@@ -22,7 +22,13 @@ import { installCursorSdkProcessErrorGuard } from "./cursor-sdk-process-error-gu
 import { sanitizeCursorProviderError } from "./cursor-provider-errors.js";
 import { resolveCursorApiKey } from "./cursor-api-key.js";
 import { CursorProviderTurnRunner } from "./cursor-provider-turn-runner.js";
-import { getCursorSessionScopeKey } from "./cursor-session-scope.js";
+import { captureCursorCloudLifecycleRecorder } from "./cursor-cloud-lifecycle.js";
+import { getCursorNativeToolDisplayState } from "./cursor-native-tool-display-state.js";
+import { getRegisteredCursorPiToolBridge } from "./cursor-pi-tool-bridge.js";
+import { getCursorSessionScopeSnapshot, type CursorTurnScope } from "./cursor-session-scope.js";
+import type { CursorPiToolBridge } from "./cursor-pi-tool-bridge.js";
+import type { CursorNativeToolDisplayState } from "./cursor-native-tool-display-state.js";
+import type { CursorCloudLifecycleRecorder } from "./cursor-cloud-lifecycle.js";
 import { runExclusiveCursorSessionTurn, __testUtils as cursorSessionTurnQueueTestUtils } from "./cursor-session-turn-queue.js";
 
 function makeInitialMessage(model: Model<Api>): AssistantMessage {
@@ -45,11 +51,25 @@ function makeInitialMessage(model: Model<Api>): AssistantMessage {
 	};
 }
 
+export interface CursorProviderOwnership {
+	scope: CursorTurnScope;
+	bridge?: CursorPiToolBridge;
+	nativeDisplay?: CursorNativeToolDisplayState;
+	recordCloudLifecycle: CursorCloudLifecycleRecorder;
+}
+
 export function streamCursor(
 	model: Model<Api>,
 	context: Context,
 	options?: SimpleStreamOptions,
+	ownership?: CursorProviderOwnership,
 ): AssistantMessageEventStream {
+	const { scope, bridge, nativeDisplay, recordCloudLifecycle } = ownership ?? {
+		scope: getCursorSessionScopeSnapshot(),
+		bridge: getRegisteredCursorPiToolBridge(),
+		nativeDisplay: getCursorNativeToolDisplayState(),
+		recordCloudLifecycle: captureCursorCloudLifecycleRecorder(),
+	};
 	const stream = createAssistantMessageEventStream();
 	const sdkEventDebugRef: { current?: CursorSdkEventDebugSink } = {};
 	attachCursorSdkEventDebugPiStreamTap(stream, sdkEventDebugRef);
@@ -59,6 +79,10 @@ export function streamCursor(
 
 		const runner = new CursorProviderTurnRunner({
 			model,
+			scope,
+			bridge,
+			nativeDisplay,
+			recordCloudLifecycle,
 			context,
 			stream,
 			partial,
@@ -69,7 +93,7 @@ export function streamCursor(
 		try {
 			stream.push({ type: "start", partial });
 			await runExclusiveCursorSessionTurn(
-				getCursorSessionScopeKey(),
+				scope.scopeKey,
 				() => runner.run(installCursorSdkProcessErrorGuard()),
 				options?.signal,
 			);

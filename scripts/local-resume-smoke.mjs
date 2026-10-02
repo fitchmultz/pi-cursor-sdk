@@ -473,7 +473,7 @@ async function runFallbackSmoke() {
 			const fallback = await promptAndRead({
 				rpc,
 				artifactDir: artifactRoot,
-				message: "What exact LOCAL_FALLBACK marker is visible after the missing local agent fallback? Reply exactly MARKER=<marker> if visible, otherwise NO_MARKER.",
+				message: "Repeat the exact LOCAL_FALLBACK marker from my immediately previous message in this conversation. Use only conversation history; do not use tools or inspect files. Reply exactly MARKER=<marker> if that prior message is present, otherwise NO_MARKER.",
 				timeoutMs,
 				seenMetadata,
 			});

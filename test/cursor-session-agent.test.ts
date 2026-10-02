@@ -637,6 +637,7 @@ describe("cursor-session-agent", () => {
 
 		registerCursorSessionAgentLifecycle(pi);
 		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/test.jsonl");
+		await pi.runSessionStart({ cwd: "/tmp/project", sessionManager: { getSessionFile: () => "/tmp/sessions/test.jsonl" } });
 		await acquireSessionCursorAgent({
 			apiKey: "test-key",
 			agentMode: "agent" as const,
@@ -661,6 +662,7 @@ describe("cursor-session-agent", () => {
 
 		registerCursorSessionAgentLifecycle(pi);
 		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/test.jsonl");
+		await pi.runSessionStart({ cwd: "/tmp/project", sessionManager: { getSessionFile: () => "/tmp/sessions/test.jsonl" } });
 		const params = {
 			apiKey: "test-key",
 			agentMode: "agent" as const,
@@ -784,7 +786,7 @@ describe("cursor-session-agent", () => {
 
 		registerCursorSessionScope(pi);
 		registerCursorSessionAgentLifecycle(pi);
-		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/session-a.jsonl");
+		await pi.runSessionStart({ cwd: "/tmp/project", sessionManager: { getSessionFile: () => "/tmp/sessions/session-a.jsonl" } });
 		await acquireSessionCursorAgent({
 			apiKey: "test-key",
 			agentMode: "agent" as const,
@@ -843,6 +845,7 @@ describe("cursor-session-agent", () => {
 
 		registerCursorSessionAgentLifecycle(pi);
 		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/test.jsonl");
+		await pi.runSessionStart({ cwd: "/tmp/project", sessionManager: { getSessionFile: () => "/tmp/sessions/test.jsonl" } });
 		await acquireSessionCursorAgent({
 			apiKey: "test-key",
 			agentMode: "agent" as const,
@@ -867,6 +870,7 @@ describe("cursor-session-agent", () => {
 
 		registerCursorSessionAgentLifecycle(pi);
 		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/test.jsonl");
+		await pi.runSessionStart({ cwd: "/tmp/project", sessionManager: { getSessionFile: () => "/tmp/sessions/test.jsonl" } });
 		const params = {
 			apiKey: "test-key",
 			agentMode: "agent" as const,

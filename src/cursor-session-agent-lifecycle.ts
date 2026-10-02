@@ -4,9 +4,10 @@ import type {
 	SessionCompactEvent,
 	SessionShutdownEvent,
 	SessionTreeEvent,
+	SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { clearCursorSdkHttp1 } from "./cursor-http1.js";
-import { onCursorSessionScopeKeyChange } from "./cursor-session-scope.js";
+import { cursorSessionScopeKeyForManager, hasLiveCursorSessions, onCursorSessionScopeKeyChange } from "./cursor-session-scope.js";
 import {
 	disposeSessionCursorAgent,
 	invalidateSessionAgent,
@@ -14,6 +15,7 @@ import {
 } from "./cursor-session-agent.js";
 
 export interface CursorSessionAgentLifecycleExtensionApi {
+	on(event: "session_start", handler: ExtensionHandler<SessionStartEvent>): void;
 	on(event: "session_shutdown", handler: ExtensionHandler<SessionShutdownEvent>): void;
 	on(event: "session_compact", handler: ExtensionHandler<SessionCompactEvent>): void;
 	on(event: "session_before_tree", handler: ExtensionHandler<SessionBeforeTreeEvent>): void;
@@ -22,30 +24,33 @@ export interface CursorSessionAgentLifecycleExtensionApi {
 }
 
 export function registerCursorSessionAgentLifecycle(pi: CursorSessionAgentLifecycleExtensionApi): void {
-	onCursorSessionScopeKeyChange(async (previousScopeKey) => {
+	let scopeKey: string | undefined;
+	pi.on("session_start", (_event, ctx) => { scopeKey = cursorSessionScopeKeyForManager(ctx.sessionManager); });
+	onCursorSessionScopeKeyChange(pi, async (previousScopeKey) => {
 		await disposeSessionCursorAgent(previousScopeKey);
 	});
 	pi.on("session_shutdown", async (event) => {
 		try {
+			if (scopeKey === undefined) return;
 			if (event.reason === "reload") {
-				await resetSessionCursorAgent();
+				await resetSessionCursorAgent(scopeKey);
 				return;
 			}
-			await disposeSessionCursorAgent();
+			await disposeSessionCursorAgent(scopeKey);
 		} finally {
-			clearCursorSdkHttp1();
+			if (!hasLiveCursorSessions()) clearCursorSdkHttp1();
 		}
 	});
 	pi.on("session_compact", () => {
-		invalidateSessionAgent();
+		if (scopeKey !== undefined) invalidateSessionAgent(scopeKey);
 	});
 	pi.on("session_before_tree", () => {
-		invalidateSessionAgent();
+		if (scopeKey !== undefined) invalidateSessionAgent(scopeKey);
 	});
 	pi.on("session_tree", async () => {
-		await resetSessionCursorAgent();
+		if (scopeKey !== undefined) await resetSessionCursorAgent(scopeKey);
 	});
 	pi.on("model_select", () => {
-		invalidateSessionAgent();
+		if (scopeKey !== undefined) invalidateSessionAgent(scopeKey);
 	});
 }

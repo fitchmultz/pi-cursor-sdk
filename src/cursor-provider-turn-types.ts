@@ -16,7 +16,16 @@ import type { CursorPrompt } from "./context.js";
 import type { CursorResolvedSetting } from "./cursor-config.js";
 import type { CursorSdkTurnUsage } from "./cursor-usage-accounting.js";
 
+import type { CursorPiToolBridge } from "./cursor-pi-tool-bridge.js";
+import type { CursorCloudLifecycleRecorder } from "./cursor-cloud-lifecycle.js";
+import type { CursorNativeToolDisplayState } from "./cursor-native-tool-display-state.js";
+import type { CursorTurnScope } from "./cursor-session-scope.js";
+
 export interface CursorProviderTurnRunnerParams {
+	scope: CursorTurnScope;
+	bridge?: CursorPiToolBridge;
+	nativeDisplay?: CursorNativeToolDisplayState;
+	recordCloudLifecycle?: CursorCloudLifecycleRecorder;
 	model: Model<Api>;
 	context: Context;
 	stream: AssistantMessageEventStream;
@@ -94,6 +103,7 @@ export interface LocalCursorProviderTurnPrepareResult extends CursorProviderTurn
 }
 
 export interface CloudCursorProviderTurnPrepareResult extends CursorProviderTurnPrepareResultBase {
+	recordCloudLifecycle?: CursorCloudLifecycleRecorder;
 	runtimeTarget: "cloud";
 	runtime: DirectCursorProviderTurnRuntime;
 	sessionAgentScopeKey?: undefined;

@@ -55,18 +55,18 @@ import { normalizeContext } from "@earendil-works/pi-ai";
 import extensionFactory from "../src/index.js";
 import { discoverModels } from "../src/model-discovery.js";
 import { __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
-import { streamCursorLazy } from "../src/cursor-provider-lazy.js";
 import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
 import { __testUtils as cursorPiToolBridgeTestUtils } from "../src/cursor-pi-tool-bridge.js";
 import { __testUtils as cursorHttp1TestUtils } from "../src/cursor-http1.js";
 import { installCursorSessionStoreMock } from "./helpers/cursor-session-store.js";
 import {
 	collectEvents,
-	createExtensionRegistrationPi,
 	makeContext,
 	makeModel,
 	makeProviderModelConfig,
 } from "./helpers/pi-harness.js";
+
+import { createExtensionPi } from "./helpers/index-extension-test-kit.js";
 
 const mockedDiscover = vi.mocked(discoverModels);
 const mockedAgentCreate = vi.mocked(Agent.create);
@@ -98,15 +98,17 @@ describe("extension session cwd integration", () => {
 	it("passes pi session cwd from extension registration through streamSimple to Agent.create", async () => {
 		const sessionDir = mkdtempSync(join(tmpdir(), "pi-cursor-index-agent-cwd-"));
 		try {
-			const pi = createExtensionRegistrationPi();
+			const pi = createExtensionPi();
 			await extensionFactory(pi);
 			await pi.runSessionStart({ cwd: sessionDir, hasUI: false });
 
 			expect(pi.registerProvider).toHaveBeenCalledOnce();
 			const streamSimple = pi._registered[0]?.config.streamSimple;
-			expect(streamSimple).toBe(streamCursorLazy);
+			expect(streamSimple).toEqual(expect.any(Function));
 
-			await collectEvents(streamSimple!(makeModel("composer-2.5"), normalizeContext(makeContext()), { apiKey: "test-key" }));
+			const headers = {};
+			await pi.invokeEvent("before_provider_headers", { type: "before_provider_headers", headers });
+			await collectEvents(streamSimple!(makeModel("composer-2.5"), normalizeContext(makeContext()), { apiKey: "test-key", headers }));
 
 			expect(mockedAgentCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -118,6 +120,7 @@ describe("extension session cwd integration", () => {
 				}),
 			);
 			expect(mockedCursorConfigure).not.toHaveBeenCalled();
+			await pi.runSessionShutdown({ reason: "quit" });
 		} finally {
 			rmSync(sessionDir, { recursive: true, force: true });
 		}

@@ -10,7 +10,6 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import type { TSchema } from "typebox";
-import { getCursorSessionCwd } from "./cursor-session-scope.js";
 import {
 	BUILTIN_NATIVE_CURSOR_TOOL_NAMES,
 	CURSOR_MODEL_ACTIVE_REPLAY_TOOL_NAMES,
@@ -33,6 +32,7 @@ import {
 import {
 	consumeCursorNativeToolDisplay,
 	isCursorReplayToolCallId,
+	type CursorNativeToolDisplayState,
 } from "./cursor-native-tool-display-state.js";
 
 
@@ -155,12 +155,13 @@ function getNativeReplayStrategy(toolName: string): NativeReplayStrategy | undef
 export function wrapNativeCursorTool<TParams extends TSchema, TDetails, TState>(
 	definition: ToolDefinition<TParams, TDetails, TState>,
 	getCurrentDefinition: () => ToolDefinition<TParams, TDetails, TState>,
+	state: CursorNativeToolDisplayState,
 ): ToolDefinition<TParams, TDetails, TState> {
 	const strategy = getNativeReplayStrategy(definition.name);
 	return {
 		...definition,
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
-			const cursorDisplay = consumeCursorNativeToolDisplay(toolCallId);
+			const cursorDisplay = consumeCursorNativeToolDisplay(toolCallId, state, definition.name);
 			if (cursorDisplay) {
 				if (cursorDisplay.isError) {
 					const text = cursorDisplay.result.content
@@ -211,9 +212,11 @@ export function createNativeCursorToolDefinition(toolName: NativeCursorToolName,
 export function registerNativeCursorTool(
 	pi: Pick<import("@earendil-works/pi-coding-agent").ExtensionAPI, "registerTool">,
 	toolName: NativeCursorToolName,
+	getCwd: () => string,
+	state: CursorNativeToolDisplayState,
 ): void {
-	const definition = createNativeCursorToolDefinition(toolName, getCursorSessionCwd());
-	pi.registerTool(wrapNativeCursorTool(definition, () => createNativeCursorToolDefinition(toolName, getCursorSessionCwd())));
+	const definition = createNativeCursorToolDefinition(toolName, getCwd());
+	pi.registerTool(wrapNativeCursorTool(definition, () => createNativeCursorToolDefinition(toolName, getCwd()), state));
 }
 
 export { CURSOR_MODEL_ACTIVE_REPLAY_TOOL_NAMES, CURSOR_REPLAY_TOOL_NAMES };

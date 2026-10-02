@@ -349,6 +349,30 @@ describe("cursor sdk event debug session grouping", () => {
 		}
 	});
 
+	it("finalizes the captured session file even if another session binds before finalization", async () => {
+		const root = mkdtempSync(join(tmpdir(), "pi-cursor-debug-binding-"));
+		const { __testUtils: scopeTestUtils } = await import("../src/cursor-session-scope.js");
+		sdkEventDebugTestUtils.resetSessionDebugState();
+		try {
+			const sessionA = join(root, "parent.jsonl");
+			const sessionB = join(root, "child.jsonl");
+			writeFileSync(sessionA, "parent journal\n");
+			writeFileSync(sessionB, "child journal\n");
+			scopeTestUtils.set(root, sessionA);
+			const sink = CursorSdkEventDebugSink.maybeCreate({ cwd: root, modelId: "gpt-5.5", provider: "cursor", env: { PI_CURSOR_SDK_EVENT_DEBUG: "1", PI_CURSOR_SDK_EVENT_DEBUG_DIR: join(root, "events") } });
+			scopeTestUtils.set(root, sessionB);
+			await sink!.finalize();
+			expect(readFileSync(join(sink!.artifactDir, sdkEventDebugTestUtils.ARTIFACTS.piSessionSnapshot), "utf8")).toBe("parent journal\n");
+			const manifest = JSON.parse(readFileSync(join(sink!.sessionDir!, sdkEventDebugTestUtils.SESSION_MANIFEST), "utf8"));
+			expect(manifest.sessionFile).toBe(sessionA);
+			expect(manifest.turns[0].summary.sessionFile).toBe(sessionA);
+		} finally {
+			sdkEventDebugTestUtils.resetSessionDebugState();
+			scopeTestUtils.reset();
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	it("keeps pinned run dirs isolated from session grouping", () => {
 		const artifactDir = mkdtempSync(join(tmpdir(), "pi-cursor-sdk-event-debug-pinned-"));
 		sdkEventDebugTestUtils.resetSessionDebugState();

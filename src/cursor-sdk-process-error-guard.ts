@@ -23,7 +23,7 @@ type GenericProcessEmit = (event: string | symbol, ...args: unknown[]) => boolea
 // ConnectRPC suppression remains scoped to active provider turns.
 const activeProviderTurns = new Set<CursorSdkProcessErrorGuardToken>();
 const activeSessions = new Set<CursorSdkSessionProcessErrorGuardToken>();
-let activeLifecycleSessionGuard: CursorSdkSessionProcessErrorGuard | undefined;
+const lifecycleSessionGuards = new Map<object, CursorSdkSessionProcessErrorGuard>();
 let originalProcessEmit: GenericProcessEmit | undefined;
 let cursorProcessEmit: GenericProcessEmit | undefined;
 let bunUnhandledRejectionListenerInstalled = false;
@@ -143,8 +143,8 @@ export const __testUtils = {
 	activeProviderTurnCount: (): number => activeProviderTurns.size,
 	activeSessionCount: (): number => activeSessions.size,
 	resetLifecycleSessionGuard(): void {
-		activeLifecycleSessionGuard?.dispose();
-		activeLifecycleSessionGuard = undefined;
+		for (const guard of lifecycleSessionGuards.values()) guard.dispose();
+		lifecycleSessionGuards.clear();
 	},
 };
 
@@ -186,11 +186,11 @@ export function installCursorSdkSessionProcessErrorGuard(): CursorSdkSessionProc
 
 export function registerCursorSdkSessionProcessErrorGuard(pi: Pick<ExtensionAPI, "on">): void {
 	pi.on("session_start", () => {
-		activeLifecycleSessionGuard?.dispose();
-		activeLifecycleSessionGuard = installCursorSdkSessionProcessErrorGuard();
+		lifecycleSessionGuards.get(pi)?.dispose();
+		lifecycleSessionGuards.set(pi, installCursorSdkSessionProcessErrorGuard());
 	});
 	pi.on("session_shutdown", () => {
-		activeLifecycleSessionGuard?.dispose();
-		activeLifecycleSessionGuard = undefined;
+		lifecycleSessionGuards.get(pi)?.dispose();
+		lifecycleSessionGuards.delete(pi);
 	});
 }

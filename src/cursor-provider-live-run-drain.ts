@@ -64,12 +64,12 @@ function getCursorNativeReplayIdFromToolCallId(toolCallId: string): string | und
 	return CURSOR_NATIVE_REPLAY_TOOL_ID_PATTERN.exec(toolCallId)?.[1];
 }
 
-export function getPendingCursorLiveRun(context: Context): CursorLiveRun | undefined {
-	return cursorLiveRuns.getPendingFromContext(context, getCursorNativeReplayIdFromToolCallId);
+export function getPendingCursorLiveRun(context: Context, scopeKey: string): CursorLiveRun | undefined {
+	return cursorLiveRuns.getPendingFromContext(context, getCursorNativeReplayIdFromToolCallId, scopeKey);
 }
 
-export function getActiveCursorLiveRunForCurrentScope(): CursorLiveRun | undefined {
-	return cursorLiveRuns.getActiveForScope();
+export function getActiveCursorLiveRunForCurrentScope(scopeKey?: string): CursorLiveRun | undefined {
+	return cursorLiveRuns.getActiveForScope(scopeKey);
 }
 
 function splitTextIntoReplayDeltas(text: string): string[] {
@@ -193,7 +193,7 @@ function emitCursorNativeToolUseTurn(
 		stream.push({ type: "toolcall_delta", contentIndex, delta: serializedArgs, partial });
 		const block = partial.content[contentIndex];
 		if (block.type === "toolCall") stream.push({ type: "toolcall_end", contentIndex, toolCall: block, partial });
-		if (recordCursorNativeToolDisplay({ ...tool, terminate: shouldTerminate })) {
+		if (recordCursorNativeToolDisplay({ ...tool, terminate: shouldTerminate }, run.nativeDisplay)) {
 			run.recordedToolDisplayIds.push(tool.id);
 			debugRecorder?.recordDrainEvent("native_tool_display_recorded", {
 				toolId: tool.id,
@@ -436,12 +436,13 @@ export async function drainExistingCursorLiveRunBeforeSend(
 	partial: AssistantMessage,
 	model: Model<Api>,
 	context: Context,
-	signal?: AbortSignal,
-	turnDebugRecorder?: CursorSdkEventDebugRecorder,
+	signal: AbortSignal | undefined,
+	turnDebugRecorder: CursorSdkEventDebugRecorder | undefined,
+	scopeKey: string,
 ): Promise<LiveRunPreSendOutcome> {
 	turnDebugRecorder?.recordDrainEvent("pre_send_start", {});
 	while (true) {
-		const run = getPendingCursorLiveRun(context) ?? getActiveCursorLiveRunForCurrentScope();
+		const run = getPendingCursorLiveRun(context, scopeKey) ?? getActiveCursorLiveRunForCurrentScope(scopeKey);
 		if (!run || run.disposed) {
 			turnDebugRecorder?.recordDrainEvent("pre_send_end", { outcome: "continue_send", reason: "no_pending_run" });
 			return "continue_send";

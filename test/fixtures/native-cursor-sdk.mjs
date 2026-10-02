@@ -1,14 +1,24 @@
 // Offline transport fixture matching installed @cursor/sdk 1.0.32's public
-// SDKAgent/Run/AgentUsage contracts. Pi and the extension are not mocked.
+// SDKAgent/Run/AgentUsage contracts (dist/esm/{agent,run,usage-types}.d.ts).
+// Controlled failures use RunResult's documented error/cancelled statuses;
+// heldCwds controls transport completion, not Pi scheduling or attribution.
+// Pi and the extension are not mocked.
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 
 export const state = globalThis[Symbol.for("pi-cursor-native-fixture")] ??= {
   created: [], sends: [], disposed: [], cancelled: [], bridgeResults: [], stores: [],
+  heldCwds: new Set(), failedCwds: new Set(),
+  configured: [],
+  cloudMutations: [],
 };
 export const Cursor = {
-  configure() {},
-  models: { list: async () => [{ id: "fixture", displayName: "Offline Cursor fixture" }] },
+  configure(options) { state.configured.push(options); },
+  models: { list: async () => [{
+    id: "fixture", displayName: "Offline Cursor fixture",
+    parameters: [{ id: "fast", displayName: "Fast", values: [{ value: "false" }, { value: "true" }] }],
+    variants: [{ params: [{ id: "fast", value: "false" }], displayName: "Offline Cursor fixture", isDefault: true }],
+  }] },
 };
 export const getDefaultSdkStateRoot = () => join(process.env.PI_CODING_AGENT_DIR, "cursor-state");
 export const SqliteLocalAgentStore = {
@@ -20,9 +30,22 @@ export const SqliteLocalAgentStore = {
 };
 export const createAgentPlatform = async () => ({ checkpointStore: { loadLatest: async () => undefined } });
 export const Agent = {
+  archive: async (agentId) => {
+    state.cloudMutations.push({ action: "archive", agentId });
+    state.cloudMutationWait?.entered.resolve();
+    await state.cloudMutationWait?.release.promise;
+  },
+  delete: async (agentId) => {
+    state.cloudMutations.push({ action: "delete", agentId });
+    state.cloudMutationWait?.entered.resolve();
+    await state.cloudMutationWait?.release.promise;
+  },
   messages: { list: async () => [] },
   create: async (options) => {
-    const agentId = `agent-fixture-${state.created.length + 1}`;
+    const index = state.created.length + 1;
+    const agentId = options.cloud
+      ? `bc-00000000-0000-0000-0000-${index.toString(16).padStart(12, "0")}`
+      : `agent-fixture-${index}`;
     state.created.push({ agentId, options });
     const runs = [];
     return {
@@ -33,7 +56,7 @@ export const Agent = {
       [Symbol.asyncDispose]: async () => { state.disposed.push(agentId); },
       send: async (message, sendOptions) => {
         const index = state.sends.length + 1;
-        state.sends.push({ agentId, message, mode: sendOptions.mode });
+        state.sends.push({ agentId, message, mode: sendOptions.mode, force: sendOptions.local?.force });
         const id = `run-fixture-${index}`;
         const request = [...message.text.matchAll(/(?:^|\n)User: ([^\n]*)/g)].at(-1)?.[1] ?? "";
         let status = "running";
@@ -54,7 +77,12 @@ export const Agent = {
           wait: () => completion,
           cancel: async () => { status = "cancelled"; state.cancelled.push(id); settle({ id, status }); },
         };
-        if (request.includes("CANCEL_FIXTURE")) return run;
+        if (request.includes("CANCEL_FIXTURE") || state.heldCwds.has(options.local?.cwd)) return run;
+        if (state.failedCwds.delete(options.local?.cwd)) {
+          status = "error";
+          settle({ id, status, error: { message: "offline controlled run failure" } });
+          return run;
+        }
         setTimeout(async () => {
           try {
             if (request.includes("BRIDGE_FIXTURE")) {

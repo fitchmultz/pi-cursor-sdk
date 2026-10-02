@@ -111,17 +111,17 @@ export async function sendCursorProviderTurn(sendParams: SendCursorProviderTurnP
 			},
 		};
 		throwIfAborted();
-		if (prepared.runtimeTarget === "local" && consumeCursorLocalForceOverride(prepared.localForce)) {
+		if (prepared.runtimeTarget === "local" && consumeCursorLocalForceOverride(prepared.localForce, params.scope.scopeKey)) {
 			sendOptions.local = { force: true };
 		}
 		const runPromise = agent.send(payload, sendOptions);
 		// Record at send initiation (promise created), including later reject/cancel paths.
 		if (prepared.runtimeTarget === "local") {
-			recordCursorSessionAgentLineage(agent.agentId);
+			recordCursorSessionAgentLineage(agent.agentId, params.scope.scopeKey);
 		}
 		const run = await runPromise;
 		sdkRun = run;
-		if (prepared.runtimeTarget === "cloud" && !recordCursorCloudLifecycleSafely({ agentId: run.agentId, runId: run.id }, resolvedApiKey)) {
+		if (prepared.runtimeTarget === "cloud" && !(params.recordCloudLifecycle ?? recordCursorCloudLifecycleSafely)({ agentId: run.agentId, runId: run.id }, resolvedApiKey)) {
 			const cancellationConfirmed = await requestBoundedCloudRunCancellation(run);
 			throw createCursorCloudLifecyclePersistenceError(run.agentId, "run", cancellationConfirmed, resolvedApiKey);
 		}

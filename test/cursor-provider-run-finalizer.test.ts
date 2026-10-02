@@ -1,3 +1,4 @@
+import { getCursorSessionScopeSnapshot } from "../src/cursor-session-scope.js";
 import { describe, expect, it, vi } from "vitest";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { LocalAgentStore, SDKAgent } from "@cursor/sdk";
@@ -100,6 +101,7 @@ describe("CursorRunFinalizer", () => {
 		const sdkProcessErrorGuard = installCursorSdkProcessErrorGuard();
 		const finalizer = new CursorRunFinalizer({
 			runnerParams: {
+				scope: getCursorSessionScopeSnapshot(),
 				model: makeModel(),
 				context: makeContext(),
 				stream: createAssistantMessageEventStream(),
@@ -199,6 +201,7 @@ describe("CursorRunFinalizer", () => {
 		} as unknown as CursorSdkEventDebugSink;
 		const finalizer = new CursorRunFinalizer({
 			runnerParams: {
+				scope: getCursorSessionScopeSnapshot(),
 				model,
 				context,
 				stream,
@@ -306,6 +309,7 @@ describe("CursorRunFinalizer", () => {
 		} as unknown as CursorSdkEventDebugSink;
 		const finalizer = new CursorRunFinalizer({
 			runnerParams: {
+				scope: getCursorSessionScopeSnapshot(),
 				model,
 				context,
 				stream,

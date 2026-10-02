@@ -16,6 +16,7 @@ import { __testUtils as modelDiscoveryTestUtils } from "../src/model-discovery.j
 import type { ModelListItem } from "@cursor/sdk";
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { CURSOR_HTTP1_ENV } from "../src/cursor-config.js";
+import { registerCursorSessionScope } from "../src/cursor-session-scope.js";
 import {
 	createExtensionCommandContext,
 	createExtensionTestContext,
@@ -102,7 +103,7 @@ function createCursorRuntimeHarness(options: {
 		},
 	});
 	const ctx = createExtensionTestContext({
-		cwd: options.cwd,
+		cwd: options.cwd ?? process.cwd(),
 		mode: options.mode ?? "tui",
 		hasUI: options.hasUI ?? true,
 		model: options.modelId
@@ -116,6 +117,7 @@ function createCursorRuntimeHarness(options: {
 			getBranch: vi.fn<ExtensionContext["sessionManager"]["getBranch"]>(() => options.branch ?? []),
 		},
 	});
+	registerCursorSessionScope(pi);
 	registerCursorRuntimeControls(pi);
 	const commandCtx = createExtensionCommandContext({
 		cwd: ctx.cwd,
@@ -717,6 +719,7 @@ describe("Cursor runtime state", () => {
 				activeTools: ["custom_bridge_tool"],
 				initialTools: [createTestToolInfo("custom_bridge_tool", undefined, "Custom bridge tool")],
 			});
+			registerCursorSessionScope(pi);
 			registerCursorRuntimeControls(pi);
 			const ctx = createExtensionTestContext();
 			await pi.runCommand("cursor-tools", "", { ui: ctx.ui, hasUI: true });
@@ -759,6 +762,7 @@ describe("Cursor runtime state", () => {
 		const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
 		try {
 			const pi = createPiHarness();
+			registerCursorSessionScope(pi);
 			registerCursorRuntimeControls(pi);
 			await pi.runCommand("cursor-tools", "", { hasUI: false });
 

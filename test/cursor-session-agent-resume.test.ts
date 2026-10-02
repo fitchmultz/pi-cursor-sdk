@@ -496,6 +496,10 @@ describe("cursor-session-agent-resume", () => {
 	});
 
 	it("clears restored handles on tree navigation and compaction", async () => {
+		const pi = createPiHarness();
+		registerCursorSessionScope(pi);
+		registerCursorSessionAgentResume(pi);
+		await pi.runSessionStart({ cwd: "/tmp/project", sessionManager: { getSessionFile: () => "/tmp/session.jsonl" } });
 		resumeTestUtils.set({
 			scopeKey: "/tmp/session.jsonl",
 			sessionFile: "/tmp/session.jsonl",
@@ -516,9 +520,6 @@ describe("cursor-session-agent-resume", () => {
 				createdAt: "2026-07-07T00:00:00.000Z",
 			},
 		});
-		const pi = createPiHarness();
-		registerCursorSessionAgentResume(pi);
-
 		await pi.runSessionTree();
 		expect(getMatchingCursorSessionAgentResumeHandle("pool-1")).toBeUndefined();
 

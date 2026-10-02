@@ -1,6 +1,7 @@
 import type { CursorSdkModule } from "./cursor-sdk-runtime.js";
 import type { CursorResolvedSetting } from "./cursor-config.js";
 import { asRecord } from "./cursor-record-utils.js";
+import { getCursorSessionSettings } from "./cursor-session-settings.js";
 
 export const CURSOR_HTTP1_ENTRY_TYPE = "cursor-http1-state";
 
@@ -12,7 +13,6 @@ type CursorHttp1Sdk = {
 	Cursor: Pick<CursorSdkModule["Cursor"], "configure">;
 };
 
-let sessionCursorHttp1Enabled: boolean | undefined;
 let globalPreferenceAuthoritative = false;
 let configuredCursor: CursorHttp1Sdk["Cursor"] | undefined;
 
@@ -20,16 +20,16 @@ export function isCursorHttp1EntryData(value: unknown): value is CursorHttp1Entr
 	return typeof asRecord(value)?.enabled === "boolean";
 }
 
-export function getStoredCursorHttp1Enabled(): boolean | undefined {
-	return sessionCursorHttp1Enabled;
+export function getStoredCursorHttp1Enabled(scopeKey?: string): boolean | undefined {
+	return getCursorSessionSettings(scopeKey).http1;
 }
 
-export function setStoredCursorHttp1Enabled(enabled: boolean | undefined): void {
-	sessionCursorHttp1Enabled = enabled;
+export function setStoredCursorHttp1Enabled(enabled: boolean | undefined, scopeKey?: string): void {
+	getCursorSessionSettings(scopeKey).http1 = enabled;
 }
 
-export function getResolvedSessionCursorHttp1Enabled(): boolean | undefined {
-	return globalPreferenceAuthoritative ? undefined : sessionCursorHttp1Enabled;
+export function getResolvedSessionCursorHttp1Enabled(scopeKey?: string): boolean | undefined {
+	return globalPreferenceAuthoritative ? undefined : getStoredCursorHttp1Enabled(scopeKey);
 }
 
 export function setCursorHttp1GlobalPreferenceAuthoritative(authoritative: boolean): void {
@@ -58,7 +58,7 @@ export function configureCursorSdkHttp1(
 
 export const __testUtils = {
 	reset(): void {
-		sessionCursorHttp1Enabled = undefined;
+		setStoredCursorHttp1Enabled(undefined);
 		globalPreferenceAuthoritative = false;
 		configuredCursor = undefined;
 	},

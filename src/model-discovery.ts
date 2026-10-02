@@ -284,15 +284,6 @@ export function getCursorModelMetadata(modelId: string): CursorModelMetadata | u
 	return metadataByPiModelId.get(modelId);
 }
 
-export function getCursorModelMetadataEntries(): CursorModelMetadata[] {
-	return [...metadataByPiModelId.values()].map((metadata) => ({
-		...metadata,
-		defaultParams: cloneParams(metadata.defaultParams),
-		...(metadata.thinkingLevelMap ? { thinkingLevelMap: { ...metadata.thinkingLevelMap } } : {}),
-		parameterIds: { ...metadata.parameterIds },
-	}));
-}
-
 function setParam(params: ModelParameterValue[], id: string, value: string): void {
 	const existing = params.find((param) => param.id === id);
 	if (existing) {

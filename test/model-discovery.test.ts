@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -6,12 +6,16 @@ import {
 	discoverModels,
 	buildCursorModelSelection,
 	getCursorModelMetadata,
-	getCursorModelMetadataEntries,
 	__testUtils,
 	type CursorModelFallbackIssue,
 } from "../src/model-discovery.js";
 import { saveCachedContextWindow, __testUtils as contextWindowCacheTestUtils } from "../src/context-window-cache.js";
 import { FALLBACK_MODEL_ITEMS } from "../src/cursor-fallback-models.generated.js";
+
+vi.mock("node:fs", async (importOriginal) => {
+	const fs = await importOriginal<typeof import("node:fs")>();
+	return { ...fs, readFileSync: vi.fn(fs.readFileSync) };
+});
 
 vi.mock("@cursor/sdk", () => ({
 	Cursor: {
@@ -496,26 +500,27 @@ describe("discoverModels", () => {
 		}
 	});
 
-	it("loads the context-window cache once while registering a model catalog", async () => {
-		const tmpAgentDir = mkdtempSync(join(tmpdir(), "pi-cursor-context-window-count-"));
-		process.env.PI_CODING_AGENT_DIR = tmpAgentDir;
-		try {
-			contextWindowCacheTestUtils.resetUserContextWindowOverrideLoadCount();
-			process.env.CURSOR_API_KEY = "test-key-123";
-			mockedList.mockResolvedValueOnce(
-				Array.from({ length: 25 }, (_, index) => ({
-					id: `synthetic-model-${index}`,
-					displayName: `Synthetic Model ${index}`,
-					variants: [{ params: [], displayName: `Synthetic Model ${index}`, isDefault: true }],
-				})),
-			);
+	it.each([3, 25])("bounds populated context-window cache reads for a %i-model catalog", async (catalogSize) => {
+		const cachePath = join(tmpAgentDir, "cursor-sdk-context-windows.json");
+		writeFileSync(cachePath, JSON.stringify({ contextWindows: { default: 321000, "synthetic-model-0": 654000 } }));
+		process.env.CURSOR_API_KEY = "test-key-123";
+		mockedList.mockResolvedValueOnce(
+			Array.from({ length: catalogSize }, (_, index) => ({
+				id: `synthetic-model-${index}`,
+				displayName: `Synthetic Model ${index}`,
+				variants: [{ params: [], displayName: `Synthetic Model ${index}`, isDefault: true }],
+			})),
+		);
 
-			await discoverModels();
+		const models = await discoverModels();
 
-			expect(contextWindowCacheTestUtils.getUserContextWindowOverrideLoadCount()).toBe(1);
-		} finally {
-			rmSync(tmpAgentDir, { recursive: true, force: true });
-		}
+		expect(models).toHaveLength(catalogSize);
+		expect(models.find(({ id }) => id === "synthetic-model-0")?.contextWindow).toBe(654000);
+		expect(models.filter(({ id }) => id !== "synthetic-model-0").map(({ contextWindow }) => contextWindow))
+			.toEqual(Array(catalogSize - 1).fill(321000));
+		const cacheReads = vi.mocked(readFileSync).mock.calls.filter(([path]) => path === cachePath).length;
+		expect(cacheReads).toBeGreaterThan(0);
+		expect(cacheReads).toBeLessThanOrEqual(3);
 	});
 
 	it("lets user cache override context-qualified model IDs", async () => {

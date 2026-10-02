@@ -11,6 +11,7 @@
 - Bound bridge tool-call IDs while preserving unique calls and matching results (#237; thanks @gwatkins-arista).
 - Keep skill activation callable with its catalog/descriptions intact and a stable system prompt (#244).
 - Map SDK `reasoning_effort` controls to Pi thinking without changing SDK defaults.
+- Stop post-compaction occupancy floors from reusing retained pre-compaction measurements, including after Pi converts the summary to a user message. Use the compaction timestamp rather than comparing token totals, so genuine new context can grow past the old `tokensBefore` value without being discarded.
 
 ## 0.4.0 - 2026-09-26
 

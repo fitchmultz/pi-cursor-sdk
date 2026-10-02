@@ -37,6 +37,13 @@ export function getCursorSessionFile(): string | undefined {
 }
 
 /**
+ * Pi session id when known; used by Cursor→Pi todo mirroring.
+ */
+export function getCursorSessionId(): string | undefined {
+	return state.sessionId;
+}
+
+/**
  * Stable scope key for session-agent pooling. Falls back to a process-local anonymous key
  * before the first session_start (tests and early startup).
  */

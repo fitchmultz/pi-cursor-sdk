@@ -9,8 +9,11 @@ import { streamCursor } from "../src/cursor-provider.js";
 import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
 import {
 	collectEvents,
+	collectThinkingDeltas,
 	createPiHarness,
+	getDoneEvent,
 	getErrorEvent,
+	getTextEndEvent,
 	makeContext,
 	makeModel,
 	mockCreatedAgent,
@@ -112,11 +115,15 @@ describe("streamCursor cloud request validation", () => {
 		});
 		mockCreatedAgent({ agentId: "bc-00000000-0000-0000-0000-000000000001", send });
 
-		await collectEvents(streamCursor(makeModel("gpt-5.5@1m"), makeContext(), { apiKey: "test-key" }));
+		const events = await collectEvents(streamCursor(makeModel("gpt-5.5@1m"), makeContext(), { apiKey: "test-key" }));
 
 		expect(mockedInspectCursorCloudLocalState).not.toHaveBeenCalled();
 		expect(mockedCreate).toHaveBeenCalledOnce();
 		expect(send).toHaveBeenCalledOnce();
+		expect(getDoneEvent(events).reason).toBe("stop");
+		expect(getTextEndEvent(events).content).toBe("cloud done");
+		expect(collectThinkingDeltas(events)).toContain("Cursor cloud run:");
+		expect(collectThinkingDeltas(events)).not.toContain("raw usage");
 	});
 
 	it("rejects an invalid cloud branch before Agent.create", async () => {

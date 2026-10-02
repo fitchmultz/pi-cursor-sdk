@@ -1,30 +1,46 @@
 import { describe, expect, it } from "vitest";
-import { CURSOR_SDK_STARTUP_NOISE_PATTERNS, installCursorSdkOutputFilter, isCursorSdkStartupNoise } from "../src/cursor-sdk-output-filter.js";
+import { installCursorSdkOutputFilter, isCursorSdkStartupNoise } from "../src/cursor-sdk-output-filter.js";
 import { installCursorSdkOutputFilter as installScriptCursorSdkOutputFilter } from "../scripts/lib/cursor-sdk-output-filter.mjs";
+import { readInstalledPackageDistText } from "./helpers/installed-package.js";
+
+const sdkSource = readInstalledPackageDistText("@cursor/sdk");
 
 describe("isCursorSdkStartupNoise", () => {
-	it.each(CURSOR_SDK_STARTUP_NOISE_PATTERNS)("filters startup noise containing %j", (pattern) => {
-		expect(isCursorSdkStartupNoise(`prefix ${pattern} suffix`)).toBe(true);
+	it("filters [hooks] noise like provider integration tests", () => {
+		const message = '[hooks] SessionStart trigger matcher "startup" is not supported in Cursor, hooks will fire for all triggers';
+		expect(sdkSource).toContain("[hooks] ${");
+		expect(sdkSource).toContain('"SessionStart"');
+		expect(sdkSource).toContain('"startup"');
+		expect(sdkSource).toContain(' trigger matcher "');
+		expect(sdkSource).toContain(" is not supported in Cursor, hooks will fire for all triggers");
+		expect(isCursorSdkStartupNoise(message)).toBe(true);
+		expect(isCursorSdkStartupNoise(`prefix ${message} suffix`)).toBe(true);
 	});
 
-	it("filters [hooks] noise like provider integration tests", () => {
-		expect(
-			isCursorSdkStartupNoise(
-				'[hooks] SessionStart trigger matcher "startup" is not supported in Cursor, hooks will fire for all triggers',
-			),
-		).toBe(true);
+	it.each([
+		"managed_skills.startup_inventory",
+		"CursorPluginsAgentSkillsService load completed",
+		"LocalCursorRulesService load completed",
+		"AgentSkillsCursorRulesService load completed",
+	])("filters SDK startup message %j", (message) => {
+		expect(sdkSource).toContain(message);
+		expect(isCursorSdkStartupNoise(message)).toBe(true);
+		// Synthetic surrounding text exercises containment, not a captured SDK log line.
+		expect(isCursorSdkStartupNoise(`prefix ${message} suffix`)).toBe(true);
 	});
 
 	it("filters ignore-mapping initialization errors", () => {
-		expect(
-			isCursorSdkStartupNoise("Error initializing ignore mapping for /Users/dev/project: permission denied"),
-		).toBe(true);
+		const message = "Error initializing ignore mapping for .gitignore:";
+		expect(sdkSource).toMatch(/Error initializing ignore mapping for \$\{[^}]+\}:/);
+		expect(isCursorSdkStartupNoise(message)).toBe(true);
+		expect(isCursorSdkStartupNoise(`prefix ${message} suffix`)).toBe(true);
 	});
 
-	it("filters ripgrep path configuration warnings", () => {
-		expect(
-			isCursorSdkStartupNoise("Ripgrep path not configured. Call configureRipgrepPath() at startup."),
-		).toBe(true);
+	it("filters the known ripgrep path configuration message", () => {
+		const message = "Ripgrep path not configured. Call configureRipgrepPath() at startup.";
+		expect(sdkSource).toContain(message);
+		expect(isCursorSdkStartupNoise(message)).toBe(true);
+		expect(isCursorSdkStartupNoise(`prefix ${message} suffix`)).toBe(true);
 	});
 
 	it("does not filter unrelated provider output", () => {

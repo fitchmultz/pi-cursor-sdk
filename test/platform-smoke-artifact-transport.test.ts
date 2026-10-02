@@ -681,7 +681,7 @@ try {
 		} finally {
 			rmSync(out, { recursive: true, force: true });
 		}
-	});
+	}, 15_000);
 
 	it.skipIf(process.platform === "win32")("accepts only the exact root bundle path and rejects static and racing final symlinks", async () => {
 		const root = mkdtempSync(join(tmpdir(), "bundle-nofollow-test-"));

@@ -10,7 +10,9 @@ import { getCursorSessionScopeSnapshot, registerCursorSessionScope } from "./cur
 import { registerCursorSessionAgentLifecycle } from "./cursor-session-agent-lifecycle.js";
 import { registerCursorSessionAgentLineage } from "./cursor-session-agent-lineage.js";
 import { registerCursorSessionAgentResume } from "./cursor-session-agent-resume.js";
-import { resolveCursorApiKey } from "./cursor-api-key.js";
+import { resolveCursorApiKey, resolveCursorRuntimeApiKey } from "./cursor-api-key.js";
+import { clearModelListCache } from "./model-list-cache.js";
+import { hasCursorAuthChanged, resolveCursorKeyFingerprint } from "./cursor-model-auth-resync.js";
 import { registerCursorFallbackIssueWarning } from "./cursor-fallback-warning.js";
 import { registerCursorAgentsContextDedup } from "./cursor-agents-context-registration.js";
 import { registerCursorOverflowNormalization } from "./cursor-provider-overflow.js";
@@ -61,11 +63,41 @@ export default async function (pi: CursorExtensionApi) {
 		registerCursorFallbackIssueWarning(pi, fallbackIssue);
 	}
 
+	// Pi core has no logout/auth-change event, so a /logout (or key rotation)
+	// leaves the models captured above stale for the rest of the process.
+	// Re-resolve live auth on every session start and rebuild the provider when
+	// it moved. Logout re-runs discovery (empty list when
+	// PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT=1, else the fallback catalog),
+	// and the orphaned on-disk catalog is deleted.
+	let lastKeyFingerprint = await resolveCursorKeyFingerprint();
+	pi.on("session_start", async () => {
+		const currentFingerprint = await resolveCursorKeyFingerprint();
+		if (!hasCursorAuthChanged(lastKeyFingerprint, currentFingerprint)) return;
+		lastKeyFingerprint = currentFingerprint;
+		// Any move invalidates the previous catalog: logout orphans it and a
+		// rotated key can never match it, so delete before rediscovering.
+		clearModelListCache();
+		let resyncFallbackIssue: CursorModelFallbackIssue | undefined;
+		const resyncedModels = await discoverModels({
+			onFallback: (issue) => {
+				resyncFallbackIssue = issue;
+			},
+		});
+		registerCursorProvider(resyncedModels);
+		if (resyncFallbackIssue) {
+			registerCursorFallbackIssueWarning(pi, resyncFallbackIssue);
+		}
+	});
+
 	pi.registerCommand("cursor-refresh-models", {
 		description: "Refresh the live Cursor model catalog without restarting pi",
 		handler: async (_args, ctx) => {
 			let refreshFallbackIssue: CursorModelFallbackIssue | undefined;
-			const apiKey = resolveCursorApiKey(await ctx.modelRegistry.getApiKeyForProvider("cursor"));
+			const apiKey = resolveCursorApiKey(await ctx.modelRegistry.getApiKeyForProvider("cursor"))
+				?? await resolveCursorRuntimeApiKey();
+			// A refresh with no auth anywhere is the explicit post-logout state:
+			// drop the orphaned catalog before falling back so it cannot linger.
+			if (!apiKey) clearModelListCache();
 			const refreshedModels = await discoverModels({
 				apiKey,
 				forceRefresh: true,
@@ -74,6 +106,7 @@ export default async function (pi: CursorExtensionApi) {
 				},
 			});
 			registerCursorProvider(refreshedModels);
+			lastKeyFingerprint = await resolveCursorKeyFingerprint();
 			if (!ctx.hasUI) return;
 			if (refreshFallbackIssue) {
 				ctx.ui.notify(`Cursor model catalog refresh did not use a live catalog: ${refreshFallbackIssue.message}`, "warning");

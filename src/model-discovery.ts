@@ -10,6 +10,7 @@ import { getCursorModelSelectionIdentities } from "../shared/cursor-model-select
 import { loadContextWindowCache } from "./context-window-cache.js";
 import { loadCursorSdk } from "./cursor-sdk-runtime.js";
 import { resolveCursorApiKey, resolveCursorRuntimeApiKey } from "./cursor-api-key.js";
+import { parseEnvBoolean } from "./cursor-env-boolean.js";
 import { sanitizeCursorProviderError } from "./cursor-provider-errors.js";
 import {
 	fingerprintApiKey,
@@ -27,6 +28,16 @@ const TEXT_AND_IMAGE_INPUT: ProviderModelConfig["input"] = ["text", "image"];
 const AUTH_SETUP_HINT = "/login (Use an API key -> Cursor) or CURSOR_API_KEY; startup discovery does not parse Pi CLI arguments, and Cursor Agent CLI/Desktop login is not reused";
 const CATALOG_REFRESH_HINT =
 	"After adding auth to an already-started pi session, run /cursor-refresh-models to refresh the full live Cursor model catalog without restarting pi.";
+
+// Opt-in logged-out visibility: by default the no-auth path registers the
+// bundled fallback catalog so /login stays reachable from the model list.
+// PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT=1 registers nothing instead, so the
+// provider disappears from the model list until auth exists.
+export const HIDE_MODELS_WHEN_LOGGED_OUT_ENV = "PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT";
+
+export function resolveHideModelsWhenLoggedOut(env: Record<string, string | undefined> = process.env): boolean {
+	return parseEnvBoolean(env[HIDE_MODELS_WHEN_LOGGED_OUT_ENV], false);
+}
 
 export type CursorModelFallbackReason = "missing-api-key" | "discovery-failed" | "empty-model-list" | "cached-after-error";
 
@@ -354,6 +365,11 @@ export function buildCursorModelSelection(
 	return params.length > 0 ? { id: metadata.selectionModelId, params } : { id: metadata.selectionModelId };
 }
 
+async function useEmptyModels(options: DiscoverModelsOptions, issue: CursorModelFallbackIssue): Promise<ProviderModelConfig[]> {
+	options.onFallback?.(issue);
+	return registerModelItems([]);
+}
+
 async function useFallbackModels(options: DiscoverModelsOptions, issue: CursorModelFallbackIssue): Promise<ProviderModelConfig[]> {
 	options.onFallback?.(issue);
 	const { FALLBACK_MODEL_ITEMS } = await import("./cursor-fallback-models.generated.js");
@@ -363,6 +379,16 @@ async function useFallbackModels(options: DiscoverModelsOptions, issue: CursorMo
 export async function discoverModels(options: DiscoverModelsOptions = {}): Promise<ProviderModelConfig[]> {
 	const apiKey = await getDiscoveryApiKey(options.apiKey);
 	if (!apiKey) {
+		if (resolveHideModelsWhenLoggedOut()) {
+			// No credential anywhere (logged out or never logged in): register no
+			// models rather than a fallback catalog, so the provider disappears
+			// from the model list until auth exists. Login via /login, then a new
+			// session (or /cursor-refresh-models) restores the live catalog.
+			return useEmptyModels(options, {
+				reason: "missing-api-key",
+				message: `Cursor model discovery needs an API key from ${AUTH_SETUP_HINT}. No Cursor models are registered until auth exists; ${CATALOG_REFRESH_HINT}`,
+			});
+		}
 		return useFallbackModels(options, {
 			reason: "missing-api-key",
 			message: `Cursor model discovery needs an API key from ${AUTH_SETUP_HINT}. Using fallback Cursor models so /login and model selection still work; fallback models can run once auth exists. ${CATALOG_REFRESH_HINT}`,

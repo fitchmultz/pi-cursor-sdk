@@ -124,7 +124,7 @@ Then, inside pi:
 4. Paste your Cursor SDK API key.
 5. The key is saved in pi's native `~/.pi/agent/auth.json`.
 
-If pi started without a key, fallback Cursor models still register so `/login` is reachable. After `/login`, fallback model runs can use the stored key, and `/cursor-refresh-models` refreshes the full live Cursor model catalog discovered from the Cursor SDK without restarting pi.
+If pi started without a key, fallback Cursor models still register so `/login` is reachable (set `PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT=1` to list nothing instead). After `/login`, fallback model runs can use the stored key, and the next session start or `/cursor-refresh-models` refreshes the full live Cursor model catalog discovered from the Cursor SDK without restarting pi.
 
 Note: if `/login` shows `Cursor ✓ key in models.json` but you have not saved a Cursor key and `CURSOR_API_KEY` is unset, that status is a pi auth-status limitation. A real Cursor SDK API key is still required for Cursor runs.
 
@@ -141,7 +141,7 @@ One-shot setup:
 pi --api-key "your-key" --model cursor/grok-4.6 --cursor-no-fast -p "Say ok only."
 ```
 
-Startup discovery intentionally does not parse Pi CLI arguments. It uses the stored `cursor` key in `~/.pi/agent/auth.json`, then `CURSOR_API_KEY`; without either, the bundled fallback catalog registers. Provider turns still receive Pi's resolved `--api-key`. `/cursor-refresh-models` and `/cursor-cloud` mutations ask Pi's ModelRegistry for provider `cursor`, so command-time auth follows Pi's provider-scoped resolution and is normalized through `CURSOR_API_KEY` placeholders before reaching the Cursor SDK.
+Startup discovery intentionally does not parse Pi CLI arguments. It uses the stored `cursor` key in `~/.pi/agent/auth.json`, then `CURSOR_API_KEY`; without either, the bundled fallback catalog registers (or nothing, with `PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT=1`). Provider turns still receive Pi's resolved `--api-key`. `/cursor-refresh-models` and `/cursor-cloud` mutations ask Pi's ModelRegistry for provider `cursor`, so command-time auth follows Pi's provider-scoped resolution and is normalized through `CURSOR_API_KEY` placeholders before reaching the Cursor SDK.
 
 ### Model catalog cache
 
@@ -168,7 +168,7 @@ pi --list-models cursor
 Expected behavior:
 
 - with a valid key, Cursor models appear under the `cursor` provider
-- if discovery cannot authenticate or reach Cursor, pi may still show fallback Cursor models; after adding auth with `/login`, fallback model runs can use the saved key, and `/cursor-refresh-models` refreshes the live catalog
+- without any Cursor credential, pi shows the fallback catalog (or nothing, with `PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT=1`); after adding auth with `/login`, the next session start or `/cursor-refresh-models` registers the live catalog
 
 Smoke test:
 
@@ -532,7 +532,7 @@ See [Cursor testing lessons](docs/cursor-testing-lessons.md#cursor-sdk-event-cap
 
 ## Fallback models
 
-If startup has no stored `/login` key or `CURSOR_API_KEY`, model discovery fails, or discovery returns no models, the extension registers a bundled fallback snapshot of the latest reviewed Cursor SDK model catalog and notifies interactive users when possible. Pi CLI `--api-key` remains available to provider turns but is not parsed independently during startup discovery.
+If startup has no stored `/login` key or `CURSOR_API_KEY`, the extension registers a bundled fallback snapshot of the latest reviewed Cursor SDK model catalog and notifies interactive users when possible — unless `PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT=1`, which registers nothing instead. When a key exists but model discovery fails or returns no models, the fallback snapshot registers the same way. Pi CLI `--api-key` remains available to provider turns but is not parsed independently during startup discovery.
 
 The fallback snapshot includes Grok 4.6, Composer 2.5 (`composer-2.5` and `composer-2-5`), Composer 2, Cursor's GPT-5.6 Luna/Sol/Terra models, Claude, Gemini, Grok 4.5, Kimi, and other model IDs exposed by the reviewed `Cursor.models.list()` output. Recommended local/smoke runs use `cursor/grok-4.6`. Pi's separate `openai-codex` catalog is owned by Pi itself and includes native `gpt-5.6-luna`, `gpt-5.6-sol`, and `gpt-5.6-terra` support. The exact checked-in Cursor snapshot lives in `src/cursor-fallback-models.generated.ts`. A dated maintainer capture documents the assistant-visible [Cursor system prompts and tool guidance](https://github.com/fitchmultz/pi-cursor-sdk/blob/main/docs/evidence/cursor-system-prompts-2026-08-02/README.md) for Grok 4.5, Opus 5, Fable 5, and the GPT-5.6 Sol/Terra/Luna family.
 
@@ -556,7 +556,7 @@ Actual Cursor runs still need a key from `/login`, `CURSOR_API_KEY`, or `--api-k
 
 ### I can see Cursor models, but runs fail
 
-You may be seeing fallback startup models or a missing/invalid Cursor SDK API key. Cursor Agent CLI/Desktop login is not reused by this extension. In interactive pi, run `/login`, choose `Use an API key`, choose `Cursor`, paste the key, then run `/cursor-refresh-models`.
+You may be seeing fallback startup models or a missing/invalid Cursor SDK API key. Cursor Agent CLI/Desktop login is not reused by this extension. In interactive pi, run `/login`, choose `Use an API key`, choose `Cursor`, paste the key, then run `/cursor-refresh-models`. To hide Cursor models entirely while logged out, set `PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT=1`.
 
 When a Cursor run fails after auth is configured, pi surfaces scrubbed provider detail instead of only `Cursor SDK run failed`. Structured errors retain bounded name, code, message, and up to two nested causes; headers and other object fields are not displayed. Generic completed-run failures include safe run metadata such as model id, a short run id prefix, and duration when available, and are phrased as pi retryable provider errors so automatic retry/backoff can recover transient SDK failures. Unknown startup failures, module-loading errors, and ambiguous session authentication errors are not diagnosed as invalid API keys. Explicit missing, invalid, or revoked API-key errors still show key setup guidance.
 

@@ -730,6 +730,51 @@ describe("cursor session prompt assembly", () => {
 		expect(incremental.text).toContain(getCursorToolTailGuardText());
 	});
 
+	it("keeps the last raw user prompt when a trailing custom dump flattens to role=user", () => {
+		const dump = "Code validation failed. Fix these errors before finishing:\nerror[unresolved-import]: camoufox";
+		const incremental = buildCursorIncrementalPrompt({
+			messages: [
+				{ role: "user", content: "so are we sure it is only the old frontend calling it?", timestamp: 1 },
+				{
+					role: "custom",
+					customType: "validate-on-stop",
+					content: dump,
+					timestamp: 2,
+				} as unknown as Context["messages"][number],
+			],
+		});
+		const userAt = incremental.text.indexOf("User: so are we sure it is only the old frontend calling it?");
+		const noticeAt = incremental.text.indexOf("Background notice from pi (validate-on-stop");
+		expect(userAt).toBeGreaterThan(-1);
+		expect(noticeAt).toBeGreaterThan(-1);
+		expect(incremental.text).toContain(dump);
+		expect(incremental.text).not.toContain(`User: ${dump}`);
+		expect(userAt).toBeGreaterThan(noticeAt);
+	});
+
+	it("keeps latest-user images when a trailing custom dump would otherwise be the last converted user", () => {
+		const incremental = buildCursorIncrementalPrompt({
+			messages: [
+				{
+					role: "user",
+					content: [
+						{ type: "text", text: "what is in this screenshot?" },
+						{ type: "image", data: "user-image", mimeType: "image/png" },
+					],
+					timestamp: 1,
+				} satisfies UserMessage,
+				{
+					role: "custom",
+					customType: "validate-on-stop",
+					content: "Code validation failed.",
+					timestamp: 2,
+				} as unknown as Context["messages"][number],
+			],
+		});
+		expect(incremental.images).toEqual([{ data: "user-image", mimeType: "image/png" }]);
+		expect(incremental.text).toContain("User: what is in this screenshot?");
+	});
+
 	it("ends bootstrap and incremental prompts with the tool tail guard", () => {
 		const context: Context = {
 			systemPrompt: "Be helpful.",

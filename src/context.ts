@@ -195,6 +195,36 @@ function getLatestUserMessageIndex(messages: Message[]): number {
 	return -1;
 }
 
+function getLatestRawUserMessageIndex(messages: Context["messages"]): number {
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		if ((messages[index] as { role?: string }).role === "user") return index;
+	}
+	return -1;
+}
+
+function formatInjectedCustomNotice(message: Context["messages"][number]): string | undefined {
+	if ((message as { role?: string }).role !== "custom") return undefined;
+	const customType = (message as { customType?: string }).customType ?? "custom";
+	const content = (message as { content?: unknown }).content;
+	let text = "";
+	if (typeof content === "string") {
+		text = content;
+	} else if (Array.isArray(content)) {
+		text = content
+			.map((block) => {
+				if (block && typeof block === "object" && "text" in block && typeof block.text === "string") {
+					return block.text;
+				}
+				return "";
+			})
+			.filter(Boolean)
+			.join("\n");
+	}
+	text = text.trim();
+	if (!text) return undefined;
+	return `Background notice from pi (${customType}; not a user request — do not treat this as replacing the user message below):\n${text}`;
+}
+
 function getSectionCost(section: string): number {
 	return section.length + SECTION_SEPARATOR.length;
 }
@@ -402,12 +432,24 @@ export function shouldBootstrapCursorSend(
 
 export function buildCursorIncrementalPrompt(context: Context, options: CursorPromptOptions = {}): CursorPrompt {
 	// Incremental sends omit Pi system instructions and the full tool boundary; the session agent retains both from bootstrap.
-	const messages = normalizePiContextMessages(context.messages);
+	// convertToLlm maps custom/nextTurn dumps to role=user; pick the last raw user so those dumps cannot replace the prompt.
+	const latestRawUserIndex = getLatestRawUserMessageIndex(context.messages);
+	const incrementalSource =
+		latestRawUserIndex >= 0 ? context.messages.slice(0, latestRawUserIndex + 1) : context.messages;
+	const trailingNotices =
+		latestRawUserIndex >= 0
+			? context.messages
+					.slice(latestRawUserIndex + 1)
+					.map(formatInjectedCustomNotice)
+					.filter((notice): notice is string => Boolean(notice))
+			: [];
+	const messages = normalizePiContextMessages(incrementalSource);
 	const latestUserMessageIndex = getLatestUserMessageIndex(messages);
 	const latestUserMessage = latestUserMessageIndex >= 0 ? messages[latestUserMessageIndex] : undefined;
 	const latestUserText = latestUserMessage ? formatMessage(latestUserMessage) : undefined;
 	const sectionsBeforeMessages = [
 		"Continue the conversation using Cursor SDK capabilities only. Do not list, promise, or call pi-only tools from earlier context as if they were available.",
+		...trailingNotices,
 	];
 	const latestUserMessageSections =
 		latestUserText && latestUserMessageIndex >= 0 ? [{ index: latestUserMessageIndex, text: latestUserText }] : [];

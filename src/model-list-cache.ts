@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ModelListItem } from "@cursor/sdk";
@@ -177,3 +177,17 @@ export const __testUtils = {
 	DISABLE_ENV_VAR,
 	TTL_ENV_VAR,
 };
+
+// Delete the on-disk model catalog. Called when Cursor auth disappears (logout,
+// key rotation) so a stale catalog can never be served or mistaken for a live
+// one again. Never throws; returns true when a cache file was actually removed.
+export function clearModelListCache(): boolean {
+	try {
+		const path = getCachePath();
+		if (!existsSync(path)) return false;
+		rmSync(path, { force: true });
+		return !existsSync(path);
+	} catch {
+		return false;
+	}
+}

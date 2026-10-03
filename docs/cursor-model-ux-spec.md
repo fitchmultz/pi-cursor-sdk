@@ -108,6 +108,8 @@ For each model, use:
 
 This means new Cursor models and changed Cursor parameters are picked up after `/cursor-refresh-models`, reload, or restart.
 
+Pi core has no logout/auth-change event, so the extension re-resolves live auth on every `session_start` and compares the key fingerprint with the one used at startup. When auth appears, disappears (`/logout`), or rotates, it re-runs discovery and re-registers the provider: login collapses to the live catalog (or fresh cache), logout collapses to the same fallback catalog a fresh logged-out boot would register, and the orphaned on-disk catalog (`cursor-sdk-model-list.json`) is deleted. No change means no extra work — discovery (and any network or cache read it would do) is skipped entirely; only the cheap key-fingerprint comparison runs. A `/cursor-refresh-models` run with no auth anywhere also deletes the orphaned catalog before falling back.
+
 Pi model metadata is also a source of truth for pi-native behavior:
 
 - `ProviderModelConfig.id`

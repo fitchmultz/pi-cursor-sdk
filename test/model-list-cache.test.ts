@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { ModelListItem } from "@cursor/sdk";
 import {
+	clearModelListCache,
 	fingerprintApiKey,
 	getModelCacheTtlMs,
 	isModelCacheDisabled,
@@ -138,6 +139,23 @@ describe("model-list-cache", () => {
 	it("falls back to the default TTL for invalid env values", () => {
 		process.env[__testUtils.TTL_ENV_VAR] = "not-a-number";
 		expect(getModelCacheTtlMs()).toBe(__testUtils.DEFAULT_TTL_MS);
+	});
+
+	it("removes a saved catalog and reports the removal", () => {
+		saveModelListCache(fp, MODELS);
+		expect(clearModelListCache()).toBe(true);
+		expect(loadFreshCachedModels(fp)).toBeUndefined();
+		expect(loadAnyCachedModelCatalog(fp)).toBeUndefined();
+	});
+
+	it("reports false when no cache file exists", () => {
+		expect(clearModelListCache()).toBe(false);
+	});
+
+	it("removes a corrupt cache file instead of leaving it in place", () => {
+		writeFileSync(__testUtils.getCachePath(), "{ not json");
+		expect(clearModelListCache()).toBe(true);
+		expect(loadFreshCachedModels(fp)).toBeUndefined();
 	});
 
 	it.each(["1", "true", "on", "yes", "enabled"])("reports disabled state from truthy env flag %s", (value) => {

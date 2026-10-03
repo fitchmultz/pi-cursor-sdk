@@ -99,6 +99,21 @@ describe("discoverModels", () => {
 		expect(mockedList).not.toHaveBeenCalled();
 	});
 
+	it("registers no models when no API key and hiding logged-out models is enabled", async () => {
+		delete process.env.CURSOR_API_KEY;
+		process.env.PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT = "1";
+		const issues: CursorModelFallbackIssue[] = [];
+		const models = await discoverModels({ onFallback: (issue) => issues.push(issue) });
+		expect(models).toEqual([]);
+		expect(issues).toEqual([
+			expect.objectContaining({
+				reason: "missing-api-key",
+				message: expect.stringContaining("No Cursor models are registered until auth exists"),
+			}),
+		]);
+		expect(mockedList).not.toHaveBeenCalled();
+	});
+
 	it("returns fallback models and reports missing key when API key is whitespace", async () => {
 		process.env.CURSOR_API_KEY = "   ";
 		const issues: CursorModelFallbackIssue[] = [];

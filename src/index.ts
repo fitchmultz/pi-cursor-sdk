@@ -66,8 +66,9 @@ export default async function (pi: CursorExtensionApi) {
 	// Pi core has no logout/auth-change event, so a /logout (or key rotation)
 	// leaves the models captured above stale for the rest of the process.
 	// Re-resolve live auth on every session start and rebuild the provider when
-	// it moved. Logout collapses to the same fallback catalog a fresh logged-out
-	// boot would register, and the orphaned on-disk catalog is deleted.
+	// it moved. Logout re-runs discovery (empty list when
+	// PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT=1, else the fallback catalog),
+	// and the orphaned on-disk catalog is deleted.
 	let lastKeyFingerprint = await resolveCursorKeyFingerprint();
 	pi.on("session_start", async () => {
 		const currentFingerprint = await resolveCursorKeyFingerprint();

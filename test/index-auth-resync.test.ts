@@ -77,11 +77,11 @@ describe("extension auth resync on session_start", () => {
 		expect(registrations[registrations.length - 1]?.config.models).toEqual(rotatedModels);
 	});
 
-	it("clears the stale on-disk catalog and falls back after logout", async () => {
+	it("clears the stale on-disk catalog and re-registers after logout", async () => {
 		mockedResolveKey.mockResolvedValue("key-a");
 		mockedDiscover.mockResolvedValueOnce([makeProviderModelConfig("composer-2")]);
-		const fallbackModels = [makeProviderModelConfig("fallback-1")];
-		mockedDiscover.mockResolvedValueOnce(fallbackModels);
+		const reloginModels = [makeProviderModelConfig("fallback-1")];
+		mockedDiscover.mockResolvedValueOnce(reloginModels);
 		const staleCatalog: ModelListItem[] = [{ id: "composer-2", displayName: "Composer 2" }];
 		saveModelListCache(fingerprintApiKey("key-a"), staleCatalog);
 		expect(existsSync(cacheTestUtils.getCachePath())).toBe(true);
@@ -97,6 +97,6 @@ describe("extension auth resync on session_start", () => {
 		const registrations = (pi._registered as Array<{ name: string; config: { models?: unknown } }>).filter(
 			(entry) => entry.name === "cursor",
 		);
-		expect(registrations[registrations.length - 1]?.config.models).toEqual(fallbackModels);
+		expect(registrations[registrations.length - 1]?.config.models).toEqual(reloginModels);
 	});
 });

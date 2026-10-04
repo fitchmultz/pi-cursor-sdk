@@ -13,12 +13,13 @@ import {
 import type {
 	CursorProviderTurnPrepareResult,
 	CursorProviderTurnRunnerParams,
+	StartedCursorProviderTurn,
 } from "./cursor-provider-turn-types.js";
 import type { CursorSdkEventDebugSink } from "./cursor-sdk-event-debug.js";
 
 export interface EmitCursorLiveTurnParams {
 	params: CursorProviderTurnRunnerParams;
-	prepared: CursorProviderTurnPrepareResult;
+	prepared: StartedCursorProviderTurn;
 	sdkEventDebug: CursorSdkEventDebugSink | undefined;
 	discardIncompleteTools: (outcome: IncompleteCursorToolRunOutcomeInput) => void;
 }
@@ -42,6 +43,7 @@ export async function emitCursorLiveTurn(emitParams: EmitCursorLiveTurnParams): 
 				emitter,
 				signal: options?.signal,
 				debugRecorder: sdkEventDebug,
+				occupancyFloor: params.request.occupancyFloor,
 			});
 		});
 	} catch (caught) {

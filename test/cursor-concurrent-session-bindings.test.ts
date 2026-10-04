@@ -4,6 +4,8 @@ import { installCursorSessionStoreMock } from "./helpers/cursor-session-store.js
 import type { PiHarness } from "./helpers/pi-harness.js";
 import { getCursorSessionScopeSnapshot, registerCursorSessionScope } from "../src/cursor-session-scope.js";
 import { streamCursor } from "../src/cursor-provider.js";
+import { registerCursorNativeToolDisplayState } from "../src/cursor-native-tool-display-state.js";
+import { captureProviderTestOwnership } from "./helpers/cursor-provider-ownership.js";
 import { acquireSessionCursorAgent } from "../src/cursor-session-agent.js";
 import { registerCursorSessionAgentLifecycle } from "../src/cursor-session-agent-lifecycle.js";
 import { registerCursorSessionAgentLineage } from "../src/cursor-session-agent-lineage.js";
@@ -17,6 +19,7 @@ const scopeB = { cwd: "/tmp/cursor-session-b", file: "/tmp/cursor-session-b.json
 function binding() {
 	const pi = createPiHarness();
 	registerCursorSessionScope(pi);
+	registerCursorNativeToolDisplayState(pi);
 	registerCursorSessionAgentLifecycle(pi);
 	registerCursorSessionAgentLineage(pi);
 	registerCursorSessionAgentResume(pi);
@@ -59,9 +62,7 @@ describe("owned session snapshots and cleanup", () => {
 		const releaseCreate = Promise.withResolvers<ReturnType<typeof completedAgent>>();
 		mockedCreate.mockImplementationOnce(async () => { enteredCreate.resolve(); return releaseCreate.promise; });
 		const { openedOptions } = installCursorSessionStoreMock();
-		const eventsPromise = collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }, {
-			scope: getCursorSessionScopeSnapshot(a), bridge: undefined, recordCloudLifecycle: captureCursorCloudLifecycleRecorder(a),
-		}));
+		const eventsPromise = collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }, captureProviderTestOwnership(makeModel(), makeContext(), getCursorSessionScopeSnapshot(a), a)));
 		await enteredCreate.promise;
 		const b = binding();
 		await start(b, scopeB);

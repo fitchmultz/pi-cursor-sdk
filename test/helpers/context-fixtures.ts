@@ -5,6 +5,7 @@ import {
 	DEFAULT_COMPACTION_SETTINGS,
 	ModelRegistry,
 	ModelRuntime,
+	SessionManager,
 	type NormalizedBuildSystemPromptOptions,
 	type ExtensionCommandContext,
 	type ExtensionContext,
@@ -41,6 +42,7 @@ export function createDefaultSystemPromptOptions(cwd: string): NormalizedBuildSy
 }
 
 function createMinimalSessionManager(cwd: string, overrides: Partial<ExtensionContext["sessionManager"]> = {}): ExtensionContext["sessionManager"] {
+	const canonical = SessionManager.inMemory(cwd);
 	// Return-type checking supports the official and fork fixture superset.
 	const sessionManager = {
 		getCwd: vi.fn(() => cwd),
@@ -55,9 +57,7 @@ function createMinimalSessionManager(cwd: string, overrides: Partial<ExtensionCo
 		getLabel: vi.fn(() => undefined),
 		getBranch: vi.fn(() => []),
 		buildContextEntries: vi.fn(() => []),
-		buildSessionProjection: vi.fn(() => {
-			throw new Error("sessionManager.buildSessionProjection is not implemented in this test harness.");
-		}),
+		buildSessionProjection: vi.fn(() => canonical.buildSessionProjection()),
 		getHeader: vi.fn(() => null),
 		getEntries: vi.fn(() => []),
 		getEntriesRevision: vi.fn(() => 0),

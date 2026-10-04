@@ -11,7 +11,7 @@ import {
 	resetCursorProviderTestState,
 	type CursorDeltaHandler,
 } from "./helpers/cursor-provider-harness.js";
-import { streamCursor } from "../src/cursor-provider.js";
+import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import {
 	CLOUD_LIFECYCLE_ENTRY_TYPE,
 	registerCursorCloudLifecycleLedger,
@@ -148,7 +148,7 @@ describe("streamCursor cloud reporting", () => {
 		expect(pi.appendEntry.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0]);
 	});
 
-	it("records returned cloud run IDs before post-send abort cancellation", async () => {
+	it.each(["cancelled result", "wait rejection"])("records returned cloud run IDs and awaits post-send abort: %s", async outcome => {
 		process.env.PI_CURSOR_RUNTIME = "cloud";
 		process.env.PI_CURSOR_CLOUD_ALLOW_LOCAL_STATE = "1";
 		process.env.PI_CURSOR_CLOUD_ACK = "1";
@@ -156,7 +156,9 @@ describe("streamCursor cloud reporting", () => {
 		registerCursorCloudLifecycleLedger(pi);
 		const abortController = new AbortController();
 		const cancel = vi.fn().mockResolvedValue(undefined);
-		const wait = vi.fn();
+		const wait = outcome === "wait rejection"
+			? vi.fn().mockRejectedValue(new Error("transport rejected after cancellation"))
+			: vi.fn().mockResolvedValue({ id: "run-aborted", status: "cancelled" });
 		const send = vi.fn(async () => {
 			abortController.abort();
 			return asMockCursorRun({
@@ -183,7 +185,7 @@ describe("streamCursor cloud reporting", () => {
 		}));
 		expect(pi.appendEntry.mock.invocationCallOrder[1]).toBeLessThan(cancel.mock.invocationCallOrder[0]);
 		expect(cancel).toHaveBeenCalledTimes(1);
-		expect(wait).not.toHaveBeenCalled();
+		expect(wait).toHaveBeenCalledOnce();
 	});
 
 	it("fails before cloud send when its durable agent intent cannot be recorded", async () => {

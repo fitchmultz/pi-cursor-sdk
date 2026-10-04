@@ -542,7 +542,7 @@ describe("cursor-session-agent-resume", () => {
 		expect(getMatchingCursorSessionAgentResumeHandle("pool-1")).toBeUndefined();
 	});
 
-	it("does not flush a compaction-summarizer pending handle on the first later turn_end", async () => {
+	it("invalidates an ordinary pending handle when compaction completes", async () => {
 		const pi = createPiHarness();
 		registerCursorSessionScope(pi);
 		registerCursorSessionAgentResume(pi);
@@ -569,12 +569,12 @@ describe("cursor-session-agent-resume", () => {
 		});
 		persistCursorSessionAgentResumeHandle({
 			runtime: "local",
-			agentId: "agent-summarizer",
+			agentId: "agent-conversation",
 			poolKey: "pool-1",
-			sendState: { bootstrapped: true, contextFingerprint: "one-message", incrementalSendCount: 0 },
+			sendState: { bootstrapped: true, contextFingerprint: "ordinary-context", incrementalSendCount: 0 },
 			storeIdentity: { version: 1, stateRoot: "/tmp/store" },
 		});
-		expect(resumeTestUtils.state.pendingHandle?.agentId).toBe("agent-summarizer");
+		expect(resumeTestUtils.state.pendingHandle?.agentId).toBe("agent-conversation");
 
 		await pi.runSessionCompact({
 			compactionEntry: compact,
@@ -587,7 +587,6 @@ describe("cursor-session-agent-resume", () => {
 			},
 		});
 		expect(resumeTestUtils.state.pendingHandle).toBeUndefined();
-		expect(resumeTestUtils.isResumeHandlePersistSuppressed()).toBe(false);
 
 		pi.appendEntry.mockClear();
 		await pi.runTurnEnd({}, {
@@ -598,5 +597,30 @@ describe("cursor-session-agent-resume", () => {
 			},
 		});
 		expect(pi.appendEntry).not.toHaveBeenCalled();
+	});
+
+	it("drops the ordinary pending handle at compaction start without disabling later conversation commits", async () => {
+		const manager = SessionManager.inMemory("/tmp/project");
+		const pi = createPiHarness();
+		pi.appendEntry.mockImplementation((type, data) => { manager.appendCustomEntry(type, data); });
+		registerCursorSessionScope(pi);
+		registerCursorSessionAgentResume(pi);
+		const ctx = { cwd: "/tmp/project", sessionManager: manager };
+		await pi.runSessionStart(ctx);
+		const pending = {
+			runtime: "local" as const, agentId: "agent-conversation", poolKey: "pool-1",
+			sendState: { bootstrapped: true, contextFingerprint: "ordinary-context", incrementalSendCount: 0 },
+			storeIdentity: { version: 1 as const, stateRoot: "/tmp/store" },
+		};
+		persistCursorSessionAgentResumeHandle(pending);
+		await pi.runSessionBeforeCompact();
+		await pi.runTurnEnd({}, ctx);
+		expect(manager.getEntries()).toHaveLength(0);
+		persistCursorSessionAgentResumeHandle(pending);
+		await pi.runTurnEnd({}, ctx);
+		expect(manager.getEntries()).toEqual([expect.objectContaining({
+			type: "custom", customType: CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE,
+			data: expect.objectContaining({ agentId: "agent-conversation", compactionGeneration: 0 }),
+		})]);
 	});
 });

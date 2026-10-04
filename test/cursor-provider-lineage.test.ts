@@ -16,7 +16,7 @@ import {
 } from "../src/cursor-session-agent-lineage.js";
 import { __testUtils as sessionAgentTestUtils } from "../src/cursor-session-agent.js";
 import { registerCursorSessionScope } from "../src/cursor-session-scope.js";
-import { streamCursor } from "../src/cursor-provider.js";
+import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 
 function successfulAgent(agentId: string) {
 	return asMockSdkAgent({

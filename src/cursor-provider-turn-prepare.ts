@@ -44,10 +44,7 @@ import {
 	resolveCursorToolManifestEnabled,
 } from "./cursor-tool-manifest.js";
 import { isCursorNativeToolDisplayRuntimeEnabled } from "./cursor-native-tool-display-state.js";
-import {
-	createCursorCloudLifecyclePersistenceError,
-	recordCursorCloudLifecycleSafely,
-} from "./cursor-cloud-lifecycle.js";
+import { createCursorCloudLifecyclePersistenceError } from "./cursor-cloud-lifecycle.js";
 import { MISSING_CURSOR_API_KEY_MESSAGE } from "./cursor-provider-errors.js";
 import { CursorSdkTurnCoordinator } from "./cursor-provider-turn-coordinator.js";
 import { resolveCursorApiKey } from "./cursor-api-key.js";
@@ -61,6 +58,7 @@ import type {
 } from "./cursor-provider-turn-types.js";
 import type { CursorSdkEventDebugSink } from "./cursor-sdk-event-debug.js";
 import type { SessionCursorAgentLease } from "./cursor-session-agent.js";
+import { prepareCursorSummaryProviderTurn } from "./cursor-provider-turn-summary.js";
 
 export interface PrepareCursorProviderTurnParams {
 	params: CursorProviderTurnRunnerParams;
@@ -169,7 +167,7 @@ async function prepareCursorCloudProviderTurn(
 			})),
 		);
 		cloudAgentForCleanup = agent;
-		if (!(params.recordCloudLifecycle ?? recordCursorCloudLifecycleSafely)({ agentId: agent.agentId }, resolvedApiKey)) {
+		if (!params.recordCloudLifecycle({ agentId: agent.agentId }, resolvedApiKey)) {
 			throw createCursorCloudLifecyclePersistenceError(agent.agentId, "intent", undefined, resolvedApiKey);
 		}
 		sdkEventDebug?.recordProviderMeta({ runtime: "cloud", cloudAgentId: agent.agentId, phase: "agent_created" });
@@ -209,6 +207,7 @@ async function prepareCursorCloudProviderTurn(
 		cloudAgentForCleanup = undefined;
 		return {
 			runtimeTarget: "cloud",
+			execution: "conversation",
 			recordCloudLifecycle: params.recordCloudLifecycle,
 			agent,
 			cwd,
@@ -406,6 +405,9 @@ async function prepareCursorLocalProviderTurn(
 		completed = true;
 		return {
 			runtimeTarget: "local",
+			execution: "conversation",
+			store: sessionAgentLease.store,
+			storeIdentity: sessionAgentLease.storeIdentity,
 			agent,
 			cwd,
 			payload: sendPayload,
@@ -453,9 +455,12 @@ export async function prepareCursorProviderTurn(
 	const { params, resolvedConfig } = prepareParams;
 	const { model, options } = params;
 
-	const agentMode = getCursorProviderAgentModeOrThrow(params.scope.scopeKey);
 	const fastEnabled = resolvedConfig.runtime.value === "cloud" ? undefined : getEffectiveFastForModelId(model.id, params.scope.scopeKey);
 	const selection = buildCursorModelSelection(model.id, options?.reasoning ?? "off", fastEnabled);
+	if (resolvedConfig.runtime.value === "local" && params.request.purpose !== "normal") {
+		return prepareCursorSummaryProviderTurn(prepareParams, selection);
+	}
+	const agentMode = getCursorProviderAgentModeOrThrow(params.scope.scopeKey);
 	const context: PrepareCursorProviderTurnContext = { ...prepareParams, agentMode, selection, fastEnabled };
 
 	return resolvedConfig.runtime.value === "cloud"

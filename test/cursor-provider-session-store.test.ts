@@ -1,6 +1,6 @@
 import { toNamespacedPath } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { streamCursor } from "../src/cursor-provider.js";
+import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
 import { buildCursorSessionStateRoot } from "../src/cursor-session-store.js";
 import {

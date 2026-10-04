@@ -18,7 +18,7 @@ import {
 	inspectNativeTrust,
 	makeRunPi,
 } from "./helpers/project-trust-contract-fixture.js";
-import { streamCursor } from "../src/cursor-provider.js";
+import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
 
 // Shard 4/4 of the former test/cursor-project-trust-contract.test.ts (split for

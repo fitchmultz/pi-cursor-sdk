@@ -1,6 +1,6 @@
 import type { ModelListItem } from "@cursor/sdk";
 
-// Generated with @cursor/sdk@1.0.32 from 42 Cursor models.
+// Generated with @cursor/sdk@1.0.32 from 45 Cursor models.
 // Refresh with: npm run refresh:cursor-snapshots -- --write
 // Do not add secrets; this file stores public model metadata only.
 export const FALLBACK_MODEL_ITEMS = [
@@ -5600,6 +5600,185 @@ export const FALLBACK_MODEL_ITEMS = [
 		]
 	},
 	{
+		id: "claude-sonnet-5-5",
+		displayName: "Claude Sonnet 5.5",
+		parameters: [
+			{
+				id: "context",
+				displayName: "Context",
+				values: [
+					{
+						value: "300k",
+						displayName: "300K"
+					},
+					{
+						value: "1m",
+						displayName: "1M"
+					}
+				]
+			},
+			{
+				id: "reasoning_effort",
+				displayName: "Effort",
+				values: [
+					{
+						value: "low",
+						displayName: "Low"
+					},
+					{
+						value: "medium",
+						displayName: "Medium"
+					},
+					{
+						value: "high",
+						displayName: "High"
+					},
+					{
+						value: "xhigh",
+						displayName: "Extra High"
+					},
+					{
+						value: "max",
+						displayName: "Max"
+					}
+				]
+			}
+		],
+		variants: [
+			{
+				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "reasoning_effort",
+						value: "low"
+					}
+				],
+				displayName: "Claude Sonnet 5.5  Low"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "reasoning_effort",
+						value: "medium"
+					}
+				],
+				displayName: "Claude Sonnet 5.5  Medium"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "reasoning_effort",
+						value: "high"
+					}
+				],
+				displayName: "Claude Sonnet 5.5  High"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "reasoning_effort",
+						value: "xhigh"
+					}
+				],
+				displayName: "Claude Sonnet 5.5  Extra High"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "reasoning_effort",
+						value: "max"
+					}
+				],
+				displayName: "Claude Sonnet 5.5  Max"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "low"
+					}
+				],
+				displayName: "Claude Sonnet 5.5 1M Low"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "medium"
+					}
+				],
+				displayName: "Claude Sonnet 5.5 1M Medium"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "high"
+					}
+				],
+				displayName: "Claude Sonnet 5.5 1M High",
+				isDefault: true
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "xhigh"
+					}
+				],
+				displayName: "Claude Sonnet 5.5 1M Extra High"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "max"
+					}
+				],
+				displayName: "Claude Sonnet 5.5 1M Max"
+			}
+		]
+	},
+	{
 		id: "composer-2",
 		displayName: "Composer 2",
 		parameters: [
@@ -5976,6 +6155,114 @@ export const FALLBACK_MODEL_ITEMS = [
 					}
 				],
 				displayName: "GLM 5.2"
+			}
+		]
+	},
+	{
+		id: "glm-5p3",
+		displayName: "GLM 5.3",
+		parameters: [
+			{
+				id: "reasoning",
+				displayName: "Reasoning",
+				values: [
+					{
+						value: "low",
+						displayName: "Low"
+					},
+					{
+						value: "high",
+						displayName: "High"
+					},
+					{
+						value: "max",
+						displayName: "Max"
+					}
+				]
+			}
+		],
+		variants: [
+			{
+				params: [
+					{
+						id: "reasoning",
+						value: "low"
+					}
+				],
+				displayName: "GLM 5.3 Low"
+			},
+			{
+				params: [
+					{
+						id: "reasoning",
+						value: "high"
+					}
+				],
+				displayName: "GLM 5.3 High"
+			},
+			{
+				params: [
+					{
+						id: "reasoning",
+						value: "max"
+					}
+				],
+				displayName: "GLM 5.3 Max",
+				isDefault: true
+			}
+		]
+	},
+	{
+		id: "glm-5p3-flash",
+		displayName: "GLM 5.3 Flash",
+		parameters: [
+			{
+				id: "reasoning",
+				displayName: "Reasoning",
+				values: [
+					{
+						value: "low",
+						displayName: "Low"
+					},
+					{
+						value: "high",
+						displayName: "High"
+					},
+					{
+						value: "max",
+						displayName: "Max"
+					}
+				]
+			}
+		],
+		variants: [
+			{
+				params: [
+					{
+						id: "reasoning",
+						value: "low"
+					}
+				],
+				displayName: "GLM 5.3 Flash Low"
+			},
+			{
+				params: [
+					{
+						id: "reasoning",
+						value: "high"
+					}
+				],
+				displayName: "GLM 5.3 Flash High"
+			},
+			{
+				params: [
+					{
+						id: "reasoning",
+						value: "max"
+					}
+				],
+				displayName: "GLM 5.3 Flash Max",
+				isDefault: true
 			}
 		]
 	},

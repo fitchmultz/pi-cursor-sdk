@@ -51,7 +51,7 @@ If pi started without a key, run `/cursor-refresh-models` after `/login` to refr
 ## Requirements
 
 - Node.js 24+
-- pi-cursor-sdk 0.5.0 requires official Pi 0.87.1 or later. Official Pi 0.87.1/latest and current `fitchmultz/pi` main are compatibility targets; the exact development `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` packages are 0.99.1
+- pi-cursor-sdk 0.5.0 requires official Pi 0.87.1 or later. The latest stable official Pi and current `fitchmultz/pi` main are required compatibility targets, resolved once per workflow run; locked development Pi packages are reproducible snapshots, not validation targets
 - optional Pi and TypeBox peer metadata uses `"*"` ranges per Pi package guidance
 - a Cursor SDK API key saved through `/login`, available as `CURSOR_API_KEY`, or passed with pi's `--api-key`
 
@@ -723,13 +723,21 @@ Capture `pi --version`, extension version, model, flags, the exact prompt, and a
 
 Cursor native replay is a display enhancement for TUI sessions and structured JSON/RPC consumers. It replays recorded Cursor SDK activity without re-running tools, and print mode remains text-first. See [Cursor native tool replay](docs/cursor-native-tool-replay.md) for conflict behavior and opt-out flags.
 
+## Automatic npm releases (maintainers)
+
+Follow the [shared release procedure](https://github.com/fitchmultz/.github#automatic-npm-releases): merge a reviewed PR into `main` with an intentional `package.json` version bump and a matching versioned `CHANGELOG.md` section. Automation never bumps versions, overwrites releases, or republishes an existing version. Once configured and enabled, it runs the existing offline compatibility and native macOS/Windows jobs, qualifies one candidate tarball, then waits for `fitchmultz` approval in the `npm` environment.
+
+Approve only after checking the exact source commit, version, downloaded candidate tarball and summary against the [release review gate](AGENTS.md#release-review-gate-maintainer) and [cost-conscious verification policy](#maintainer-cost-conscious-verification). Complete the exact-release-diff deep review with zero findings, the documented pre-release catalog check, and any genuinely necessary changed-behavior proof. Approval attests genuine satisfaction of existing requirements; it does not create proof. Authenticated checks remain outside CI; automated Cursor PR reviews remain unchanged, and no routine paid Cloud campaigns or paid retries are added. Automated publication disables npm hooks to publish the checked bytes; existing manual publisher instructions remain valid.
+
+Failed/unpublished candidates can retry daily at 12:17 UTC or via manual dispatch of `npm release` on `main`, without another bump. Set repository variable `NPM_RELEASE_ENABLED` to anything other than `true` to stop new release plans; cancel pending runs separately when needed. Workflow validation is not evidence of a completed real OIDC publication.
+
 ## Development
 
-The source qualification baseline is official Pi **0.99.1**, with official Pi latest and current `fitchmultz/pi` main as compatibility targets, optional wildcard Pi/TypeBox host peers, and exact Cursor SDK **1.0.32**. The exact development Pi cohort is 0.99.1, with host TypeBox 1.3.27. Run `npm ci --ignore-scripts` then `npm run check:compat` in an empty HOME/agent profile for credential-free qualification. This builds the manifest entry, runs existing type/unit/package checks, and tests the compiled provider's registration plus production prompt shaping against native Pi transcript/tool transitions. Replay arguments must match their JSON stream deltas. A second native contract runs the registered Cursor provider with only its external SDK transport/storage substituted: real loopback bridge execution, display-only replay, persisted usage, incremental sends, tree navigation, compaction, request-boundary steering, abort and reload/disposal. Tests use no live Cursor service.
+Required qualification targets are the latest stable official Pi and latest maintained `fitchmultz/pi` main, with optional wildcard Pi/TypeBox host peers and exact Cursor SDK **1.0.32**. CI resolves the official version/fork commit once and retains exact SDK/CLI provenance. Types, tests and package checks use each selected host's consistent dependency graph; locked development dependencies are reproducible snapshots, not qualification targets. After `npm ci --ignore-scripts`, run `node scripts/ci-compatibility.mjs --automation /path/to/automation` in an empty HOME/agent profile for credential-free latest qualification. Native macOS/Windows checks select the same resolved latest official graph. This builds the manifest entry, runs existing type/unit/package checks, and tests the compiled provider's registration plus production prompt shaping against native Pi transcript/tool transitions. Replay arguments must match their JSON stream deltas. A second native contract runs the registered Cursor provider with only its external SDK transport/storage substituted: real loopback bridge execution, display-only replay, persisted usage, incremental sends, tree navigation, compaction, request-boundary steering, abort and reload/disposal. Tests use no live Cursor service.
 
 TypeScript 7 builds and checks package types. `@typescript/typescript6` is dev-only and used solely by the AST architecture test because TypeScript 7 does not expose a stable compiler API. Vitest 5 runs with `clearMocks: true` by default.
 
-Pull-request CI runs that suite once, then checks the installed package offline with the oldest supported official Pi release, the current official release, and a source-built revision of the Pi fork. It checks both npm and Git installations without starting a Cursor model turn. The selected official version and fork commit are printed in the check log. Separate macOS and Windows jobs install with lifecycle scripts, load `node-pty`, and run the platform-build test, typecheck, and pack checks on Node 24.
+Pull-request CI runs that suite once per selected host: the latest stable official Pi and a source-built revision of the latest maintained fork `main`, each using its own consistent dependency graph and the version/commit resolved once for the run. It checks both npm and Git installations against both hosts without starting a Cursor model turn. The selected official version and fork commit are printed in the check log. Separate macOS and Windows jobs install with lifecycle scripts, load `node-pty`, and run the platform-build test, typecheck, and pack checks on Node 24.
 
 For authorized uncommitted repairs, qualify an isolated immutable working-tree snapshot without committing:
 
@@ -738,6 +746,8 @@ node scripts/ci-compatibility.mjs --working-tree --official-only --versions 0.87
 ```
 
 This builds and packs the snapshot, checks package loading, and exercises actual official native provider/session flows. The default invocation still requires a clean checkout and includes the maintained fork. `--help` documents selection and exit codes.
+
+This manual snapshot mode retains explicit older-host qualification for the advertised floor; it is separate from CI's once-resolved latest-only targets. Do not combine manual selection flags with `--automation`.
 
 This is offline compatibility proof, not Cursor authentication, desktop/cloud execution, visual, or all-platform live proof. Add only necessary changed-behavior live evidence under the [cost-conscious verification policy](#maintainer-cost-conscious-verification); the comprehensive paid matrix is optional, and paid Cloud testing is restricted to explicitly Cursor Cloud-focused PRs/issues. Older advertised Pi/Node floors require their own offline compatibility evidence.
 

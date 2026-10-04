@@ -117,7 +117,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - Keep pi-native abstractions first: context is a model variant, thinking uses pi thinking metadata, and Cursor-only `fast` is extension state/status.
 - Preserve the default pi footer; use extension status only for Cursor-only state such as `cursor:local · fast:on`, `cursor:local · fast:off`, and `cursor:cloud · fast:n/a`.
 - Stop discovery once package scripts, README, config files, tests, and the relevant `src/` modules explain the task. Do not broad-search `node_modules` unless debugging a dependency API.
-- Ask the user before changing public UX, published package metadata, dependency families, or behavior that requires a migration. Otherwise proceed and verify locally.
+- Make ordinary in-scope UX, package metadata, and dependency choices directly, using native capabilities or maintained libraries where useful. Preserve settled product decisions, migration/data-loss guarantees, and security/trust boundaries; ask only for missing owner information or an unrequested irreversible change, private-data disclosure, or substantial new financial commitment. Verify affected behavior, update affected docs, and update the lockfile when dependencies change.
 
 ## Setup and commands
 
@@ -153,7 +153,7 @@ There is no lint or format script in `package.json` at this time.
 Done means:
 
 - The intended behavior or documentation change is complete.
-- `npm test`, `npm run typecheck`, and `npm run typecheck:tests` pass, unless the change is docs-only and the user asked for minimal validation.
+- Code changes pass `npm test`, `npm run typecheck`, and `npm run typecheck:tests`. For docs-only changes, verify affected links, commands, and documented contracts without asking for a minimal-validation exception; required PR and package checks still apply.
 - `npm pack --dry-run` passes when package metadata, publishable docs, dependencies, or ignored artifacts change.
 - Related README/docs/tests are updated when behavior, commands, user-visible model IDs, flags, or troubleshooting change.
 - No secrets, local API keys, or noisy local state are added.

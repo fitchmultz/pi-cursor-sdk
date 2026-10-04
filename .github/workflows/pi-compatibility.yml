@@ -3,6 +3,16 @@ name: Pi compatibility
 on:
   pull_request:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      official-version:
+        description: Official stable version resolved for this run; blank resolves latest
+        type: string
+        default: ''
+      fork-ref:
+        description: Maintained fork commit resolved for this run; blank resolves main
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -14,3 +24,6 @@ concurrency:
 jobs:
   compatibility:
     uses: ./.github/workflows/pi-compatibility-check.yml
+    with:
+      official-version: ${{ inputs.official-version }}
+      fork-ref: ${{ inputs.fork-ref }}

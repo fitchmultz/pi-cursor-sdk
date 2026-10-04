@@ -105,7 +105,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 ## Operating rules
 
 - Prefer the smallest change that preserves the current pi user contract.
-- Package 0.4.0 requires Node 24+ and official Pi 0.87.1+. The development qualification baseline is official Pi 0.99.1 with host TypeBox 1.3.27. Compatibility targets remain official Pi 0.87.1/latest and current `fitchmultz/pi` main; optional Pi and TypeBox peer ranges stay `"*"` per Pi guidance.
+- Package 0.4.0 requires Node 24+ and official Pi 0.87.1+. Locked development Pi/TypeBox dependencies are reproducible build snapshots, not qualification targets. Compatibility requires latest stable official Pi and current `fitchmultz/pi` main, resolving version/commit once per workflow run and retaining exact SDK/CLI evidence; optional Pi and TypeBox peer ranges stay `"*"` per Pi guidance.
 - Treat Cursor SDK model metadata as the source of truth for model IDs, parameters, variants, thinking controls, and context variants. Do not hardcode new model-specific behavior unless it is a documented fallback.
 - HARD REPO RULE: never guess what the Cursor SDK outputs, expects, or does. Always verify Cursor SDK behavior against the installed `@cursor/sdk` package and/or the official TypeScript SDK docs at `https://cursor.com/docs/sdk/typescript` before making claims or implementation changes.
 - Contract-test external behavior before relying on it: when code depends on Cursor SDK/pi runtime payloads, timing, lifecycle, errors, usage accounting, or tool/event shapes, add or update a focused test that asserts the observed installed-package/docs/captured-fixture contract and fails if that contract drifts. Do not replace this with mocks based on guesses.

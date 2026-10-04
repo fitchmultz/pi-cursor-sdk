@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { closeSync, constants, existsSync, fchmodSync, fstatSync, fsyncSync, lstatSync, openSync, readFileSync, readSync, writeFileSync } from "node:fs";
+import { closeSync, constants, existsSync, fchmodSync, fstatSync, fsyncSync, openSync, readFileSync, readSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { resolveCursorApiKey } from "./cursor-api-key.js";
@@ -12,7 +12,7 @@ import {
 	CLOUD_LIFECYCLE_ENTRY_TYPE,
 	CLOUD_LIFECYCLE_JOURNAL_PREFIX,
 } from "../shared/cursor-cloud-lifecycle-constants.mjs";
-import { fsyncExistingRegularFile, noFollowFlag, openExistingRegularFileNoFollow } from "./cursor-durable-fs.js";
+import { createRegularFileExclusive, fsyncExistingRegularFile, openExistingRegularFileNoFollow } from "./cursor-durable-fs.js";
 import { truncateCursorDisplayLine } from "./cursor-display-text.js";
 import { asRecord, getString } from "./cursor-record-utils.js";
 import { scrubSensitiveText } from "./cursor-sensitive-text.js";
@@ -193,28 +193,6 @@ function durableLedgerPath(sessionFile: string, sessionId: string): string {
 	return join(dirname(sessionFile), `${DURABLE_LEDGER_PREFIX}-${sessionHash}.journal`);
 }
 
-function sameFileIdentity(left: { dev: number; ino: number }, right: { dev: number; ino: number }): boolean {
-	return left.dev === right.dev && left.ino === right.ino;
-}
-
-function createRegularFileExclusive(path: string, flags: number, mode: number): number {
-	let fd: number | undefined;
-	try {
-		fd = openSync(path, flags | constants.O_CREAT | constants.O_EXCL | noFollowFlag(), mode);
-		const opened = fstatSync(fd);
-		const after = lstatSync(path);
-		if (!opened.isFile() || !after.isFile() || !sameFileIdentity(opened, after)) {
-			throw new Error("created journal path changed while opening");
-		}
-		return fd;
-	} catch (error) {
-		if (fd !== undefined) {
-			try { closeSync(fd); } catch {}
-		}
-		throw error;
-	}
-}
-
 function fsyncCloudLifecycleSessionFile(session: CloudLifecycleSessionState): boolean {
 	if (sessionFsyncForTests) return sessionFsyncForTests();
 	const sessionFile = session.sessionFile;
@@ -358,17 +336,6 @@ export function captureCursorCloudLifecycleRecorder(owner?: object): CursorCloud
 			return false;
 		}
 	};
-}
-
-export function recordCursorCloudLifecycleSafely(
-	report: { agentId: string; runId?: string },
-	apiKey: string | undefined,
-): boolean {
-	try {
-		return recordCursorCloudLifecycleRun({ ...report, branches: [] }, { apiKey });
-	} catch {
-		return false;
-	}
 }
 
 export function createCursorCloudLifecyclePersistenceError(

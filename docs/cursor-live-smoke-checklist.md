@@ -353,8 +353,8 @@ Script-enforced pass criteria:
 
 Additional manual usage checks for provider/accounting changes:
 
-- Tool-heavy runs should show nonzero output for visible assistant/tool-call activity.
-- Split runs should count consumed tool-result input once on the following assistant turn.
+- Each assistant message's disjoint input/cache/output components should sum to `totalTokens` and describe one coherent current context, not cumulative billed spend.
+- In split runs, earlier tool results can remain in later current-context estimates. Fresh, attributable LOCAL SDK usage takes precedence; late raw and billed facts remain in the separate ledger without rewriting emitted messages. See [context, compaction, and Cursor usage](../README.md#context-compaction-and-cursor-usage).
 
 ## 11. Standard local gates
 

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { inspectCursorCloudLocalState } from "../src/cursor-cloud-local-state.js";
 import { registerCursorRuntimeControls } from "../src/cursor-state.js";
 import { registerCursorSessionScope } from "../src/cursor-session-scope.js";
-import { streamCursor } from "../src/cursor-provider.js";
+import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
 import {
 	collectEvents,

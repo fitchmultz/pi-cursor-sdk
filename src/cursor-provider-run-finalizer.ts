@@ -18,7 +18,7 @@ import {
 } from "./cursor-incomplete-tool-visibility.js";
 import type { installCursorSdkProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
 import type { CursorSdkEventDebugSink } from "./cursor-sdk-event-debug.js";
-import { awaitFinalizeCursorRunOutcome } from "./cursor-provider-turn-finalize.js";
+import { awaitFinalizeCursorRunOutcome, recordCursorProviderTerminalUsage } from "./cursor-provider-turn-finalize.js";
 import type {
 	CursorProviderTurnPrepareResult,
 	CursorProviderTurnRunnerParams,
@@ -26,6 +26,7 @@ import type {
 	CursorProviderTurnSendResult,
 	LiveCursorProviderTurnRuntime,
 	LocalCursorProviderTurnPrepareResult,
+	StartedCursorProviderTurn,
 } from "./cursor-provider-turn-types.js";
 import { applyCursorUsage } from "./cursor-usage-accounting.js";
 import { hasUsableText } from "./cursor-record-utils.js";
@@ -33,15 +34,15 @@ import { emitDisplayOnlyTraceBlock } from "./cursor-display-only-trace.js";
 export type CursorTurnTerminalEvent =
 	| {
 			kind: "direct";
-			prepared: CursorProviderTurnPrepareResult;
+			prepared: StartedCursorProviderTurn;
 			outcome: CursorRunOutcome;
 			displayOnlyTraceBlock?: string;
 	  }
-	| { kind: "error"; prepared: CursorProviderTurnPrepareResult | undefined; error: unknown };
+	| { kind: "error"; prepared: CursorProviderTurnPrepareResult | StartedCursorProviderTurn | undefined; error: unknown };
 
 function applyLiveRunOutcome(
 	outcome: CursorRunOutcome,
-	prepared: LocalCursorProviderTurnPrepareResult & { runtime: LiveCursorProviderTurnRuntime },
+	prepared: StartedCursorProviderTurn & LocalCursorProviderTurnPrepareResult & { runtime: LiveCursorProviderTurnRuntime },
 	context: CursorProviderTurnRunnerParams["context"],
 ): void {
 	if (prepared.runtime.liveRun.disposed) return;
@@ -63,7 +64,7 @@ function applyLiveRunOutcome(
 
 export interface CursorLiveRunCompletion {
 	waitCompletion: Promise<void>;
-	prepared: CursorProviderTurnPrepareResult;
+	prepared: StartedCursorProviderTurn;
 }
 
 export interface CursorRunFinalizerParams {
@@ -76,7 +77,7 @@ export interface CursorRunFinalizerParams {
 
 export interface StartCursorLiveRunCompletionParams {
 	send: CursorProviderTurnSend;
-	prepared: LocalCursorProviderTurnPrepareResult & { runtime: LiveCursorProviderTurnRuntime };
+	prepared: StartedCursorProviderTurn & LocalCursorProviderTurnPrepareResult & { runtime: LiveCursorProviderTurnRuntime };
 	modelId: string;
 	discardIncompleteTools: (outcome: IncompleteCursorToolRunOutcomeInput) => void;
 }
@@ -110,14 +111,16 @@ export class CursorRunFinalizer {
 				applyLiveRunOutcome(finalized.outcome, prepared, runnerParams.context);
 			})
 			.catch((error: unknown) => {
-				this.safeCleanup(() => discardIncompleteTools({ status: "error" }));
+				const aborted = error instanceof CursorLiveRunAbortError || runnerParams.options?.signal?.aborted === true;
+				this.safeCleanup(() => discardIncompleteTools({ status: aborted ? "cancelled" : "error" }));
 				if (!liveRun.disposed) {
-					cursorLiveRuns.markError(
+					if (aborted) cursorLiveRuns.markCancelled(liveRun, this.abortMessage());
+					else cursorLiveRuns.markError(
 						liveRun,
 						sanitizeCursorProviderError(error, this.params.resolvedApiKey() ?? runnerParams.options?.apiKey, "local"),
 					);
 				}
-				this.safeCleanup(() => sdkEventDebug?.recordWaitResult({ status: "error", error: String(error) }));
+				this.safeCleanup(() => sdkEventDebug?.recordWaitResult({ status: aborted ? "cancelled" : "error", error: String(error) }));
 				this.safeCleanup(() => sdkEventDebug?.recordError("run_wait", error));
 			});
 		// Mark the pooled local agent busy as soon as the SDK run exists so auto-compaction summarization
@@ -166,11 +169,13 @@ export class CursorRunFinalizer {
 	}
 
 	private async applyDirectOutcome(
-		prepared: CursorProviderTurnPrepareResult,
+		prepared: StartedCursorProviderTurn,
 		outcome: CursorRunOutcome,
 		displayOnlyTraceBlock: string | undefined,
 	): Promise<void> {
 		const { stream, partial, model, context } = this.params.runnerParams;
+		// Native summaries return at terminal emission, so release their temporary resources first.
+		if (prepared.execution === "summary") await prepared.lifecycle.dispose().catch(() => {});
 		prepared.runtime.turnCoordinator.closeTraceBlock();
 		switch (classifyCursorRunEmission(outcome)) {
 			case "cancelled":
@@ -189,7 +194,7 @@ export class CursorRunFinalizer {
 				applyCursorUsage(partial, model, context, prepared.meta.promptInputTokens, {
 					runtime: prepared.runtimeTarget,
 					turn: prepared.runtime.turnCoordinator.lastSdkTurnUsage,
-					billed: prepared.runtime.billedTurnUsage,
+					occupancyFloor: this.params.runnerParams.request.occupancyFloor,
 				});
 				if (prepared.meta.resumeNotice) emitDisplayOnlyTraceBlock(stream, partial, prepared.meta.resumeNotice);
 				if (displayOnlyTraceBlock) emitDisplayOnlyTraceBlock(stream, partial, displayOnlyTraceBlock);
@@ -198,11 +203,15 @@ export class CursorRunFinalizer {
 		}
 	}
 
-	private async applyErrorOutcome(prepared: CursorProviderTurnPrepareResult | undefined, error: unknown): Promise<void> {
+	private async applyErrorOutcome(prepared: CursorProviderTurnPrepareResult | StartedCursorProviderTurn | undefined, error: unknown): Promise<void> {
+		const aborted = error instanceof CursorLiveRunAbortError || this.params.runnerParams.options?.signal?.aborted === true;
+		if (prepared && "usage" in prepared && (!prepared.runtime.sdkRun || prepared.runtime.kind !== "live")) {
+			await recordCursorProviderTerminalUsage(prepared, aborted ? "abort" : "error");
+		}
 		this.safeCleanup(() => prepared?.runtime.turnCoordinator.discardIncompleteStartedToolCalls(
 			buildIncompleteCursorToolRunOutcome({
-				status: error instanceof CursorLiveRunAbortError ? "cancelled" : "error",
-				signalAborted: error instanceof CursorLiveRunAbortError,
+				status: aborted ? "cancelled" : "error",
+				signalAborted: aborted,
 			}),
 		));
 		const activeLiveRun = prepared?.runtime.liveRun;
@@ -212,7 +221,7 @@ export class CursorRunFinalizer {
 			await prepared?.lifecycle.abandon();
 		}
 		this.safeCleanup(() => this.params.sdkEventDebug()?.recordError("provider_stream", error));
-		if (error instanceof CursorLiveRunAbortError) {
+		if (aborted) {
 			this.params.sdkProcessErrorGuard.suppressAbortErrors();
 			this.pushTerminalError(this.params.runnerParams.partial, "aborted", this.abortMessage());
 		} else {

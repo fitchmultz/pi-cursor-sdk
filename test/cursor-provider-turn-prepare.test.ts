@@ -1,4 +1,4 @@
-import { getCursorSessionScopeSnapshot } from "../src/cursor-session-scope.js";
+import { captureProviderTestOwnership } from "./helpers/cursor-provider-ownership.js";
 import { describe, expect, it, vi } from "vitest";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { resolveCursorSdkConfig, type CursorResolvedSdkConfig } from "../src/cursor-config.js";
@@ -50,7 +50,7 @@ describe("CursorProviderTurnRunner config snapshotting (F3)", () => {
 		});
 
 		const runner = new CursorProviderTurnRunner({
-			scope: getCursorSessionScopeSnapshot(),
+			...captureProviderTestOwnership(makeModel(), makeContext()),
 			model: makeModel(),
 			context: makeContext(),
 			stream: createAssistantMessageEventStream(),

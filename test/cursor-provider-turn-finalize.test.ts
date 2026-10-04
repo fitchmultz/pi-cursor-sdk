@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SDKAgent } from "@cursor/sdk";
-import type { CursorProviderTurnPrepareResult } from "../src/cursor-provider-turn-types.js";
+import type { StartedCursorProviderTurn } from "../src/cursor-provider-turn-types.js";
 import type { CursorSdkEventDebugSink } from "../src/cursor-sdk-event-debug.js";
 import {
 	CLOUD_LIFECYCLE_ENTRY_TYPE,
 	__testUtils as cloudLifecycleTestUtils,
+	captureCursorCloudLifecycleRecorder,
 	recordCursorCloudLifecycleRun,
 	registerCursorCloudLifecycleLedger,
 } from "../src/cursor-cloud-lifecycle.js";
+import { createProviderTestTurnUsage } from "./helpers/cursor-provider-ownership.js";
 import { createPiHarness } from "./helpers/pi-harness.js";
 
 const CLOUD_AGENT_ID = "bc-00000000-0000-0000-0000-000000000001";
@@ -30,8 +32,10 @@ vi.mock("../src/context-window-cache.js", () => ({
 
 import { awaitFinalizeCursorRunOutcome, cacheSdkContextWindow } from "../src/cursor-provider-turn-finalize.js";
 
-function makeCloudPrepared(agent: SDKAgent): CursorProviderTurnPrepareResult {
+function makeCloudPrepared(pi: ReturnType<typeof createPiHarness>, agent: SDKAgent): StartedCursorProviderTurn {
 	return {
+		usage: createProviderTestTurnUsage(),
+		recordCloudLifecycle: captureCursorCloudLifecycleRecorder(pi),
 		runtimeTarget: "cloud",
 		agent,
 		cwd: process.cwd(),
@@ -47,7 +51,7 @@ function makeCloudPrepared(agent: SDKAgent): CursorProviderTurnPrepareResult {
 				discardIncompleteStartedToolCalls: vi.fn(),
 			},
 		},
-	} as unknown as CursorProviderTurnPrepareResult;
+	} as unknown as StartedCursorProviderTurn;
 }
 
 describe("awaitFinalizeCursorRunOutcome", () => {
@@ -85,7 +89,7 @@ describe("awaitFinalizeCursorRunOutcome", () => {
 					agentId: CLOUD_AGENT_ID,
 					wait: vi.fn(),
 				} as unknown as Awaited<ReturnType<SDKAgent["send"]>>,
-				prepared: makeCloudPrepared({ agentId: CLOUD_AGENT_ID, listArtifacts } as unknown as SDKAgent),
+				prepared: makeCloudPrepared(pi, { agentId: CLOUD_AGENT_ID, listArtifacts } as unknown as SDKAgent),
 				cursorAgentMessageOffset: undefined,
 				modelId: "composer-2.5",
 				waitResult: { id: "run-1", status: "finished", result: "cloud done" },
@@ -129,7 +133,7 @@ describe("awaitFinalizeCursorRunOutcome", () => {
 
 		const finalized = await awaitFinalizeCursorRunOutcome({
 			run: { id: "run-failed", agentId: CLOUD_AGENT_ID, wait } as unknown as Awaited<ReturnType<SDKAgent["send"]>>,
-			prepared: makeCloudPrepared({ agentId: CLOUD_AGENT_ID, listArtifacts } as unknown as SDKAgent),
+			prepared: makeCloudPrepared(pi, { agentId: CLOUD_AGENT_ID, listArtifacts } as unknown as SDKAgent),
 			cursorAgentMessageOffset: undefined,
 			modelId: "composer-2.5",
 			sdkEventDebug,
@@ -157,7 +161,7 @@ describe("awaitFinalizeCursorRunOutcome", () => {
 
 		await expect(awaitFinalizeCursorRunOutcome({
 			run: { id: "run-throw", agentId: CLOUD_AGENT_ID, wait } as unknown as Awaited<ReturnType<SDKAgent["send"]>>,
-			prepared: makeCloudPrepared({ agentId: CLOUD_AGENT_ID, listArtifacts } as unknown as SDKAgent),
+			prepared: makeCloudPrepared(pi, { agentId: CLOUD_AGENT_ID, listArtifacts } as unknown as SDKAgent),
 			cursorAgentMessageOffset: undefined,
 			modelId: "composer-2.5",
 			sdkEventDebug,
@@ -179,7 +183,7 @@ describe("awaitFinalizeCursorRunOutcome", () => {
 
 		const finalized = await awaitFinalizeCursorRunOutcome({
 			run: { id: "run-1", agentId: CLOUD_AGENT_ID, wait: vi.fn() } as unknown as Awaited<ReturnType<SDKAgent["send"]>>,
-			prepared: makeCloudPrepared({ agentId: CLOUD_AGENT_ID } as unknown as SDKAgent),
+			prepared: makeCloudPrepared(pi, { agentId: CLOUD_AGENT_ID } as unknown as SDKAgent),
 			cursorAgentMessageOffset: undefined,
 			modelId: "composer-2.5",
 			waitResult: { id: "run-1", status: "finished", result: "done" },

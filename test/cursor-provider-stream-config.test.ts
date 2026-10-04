@@ -19,7 +19,7 @@ import {
 	registerBridgeForProviderTest,
 	createTestToolInfo,
 } from "./helpers/cursor-provider-harness.js";
-import { streamCursor } from "../src/cursor-provider.js";
+import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { cursorLiveRuns } from "../src/cursor-provider-live-run-drain.js";
 import { CLOUD_LIFECYCLE_ENTRY_TYPE, registerCursorCloudLifecycleLedger } from "../src/cursor-cloud-lifecycle.js";
 import { registerCursorRuntimeControls } from "../src/cursor-state.js";

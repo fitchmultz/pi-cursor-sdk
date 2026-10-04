@@ -5,7 +5,6 @@ import {
 	formatCursorCloudRunReport,
 	type CursorCloudRunReport,
 } from "./cursor-cloud-reporting.js";
-import { recordCursorCloudLifecycleRun } from "./cursor-cloud-lifecycle.js";
 import { getCheckpointContextWindow, saveCachedContextWindow } from "./context-window-cache.js";
 import { scrubSensitiveText } from "./cursor-sensitive-text.js";
 import type { CursorSdkEventDebugSink } from "./cursor-sdk-event-debug.js";
@@ -15,9 +14,8 @@ import {
 	resolveCursorRunOutcome,
 	type CursorRunOutcome,
 } from "./cursor-provider-run-outcome.js";
-import type { CursorProviderTurnPrepareResult } from "./cursor-provider-turn-types.js";
+import type { StartedCursorProviderTurn } from "./cursor-provider-turn-types.js";
 import { loadCursorSdk } from "./cursor-sdk-runtime.js";
-import { attachCursorSdkBilledTurnUsage } from "./cursor-sdk-billed-usage.js";
 
 export async function cacheSdkContextWindow(
 	agentId: string,
@@ -45,7 +43,7 @@ export async function cacheSdkContextWindow(
 
 export interface BuildCursorRunOutcomeParams {
 	waitResult: Awaited<ReturnType<Awaited<ReturnType<SDKAgent["send"]>>["wait"]>>;
-	prepared: CursorProviderTurnPrepareResult;
+	prepared: StartedCursorProviderTurn;
 	signal?: AbortSignal;
 	runResultFallback?: string;
 	runErrorFallback?: RunError;
@@ -117,7 +115,7 @@ function recordCursorCloudReportingError(
 
 export interface AwaitFinalizeCursorRunOutcomeParams {
 	run: Awaited<ReturnType<SDKAgent["send"]>>;
-	prepared: CursorProviderTurnPrepareResult;
+	prepared: StartedCursorProviderTurn;
 	cursorAgentMessageOffset: number | undefined;
 	modelId: string;
 	signal?: AbortSignal;
@@ -137,10 +135,32 @@ export interface FinalizedCursorRunOutcome {
 	displayOnlyTraceBlock?: string;
 }
 
-/** Single wait/finalize path for SDK runs: wait, debug capture, transcript replay, incomplete tools, artifacts, context cache. */
+export async function recordCursorProviderTerminalUsage(
+	prepared: StartedCursorProviderTurn,
+	status: "success" | "error" | "abort",
+	waitUsage?: unknown,
+) {
+	if (prepared.runtime.usageTerminalRecorded) return undefined;
+	prepared.runtime.usageTerminalRecorded = true;
+	try {
+		return await prepared.usage.recordTerminal({ status, waitUsage, handleUsage: prepared.runtime.sdkRun?.usage });
+	} catch (error) {
+		prepared.usage.notePersistenceFailure(error);
+		return undefined;
+	}
+}
+
+/** Single wait/finalize path for SDK runs: accounting, replay, incomplete tools, artifacts, context cache. */
 export async function awaitFinalizeCursorRunOutcome(params: AwaitFinalizeCursorRunOutcomeParams): Promise<FinalizedCursorRunOutcome> {
 	const apiKey = params.resolvedApiKey ?? params.optionsApiKey;
-	const waitResult = params.waitResult ?? (await params.run.wait());
+	params.prepared.runtime.sdkRun = params.run;
+	let waitResult: Awaited<ReturnType<typeof params.run.wait>>;
+	try {
+		waitResult = params.waitResult ?? (await params.run.wait());
+	} catch (error) {
+		await recordCursorProviderTerminalUsage(params.prepared, params.signal?.aborted ? "abort" : "error");
+		throw error;
+	}
 	const outcome = buildCursorRunOutcomeFromWait({
 		waitResult,
 		prepared: params.prepared,
@@ -150,16 +170,11 @@ export async function awaitFinalizeCursorRunOutcome(params: AwaitFinalizeCursorR
 		resolvedApiKey: params.resolvedApiKey,
 		optionsApiKey: params.optionsApiKey,
 	});
-	const billed = await attachCursorSdkBilledTurnUsage({
-		agent: params.prepared.agent,
-		agentId: params.run.agentId,
-		runtime: params.prepared.runtimeTarget,
-		runId: params.run.id,
-	});
-	params.prepared.runtime.billedTurnUsage = billed.turn;
-	if (params.prepared.runtime.liveRun) {
-		params.prepared.runtime.liveRun.billedTurnUsage = billed.turn;
-	}
+	const billing = await recordCursorProviderTerminalUsage(
+		params.prepared,
+		outcome.kind === "finished" ? "success" : outcome.kind === "cancelled" ? "abort" : "error",
+		waitResult.usage,
+	);
 	let displayOnlyTraceBlock: string | undefined;
 	if (params.prepared.runtimeTarget === "cloud" && isCursorRunFinishedSuccessfully(outcome)) {
 		let report: CursorCloudRunReport = { agentId: params.run.agentId, runId: params.run.id, branches: [] };
@@ -169,14 +184,13 @@ export async function awaitFinalizeCursorRunOutcome(params: AwaitFinalizeCursorR
 				run: params.run,
 				waitResult,
 				apiKey,
-				agentUsage: billed.agentUsage,
+				agentUsage: billing ? billing.status === "observed-pending-settlement" ? billing.snapshot : null : undefined,
 			});
 		} catch (error) {
 			recordCursorCloudReportingError(params.sdkEventDebug, error, apiKey);
 		}
 		try {
-			if (params.prepared.recordCloudLifecycle) params.prepared.recordCloudLifecycle(report, apiKey);
-			else recordCursorCloudLifecycleRun(report, { apiKey });
+			params.prepared.recordCloudLifecycle(report, apiKey);
 		} catch (error) {
 			recordCursorCloudReportingError(params.sdkEventDebug, error, apiKey);
 		}
@@ -196,12 +210,12 @@ export async function awaitFinalizeCursorRunOutcome(params: AwaitFinalizeCursorR
 	} catch {
 		// Debug reporting must never affect provider execution.
 	}
-	if (params.prepared.runtimeTarget === "local" && isCursorRunFinishedSuccessfully(outcome)) {
+	if (params.prepared.runtimeTarget === "local" && params.prepared.execution === "conversation" && isCursorRunFinishedSuccessfully(outcome)) {
 		await replayCursorTranscriptWebToolCalls(
 			params.run.agentId,
 			params.prepared.cwd,
 			params.cursorAgentMessageOffset,
-			params.prepared.sessionAgentLease.store,
+			params.prepared.store,
 			params.prepared.runtime.turnCoordinator,
 			params.sdkEventDebug,
 		);
@@ -212,12 +226,12 @@ export async function awaitFinalizeCursorRunOutcome(params: AwaitFinalizeCursorR
 	} catch {
 		// Debug artifact failures must never affect provider execution.
 	}
-	if (params.prepared.runtimeTarget === "local" && params.cacheContextWindow !== false) {
+	if (params.prepared.runtimeTarget === "local" && params.prepared.execution === "conversation" && params.cacheContextWindow !== false) {
 		await cacheSdkContextWindow(
 			params.contextWindowAgentId ?? params.run.agentId,
 			params.modelId,
 			params.prepared.cwd,
-			params.prepared.sessionAgentLease.store,
+			params.prepared.store,
 		);
 	}
 	return { outcome, displayOnlyTraceBlock };

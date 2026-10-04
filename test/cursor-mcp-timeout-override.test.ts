@@ -1,4 +1,5 @@
-import { getCursorSessionScopeSnapshot } from "../src/cursor-session-scope.js";
+import { captureProviderTestOwnership } from "./helpers/cursor-provider-ownership.js";
+import { makeModel, makeContext } from "./helpers/pi-harness.js";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -221,7 +222,7 @@ describe("Cursor MCP timeout override", () => {
 		await expect(
 			prepareCursorProviderTurn({
 				params: {
-					scope: getCursorSessionScopeSnapshot(),
+					...captureProviderTestOwnership(makeModel(), makeContext()),
 					model: { id: "cursor/composer-2.5", provider: "cursor", api: "assistant" } as never,
 					context: {} as never,
 					stream: { push: vi.fn() } as never,

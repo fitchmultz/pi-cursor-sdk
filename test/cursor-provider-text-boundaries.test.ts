@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import type { SendOptions } from "@cursor/sdk";
 import { AgentSession } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { streamCursor, __testUtils } from "../src/cursor-provider.js";
+import { streamCursor } from "./helpers/cursor-provider-ownership.js";
+import { __testUtils } from "../src/cursor-provider.js";
 import { getFinalAssistantText } from "../src/cursor-run-final-text.js";
 import {
 	asMockCursorRun, collectEvents, collectTextDeltas, getDoneEvent, getErrorEvent,

@@ -4,12 +4,14 @@
 // heldCwds controls transport completion, not Pi scheduling or attribution.
 // Pi and the extension are not mocked.
 import { join } from "node:path";
+import { mkdir } from "node:fs/promises";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 
 export const state = globalThis[Symbol.for("pi-cursor-native-fixture")] ??= {
   created: [], sends: [], disposed: [], cancelled: [], bridgeResults: [], stores: [],
   heldCwds: new Set(), failedCwds: new Set(),
   configured: [],
+  usageByCwd: new Map(),
   cloudMutations: [],
 };
 export const Cursor = {
@@ -23,6 +25,9 @@ export const Cursor = {
 export const getDefaultSdkStateRoot = () => join(process.env.PI_CODING_AGENT_DIR, "cursor-state");
 export const SqliteLocalAgentStore = {
   open: async (options) => {
+    // Materialize the controlled store root so cleanup assertions exercise
+    // extension-owned filesystem removal, not an already absent directory.
+    await mkdir(options.stateRoot, { recursive: true });
     const store = { ...options, dispose: async () => { store.disposed = true; } };
     state.stores.push(store);
     return store;
@@ -52,7 +57,13 @@ export const Agent = {
       agentId,
       model: options.model,
       listArtifacts: async () => [],
-      getUsage: async () => ({ usage: { inputTokens: 10, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 0, totalTokens: 15 }, runs }),
+      getUsage: async () => {
+        const control = state.usageByCwd.get(options.local?.cwd);
+        if (control && !control.billed) throw new Error("offline controlled usage unavailable");
+        const bill = control?.billed ?? { inputTokens: 10, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 0, totalTokens: 15 };
+        const usage = runs.reduce((sum, run) => Object.fromEntries(Object.keys(bill).map(key => [key, sum[key] + run.usage[key]])), Object.fromEntries(Object.keys(bill).map(key => [key, 0])));
+        return { usage, runs };
+      },
       [Symbol.asyncDispose]: async () => { state.disposed.push(agentId); },
       send: async (message, sendOptions) => {
         const index = state.sends.length + 1;
@@ -64,8 +75,10 @@ export const Agent = {
         const completion = new Promise((resolve) => { settle = resolve; });
         const finish = (result) => {
           status = "finished";
-          sendOptions.onDelta({ update: { type: "turn-ended", usage: { inputTokens: 10, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 0 } } });
-          runs.push({ runId: `usage-${index}`, usage: { inputTokens: 10, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 0, totalTokens: 15 } });
+          const control = state.usageByCwd.get(options.local?.cwd);
+          const raw = control ? control.raw : { inputTokens: 10, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 0 };
+          sendOptions.onDelta({ update: { type: "turn-ended", usage: raw } });
+          runs.push({ runId: `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`, usage: control?.billed ?? { inputTokens: 10, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 0, totalTokens: 15 } });
           settle({ id, status, result });
         };
         const run = {
@@ -85,7 +98,7 @@ export const Agent = {
         }
         setTimeout(async () => {
           try {
-            if (request.includes("BRIDGE_FIXTURE")) {
+            if (options.tools?.length !== 0 && request.includes("BRIDGE_FIXTURE")) {
               const client = new Client({ name: "offline-cursor", version: "1" });
               const transport = new StreamableHTTPClientTransport(new URL(options.mcpServers.pi_tools.url));
               try {
@@ -106,7 +119,7 @@ export const Agent = {
                 await transport.close();
               }
             }
-            if (request.includes("REPLAY_FIXTURE")) {
+            if (options.tools?.length !== 0 && request.includes("REPLAY_FIXTURE")) {
               const args = { path: "never-read.txt" };
               const callId = `${id}-read`;
               const modelCallId = `${callId}-model`;

@@ -14,7 +14,7 @@ import {
 	type CursorDeltaHandler,
 	type RegisteredTool,
 } from "./helpers/cursor-provider-harness.js";
-import { streamCursor } from "../src/cursor-provider.js";
+import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { getFinalAssistantText } from "../src/cursor-run-final-text.js";
 
 const delayBeforeToolCompletion = () => new Promise((resolve) => setTimeout(resolve, 120));

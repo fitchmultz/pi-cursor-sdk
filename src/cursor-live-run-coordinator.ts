@@ -45,7 +45,7 @@ export interface CursorLiveRun {
 	sdkRun?: CursorLiveSdkRun;
 	ignoreFutureSdkTurnUsage?: boolean;
 	accounting: CursorLiveRunAccountingState;
-	billedTurnUsage?: CursorSdkTurnUsage;
+	onAbandon?: () => Promise<void>;
 	pendingEvents: CursorLiveQueuedEvent[];
 	textDeltas: string[];
 	emittedText: string;
@@ -528,11 +528,13 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 				}
 				if (abandoned) {
 					if (!run.done) {
+						const usageCompletion = run.onAbandon?.();
 						try {
 							await cancelCursorLiveSdkRun(run);
 						} catch {
 							// cancellation failure should not block session-agent abandonment
 						}
+						await usageCompletion;
 					}
 					await deps.abandonSessionAgent(run.sessionAgentScopeKey);
 				}

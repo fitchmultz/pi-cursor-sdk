@@ -1,90 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { SDKAgent } from "@cursor/sdk";
-import {
-	__testUtils,
-	attachCursorSdkBilledTurnUsage,
-	fetchCursorSdkAgentUsage,
-	isCursorSdkClientMintedRunId,
-	selectCursorBilledTurnUsage,
-	sumCursorSdkTurnUsage,
-} from "../src/cursor-sdk-billed-usage.js";
-
-const turnA = { inputTokens: 10, outputTokens: 2, cacheReadTokens: 4, cacheWriteTokens: 1 };
-const turnB = { inputTokens: 20, outputTokens: 3, cacheReadTokens: 8, cacheWriteTokens: 2 };
-
-afterEach(() => {
-	__testUtils.reset();
-});
-
-describe("cursor billed usage selection", () => {
-	it("treats client-minted run IDs as cloud-only filters", () => {
-		expect(isCursorSdkClientMintedRunId("run-aaaa")).toBe(true);
-		expect(isCursorSdkClientMintedRunId("usage-uuid")).toBe(false);
+import type { AgentUsage, SDKAgent, TokenUsage } from "@cursor/sdk";
+import { fetchCursorSdkAgentUsage, readCursorBilledSnapshot } from "../src/cursor-sdk-billed-usage.js";
+const cached: TokenUsage = { inputTokens: 136, outputTokens: 3, cacheReadTokens: 4096, cacheWriteTokens: 0, totalTokens: 4235 };
+afterEach(() => vi.useRealTimers());
+describe("public SDK billed observations", () => {
+	it("preserves documented disjoint cache, aggregate-only totals, large outputs and optional revised cost", async () => {
+		const snapshot: AgentUsage = { usage: { ...cached, outputTokens: 500003, totalTokens: 504235 }, runs: [{ runId: "billing-uuid", usage: cached, cost: { rawCostCents: 0.1, chargedCents: 0.2 } }] };
+		expect(readCursorBilledSnapshot(snapshot)).toEqual(snapshot);
+		expect(await fetchCursorSdkAgentUsage({ getUsage: async () => snapshot })).toEqual({ status: "observed-pending-settlement", snapshot });
+		for (const usage of [{ ...cached, inputTokens: -1 }, { ...cached, outputTokens: Infinity }, { ...cached, totalTokens: 8331 }]) expect(readCursorBilledSnapshot({ usage, runs: [] })).toBeUndefined();
 	});
-
-	it("matches cloud billed usage by runId and sums unseen local turns", () => {
-		const agentUsage = {
-			usage: { inputTokens: 30, outputTokens: 5, cacheReadTokens: 12, cacheWriteTokens: 3, totalTokens: 50 },
-			runs: [
-				{ runId: "run-aaaa", usage: turnA },
-				{ runId: "usage-b", usage: turnB },
-			],
-		};
-		expect(selectCursorBilledTurnUsage(agentUsage, { runtime: "cloud", runId: "run-aaaa" })).toEqual({
-			turn: turnA,
-			runIds: ["run-aaaa"],
-		});
-		expect(selectCursorBilledTurnUsage(agentUsage, { runtime: "local" })).toEqual({
-			turn: sumCursorSdkTurnUsage([turnA, turnB]),
-			runIds: ["run-aaaa", "usage-b"],
-		});
-		expect(selectCursorBilledTurnUsage(agentUsage, { runtime: "local", seenRunIds: new Set(["run-aaaa"]) })).toEqual({
-			turn: turnB,
-			runIds: ["usage-b"],
-		});
+	it("keeps unsupported, failed, invalid and timed-out requests distinct from a recognized bill", async () => {
+		expect(await fetchCursorSdkAgentUsage({} as SDKAgent)).toEqual({ status: "unavailable", reason: "unsupported" });
+		expect(await fetchCursorSdkAgentUsage({ getUsage: async () => { throw new Error("secret must not escape"); } })).toEqual({ status: "unavailable", reason: "request-failed" });
+		expect(await fetchCursorSdkAgentUsage({ getUsage: async () => ({}) as AgentUsage })).toEqual({ status: "unavailable", reason: "invalid-response" });
+		vi.useFakeTimers(); const result = fetchCursorSdkAgentUsage({ getUsage: () => new Promise(() => {}) }); await vi.advanceTimersByTimeAsync(5000);
+		expect(await result).toEqual({ status: "unavailable", reason: "timeout" });
 	});
-
-	it("does not pass a local client-minted runId into getUsage", async () => {
-		const getUsage = vi.fn().mockResolvedValue({ usage: turnA, runs: [] });
-		const agent = { getUsage } as unknown as SDKAgent;
-		await fetchCursorSdkAgentUsage(agent, { runtime: "local", runId: "run-local-1" });
-		expect(getUsage).toHaveBeenCalledWith(undefined);
-		await fetchCursorSdkAgentUsage(agent, { runtime: "cloud", runId: "run-cloud-1" });
-		expect(getUsage).toHaveBeenCalledWith({ runId: "run-cloud-1" });
-	});
-
-	it("watermarks selected local runIds so a later fetch skips them", async () => {
-		const getUsage = vi.fn()
-			.mockResolvedValueOnce({
-				usage: turnA,
-				runs: [{ runId: "usage-a", usage: turnA }],
-			})
-			.mockResolvedValueOnce({
-				usage: turnB,
-				runs: [
-					{ runId: "usage-a", usage: turnA },
-					{ runId: "usage-b", usage: turnB },
-				],
-			});
-		const agent = { getUsage } as unknown as SDKAgent;
-		const first = await attachCursorSdkBilledTurnUsage({
-			agent,
-			agentId: "agent-1",
-			runtime: "local",
-		});
-		const second = await attachCursorSdkBilledTurnUsage({
-			agent,
-			agentId: "agent-1",
-			runtime: "local",
-		});
-		expect(first.turn).toEqual(turnA);
-		expect(second.turn).toEqual(turnB);
-	});
-
-	it("returns undefined when getUsage is missing or times out", async () => {
-		expect(await fetchCursorSdkAgentUsage({} as SDKAgent, { runtime: "local" })).toBeUndefined();
-		const getUsage = vi.fn(() => new Promise(() => {}));
-		const agent = { getUsage } as unknown as SDKAgent;
-		await expect(fetchCursorSdkAgentUsage(agent, { runtime: "local" })).resolves.toBeUndefined();
-	}, 8000);
 });

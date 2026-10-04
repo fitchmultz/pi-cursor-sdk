@@ -10,7 +10,7 @@ import {
 	resetCursorProviderTestState,
 	mockCreatedAgent,
 } from "./helpers/cursor-provider-harness.js";
-import { streamCursor } from "../src/cursor-provider.js";
+import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { __testUtils as cursorSdkProcessGuardTestUtils } from "../src/cursor-sdk-process-error-guard.js";
 
 const emitProcessEvent = (event: string | symbol, ...args: unknown[]): boolean =>

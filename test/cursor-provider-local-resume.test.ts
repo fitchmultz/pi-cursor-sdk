@@ -17,7 +17,7 @@ import {
 	registerNativeToolDisplayForTest,
 	resetCursorProviderTestState,
 } from "./helpers/cursor-provider-harness.js";
-import { streamCursor } from "../src/cursor-provider.js";
+import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
 import { __testUtils as cursorSessionAgentTestUtils } from "../src/cursor-session-agent.js";
 import { __testUtils as resumeTestUtils } from "../src/cursor-session-agent-resume.js";

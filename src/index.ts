@@ -16,6 +16,8 @@ import { registerCursorAgentsContextDedup } from "./cursor-agents-context-regist
 import { registerCursorOverflowNormalization } from "./cursor-provider-overflow.js";
 import { registerCursorSdkSessionProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
 import { prepareCursorSessionForCompaction } from "./cursor-session-compaction-prep.js";
+import { registerCursorUsageLedger } from "./cursor-usage-ledger.js";
+import { registerCursorUsageCommand } from "./cursor-usage-command.js";
 
 type CursorExtensionApi =
 	& Pick<ExtensionAPI, "registerProvider" | "registerCommand" | "on">
@@ -31,11 +33,14 @@ type CursorExtensionApi =
 	& Parameters<typeof registerCursorFallbackIssueWarning>[0]
 	& Parameters<typeof registerCursorAgentsContextDedup>[0]
 	& Parameters<typeof registerCursorOverflowNormalization>[0]
-	& Parameters<typeof registerCursorSdkSessionProcessErrorGuard>[0];
+	& Parameters<typeof registerCursorSdkSessionProcessErrorGuard>[0]
+	& Parameters<typeof registerCursorUsageLedger>[0];
 
 export default async function (pi: CursorExtensionApi) {
 	// Session cwd must register before other session_start listeners that depend on it.
 	registerCursorSessionScope(pi);
+	registerCursorUsageLedger(pi);
+	registerCursorUsageCommand(pi);
 	const registerCursorProvider = registerCursorProviderBinding(pi);
 	registerCursorSessionAgentLineage(pi);
 	registerCursorSessionAgentLifecycle(pi);

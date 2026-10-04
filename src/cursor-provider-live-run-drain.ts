@@ -176,6 +176,7 @@ function emitCursorNativeToolUseTurn(
 	run: CursorLiveRun,
 	toolResultInputTokens: number,
 	tools: CursorNativeToolDisplayItem[],
+	occupancyFloor: number | undefined,
 	debugRecorder?: CursorSdkEventDebugRecorder,
 ): void {
 	const shouldTerminate = run.done && !run.finalText?.trim() && !cursorLiveRuns.peekEvent(run);
@@ -205,6 +206,7 @@ function emitCursorNativeToolUseTurn(
 	applyCursorUsage(partial, model, context, cursorLiveRuns.takeTurnInputTokens(run, toolResultInputTokens), {
 		runtime: "local",
 		turn: cursorLiveRuns.takeSdkTurnUsage(run),
+		occupancyFloor,
 	});
 	partial.stopReason = "toolUse";
 	stream.push({ type: "done", reason: "toolUse", message: partial });
@@ -236,6 +238,7 @@ function emitCursorBridgeToolUseTurn(
 	run: CursorLiveRun,
 	toolResultInputTokens: number,
 	requests: CursorPiBridgeToolRequest[],
+	occupancyFloor: number | undefined,
 ): void {
 	for (const request of requests) {
 		const contentIndex = partial.content.length;
@@ -254,6 +257,7 @@ function emitCursorBridgeToolUseTurn(
 	applyCursorUsage(partial, model, context, cursorLiveRuns.takeTurnInputTokens(run, toolResultInputTokens), {
 		runtime: "local",
 		turn: cursorLiveRuns.takeSdkTurnUsage(run),
+		occupancyFloor,
 	});
 	partial.stopReason = "toolUse";
 	stream.push({ type: "done", reason: "toolUse", message: partial });
@@ -268,7 +272,7 @@ async function emitCursorLiveRunPendingToolUseTurn(
 	context: Context,
 	run: CursorLiveRun,
 	toolResultInputTokens: number,
-	options: { mode: CursorLiveRunDrainMode; signal?: AbortSignal; debugRecorder?: CursorSdkEventDebugRecorder },
+	options: { mode: CursorLiveRunDrainMode; signal?: AbortSignal; debugRecorder?: CursorSdkEventDebugRecorder; occupancyFloor?: number },
 ): Promise<"tool_use" | "handled" | undefined> {
 	const debugRecorder = options.debugRecorder ?? run.debugRecorder;
 	const eventType = cursorLiveRuns.peekEvent(run)?.type;
@@ -285,13 +289,13 @@ async function emitCursorLiveRunPendingToolUseTurn(
 		}
 		if (!sdkTurnEnded) cursorLiveRuns.ignoreFutureSdkTurnUsage(run);
 		if (options.mode === "emit") turn.emitter.closeAll();
-		emitCursorNativeToolUseTurn(stream, partial, model, context, run, toolResultInputTokens, active, debugRecorder);
+		emitCursorNativeToolUseTurn(stream, partial, model, context, run, toolResultInputTokens, active, options.occupancyFloor, debugRecorder);
 	} else {
 		const requests = cursorLiveRuns.collectBridgeToolBatch(run);
 		if (requests.length === 0) return "handled";
 		if (!sdkTurnEnded) cursorLiveRuns.ignoreFutureSdkTurnUsage(run);
 		if (options.mode === "emit") turn.emitter.closeAll();
-		emitCursorBridgeToolUseTurn(stream, partial, model, context, run, toolResultInputTokens, requests);
+		emitCursorBridgeToolUseTurn(stream, partial, model, context, run, toolResultInputTokens, requests, options.occupancyFloor);
 	}
 	return "tool_use";
 }
@@ -303,7 +307,7 @@ export async function drainCursorLiveRunTurn(
 	context: Context,
 	run: CursorLiveRun,
 	toolResultInputTokens: number,
-	options: { mode: CursorLiveRunDrainMode; signal?: AbortSignal; debugRecorder?: CursorSdkEventDebugRecorder; emitter?: CursorPartialContentEmitter },
+	options: { mode: CursorLiveRunDrainMode; signal?: AbortSignal; debugRecorder?: CursorSdkEventDebugRecorder; emitter?: CursorPartialContentEmitter; occupancyFloor?: number },
 ): Promise<CursorLiveRunDrainOutcome> {
 	const debugRecorder = options.debugRecorder ?? run.debugRecorder;
 	debugRecorder?.recordDrainEvent("turn_start", {
@@ -390,7 +394,7 @@ export async function drainCursorLiveRunTurn(
 				applyCursorUsage(partial, model, context, cursorLiveRuns.takeTurnInputTokens(run, toolResultInputTokens), {
 					runtime: "local",
 					turn: cursorLiveRuns.takeSdkTurnUsage(run),
-					billed: run.billedTurnUsage,
+					occupancyFloor: options.occupancyFloor,
 				});
 				if (run.resumeNotice) {
 					emitDisplayOnlyTraceBlock(stream, partial, run.resumeNotice);
@@ -439,6 +443,7 @@ export async function drainExistingCursorLiveRunBeforeSend(
 	signal: AbortSignal | undefined,
 	turnDebugRecorder: CursorSdkEventDebugRecorder | undefined,
 	scopeKey: string,
+	occupancyFloor?: number,
 ): Promise<LiveRunPreSendOutcome> {
 	turnDebugRecorder?.recordDrainEvent("pre_send_start", {});
 	while (true) {
@@ -463,6 +468,7 @@ export async function drainExistingCursorLiveRunBeforeSend(
 					mode: shouldChainUserInput ? "chain_user_input" : "emit",
 					signal,
 					debugRecorder: turnDebugRecorder,
+					occupancyFloor,
 				});
 				const mapped = drainOutcome === "chain_user_input" ? "continue_send" : "stream_ended";
 				turnDebugRecorder?.recordDrainEvent("pre_send_iteration", {

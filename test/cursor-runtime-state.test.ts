@@ -29,8 +29,9 @@ import {
 	mockedCreate,
 	resetCursorProviderTestState,
 } from "./helpers/cursor-provider-harness.js";
-import { captureCursorCloudLifecycleRecorder } from "../src/cursor-cloud-lifecycle.js";
 import { streamCursor } from "../src/cursor-provider.js";
+import { registerCursorNativeToolDisplayState } from "../src/cursor-native-tool-display-state.js";
+import { captureProviderTestOwnership } from "./helpers/cursor-provider-ownership.js";
 
 const RUNTIME_ENV_NAMES = [
 	"PI_CURSOR_RUNTIME",
@@ -631,12 +632,13 @@ describe("Cursor cloud model selection", () => {
 				[flag]: true,
 			} });
 			registerCursorSessionScope(pi);
+			registerCursorNativeToolDisplayState(pi);
 			registerCursorRuntimeControls(pi);
 			await pi.runSessionStart({ model: makeModel(modelId) });
 			await collectEvents(streamCursor(makeModel(modelId), {
 				systemPrompt: "Be helpful.",
 				messages: [{ role: "user", content: "hello", timestamp: 1 }],
-			}, { apiKey: "test-key" }, { scope: getCursorSessionScopeSnapshot(pi), bridge: undefined, recordCloudLifecycle: captureCursorCloudLifecycleRecorder(pi) }));
+			}, { apiKey: "test-key" }, captureProviderTestOwnership(makeModel(modelId), { messages: [] }, getCursorSessionScopeSnapshot(pi), pi)));
 			await pi.runSessionShutdown({ reason: "quit" });
 		}
 

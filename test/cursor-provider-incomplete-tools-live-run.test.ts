@@ -17,7 +17,8 @@ import {
 	type RegisteredTool,
 	mockCreatedAgent,
 } from "./helpers/cursor-provider-harness.js";
-import { streamCursor, __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
+import { streamCursor } from "./helpers/cursor-provider-ownership.js";
+import { __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
 import { __testUtils as nativeToolDisplayTestUtils } from "../src/cursor-native-tool-display-state.js";
 
 

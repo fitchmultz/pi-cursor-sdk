@@ -2,10 +2,33 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 
+const args = process.argv.slice(2);
+if (args.includes("--help") || args.includes("-h")) {
+  console.log(`Usage: node scripts/ci-compatibility.mjs [--working-tree] [--official-only] [--versions 0.87.1,0.99.1,1.0.2]
+
+Default: require a clean checkout; qualify official minimum/latest and current fork offline.
+--working-tree  Build an isolated snapshot of tracked and nonignored new files, without committing.
+--official-only Skip the fork clone/build.
+--versions      Select exact official releases (default: minimum/latest).
+
+Examples:
+  node scripts/ci-compatibility.mjs
+  node scripts/ci-compatibility.mjs --working-tree --official-only --versions 0.87.1,0.99.1,1.0.2
+Exit codes: 0 success/help; 1 qualification or invalid argument failure.`);
+  process.exit(0);
+}
+let versions;
+for (let index = 0; index < args.length; index++) {
+  if (["--working-tree", "--official-only"].includes(args[index])) continue;
+  if (args[index] === "--versions" && /^\d+\.\d+\.\d+(,\d+\.\d+\.\d+)*$/.test(args[index + 1] ?? "")) {
+    versions = args[++index].split(",");
+  } else throw new Error(`Invalid argument: ${args[index]}. Use --help.`);
+}
 const source = process.cwd();
 const root = mkdtempSync(join(tmpdir(), "pi-cursor-compat-"));
 const home = join(root, "home");
@@ -47,7 +70,7 @@ function run(command, args, cwd = source, capture = false) {
   });
   if (result.error) throw result.error;
   assert.equal(result.status, 0, `${command} failed: ${result.stderr ?? ""}`);
-  return result.stdout?.trim() ?? "";
+  return result.stdout ?? "";
 }
 
 function hostCli(host) {
@@ -94,40 +117,74 @@ function probe(label, host, extension) {
 }
 
 try {
-  assert.equal(run("git", ["status", "--porcelain"], source, true), "", "Commit changes before compatibility qualification");
-  const latest = JSON.parse(run("npm", ["view", "@earendil-works/pi-coding-agent", "dist-tags.latest", "--json"], source, true));
-  assert.match(latest, /^\d+\.\d+\.\d+$/, "Official Pi latest must be a stable release");
+  if (!args.includes("--working-tree")) assert.equal(run("git", ["status", "--porcelain"], source, true), "", "Clean checkout required (use --working-tree for authorized uncommitted changes)");
+  if (!versions) {
+    const latest = JSON.parse(run("npm", ["view", "@earendil-works/pi-coding-agent", "dist-tags.latest", "--json"], source, true));
+    assert.match(latest, /^\d+\.\d+\.\d+$/, "Official Pi latest must be a stable release");
+    versions = ["0.87.1", latest];
+  }
 
-  const packed = JSON.parse(run("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", root], source, true));
+  const gitExtension = join(root, "git-consumer");
+  if (args.includes("--working-tree")) {
+    mkdirSync(gitExtension);
+    const sourceFiles = () => run("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], source, true).split("\0").filter(Boolean);
+    const files = sourceFiles();
+    const manifest = [];
+    for (const file of new Set(files)) {
+      // Exclude local state even when accidentally tracked or symlinked.
+      if (file.split("/").some(part => ["node_modules", ".git", ".pi", ".debug", ".artifacts", "dist", "coverage"].includes(part) || part.startsWith(".env"))) continue;
+      const from = join(source, file);
+      if (!existsSync(from)) continue; // tracked deletion
+      assert.ok(lstatSync(from).isFile(), `Snapshot requires regular files: ${file}`);
+      const to = join(gitExtension, file);
+      mkdirSync(dirname(to), { recursive: true });
+      copyFileSync(from, to);
+      manifest.push({ path: file, sha256: createHash("sha256").update(readFileSync(to)).digest("hex") });
+    }
+    assert.deepEqual(sourceFiles(), files, "Source inventory changed while snapshotting; retry once edits stop");
+    for (const file of manifest) assert.equal(createHash("sha256").update(readFileSync(join(source, file.path))).digest("hex"), file.sha256, `Source changed while snapshotting: ${file.path}`);
+    console.log(`Exact working-tree snapshot SHA256: ${createHash("sha256").update(JSON.stringify(manifest)).digest("hex")} (${manifest.length} files)`);
+    run("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], gitExtension);
+    run("npm", ["run", "build"], gitExtension);
+  } else {
+    run("git", ["clone", "--no-hardlinks", "--quiet", source, gitExtension]);
+    run("npm", ["install", "--omit=dev", "--no-audit", "--no-fund"], gitExtension);
+  }
+  const packed = JSON.parse(run("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", root], args.includes("--working-tree") ? gitExtension : source, true));
   assert.equal(packed.length, 1);
   const tarball = join(root, packed[0].filename);
   const consumer = join(root, "npm-consumer");
   run("npm", ["install", "--prefix", consumer, "--omit=dev", "--no-audit", "--no-fund", tarball]);
   const npmExtension = join(consumer, "node_modules", "pi-cursor-sdk");
 
-  const gitExtension = join(root, "git-consumer");
-  run("git", ["clone", "--no-hardlinks", "--quiet", source, gitExtension]);
-  run("npm", ["install", "--omit=dev", "--no-audit", "--no-fund"], gitExtension);
-
-  for (const version of new Set(["0.87.1", latest])) {
+  for (const version of new Set(versions)) {
     const hostRoot = join(root, `official-${version}`);
     run("npm", ["install", "--prefix", hostRoot, "--omit=dev", "--ignore-scripts",
       "--no-audit", "--no-fund", `@earendil-works/pi-coding-agent@${version}`]);
-    probe(`official-${version}`, join(hostRoot, "node_modules", "@earendil-works", "pi-coding-agent"), npmExtension);
+    const host = join(hostRoot, "node_modules", "@earendil-works", "pi-coding-agent");
+    probe(`official-${version}`, host, npmExtension);
+    if (args.includes("--working-tree")) {
+      const nativeEnv = { ...env, PI_CURSOR_TEST_HOST: join(host, "dist", "index.js") };
+      const result = spawnSync(process.execPath, ["--test", "test/ci-compatibility.test.mjs", "test/native-provider.test.mjs", "test/native-cursor-flow.test.mjs"], { cwd: gitExtension, env: nativeEnv, stdio: "inherit", timeout: 180_000 });
+      if (result.error) throw result.error;
+      assert.equal(result.status, 0, `Official ${version} native qualification failed`);
+    }
   }
 
-  const fork = join(root, "fork");
-  run("git", ["clone", "--depth", "1", "--branch", "main", "--quiet", "https://github.com/fitchmultz/pi.git", fork]);
-  const forkSha = run("git", ["rev-parse", "HEAD"], fork, true);
-  assert.match(forkSha, /^[a-f0-9]{40}$/);
-  console.log(`Fork host: fitchmultz/pi@${forkSha}`);
-  run("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], fork);
-  run("npm", ["run", "hydrate:model-data"], fork);
-  run("npm", ["run", "build:offline"], fork);
-  const forkHost = join(fork, "packages", "coding-agent");
-  probe("fork-npm", forkHost, npmExtension);
-  probe("fork-git", forkHost, gitExtension);
-  console.log("Official Pi and the current fork load both installed Cursor extension forms offline.");
+  if (!args.includes("--official-only")) {
+    const fork = join(root, "fork");
+    run("git", ["clone", "--depth", "1", "--branch", "main", "--quiet", "https://github.com/fitchmultz/pi.git", fork]);
+    const forkSha = run("git", ["rev-parse", "HEAD"], fork, true).trim();
+    assert.match(forkSha, /^[a-f0-9]{40}$/);
+    console.log(`Fork host: fitchmultz/pi@${forkSha}`);
+    run("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], fork);
+    run("npm", ["run", "hydrate:model-data"], fork);
+    run("npm", ["run", "build:offline"], fork);
+    const forkHost = join(fork, "packages", "coding-agent");
+    probe("fork-npm", forkHost, npmExtension);
+    probe("fork-git", forkHost, gitExtension);
+  }
+  console.log("Selected compatibility qualification passed offline.");
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

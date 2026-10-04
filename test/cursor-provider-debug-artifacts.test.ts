@@ -13,7 +13,7 @@ import {
 	registerNativeToolDisplayForTest,
 	createPiHarness,
 } from "./helpers/cursor-provider-harness.js";
-import { streamCursor } from "../src/cursor-provider.js";
+import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { registerCursorRuntimeControls } from "../src/cursor-state.js";
 import { registerCursorSessionScope } from "../src/cursor-session-scope.js";
 import { CursorSdkEventDebugSink, __testUtils as sdkEventDebugTestUtils } from "../src/cursor-sdk-event-debug.js";

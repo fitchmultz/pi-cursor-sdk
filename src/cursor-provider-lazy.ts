@@ -31,7 +31,7 @@ function makeProviderRuntimeErrorMessage(model: Model<Api>, error: unknown, apiK
 	};
 }
 
-export function createCursorLazyStream(capture: (options?: SimpleStreamOptions) => CursorProviderOwnership) {
+export function createCursorLazyStream(capture: (model: Model<Api>, context: Context, options?: SimpleStreamOptions) => CursorProviderOwnership) {
 	return (model: Model<Api>, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream => {
 		const outer = createAssistantMessageEventStream();
 		const fail = (error: unknown) => {
@@ -41,7 +41,7 @@ export function createCursorLazyStream(capture: (options?: SimpleStreamOptions) 
 		};
 		let ownership: CursorProviderOwnership;
 		try {
-			ownership = capture(options);
+			ownership = capture(model, context, options);
 		} catch (error) {
 			fail(error);
 			return outer;

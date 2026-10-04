@@ -427,6 +427,14 @@ export function buildCursorIncrementalPrompt(context: Context, options: CursorPr
 	return { text: parts.join(SECTION_SEPARATOR), images };
 }
 
+/** Native compaction/tree instructions are already a complete summarization request. */
+export function buildCursorSummaryPrompt(context: Context): CursorPrompt {
+	const { systemPrompt } = resolveCursorPiContext(context);
+	const sections = normalizePiContextMessages(context.messages).map(formatMessage).filter((text): text is string => text !== undefined);
+	if (systemPrompt) sections.unshift(`System instructions from pi:\n${systemPrompt}`);
+	return { text: sections.join(SECTION_SEPARATOR), images: [] };
+}
+
 export function buildCursorPrompt(context: Context, options: CursorPromptOptions = {}): CursorPrompt {
 	const sectionsBeforeMessages: string[] = [getCursorToolBoundaryText({
 		agentMode: options.agentMode,

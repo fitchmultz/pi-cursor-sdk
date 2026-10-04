@@ -32,7 +32,8 @@ import {
 	asMockCursorRun,
 	getPiToolsMcpUrlFromAgentCreateOptions,
 	createExtensionTestContext} from "./helpers/cursor-provider-harness.js";
-import { streamCursor, __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
+import { streamCursor } from "./helpers/cursor-provider-ownership.js";
+import { __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
 import { __testUtils as sessionAgentTestUtils } from "../src/cursor-session-agent.js";
 import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
 import { estimateCursorPromptMessageTokens } from "../src/context.js";

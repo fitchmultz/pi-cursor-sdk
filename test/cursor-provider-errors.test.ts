@@ -1,3 +1,7 @@
+import { createRequire } from "node:module";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { resolveInstalledPackageRoot } from "./helpers/installed-package.js";
 import { AuthenticationError, IntegrationNotConnectedError, convertConnectError } from "@cursor/sdk";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { describe, expect, it } from "vitest";
@@ -413,9 +417,20 @@ describe("cursor-provider-errors", () => {
 		expect(message).not.toContain("[unavailable] Error");
 	});
 
-	it("classifies a backend UNAVAILABLE ConnectError after @cursor/sdk re-wraps it as NetworkError (#265)", () => {
-		const raw = new ConnectError("Error", Code.Unavailable);
-		(raw as { details: Array<{ type: string }> }).details = [{ type: "aiserver.v1.ErrorDetails" }];
+	it("classifies a real development Connect 2 backend error structurally", () => {
+		const error = new ConnectError("Error", Code.Unavailable);
+		error.details = [{ type: "aiserver.v1.ErrorDetails", value: new Uint8Array() }];
+		expect(classifyCursorConnectError(error)).toEqual({ kind: "network", source: "cursor-backend-details" });
+		expect(sanitizeCursorProviderError(error, "test-key")).toContain("Network error");
+	});
+
+	it("classifies a backend UNAVAILABLE ConnectError after @cursor/sdk re-wraps it as NetworkError (#265)", async () => {
+		// The SDK owns Connect 1; the root Connect 2 fixtures above exercise structural classification.
+		const sdkRequire = createRequire(join(resolveInstalledPackageRoot("@cursor/sdk"), "dist/esm/index.js"));
+		const sdkConnect = await import(pathToFileURL(sdkRequire.resolve("@connectrpc/connect")).href);
+		expect(sdkConnect.ConnectError).not.toBe(ConnectError);
+		const raw = new sdkConnect.ConnectError("Error", sdkConnect.Code.Unavailable);
+		raw.details = [{ type: "aiserver.v1.ErrorDetails", value: new Uint8Array() }];
 		const error = convertConnectError(raw);
 
 		expect(error.name).toBe("NetworkError");

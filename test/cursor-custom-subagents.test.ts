@@ -49,6 +49,16 @@ describe("Cursor custom subagents", () => {
 			(value): value is (input: unknown) => unknown => typeof value === "function",
 		);
 		const results = functions.map(fn => fn(definitions));
+		// Execute the installed converters rather than inferring the default from optional types.
+		const omitted = { reviewer: { description: "d", prompt: "p" } };
+		const explicit = { reviewer: { ...omitted.reviewer, model: "inherit" } };
+		expect(functions.length).toBeGreaterThan(0);
+		for (const convert of functions) {
+			expect(convert(omitted)).toEqual(convert(explicit));
+			expect(convert(omitted)).toEqual([
+				{ name: "reviewer", description: "d", prompt: "p", model: "inherit" },
+			]);
+		}
 		const inherited = { name: "inherited", description: "i", prompt: "i", model: "inherit" };
 		expect(results).toContainEqual([
 			{ name: "reviewer", description: "d", prompt: "p", model: "gpt-5.5" },

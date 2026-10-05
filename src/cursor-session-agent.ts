@@ -212,7 +212,8 @@ function buildPoolKeyFingerprint(value: string): string {
 	return createHash("sha256").update(value).digest("hex").slice(0, 16);
 }
 
-// Keeps whole subagent prompts out of the pool key while still repooling when a definition changes.
+// Keeps prompts out of the pool key and repools when effective definitions change.
+// SDK 1.0.35 converts omitted models to inherit in both converters; hash those forms identically.
 function buildCustomSubagentsPoolKey(customSubagents?: CursorCustomSubagentDefinitions): string {
 	if (!customSubagents) return "subagents:none";
 	const entries = Object.keys(customSubagents)

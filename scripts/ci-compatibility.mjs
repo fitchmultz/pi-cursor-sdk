@@ -165,7 +165,8 @@ try {
       run("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]);
       Object.assign(env, { PI_COMPAT_EXPECTED_PACKAGE_DIR: official.packageDir,
         PI_PACKAGE_DIR: official.packageDir, PI_HOST_INDEX: official.index, PI_HOST_CLI: official.cli });
-      const packed = JSON.parse(run("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", root], source, true));
+      // npm 11 returns an array; npm 12 keys the same records by package name.
+      const packed = Object.values(JSON.parse(run("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", root], source, true)));
       assert.equal(packed.length, 1);
       const tarball = join(root, packed[0].filename);
       const consumer = join(root, "npm-consumer");
@@ -228,7 +229,8 @@ try {
       run("git", ["clone", "--no-hardlinks", "--quiet", source, gitExtension]);
       run("npm", ["install", "--omit=dev", "--no-audit", "--no-fund"], gitExtension);
     }
-    const packed = JSON.parse(run("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", root], args.includes("--working-tree") ? gitExtension : source, true));
+    // npm 11 returns an array; npm 12 keys the same records by package name.
+    const packed = Object.values(JSON.parse(run("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", root], args.includes("--working-tree") ? gitExtension : source, true)));
     assert.equal(packed.length, 1);
     const tarball = join(root, packed[0].filename);
     const consumer = join(root, "npm-consumer");

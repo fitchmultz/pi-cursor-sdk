@@ -329,6 +329,10 @@ PI_CURSOR_LOCAL_RESUME=0 pi --model cursor/grok-4.6
 
 Resume is strict: the current pi session file/id, branch path prefix, cwd/repo root, model/API/tool-surface pool key, SDK store identity, and compaction generation must match. Each persisted pi session gets a SQLite store under `<getDefaultSdkStateRoot(cwd)>/pi-sessions/<session-hash>/`, and that same store is used for create/resume, transcript reads, checkpoint lookup, and exact-ID cleanup so parallel pi sessions do not contend on one workspace `index.db`. Fileless sessions use a unique OS-temporary store per acquisition, remove it on graceful disposal, and start a fresh agent after invalidation instead of reopening a disposed temporary store. Legacy resume entries still try the SDK's default workspace store; if that resume fails or the agent is later replaced, the new agent moves to the per-session store. A trailing user message already present at process startup is crash-ambiguous and invalidates the old handle; only a user message appended in the current process may span a recorded handle, preventing restart from resending an already-submitted prompt. A successful process reattachment bootstraps the current pi transcript once while retaining the resumed Cursor agent's native state; later in-process turns remain incremental. If `Agent.resume()` fails, pi bootstraps a new local Cursor agent from the current transcript and streams one display-only continuity note. Superseded local agents can be cleaned up explicitly with `/cursor-local-resume-cleanup --dry-run` and `/cursor-local-resume-cleanup --yes`; cleanup only deletes exact recorded `agent-*` IDs from their recorded store. Cloud resume remains disabled; `/cursor-cloud list|archive|delete` only manages recorded cloud agents.
 
+Configure `local.storeRoot` in user or trusted project config, or set `PI_CURSOR_SDK_STATE_ROOT`, to place persistent local stores beneath `<base>/pi-cursor-sdk/cwd-<cwd-hash>/pi-sessions/<session-hash>/`. The environment overrides trusted project config, then user config. Relative paths resolve from the session cwd; `~` and `~/` expand to your home directory. Blank paths, control characters and non-string config values fail explicitly. The owned prefix and each store component must be real directories; higher user-managed ancestor links remain supported. Existing ancestor permissions are preserved.
+
+Leaving this option unset preserves the SDK default and its existing migration path. A configured base bypasses that default migration and does not copy existing histories. Changing the base creates a distinct agent pool and store identity; cleanup admits only the current configured base and exact recorded session identity. Restore the previous base before cleaning its agents, or unset the option for agents created under the SDK default. An attempt under a different base retains canonical recorded candidates for retry; legacy entries without a store identity require the default configuration before cleanup. Fileless sessions and text-only compaction/tree summaries retain isolated temporary stores.
+
 If a local-store error names a rejected link or non-directory, make that SDK-owned prefix/component a real directory without discarding its data, or relocate via a link at a higher ancestor such as `~/.cursor/projects` instead.
 
 Config can also set non-secret defaults in `~/.pi/agent/cursor-sdk.json` or trusted `.pi/cursor-sdk.json`. Project config activates only when Pi's project-trust flow reached this extension and approved the project, or the run started with explicit `--approve`; Pi's implicit trust for a project with no recognized resources is not enough. Because project-local package extensions load after the trust event, `pi install -l` users must pass `--approve` on every run that reads or writes `.pi/cursor-sdk.json`. A trust resource added after trust resolution requires restarting pi. `/cursor-runtime ... --save-project` requires the same trust provenance and does not create Pi trust resources automatically. Explicit runtime, fast-default, and HTTP transport saves preserve unrecognized fields, reject malformed or non-object JSON without rewriting it, and serialize concurrent writers. A completed global preference write is retained if Pi's subsequent session-journal append fails, because Pi may already have mutated the in-memory branch; the command reports that partial journal failure and ignores the uncertain session entry until a later successful save or session restart. If a process is force-killed during the tiny update window, the next save reports the `.lock` path; remove it only after confirming no pi process is writing that config.
@@ -491,7 +495,7 @@ Local Cursor runs use two separate tool surfaces:
 - **Cursor-native surface:** Cursor local-agent tools, Cursor settings, plugins, and configured Cursor MCP servers. These remain owned by the Cursor SDK local agent path. Pi CLI tool toggles such as `--no-tools`, `--tools`, and `--exclude-tools` do not disable this Cursor-native surface.
 - **pi bridge surface:** pi-cursor-sdk exposes bridgeable active pi tools through a per-run local loopback MCP bridge when the bridge is enabled and the current pi tool registry has exposed tools. Pi CLI tool toggles affect this bridge surface because they change pi's active tool registry.
 
-The bridge uses stable MCP v2 with `@modelcontextprotocol/server@2.3.1`, `@modelcontextprotocol/hono@2.0.2`, `hono@4.13.9`, and `@hono/node-server@2.1.3`, bundled as its runtime closure. It binds only to loopback and validates Hono `Host` and `Origin` headers.
+The bridge uses stable MCP v2 with `@modelcontextprotocol/server@2.3.1`, `@modelcontextprotocol/hono@2.0.2`, `hono@4.13.13`, and `@hono/node-server@2.1.3`, bundled as its runtime closure. It binds only to loopback and validates Hono `Host` and `Origin` headers.
 
 Bridge capabilities are snapshotted from `pi.getActiveTools()` and `pi.getAllTools()` for each Cursor run, including per-tool prompt guidelines when pi exposes them. Cursor sees active bridgeable pi tools as collision-safe MCP names such as `pi__sem_reindex` only when they are exposed in that current run. When exposed, Cursor is instructed to prefer `pi__mcp` for MCP work and `pi__subagent` for delegation; Cursor-configured MCP and Cursor-native subagents are fallbacks when the matching pi tool is not exposed or is unavailable. Pi session output, tool cards, confirmations, hooks, renderers, history, and abort behavior use the real pi tool name, such as `sem_reindex`. The bridge queues Cursor's MCP call, emits a normal pi `toolCall`, waits for the matching pi `toolResult`, and resolves that result back into the same live Cursor SDK run without creating a new `Agent`, unless the run was disposed, aborted, or cancelled. The bridge does not call pi tool `execute()` handlers directly.
 
@@ -565,6 +569,40 @@ Use `npm run debug:sdk-events` to capture timestamped `run.stream()`, `onDelta`,
 Use `npm run debug:provider-events` to capture the same `onDelta`/`onStep` payloads **through pi's Cursor provider** (session agent reuse, bridge, native replay, send planning). Artifacts default under gitignored `.debug/cursor-sdk-events/`. Interactive multi-turn pi sessions group turns under `.debug/cursor-sdk-events/sessions/<session-slug>/turn-NNN-.../` with a `session.json` index. You can also opt in during any pi run with `PI_CURSOR_SDK_EVENT_DEBUG=1`; capture is file-only by default so the pi TUI stays normal. Each cumulative JSONL artifact is capped at 2 MiB, ends with an `artifact_truncated` record when capped, and is listed in `summary.json` under `truncatedJsonlFiles`.
 
 See [Cursor testing lessons](docs/cursor-testing-lessons.md#cursor-sdk-event-capture-probe) for usage, artifact layout, and safety notes.
+
+## Custom subagents
+
+Cursor's built-in `task` subagent types accept only the models Cursor's own registry allows, so a delegated task cannot be pointed at an arbitrary Cursor model through that tool. The installed Cursor SDK exposes `AgentOptions.agents`, where each named custom subagent carries its own `model`. Declare those subagents under `subagents` in `~/.pi/agent/cursor-sdk.json` (user) or `.pi/cursor-sdk.json` in a trusted project, and Cursor gains one named subagent type per entry, each pinned to the model you chose:
+
+```json
+{
+  "subagents": {
+    "explore": {
+      "description": "Low-complexity exploration and code search.",
+      "prompt": "You explore the repository and report findings concisely.",
+      "model": "composer-2-5"
+    },
+    "implement": {
+      "description": "Medium-complexity implementation work.",
+      "prompt": "You implement scoped changes and report what you changed.",
+      "model": "grok-4.6",
+      "thinking": "high"
+    },
+    "architect": {
+      "description": "High-complexity design and multi-file reasoning.",
+      "prompt": "You design and justify multi-file changes.",
+      "model": "gpt-5.5@272k",
+      "thinking": "high"
+    }
+  }
+}
+```
+
+`model` takes a pi Cursor model id exactly as `pi --list-models cursor` prints it, including `-`/`.` aliases such as `composer-2-5` and context variants such as `gpt-5.5@272k`. `thinking` accepts pi thinking levels (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`) and maps to the model's Cursor reasoning/effort/thinking parameter the same way session thinking does; it defaults to `off`. Optional `fast` selects the Cursor fast/slow variant for models that support it; subagents read it only from this config, so `/cursor-fast` and `fastDefaults` stay scoped to the session model and never leak into a subagent. Set `"model": "inherit"` to run a subagent on the parent session's model, or omit `model`: SDK 1.0.35 treats omission as `inherit` as well. An id with no registered Cursor metadata is passed through unchanged, so a typo surfaces as a Cursor delegation error rather than being silently rewritten.
+
+**Model parameters apply on cloud runtime only.** The installed Cursor SDK narrows custom subagents to `RuntimeCustomSubagentDefinition` for local runs, whose `model` is a plain string, and its local converter keeps only `model.id`. So on the default local runtime a subagent runs on the model you named, but `thinking`, `fast`, and the context part of a variant such as `@300k` are dropped by the SDK and the model's own defaults apply. Cloud runs pass the full selection. This is an SDK-side limitation, not a pi override; `test/cursor-custom-subagents.test.ts` pins both SDK shapes so the behavior change is caught if a future SDK preserves local params.
+
+Delegation happens by subagent name rather than by model argument, so instructions in `AGENTS.md` should reference the names you declared (for example "use `implement` for medium-complexity subtasks"). Names must start with an ASCII letter, contain at most 64 characters, and use only ASCII letters, digits, dots, underscores, or hyphens after the first letter. The names `__proto__`, `constructor`, and `prototype` are reserved. Entries whose name fails these rules or whose `description`/`prompt` is missing are skipped so one bad entry cannot discard the rest of the config; an unrecognized `thinking` value is dropped and the subagent still runs. A block with no usable entry at all is treated as absent rather than as an empty set, so it cannot shadow a lower-precedence layer. Precedence is trusted project config, then user config, with the winning layer replacing the whole set rather than merging per name; there is no CLI flag or environment variable for subagent definitions. Changing an effective definition splits the local agent pool so the next turn creates a Cursor agent with the new subagents instead of reusing the old one. Per-subagent `mcpServers` is not exposed by this config shape; SDK custom subagents inherit the parent agent's MCP configuration.
 
 ## Fallback models
 

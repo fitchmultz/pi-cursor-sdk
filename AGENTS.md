@@ -25,7 +25,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `src/cursor-session-scope.ts` owns pi session cwd, session file/id/name/generation scope keys, and `session_start` / `session_info_changed` registration for session-agent pooling, cloud agent names, and debug grouping.
 - `src/cursor-provider-binding.ts` owns per-ExtensionAPI provider closures and one-shot native header receipts capturing scope, usage origin, and canonical projection; `src/cursor-request-provenance.ts` resolves actual-request-equivalent source-ordered occupancy floors and operation-signal summary purpose without text/clocks or sibling scans.
 - `src/cursor-session-settings.ts` owns branch-scoped runtime/cloud acknowledgement, mode, fast, and HTTP preferences plus owner-scoped CLI snapshots/one-shot consumption across reload; SDK transport configuration and environment/user defaults remain process-global.
-- `src/cursor-session-store.ts` owns current/legacy cwd/session-derived SQLite identity admission, contract-verified pre-migration layout safety, exact identity admission before bounded path walks, atomic derived cwd ownership through admission/open/disposal, temporary stores, and owned-prefix/removal guards (higher user-managed links allowed; persistent opens retain an active matching lease).
+- `src/cursor-session-store.ts` owns current/legacy cwd/session-derived SQLite identity admission, contract-verified pre-migration layout safety, exact identity admission before bounded path walks, configured base normalization and atomic per-cwd/base ownership through admission/open/disposal, temporary stores, and owned-prefix/removal guards (higher user-managed links allowed; persistent opens retain an active matching lease).
 - `src/cursor-http1.ts` owns branch-scoped local HTTP/1.1 session state, global-preference override tracking, and extension-owned SDK configuration/null reset.
 - `src/cursor-ripgrep-path.ts` owns shared SDK-relative platform package resolution and local-agent ripgrep initialization; `src/cursor-sdk-runtime.ts` initializes the native parser vendor path before shared SDK imports.
 - `src/cursor-session-agent.ts` owns session-scoped SDK agent pooling, transport-aware pool identity, send-state commits, busy tracking for in-flight SDK `run.wait()` work, and scoped acquire/dispose state.
@@ -146,7 +146,7 @@ There is no lint or format script in `package.json` at this time.
 - Keep provider runtime code side-effect-light. Do not write secrets, and do not let cache or discovery failures break response streaming unless the run cannot proceed safely.
 - Add or update tests for behavior changes in `src/`. Prefer focused unit tests over live Cursor calls.
 - If dependency versions change, update `package-lock.json` with npm. Do not manually edit generated dependency output.
-- The bridge runtime closure is bundled and pinned to `@modelcontextprotocol/server@2.3.1`, `@modelcontextprotocol/hono@2.0.2`, `hono@4.13.9`, and `@hono/node-server@2.1.3`. `@cursor/sdk@1.0.35` remains an exact unbundled dependency.
+- The bridge runtime closure is bundled and pinned to `@modelcontextprotocol/server@2.3.1`, `@modelcontextprotocol/hono@2.0.2`, `hono@4.13.13`, and `@hono/node-server@2.1.3`. `@cursor/sdk@1.0.35` remains an exact unbundled dependency.
 - Do not commit `dist/`, `coverage/`, `.env*`, `.pi/`, or package tarballs.
 
 ## Validation and done criteria

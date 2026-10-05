@@ -4,11 +4,16 @@
 
 ## 0.5.1 - 2026-10-05
 
+### Added
+
+- Support trusted config-defined Cursor custom subagents with independent model selections and session pool invalidation (adapted from #208 by Sam Armstrong). Local SDK subagents retain only model IDs.
+- Allow owned per-cwd/session persistent local stores beneath a configured `local.storeRoot` or `PI_CURSOR_SDK_STATE_ROOT`, preserving default SDK migration when unset (adapted from #236 by @gwatkins-arista).
+
 ### Fixed
 
 - Bound artifact gzip output during compression at the existing public size cap, retaining the same fail-closed limit evidence and individual test deadlines.
+- Retain canonical default-store cleanup candidates across configured-root changes, and refuse legacy identityless cleanup under a custom root until the default is restored.
 - Give compatibility build, verification and native contracts separate bounded phases; stop timed-out POSIX command descendants before deleting their isolated workspace. Keep individual test deadlines unchanged.
-
 - Keep Cursor SDK and bridge imports in Pi’s static extension graph so compiled-Bun launchers can resolve them; initialize the native parser vendor path before the SDK loads.
 - Preserve network classification through real SDK UNAVAILABLE error wrappers while keeping bounded, scrubbed cause provenance.
 - Protect owned pending pi bridge calls, including human questions, from live-run idle disposal. Restart the normal cleanup window after the last pending call settles; explicit cancellation and shutdown still release the run.
@@ -17,7 +22,7 @@
 
 ### Changed
 
-- Upgrade the bundled MCP bridge cohort to `@modelcontextprotocol/hono@2.0.2` and its required `@modelcontextprotocol/server@2.3.1` peer, retaining bounded JSON-body parsing and Host/Origin rejection before request dispatch.
+- Upgrade the bundled MCP bridge cohort to `@modelcontextprotocol/hono@2.0.2` and its required `@modelcontextprotocol/server@2.3.1` peer, Hono 4.13.13, and the development-only MCP client 2.3.1, retaining bounded JSON-body parsing and Host/Origin rejection before request dispatch.
 - Add default-visible `PI_CURSOR_FOOTER`; set it to `0` to hide Cursor runtime/fast/mode/transport status without changing provider behavior.
 - Add `PI_CURSOR_LIVE_RUN_IDLE_DISPOSE_MS` to configure eligible local replay idle cleanup, preserving owned pending-call protection and immediate explicit release (adapted from #283 by @aaalexliu).
 - `cursor_ask_question` now requires `PI_CURSOR_ASK_QUESTION=1`; Cursor proceeds with a stated assumption by default.
@@ -26,7 +31,7 @@
 - Add fail-closed rejection of links/non-directories inside SDK/extension-owned store layouts before migration, opening, or temporary removal; higher user-managed ancestor links remain supported as in 0.5.0. Malformed recorded identities fall back or become non-retryable cleanup candidates without unbounded path traversal.
 - Stop suppressing unrelated connect-node-only network process errors during active Cursor turns; SDK-vendored and backend-detail provenance remain scoped.
 - Qualify vendored Node transport abort/stall provenance and HTTP/2 defaults, and keep scoped MCP timeout overrides independent of minified class/argument names. Refresh catalog generator provenance to SDK 1.0.35; the 45-model metadata and checkpoint limits are unchanged.
-- Upgrade root TypeBox validation to 1.3.35 while retaining direct Pi 0.99.1 dependencies, lockfile-resolved 0.99.2 transitives and nested TypeBox 1.3.27; update Vitest to 5.0.3.
+- Upgrade root TypeBox validation to 1.3.35 and align direct Pi dependencies with lockfile-resolved 0.99.2 transitives and nested TypeBox 1.3.27; update Vitest to 5.0.3.
 
 ## 0.5.0 - 2026-10-04
 

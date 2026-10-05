@@ -16,7 +16,7 @@ import {
 	type CursorSessionAgentResumeEntryData,
 } from "../src/cursor-session-agent-resume.js";
 import { makeAssistantMessage } from "./helpers/pi-harness.js";
-import { __testUtils as scopeTestUtils } from "../src/cursor-session-scope.js";
+import { cursorSessionScopeKeyForManager, __testUtils as scopeTestUtils } from "../src/cursor-session-scope.js";
 import { installCursorSessionStoreMock } from "./helpers/cursor-session-store.js";
 import { buildCursorSessionStateRoot } from "../src/cursor-session-store.js";
 
@@ -315,7 +315,7 @@ describe("cursor-session-agent-cleanup", () => {
 
 	it("deletes a versioned cleanup candidate from its recorded per-session store", async () => {
 		const storeMock = installCursorSessionStoreMock();
-		const stateRoot = buildCursorSessionStateRoot("/tmp/cursor-sdk-state", cleanupScope.scopeKey, true);
+		const stateRoot = buildCursorSessionStateRoot("/tmp/cursor-sdk-state/workspace", cleanupScope.scopeKey);
 		const storeIdentity = { version: 1 as const, stateRoot };
 		const entries = linearEntries([
 			resumeEntry("r1", resumeData("agent-old", { version: 2, storeIdentity })),
@@ -343,7 +343,7 @@ describe("cursor-session-agent-cleanup", () => {
 			resumeEntry("r1", resumeData("agent-old")),
 			resumeEntry("r2", resumeData("agent-active", {
 				version: 2,
-				storeIdentity: { version: 1, stateRoot: buildCursorSessionStateRoot("/tmp/cursor-sdk-state", cleanupScope.scopeKey, true) },
+				storeIdentity: { version: 1, stateRoot: buildCursorSessionStateRoot("/tmp/cursor-sdk-state/workspace", cleanupScope.scopeKey) },
 				cleanupCandidates: [{
 					agentId: "agent-old",
 					storeIdentity: { version: 1, stateRoot: "/tmp/untrusted-store" },
@@ -482,11 +482,13 @@ describe("cursor-session-agent-cleanup", () => {
 		}
 	});
 
-	it("performs zero deletes when durable intent append fails", async () => {
-		const entries = linearEntries([resumeEntry("r1", resumeData("agent-old")), resumeEntry("r2", resumeData("agent-active", { cleanupCandidateAgentIds: ["agent-old"] }))]);
-		const appendEntry = vi.fn(() => { throw new Error("disk full"); });
+	it.each(["append failure", "fileless context"])("performs zero deletes without durable intent: %s", async (failure) => {
+		const sessionManager = { ...makeContext([]).sessionManager, getSessionFile: () => failure === "fileless context" ? undefined : "/tmp/session.jsonl" };
+		const extra = { scopeKey: cursorSessionScopeKeyForManager(sessionManager), sessionFile: sessionManager.getSessionFile() };
+		const entries = linearEntries([resumeEntry("r1", resumeData("agent-old", extra)), resumeEntry("r2", resumeData("agent-active", { ...extra, cleanupCandidateAgentIds: ["agent-old"] }))]);
+		const appendEntry = failure === "append failure" ? vi.fn(() => { throw new Error("disk full"); }) : vi.fn();
 		const deleteAgent = vi.fn();
-		const ctx = makeContext(entries);
+		const ctx = { ...makeContext(entries), sessionManager: { ...sessionManager, getEntries: () => entries, getBranch: () => entries } };
 		cleanupTestUtils.setSdkOperations({ delete: deleteAgent });
 
 		await runCursorSessionAgentCleanupCommand({ appendEntry }, "--yes", ctx);

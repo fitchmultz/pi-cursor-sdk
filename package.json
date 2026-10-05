@@ -161,7 +161,7 @@
     "smoke:platform:all": "npm run smoke:platform:doctor && node scripts/platform-smoke.mjs run --target macos,ubuntu,windows-native"
   },
   "dependencies": {
-    "@cursor/sdk": "1.0.32",
+    "@cursor/sdk": "1.0.35",
     "@hono/node-server": "2.1.1",
     "@modelcontextprotocol/hono": "2.0.1",
     "@modelcontextprotocol/server": "2.1.0",

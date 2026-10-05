@@ -220,7 +220,7 @@ Pass criteria:
 
 Run offline checks first, then reuse retained proof whose tested inputs are unchanged. If changed behavior still needs real-service proof, choose one existing meaningful check on a representative environment. Do not run every command below as a paid ladder; docs/metadata-only changes need zero paid runs.
 
-TypeScript 7 owns builds and type checks. `@typescript/typescript6` is dev-only for the AST architecture test because TypeScript 7 has no stable compiler API. Vitest 5 defaults `clearMocks` to `true`.
+TypeScript 7 owns builds and type checks. `@typescript/typescript6` is dev-only for AST architecture and installed-SDK contract tests because TypeScript 7 has no stable compiler API. Vitest 5 defaults `clearMocks` to `true`.
 
 ```bash
 npm test
@@ -289,7 +289,7 @@ The script writes timestamped artifacts under `--out` (default `/tmp/pi-cursor-s
 
 Stdout prints artifact paths and summary counts only. Raw payloads stay on disk and may contain local paths, project text, tool args/results, or secrets — do not commit or share them.
 
-Hard repo rule: Cursor SDK behavior claims must come from the installed `@cursor/sdk` package and/or https://cursor.com/docs/sdk/typescript, not from memory or ad-hoc probes alone. Current validation targets Node 24+, exact `@cursor/sdk@1.0.32`, official Pi 0.87.1/latest, and current `fitchmultz/pi` main.
+Hard repo rule: Cursor SDK behavior claims must come from the installed `@cursor/sdk` package and/or https://cursor.com/docs/sdk/typescript, not from memory or ad-hoc probes alone. Current validation targets Node 24+, exact `@cursor/sdk@1.0.35`, official Pi 0.87.1/latest, and current `fitchmultz/pi` main.
 
 ## Pi provider SDK event capture
 

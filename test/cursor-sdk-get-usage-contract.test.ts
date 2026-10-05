@@ -4,7 +4,7 @@ import { loadCursorSdk } from "../src/cursor-sdk-runtime.js";
 import { readInstalledPackageDistText } from "./helpers/installed-package.js";
 
 afterEach(() => vi.unstubAllGlobals());
-describe("installed Cursor SDK 1.0.32 getUsage contract", () => {
+describe("installed Cursor SDK getUsage contract", () => {
 	it("public getter preserves disjoint whole-agent and per-UUID token/cost snapshots", async () => {
 		// Recorded LOCAL cache counts (SDK1.0.32, 2026-10-04); public endpoint contract:
 		// https://cursor.com/docs/cloud-agent/api/endpoints#usage (four disjoint categories).

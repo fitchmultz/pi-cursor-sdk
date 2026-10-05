@@ -23,7 +23,7 @@ describe("cursor-session-agent local resume", () => {
 	it("resumes a recorded local SDK agent from its versioned session store", async () => {
 		const storeMock = installCursorSessionStoreMock();
 		const scopeKey = "/tmp/sessions/test.jsonl";
-		const stateRoot = buildCursorSessionStateRoot("/tmp/cursor-sdk-state", scopeKey, true);
+		const stateRoot = buildCursorSessionStateRoot("/tmp/cursor-sdk-state/workspace", scopeKey);
 		const sendState = {
 			bootstrapped: true,
 			contextFingerprint: computeCursorContextFingerprint(makeContext()),
@@ -124,7 +124,7 @@ describe("cursor-session-agent local resume", () => {
 
 		const legacyLease = await acquireSessionCursorAgent(params);
 		expect(legacyLease.resumed).toBe(true);
-		expect(legacyLease.storeIdentity).toEqual({ version: 1, stateRoot: "/tmp/cursor-sdk-state" });
+		expect(legacyLease.storeIdentity).toEqual({ version: 1, stateRoot: "/tmp/cursor-sdk-state/workspace" });
 		expect(resumeAgent.mock.calls[0][1]?.local?.store).toBe(storeMock.stores[0]);
 
 		sessionAgentTestUtils.invalidateSessionAgent(scopeKey);
@@ -134,10 +134,10 @@ describe("cursor-session-agent local resume", () => {
 		expect(createAgent).toHaveBeenCalledTimes(1);
 		expect(createAgent.mock.calls[0][0].local?.store).toBe(storeMock.stores[1]);
 		expect(storeMock.openedOptions).toEqual([
-			{ workspaceRef: "/tmp/project", stateRoot: toNamespacedPath("/tmp/cursor-sdk-state") },
+			{ workspaceRef: "/tmp/project", stateRoot: toNamespacedPath("/tmp/cursor-sdk-state/workspace") },
 			{
 				workspaceRef: "/tmp/project",
-				stateRoot: toNamespacedPath(buildCursorSessionStateRoot("/tmp/cursor-sdk-state", scopeKey, true)),
+				stateRoot: toNamespacedPath(buildCursorSessionStateRoot("/tmp/cursor-sdk-state/workspace", scopeKey)),
 			},
 		]);
 		expect(lease.resumed).toBe(false);
@@ -233,11 +233,11 @@ describe("cursor-session-agent local resume", () => {
 
 			expect(storeMock.openSqliteStore).toHaveBeenNthCalledWith(1, {
 				workspaceRef: "/tmp/project",
-				stateRoot: toNamespacedPath("/tmp/cursor-sdk-state"),
+				stateRoot: toNamespacedPath("/tmp/cursor-sdk-state/workspace"),
 			});
 			expect(storeMock.openSqliteStore).toHaveBeenNthCalledWith(2, {
 				workspaceRef: "/tmp/project",
-				stateRoot: toNamespacedPath(buildCursorSessionStateRoot("/tmp/cursor-sdk-state", scopeKey, true)),
+				stateRoot: toNamespacedPath(buildCursorSessionStateRoot("/tmp/cursor-sdk-state/workspace", scopeKey)),
 			});
 			if (failure === "Agent.resume") {
 				expect(resumeAgent.mock.calls[0][1]?.local?.store).toBe(storeMock.stores[0]);
@@ -294,7 +294,7 @@ describe("cursor-session-agent local resume", () => {
 
 		expect(storeMock.openSqliteStore).toHaveBeenCalledTimes(1);
 		expect(storeMock.openedOptions[0].stateRoot).toContain("pi-sessions");
-		expect(storeMock.openedOptions[0].stateRoot).not.toBe(toNamespacedPath("/tmp/cursor-sdk-state"));
+		expect(storeMock.openedOptions[0].stateRoot).not.toBe(toNamespacedPath("/tmp/cursor-sdk-state/workspace"));
 		expect(resumeAgent).not.toHaveBeenCalled();
 		expect(createAgent.mock.calls[0][0].local?.store).toBe(storeMock.stores[0]);
 		expect(lease.resumeNotice).toBeUndefined();

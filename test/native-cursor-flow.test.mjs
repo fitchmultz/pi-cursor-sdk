@@ -455,6 +455,7 @@ for (const operation of ["compact", "tree", "bugreport"]) {
       const beforeB = await readFile(b.manager.getSessionFile(), "utf8");
       const before = state.sends.length;
       const storesBefore = state.stores.length;
+      const derivationsBefore = state.defaultRootCwds.length;
       const lineageBefore = a.manager.getEntries().filter(e => e.type === "custom" && ["cursor-sdk-agent-lineage", "cursor-sdk-agent-resume"].includes(e.customType));
       if (operation === "compact") await a.session.compact();
       else if (operation === "tree") await a.session.navigateTree(branchTarget, { summarize: true });
@@ -469,7 +470,10 @@ for (const operation of ["compact", "tree", "bugreport"]) {
       if (operation !== "bugreport") {
         assert.equal(new Set(state.sends.slice(before).map(send => send.agentId)).size, state.sends.length - before, "each native summary gets a fresh agent");
         assert.deepEqual(a.manager.getEntries().filter(e => e.type === "custom" && ["cursor-sdk-agent-lineage", "cursor-sdk-agent-resume"].includes(e.customType)), lineageBefore);
-        await assertSummaryStoresRemoved(state.stores.slice(storesBefore));
+        assert.equal(state.defaultRootCwds.length, derivationsBefore, "summaries never derive a persistent workspace root");
+        const summaryStores = state.stores.slice(storesBefore);
+        assert.equal(new Set(summaryStores.map(store => store.stateRoot)).size, summaryStores.length, "each invocation has a unique temporary store");
+        await assertSummaryStoresRemoved(summaryStores);
       }
       assert.equal(await readFile(b.manager.getSessionFile(), "utf8"), beforeB);
       const metadataPaths = (await readdir(a.cwd, { recursive: true })).filter((path) => path.endsWith("metadata.json"));

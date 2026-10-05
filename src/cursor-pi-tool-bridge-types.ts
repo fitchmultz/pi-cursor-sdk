@@ -60,6 +60,9 @@ export interface CursorPiToolBridgeRun {
 	resolveToolResults(toolResults: readonly ToolResultMessage[]): Promise<void>;
 	resolveToolResultsFromContext(context: Context): Promise<void>;
 	hasPendingPiToolCallId(piToolCallId: string): boolean;
+	hasPendingToolCalls(): boolean;
+	/** Synchronous changes; observer errors cannot affect settlement. Returns an idempotent unsubscribe. */
+	onPendingToolCallsChanged(listener: () => void): () => void;
 	isBridgeMcpToolCall(toolCall: unknown): boolean;
 	setOnToolRequest(handler?: (request: CursorPiBridgeToolRequest) => void): void;
 	setDebugRecorder(recorder?: CursorSdkEventDebugRecorder): void;

@@ -1,3 +1,5 @@
+// Install the external SDK transport mock before the static provider dependency graph evaluates.
+import "./helpers/cursor-provider-harness.js";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

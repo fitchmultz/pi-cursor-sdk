@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Support trusted config-defined Cursor custom subagents with independent model selections and session pool invalidation (adapted from #208 by Sam Armstrong). Local SDK subagents retain only model IDs.
+
 ## 0.5.1 - 2026-10-05
 
 ### Fixed

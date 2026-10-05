@@ -571,6 +571,17 @@ describe("Cursor SDK config resolver", () => {
 		expect(cloud.repo).toMatchObject({ value: "session-repo", source: "session" });
 	});
 
+	it("ignores cli, environment, and session for subagents (per-field source order)", () => {
+		const subagents = { reviewer: { description: "Session.", prompt: "Session." } };
+
+		expect(resolveCursorSdkConfig({ env: {}, session: { subagents } }).subagents).toMatchObject({ value: {}, source: "builtin" });
+		expect(resolveCursorSdkConfig({ env: { PI_CURSOR_SUBAGENTS: JSON.stringify(subagents) } }).subagents).toMatchObject({
+			value: {},
+			source: "builtin",
+		});
+		expect(resolveCursorSdkConfig({ env: {}, cli: { subagents } }).subagents).toMatchObject({ value: {}, source: "builtin" });
+	});
+
 	it("resolves local safety controls by CLI, env, project, user, built-in order", () => {
 		const user = { local: { autoReview: true, sandboxOptions: { enabled: true }, force: true, resume: true } };
 		const project = { local: { autoReview: false, sandbox: false, force: true, resume: false } };

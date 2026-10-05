@@ -3,7 +3,7 @@ import { vi } from "vitest";
 import { __testUtils as cursorSessionStoreTestUtils } from "../../src/cursor-session-store.js";
 
 export function installCursorSessionStoreMock(
-	getDefaultStateRoot: () => string | Promise<string> = () => "/tmp/cursor-sdk-state",
+	getDefaultStateRoot: () => string | Promise<string> = () => "/tmp/cursor-sdk-state/workspace",
 ) {
 	const stores: Array<LocalAgentStore & { dispose(): Promise<void> }> = [];
 	const openedOptions: Array<{ workspaceRef: string; stateRoot: string }> = [];

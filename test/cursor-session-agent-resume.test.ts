@@ -336,7 +336,7 @@ describe("cursor-session-agent-resume", () => {
 			branchPathHash: futureHash,
 			sendState: { bootstrapped: true, contextFingerprint: "fp-new", incrementalSendCount: 1 },
 			createdAt: "2026-07-07T00:00:00.000Z",
-			storeIdentity: { version: 1, stateRoot: "/tmp/cursor-sdk-state" },
+			storeIdentity: { version: 1, stateRoot: "/tmp/cursor-sdk-state/workspace" },
 		};
 		const newerResume = resumeEntry("r2", "a2", newerHandle);
 		const treeUser = messageEntry("u3", "r1");

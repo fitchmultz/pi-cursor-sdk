@@ -10,7 +10,7 @@ import {
 	makeContext, makeModel, mockCreatedAgent, registerNativeToolDisplayForTest,
 	resetCursorProviderTestState, createExtensionTestContext, type RegisteredTool,
 } from "./helpers/cursor-provider-harness.js";
-import { readInstalledPackageVersion } from "./helpers/installed-package.js";
+import { installedCursorModules } from "./helpers/cursor-sdk-installed-modules.js";
 
 type TextCallback =
 	| { channel: "onDelta"; args: Parameters<NonNullable<SendOptions["onDelta"]>>[0] }
@@ -53,20 +53,29 @@ describe("Cursor completed assistant-message boundaries", () => {
 		await __testUtils.resetSessionCursorAgents();
 	});
 
-	it("the captured onStep messages complete whole groups of token deltas", () => {
-		let pending = "";
+	it("the installed SDK completes token groups into the historical capture's assistant-message shape", async () => {
+		const modules = await installedCursorModules();
+		const Accumulator = Object.values(modules("./src/agent/run-interaction-accumulator.ts")).find(
+			(value: any) => typeof value === "function" && typeof value.prototype?.apply === "function",
+		) as any;
+		expect(Accumulator).toBeTypeOf("function");
+		const completed: string[] = [];
+		const accumulator = new Accumulator({ onStep: ({ step }: any) => {
+			if (step.type === "assistantMessage") completed.push(step.message.text);
+		} });
+		// Keep the original .32 capture/provenance. Only exercise the installed
+		// accumulator contract here; this is not a new live SDK capture.
 		for (const callback of fixture.callbacks) {
-			if (callback.channel === "onDelta" && callback.args.update.type === "text-delta") pending += callback.args.update.text;
+			if (callback.channel === "onDelta") await accumulator.apply(callback.args.update);
 			if (callback.channel === "onStep" && callback.args.step.type === "assistantMessage") {
-				expect(callback.args.step.message.text).toBe(pending);
-				pending = "";
+				await accumulator.apply({ type: "tool-call-completed", toolCall: { type: "read" } });
 			}
 		}
-		expect(pending).toBe("");
+		expect(completed).toEqual(messages);
+		expect(accumulator.finalAssistantText()).toBe(fixture.result);
 	});
 
 	it.each(["cloud", "local", "local-live"])("preserves captured progress and exact final text in %s output", async (runtime) => {
-		expect(readInstalledPackageVersion("@cursor/sdk")).toBe(fixture.sdkVersion);
 		expect(messages.at(-1)).toBe(fixture.result);
 		if (runtime === "cloud") {
 			process.env.PI_CURSOR_RUNTIME = "cloud";

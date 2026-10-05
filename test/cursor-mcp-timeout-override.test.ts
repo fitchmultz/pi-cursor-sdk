@@ -1,9 +1,9 @@
 import { captureProviderTestOwnership } from "./helpers/cursor-provider-ownership.js";
 import { makeModel, makeContext } from "./helpers/pi-harness.js";
-import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { installedCursorModules } from "./helpers/cursor-sdk-installed-modules.js";
 import {
 	cursorMcpToolTimeoutOverrideDefaults,
 	installCursorMcpToolTimeoutOverride,
@@ -151,36 +151,55 @@ return (() => {
 	return run(callback);
 }
 
-function readCursorSdkEsmBundleContaining(...markers: string[]): string {
-	const sdkEsmDir = join(process.cwd(), "node_modules/@cursor/sdk/dist/esm");
-	const hits = readdirSync(sdkEsmDir).flatMap((fileName) => {
-		if (!fileName.endsWith(".js")) return [];
-		const source = readFileSync(join(sdkEsmDir, fileName), "utf8");
-		return markers.every((marker) => source.includes(marker)) ? [{ fileName, source }] : [];
-	});
-
-	expect(hits.map((hit) => hit.fileName)).toHaveLength(1);
-	return hits[0]!.source;
-}
-
 describe("Cursor MCP timeout override", () => {
-	it("tracks the installed Cursor SDK MCP callTool timeout seam", () => {
-		const sdkMcpBundle = readCursorSdkEsmBundleContaining(
-			'withName("McpSdkClient.callTool")',
-			'this.client.callTool({name:t,arguments:r})',
-		);
-		const sdkProtocolBundle = readCursorSdkEsmBundleContaining(
-			'this.request({method:"initialize"',
-			"timeoutId:setTimeout",
-		);
-
-		expect(sdkMcpBundle).toContain('withName("McpSdkClient.callTool")');
-		expect(sdkMcpBundle).toContain('this.client.callTool({name:t,arguments:r})');
-		expect(sdkMcpBundle).toContain('withName("McpSdkClient.getTools")');
-		expect(sdkMcpBundle).toContain('this.client.listTools({cursor:e})');
-		expect(sdkProtocolBundle).toContain('this.request({method:"initialize"');
-		expect(sdkProtocolBundle).toContain('_setupTimeout(e,t,s,n,i=!1)');
-		expect(sdkProtocolBundle).toContain('timeoutId:setTimeout(n,t)');
+	it("applies scoped defaults to actual installed SDK MCP requests without minifier coupling", async () => {
+		const modules = await installedCursorModules();
+		const exports = modules("/@modelcontextprotocol/sdk/dist/esm/client/index.js");
+		const Client = Object.values(exports).find((value: any) => typeof value === "function" && typeof value.prototype?.callTool === "function") as any;
+		expect(Client).toBeTypeOf("function");
+		const client = new Client({ name: "offline-contract", version: "1" });
+		const pending: Promise<unknown>[] = [];
+		const timers: number[] = [];
+		const original = globalThis.setTimeout;
+		vi.stubGlobal("setTimeout", ((callback: any, delay: number, ...args: any[]) => {
+			timers.push(delay);
+			return original(callback, delay, ...args);
+		}) as typeof setTimeout);
+		installCursorMcpToolTimeoutOverride();
+		const transport = {
+			start: async () => {}, close: async () => { transport.onclose?.(); },
+			send: async (message: any) => {
+				if (message.method === "initialize") {
+					transport.onmessage?.({ jsonrpc: "2.0", id: message.id, result: {
+						protocolVersion: "2025-11-25", capabilities: { tools: {}, prompts: {} },
+						serverInfo: { name: "offline", version: "1" },
+					} });
+				}
+			},
+			onmessage: undefined as ((message: any) => void) | undefined,
+			onclose: undefined as (() => void) | undefined,
+		};
+		try {
+			await client.connect(transport);
+			expect(timers).toContain(10_000);
+			timers.length = 0;
+			pending.push(client.listTools().catch(() => {}));
+			expect(timers).toContain(10_000);
+			timers.length = 0;
+			pending.push(client.callTool({ name: "offline", arguments: {} }).catch(() => {}));
+			expect(timers).toContain(3_600_000);
+			timers.length = 0;
+			pending.push(client.listPrompts().catch(() => {}));
+			expect(timers).toContain(60_000);
+			timers.length = 0;
+			pending.push(client.callTool({ name: "offline" }, undefined, { timeout: 1234 }).catch(() => {}));
+			expect(timers).toContain(1234);
+		} finally {
+			await client.close();
+			await Promise.all(pending);
+			restoreCursorMcpToolTimeoutOverride();
+			vi.unstubAllGlobals();
+		}
 	});
 
 	it("recognizes the Cursor SDK MCP tool-call timeout stack shape", () => {

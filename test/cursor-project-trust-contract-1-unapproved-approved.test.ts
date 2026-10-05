@@ -7,6 +7,7 @@ import {
 	createTrustIsolatedRunRoot,
 	inspectNativeTrust,
 	makeRunPi,
+	PROJECT_TRUST_FIXTURE_SETUP_TIMEOUT_MS,
 } from "./helpers/project-trust-contract-fixture.js";
 
 // Shard 1/4 of the former test/cursor-project-trust-contract.test.ts (split for
@@ -27,7 +28,7 @@ describe("non-interactive project trust CLI/provider contract", () => {
 
 	beforeAll(() => {
 		({ fixtureRoot, packedPackageRoot, probeExtensionPath } = createTrustIsolatedPackedFixture());
-	}, 120_000);
+	}, PROJECT_TRUST_FIXTURE_SETUP_TIMEOUT_MS);
 
 	beforeEach(async () => {
 		await resetCursorProviderTestState();

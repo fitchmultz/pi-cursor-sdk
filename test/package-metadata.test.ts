@@ -107,21 +107,10 @@ describe("package metadata cutover baselines", () => {
 		expect(sdkOptions).toMatch(/export interface AgentOptions[\s\S]*?\bagentId\?: string;/);
 	});
 
-	it("pins the Node ConnectRPC transport required by Cursor SDK's Node seam", () => {
-		const sdkTransportDts = readFileSync(
-			join(process.cwd(), "node_modules/@cursor/sdk/dist/esm/transport.d.ts"),
-			"utf8",
-		);
-
-		expect(sdkTransportDts).toContain("Node");
-		expect(sdkTransportDts).toContain("`@connectrpc/connect-node`");
-		expect(packageLock.packages["node_modules/@cursor/sdk"]?.dependencies?.["@connectrpc/connect-node"]).toBe("^1.6.1");
+	it("keeps the SDK-vendored Node transport out of the external dependency tree", () => {
+		expect(packageLock.packages["node_modules/@cursor/sdk"]?.dependencies?.["@connectrpc/connect-node"]).toBeUndefined();
 		expect(packageJson.dependencies["@connectrpc/connect-node"]).toBeUndefined();
-		expect(lockPackageVersion("@connectrpc/connect-node")).toBeDefined();
-	});
-
-	it("keeps installed ConnectRPC transport siblings aligned", () => {
-		expect(lockPackageVersion("@connectrpc/connect-node")).toBe(lockPackageVersion("@connectrpc/connect-web"));
+		expect(lockPackageVersion("@connectrpc/connect-node")).toBeUndefined();
 	});
 
 	it("leaves the Cursor SDK transport dependency tree to npm resolution", () => {

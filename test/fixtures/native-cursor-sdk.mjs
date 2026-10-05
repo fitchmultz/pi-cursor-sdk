@@ -1,4 +1,4 @@
-// Offline transport fixture matching installed @cursor/sdk 1.0.32's public
+// Offline transport fixture matching the installed @cursor/sdk public
 // SDKAgent/Run/AgentUsage contracts (dist/esm/{agent,run,usage-types}.d.ts).
 // Controlled failures use RunResult's documented error/cancelled statuses;
 // heldCwds controls transport completion, not Pi scheduling or attribution.
@@ -10,7 +10,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 export const state = globalThis[Symbol.for("pi-cursor-native-fixture")] ??= {
   created: [], sends: [], disposed: [], cancelled: [], bridgeResults: [], stores: [],
   heldCwds: new Set(), failedCwds: new Set(),
-  configured: [],
+  configured: [], defaultRootCwds: [],
   usageByCwd: new Map(),
   cloudMutations: [],
 };
@@ -22,7 +22,10 @@ export const Cursor = {
     variants: [{ params: [{ id: "fast", value: "false" }], displayName: "Offline Cursor fixture", isDefault: true }],
   }] },
 };
-export const getDefaultSdkStateRoot = () => join(process.env.PI_CODING_AGENT_DIR, "cursor-state");
+export const getDefaultSdkStateRoot = (cwd) => {
+  state.defaultRootCwds.push(cwd);
+  return join(process.env.PI_CODING_AGENT_DIR, "cursor-state");
+};
 export const SqliteLocalAgentStore = {
   open: async (options) => {
     // Materialize the controlled store root so cleanup assertions exercise

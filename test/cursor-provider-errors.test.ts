@@ -1,5 +1,6 @@
 import { AuthenticationError, IntegrationNotConnectedError } from "@cursor/sdk";
 import { describe, expect, it } from "vitest";
+import { makeCursorSdkStallAbortWrapperConnectError } from "./helpers/cursor-sdk-stall-error.js";
 import {
 	classifyCursorConnectError,
 	isCursorSdkConnectionStalledError,
@@ -19,6 +20,8 @@ function makeUnauthenticatedConnectError(): Error & { rawMessage: string; code: 
 	return error;
 }
 
+// Synthetic errors use SDK frames from the retained .35 offline harness capture;
+// only the repo prefix is normalized. They are not new backend observations.
 function makeCursorSdkNetworkConnectError(): Error & { rawMessage: string; code: number; cause: NodeJS.ErrnoException } {
 	const error = new Error("[aborted] read ECONNRESET") as Error & {
 		rawMessage: string;
@@ -34,8 +37,8 @@ function makeCursorSdkNetworkConnectError(): Error & { rawMessage: string; code:
 	});
 	error.stack =
 		"ConnectError: [aborted] read ECONNRESET\n" +
-		"    at file:///repo/node_modules/@connectrpc/connect-node/dist/esm/node-universal-client.js:293:63\n" +
-		"    at file:///repo/node_modules/@cursor/sdk/dist/esm/index.js:8:1086456";
+		"    at file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:19228\n" +
+		"    at Object.unary (file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:21058)";
 	return error;
 }
 
@@ -59,37 +62,7 @@ function makeCursorSdkHttp2EnhanceYourCalmConnectError(): Error & {
 	error.stack =
 		"ConnectError: [internal] Stream closed with error code NGHTTP2_ENHANCE_YOUR_CALM\n" +
 		"    at file:///repo/node_modules/@connectrpc/connect/dist/esm/connect-error.js:71:20\n" +
-		"    at file:///repo/node_modules/@cursor/sdk/dist/esm/index.js:8:1086456";
-	return error;
-}
-
-function makeCursorSdkStallAbortWrapperConnectError(): Error & { rawMessage: string; code: number; cause: Error } {
-	const cause = Object.assign(new Error("[canceled] This operation was aborted"), {
-		name: "ConnectError",
-		rawMessage: "This operation was aborted",
-		code: 1,
-		cause: new DOMException("This operation was aborted", "AbortError"),
-	});
-	cause.stack =
-		"ConnectError: [canceled] This operation was aborted\n" +
-		"    at ConnectError.from (file:///repo/node_modules/@connectrpc/connect/dist/esm/connect-error.js:69:24)\n" +
-		"    at connectErrorFromNodeReason (file:///repo/node_modules/@connectrpc/connect-node/dist/esm/node-error.js:52:29)\n" +
-		"    at Object.reject (file:///repo/node_modules/@connectrpc/connect-node/dist/esm/node-universal-client.js:293:63)\n" +
-		"    at AbortSignal.r (file:///repo/node_modules/@cursor/sdk/dist/esm/34.js:1:5705)\n" +
-		"    at Y.onStall (file:///repo/node_modules/@cursor/sdk/dist/esm/34.js:1:75246)";
-	const error = new Error("[unknown] [canceled] This operation was aborted") as Error & {
-		rawMessage: string;
-		code: number;
-		cause: Error;
-	};
-	error.name = "ConnectError";
-	error.rawMessage = "[canceled] This operation was aborted";
-	error.code = 2;
-	error.cause = cause;
-	error.stack =
-		"ConnectError: [unknown] [canceled] This operation was aborted\n" +
-		"    at a.from (file:///repo/node_modules/@cursor/sdk/dist/esm/index.js:1:1125976)\n" +
-		"    at file:///repo/node_modules/@cursor/sdk/dist/esm/34.js:1:5832";
+		"    at file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:19228";
 	return error;
 }
 
@@ -101,33 +74,14 @@ function makeCursorSdkConnectionStalledRetriableError(
 	cause.code = 2;
 	cause.stack =
 		"ConnectError: [unknown] operation was aborted\n" +
-		"    at file:///repo/node_modules/@connectrpc/connect-node/dist/esm/node-universal-client.js:293:63";
+		"    at file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:19228";
 	const error = new Error(message) as Error & { kind: string; cause: Error };
 	error.name = "RetriableError";
 	error.kind = "RetriableError";
 	error.cause = cause;
 	error.stack =
 		`RetriableError: ${message}\n` +
-		"    at Q (file:///repo/node_modules/@cursor/sdk/dist/esm/34.js:1:62073)\n" +
-		"    at file:///repo/node_modules/@cursor/sdk/dist/esm/index.js:1:1125976";
-	return error;
-}
-
-function makeCursorExtensionNetworkConnectError(): Error & { rawMessage: string; code: number; cause: NodeJS.ErrnoException } {
-	const error = makeCursorSdkNetworkConnectError();
-	error.stack =
-		"ConnectError: [aborted] read ECONNRESET\n" +
-		"    at file:///C:/Users/example/.pi/agent/git/github.com/fitchmultz/pi-cursor-sdk/node_modules/@connectrpc/connect-node/dist/esm/node-universal-client.js:293:63";
-	return error;
-}
-
-function makeGenericConnectNodeNetworkConnectError(): Error & { rawMessage: string; code: number; cause: NodeJS.ErrnoException } {
-	const error = makeCursorSdkNetworkConnectError();
-	error.stack =
-		"ConnectError: [aborted] read ECONNRESET\n" +
-		"    at file:///repo/node_modules/@connectrpc/connect/dist/esm/connect-error.js:71:20\n" +
-		"    at file:///repo/node_modules/@connectrpc/connect-node/dist/esm/node-error.js:52:29\n" +
-		"    at file:///repo/node_modules/@connectrpc/connect-node/dist/esm/node-universal-client.js:293:63";
+		`    at Ho (/repo/node_modules/@cursor/sdk/dist/esm/689.js:5:${message === "Connection stalled" ? 331 : 99})`;
 	return error;
 }
 
@@ -200,6 +154,16 @@ describe("cursor-provider-errors", () => {
 		expect(message).toContain(detail);
 		expect(message).not.toMatch(/API key|\/login|recreat|expired/i);
 		expect(sanitizeCursorProviderError({})).not.toMatch(/API key|\/login/);
+	});
+
+	it("keeps rejected store components actionable while scrubbing and bounding the path", () => {
+		const component = "/private/secret-key/.cursor/projects/work/sdk-agent-store";
+		const message = sanitizeCursorProviderError(new Error(
+			`Cursor local store path contains a link or non-directory: ${component}/${"x".repeat(1900)}`,
+		), "secret-key", "local");
+		expect(message).toContain("/private/[redacted]/.cursor/projects/work/sdk-agent-store/");
+		expect(message).not.toContain("secret-key");
+		expect(message.length).toBeLessThanOrEqual(1600);
 	});
 
 	it.each(["Invalid API key", "API key revoked", "Revoked API key"])("retains actionable guidance for %s", (message) => {
@@ -401,7 +365,7 @@ describe("cursor-provider-errors", () => {
 		expect(message).not.toContain("NGHTTP2_ENHANCE_YOUR_CALM");
 	});
 
-	it("classifies Cursor SDK stall abort wrappers as retryable network failures", () => {
+	it("classifies the captured default-depth Cursor SDK stall abort wrapper as a retryable network failure", () => {
 		const error = makeCursorSdkStallAbortWrapperConnectError();
 		const classification = classifyCursorConnectError(error);
 		const message = sanitizeCursorProviderError(error, "test-key");
@@ -409,6 +373,20 @@ describe("cursor-provider-errors", () => {
 		expect(classification).toEqual({ kind: "network", source: "cursor-sdk-stack" });
 		expect(message).toContain("Network error");
 		expect(message).not.toContain("operation was aborted");
+	});
+
+	it.each([2, "unknown"] as const)("does not classify incomplete wrapped abort causes as cancellation (outer code %s)", (code) => {
+		for (const cause of [
+			{ name: "ConnectError", code: 1 },
+			{ name: "ConnectError", code: 14, cause: { name: "AbortError" } },
+		]) {
+			const error = Object.assign(new Error("[unknown] [canceled] This operation was aborted"), {
+				name: "ConnectError", code, rawMessage: "[canceled] This operation was aborted", cause,
+				stack: "ConnectError: [unknown] [canceled] This operation was aborted\n" +
+					"    at file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:19228",
+			});
+			expect(classifyCursorConnectError(error)).toBeUndefined();
+		}
 	});
 
 	it.each([
@@ -434,21 +412,9 @@ describe("cursor-provider-errors", () => {
 		expect(message).not.toContain("[unavailable] Error");
 	});
 
-	it("recognizes extension-local connect-node network stacks as Cursor provenance", () => {
-		expect(classifyCursorConnectError(makeCursorExtensionNetworkConnectError())).toEqual({
-			kind: "network",
-			source: "cursor-extension-connect-stack",
-		});
-	});
-
-	it("classifies connect-node-only ECONNRESET stacks separately from provenance-free generic network errors", () => {
-		expect(classifyCursorConnectError(makeGenericConnectNodeNetworkConnectError())).toEqual({
-			kind: "network",
-			source: "connect-node-stack",
-		});
+	it("keeps provenance-free network errors generic", () => {
 		expect(classifyCursorConnectError(makeProvenanceFreeNetworkConnectError())).toEqual({
-			kind: "network",
-			source: "generic-connect",
+			kind: "network", source: "generic-connect",
 		});
 	});
 

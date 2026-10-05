@@ -43,11 +43,11 @@ function makeFixtureRetriableStalledError(
 }
 
 const fixture = JSON.parse(
-	readFileSync(new URL("./fixtures/cursor-sdk-retriable-stalled-1.0.32.json", import.meta.url), "utf8"),
+	readFileSync(new URL("./fixtures/cursor-sdk-retriable-stalled-1.0.35.json", import.meta.url), "utf8"),
 ) as RetriableStalledContractFixture;
 
 describe("installed Cursor SDK RetriableError connection-stalled contract", () => {
-	it("matches installed @cursor/sdk 1.0.32 source markers and classifier shape", () => {
+	it("matches the installed stall factory, synchronous cancellation provenance and classifier shape", () => {
 		expect(fixture.provenance.sdkPackage).toBe("@cursor/sdk");
 		expect(fixture.provenance.sdkVersion).toBe(installedSdkVersion);
 		const source = readInstalledPackageDistText("@cursor/sdk");

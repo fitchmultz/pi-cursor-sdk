@@ -9,7 +9,7 @@ import type { ModelThinkingLevel, ThinkingLevelMap } from "@earendil-works/pi-ai
 import { getCursorModelSelectionIdentities } from "../shared/cursor-model-selection-identities.mjs";
 import { loadContextWindowCache } from "./context-window-cache.js";
 import { loadCursorSdk } from "./cursor-sdk-runtime.js";
-import { normalizeCursorApiKey, resolveCursorApiKey } from "./cursor-api-key.js";
+import { normalizeCursorApiKey } from "./cursor-api-key.js";
 import { sanitizeCursorProviderError } from "./cursor-provider-errors.js";
 import {
 	fingerprintApiKey,
@@ -445,5 +445,4 @@ export async function discoverModels(options: DiscoverModelsOptions = {}): Promi
 export const __testUtils = {
 	parseContextWindow,
 	registerModelItems,
-	normalizeApiKey: resolveCursorApiKey,
 };

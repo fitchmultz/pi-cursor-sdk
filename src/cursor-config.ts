@@ -253,6 +253,20 @@ function parseCloudEnvironment(value: unknown): CursorCloudEnvironmentConfig | u
 	return Object.keys(parsed).length > 0 ? parsed : undefined;
 }
 
+const THINKING_LEVELS = {
+	off: true,
+	minimal: true,
+	low: true,
+	medium: true,
+	high: true,
+	xhigh: true,
+	max: true,
+} satisfies Record<ModelThinkingLevel, true>;
+
+function isCursorSubagentThinkingLevel(value: unknown): value is ModelThinkingLevel {
+	return typeof value === "string" && Object.hasOwn(THINKING_LEVELS, value);
+}
+
 function parseCustomSubagents(value: unknown): CursorCustomSubagentsConfig | undefined {
 	const record = asRecord(value);
 	if (!record) return undefined;
@@ -270,8 +284,7 @@ function parseCustomSubagents(value: unknown): CursorCustomSubagentsConfig | und
 			description,
 			prompt,
 			...(model ? { model } : {}),
-			...(thinking === "off" || thinking === "minimal" || thinking === "low" || thinking === "medium" || thinking === "high" || thinking === "xhigh" || thinking === "max"
-				? { thinking } : {}),
+			...(isCursorSubagentThinkingLevel(thinking) ? { thinking } : {}),
 			...(typeof entry.fast === "boolean" ? { fast: entry.fast } : {}),
 		}]);
 	}
@@ -662,15 +675,13 @@ export function cursorSdkConfigFromEnv(env: Record<string, string | undefined> =
 	const force = parseOptionalEnvBoolean(env[CURSOR_LOCAL_FORCE_ENV]);
 	const resume = parseOptionalEnvBoolean(env[CURSOR_LOCAL_RESUME_ENV]);
 	const useHttp1ForAgent = parseOptionalEnvBoolean(env[CURSOR_HTTP1_ENV]);
-	const storeRoot = env[CURSOR_STATE_ROOT_ENV]?.trim() ? env[CURSOR_STATE_ROOT_ENV] : undefined;
-	if (autoReview !== undefined || sandbox !== undefined || force !== undefined || resume !== undefined || useHttp1ForAgent !== undefined || storeRoot !== undefined) {
+	if (autoReview !== undefined || sandbox !== undefined || force !== undefined || resume !== undefined || useHttp1ForAgent !== undefined) {
 		config.local = {
 			...(autoReview !== undefined ? { autoReview } : {}),
 			...(sandbox !== undefined ? { sandboxOptions: { enabled: sandbox } } : {}),
 			...(force !== undefined ? { force } : {}),
 			...(resume !== undefined ? { resume } : {}),
 			...(useHttp1ForAgent !== undefined ? { useHttp1ForAgent } : {}),
-			...(storeRoot !== undefined ? { storeRoot } : {}),
 		};
 	}
 	return config;

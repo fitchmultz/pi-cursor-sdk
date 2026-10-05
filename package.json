@@ -180,6 +180,7 @@
     "typebox": "*"
   },
   "devDependencies": {
+    "@connectrpc/connect": "1.7.0",
     "@earendil-works/pi-ai": "0.99.1",
     "@earendil-works/pi-coding-agent": "0.99.1",
     "@earendil-works/pi-tui": "0.99.1",

@@ -24,6 +24,36 @@ type CursorOnStepPayload = Parameters<NonNullable<SendOptions["onStep"]>>[0];
 describe("streamCursor incomplete tools", () => {
 	beforeEach(resetCursorProviderTestState);
 
+	it.each(["bash", "run_terminal_cmd"])("replays a completed %s alias without a stale shell missing-completion trace", async name => {
+		const send = vi.fn(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
+			opts.onDelta({ update: { type: "tool-call-started", callId: "shell-start", toolCall: { name: "shell", args: { command: "echo completed" } } } });
+			opts.onDelta({ update: { type: "tool-call-completed", callId: "different-completion-id", toolCall: {
+				name, args: { command: "echo completed" }, result: { status: "success", value: { stdout: "completed", exitCode: 0 } },
+			} } });
+			return asMockCursorRun({ id: "run-alias", agentId: "agent-1", status: "finished", wait: vi.fn().mockResolvedValue({ id: "run-alias", status: "finished", result: "done" }) });
+		});
+		mockCreatedAgent({ send, [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined) });
+		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		const trace = collectThinkingDeltas(events);
+		expect(trace).toContain("completed");
+		expect(trace).not.toContain("did not complete");
+		expect(collectTextDeltas(events)).toBe("done");
+	});
+
+	it("retains a different unmatched shell after another shell completes and assistant text succeeds", async () => {
+		const send = vi.fn(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
+			opts.onDelta({ update: { type: "tool-call-started", callId: "unmatched-shell", toolCall: { name: "shell", args: { command: "sleep 10" } } } });
+			opts.onDelta({ update: { type: "tool-call-completed", callId: "other-shell", toolCall: {
+				name: "bash", args: { command: "echo completed" }, result: { status: "success", value: { stdout: "completed", exitCode: 0 } },
+			} } });
+			return asMockCursorRun({ id: "run-unmatched", agentId: "agent-1", status: "finished", wait: vi.fn().mockResolvedValue({ id: "run-unmatched", status: "finished", result: "done" }) });
+		});
+		mockCreatedAgent({ send, [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined) });
+		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		expect(collectThinkingDeltas(events)).toContain("Cursor shell did not complete");
+		expect(collectTextDeltas(events)).toBe("done");
+	});
+
 		it("surfaces incomplete started Cursor tool calls with neutral activity traces", async () => {
 			const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
 				opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "shell", args: { command: "sleep 10" } }, callId: "c1" } });

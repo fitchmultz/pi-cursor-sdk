@@ -721,6 +721,8 @@ This usually needs session JSONL to classify. Common cases:
 - **Run failure / discarded tools:** A red toast with scrubbed detail may indicate an SDK failure (#55). Started-but-never-completed Cursor tools surface neutral **Cursor … did not complete** activity cards with a bounded reason when the run failed/aborted, produced no assistant text, or involved external/side-effectful tools. Incomplete fast local discovery starts (`read`, `grep`, `glob`, `ls`) are debug-only after a successful text-producing run so stale SDK start events do not create red post-answer cards; maintainer debug for the same gap remains in **#52** (`PI_CURSOR_SDK_EVENT_DEBUG=1`).
 - **Hard SDK crash:** pi exited with an uncaught Cursor SDK `ConnectError` or `WriteIterableClosedError` instead of showing a normal run error — capture the stack/session tail as a process-guard regression, not #40 text echo.
 
+Shell start/completion callbacks can use different names (`shell`, `bash`, `run_terminal_cmd`) and IDs. A single matching shell alias with identical arguments is reconciled before incomplete-tool reporting. Assistant text or stdout progress alone does not establish completion; unmatched shell starts still remain visible and debug capture is unchanged.
+
 Capture `pi --version`, extension version, model, flags, the exact prompt, and a redacted session dir before filing bugs.
 
 ### Cursor native tool cards conflict with another extension

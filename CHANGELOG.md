@@ -9,6 +9,10 @@
 - Stop suppressing unrelated connect-node-only network process errors during active Cursor turns; SDK-vendored and backend-detail provenance remain scoped.
 - Qualify vendored Node transport abort/stall provenance and HTTP/2 defaults, and keep scoped MCP timeout overrides independent of minified class/argument names. The existing SDK 1.0.32 catalog capture and checkpoint limits are unchanged.
 
+### Fixed
+
+- Match started and completed shell aliases with identical arguments when SDK callback IDs differ, avoiding false missing-completion cards while retaining genuinely unmatched shell diagnostics. Adapted from #258.
+
 ## 0.5.0 - 2026-10-04
 
 ### Breaking Changes

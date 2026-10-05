@@ -6,6 +6,8 @@ import { parseEnvBoolean } from "./cursor-env-boolean.js";
 import { isCursorModel } from "./cursor-model.js";
 import { registerCursorModelLifecycle, type CursorModelLifecycleExtensionApi } from "./cursor-model-lifecycle.js";
 import { resolveCursorPiToolBridgeEnabled } from "./cursor-pi-tool-bridge-env.js";
+import { setCursorAskQuestionBlocked } from "./cursor-ask-question-blocked-state.js";
+import { syncCursorLiveRunsAskQuestionBlocked } from "./cursor-provider-live-run-drain.js";
 
 export const CURSOR_ASK_QUESTION_TOOL_NAME = "cursor_ask_question";
 export const CURSOR_ASK_QUESTION_ENV = "PI_CURSOR_ASK_QUESTION";
@@ -206,6 +208,8 @@ function emitCursorAskQuestionBlockedEvent(
 	pi: Pick<ExtensionAPI, "events">,
 	payload: CursorAskQuestionBlockedEventPayload,
 ): void {
+	setCursorAskQuestionBlocked(payload.active);
+	syncCursorLiveRunsAskQuestionBlocked();
 	pi.events.emit(CURSOR_ASK_QUESTION_BLOCKED_EVENT, payload);
 }
 

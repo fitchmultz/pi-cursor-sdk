@@ -1,6 +1,6 @@
 import type { ModelListItem } from "@cursor/sdk";
 
-// Generated with @cursor/sdk@1.0.32 from 45 Cursor models.
+// Generated with @cursor/sdk@1.0.35 from 45 Cursor models.
 // Refresh with: npm run refresh:cursor-snapshots -- --write
 // Do not add secrets; this file stores public model metadata only.
 export const FALLBACK_MODEL_ITEMS = [

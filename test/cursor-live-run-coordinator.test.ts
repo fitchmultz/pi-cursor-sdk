@@ -11,6 +11,9 @@ import type { CursorNativeToolDisplayItem } from "../src/cursor-native-tool-disp
 import type { CursorPiToolBridgeRun } from "../src/cursor-pi-tool-bridge.js";
 import {
 	cursorLiveRuns,
+	CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV,
+	resetCursorNativeReplayIdleDisposeMs,
+	setCursorNativeReplayIdleDisposeMs,
 	drainCursorLiveRunTurn,
 } from "../src/cursor-provider-live-run-drain.js";
 import { __testUtils as cursorSdkProcessGuardTestUtils } from "../src/cursor-sdk-process-error-guard.js";
@@ -101,6 +104,62 @@ function replayIdFromToolCallId(toolCallId: string): string | undefined {
 describe("cursor live run coordinator", () => {
 	afterEach(() => {
 		vi.useRealTimers();
+	});
+
+	it.each(["bridgeRun", "sessionBridgeRun"] as const)("keeps configured idle disposal deferred for pending owned calls on %s", async slot => {
+		const original = process.env[CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV];
+		process.env[CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV] = "25";
+		resetCursorNativeReplayIdleDisposeMs();
+		vi.useFakeTimers();
+		let pending = true;
+		let changed = () => {};
+		const bridge = makeBridgeRun("bridge-configured");
+		bridge.hasPendingToolCalls = () => pending;
+		bridge.onPendingToolCallsChanged = listener => { changed = listener; return () => {}; };
+		const run = cursorLiveRuns.start({ id: "configured-pending", agent: makeAgent(), promptInputTokens: 0, [slot]: bridge });
+		try {
+			cursorLiveRuns.requestIdleDispose(run);
+			await vi.advanceTimersByTimeAsync(300001);
+			expect(run.disposed).toBe(false);
+			expect(bridge.cancel).not.toHaveBeenCalled();
+			pending = false;
+			changed();
+			await vi.advanceTimersByTimeAsync(24);
+			expect(run.disposed).toBe(false);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(run.disposed).toBe(true);
+		} finally {
+			await cursorLiveRuns.release(run);
+			resetCursorNativeReplayIdleDisposeMs();
+			if (original === undefined) delete process.env[CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV];
+			else process.env[CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV] = original;
+		}
+	});
+
+	it("preserves explicit release of a pending call and test override precedence over environment", async () => {
+		const original = process.env[CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV];
+		process.env[CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV] = "2147483647";
+		setCursorNativeReplayIdleDisposeMs(2);
+		vi.useFakeTimers();
+		const eligible = cursorLiveRuns.start({ id: "configured-override", agent: makeAgent(), promptInputTokens: 0 });
+		const bridge = makeBridgeRun("explicit-pending", ["question-call"]);
+		const pending = cursorLiveRuns.start({ id: "configured-explicit", agent: makeAgent(), promptInputTokens: 0, bridgeRun: bridge });
+		try {
+			cursorLiveRuns.requestIdleDispose(eligible);
+			cursorLiveRuns.requestIdleDispose(pending);
+			await vi.advanceTimersByTimeAsync(2);
+			expect(eligible.disposed).toBe(true);
+			expect(pending.disposed).toBe(false);
+			await cursorLiveRuns.release(pending);
+			expect(pending.disposed).toBe(true);
+			expect(bridge.cancel).toHaveBeenCalledOnce();
+		} finally {
+			await cursorLiveRuns.release(eligible);
+			await cursorLiveRuns.release(pending);
+			resetCursorNativeReplayIdleDisposeMs();
+			if (original === undefined) delete process.env[CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV];
+			else process.env[CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV] = original;
+		}
 	});
 
 	it("matches context tool results after trailing user messages and ignores disposed runs", async () => {

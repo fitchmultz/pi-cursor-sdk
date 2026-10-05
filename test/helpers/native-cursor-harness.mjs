@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { after } from "node:test";
 import { Type } from "typebox";
 import { state, Cursor } from "../fixtures/native-cursor-sdk.mjs";
+import { writeRawTestEvidence } from "./raw-test-evidence.mjs";
 
 export { state };
 export const { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } = await import(
@@ -119,13 +120,12 @@ export async function concurrentFixture(t, run) {
 export async function retainNativeEvidence(label, manager, cwd) {
   const directory = process.env.PI_CURSOR_TEST_EVIDENCE_DIR;
   if (!directory) return;
-  await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, `${label}.jsonl`), await readFile(manager.getSessionFile()));
+  writeRawTestEvidence(directory, `${label}.jsonl`, await readFile(manager.getSessionFile()));
   const metadata = [];
   for (const path of (await readdir(cwd, { recursive: true })).filter(path => path.endsWith("metadata.json"))) {
     metadata.push({ path, data: JSON.parse(await readFile(join(cwd, path), "utf8")) });
   }
-  await writeFile(join(directory, `${label}.json`), JSON.stringify({
+  writeRawTestEvidence(directory, `${label}.json`, JSON.stringify({
     sessionFile: manager.getSessionFile(), sessionId: manager.getSessionId(),
     host: process.env.PI_CURSOR_TEST_HOST ?? "@earendil-works/pi-coding-agent",
     metadata,

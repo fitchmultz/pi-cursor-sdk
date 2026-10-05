@@ -1,6 +1,7 @@
 import { join, toNamespacedPath } from "node:path";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { writeRawTestEvidence } from "./helpers/raw-test-evidence.mjs";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { computeCursorContextFingerprint } from "../src/context.js";
@@ -148,9 +149,8 @@ describe("cursor-session-agent local resume", () => {
 			expect(resumeAgent).toHaveBeenCalledTimes(1);
 			expect(createAgent.mock.calls.at(-1)![0].agents.reviewer.prompt).toBe("changed private prompt");
 			if (process.env.PI_CURSOR_TEST_EVIDENCE_DIR) {
-				mkdirSync(process.env.PI_CURSOR_TEST_EVIDENCE_DIR, { recursive: true });
-				writeFileSync(join(process.env.PI_CURSOR_TEST_EVIDENCE_DIR, "custom-agent-resume.jsonl"), persisted);
-				writeFileSync(join(process.env.PI_CURSOR_TEST_EVIDENCE_DIR, "custom-agent-resume.json"), JSON.stringify({
+				writeRawTestEvidence(process.env.PI_CURSOR_TEST_EVIDENCE_DIR, "custom-agent-resume.jsonl", persisted);
+				writeRawTestEvidence(process.env.PI_CURSOR_TEST_EVIDENCE_DIR, "custom-agent-resume.json", JSON.stringify({
 					poolKey: lease.poolKey, agentId: lease.agent.agentId, resumed: resumed.resumed,
 					changedResumed: changed.resumed, changedBootstrapped: changed.sendState.bootstrapped,
 					resumeCalls: resumeAgent.mock.calls.length, createCalls: createAgent.mock.calls.length,

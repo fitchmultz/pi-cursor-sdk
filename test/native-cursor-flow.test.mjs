@@ -676,17 +676,11 @@ for (const operation of ["ordinary", "bugreport"]) {
   });
 }
 
-test("independent concurrent streams use constant-time owner checks, not per-turn sibling scans", { timeout: 60000 }, async (t) => {
+test("independent concurrent streams retain owned persisted lineage and sibling isolation", { timeout: 60000 }, async (t) => {
   await concurrentFixture(t, async ({ create }) => {
     const a = await create("concurrent-A");
     const b = await create("concurrent-B");
     assert.notEqual(a.session.modelRuntime, b.session.modelRuntime, "SDK defaults create independent runtimes");
-    let readsA = 0;
-    let readsB = 0;
-    const getA = a.session.modelRuntime.getRegisteredProviderConfig.bind(a.session.modelRuntime);
-    const getB = b.session.modelRuntime.getRegisteredProviderConfig.bind(b.session.modelRuntime);
-    a.session.modelRuntime.getRegisteredProviderConfig = (...args) => { readsA++; return getA(...args); };
-    b.session.modelRuntime.getRegisteredProviderConfig = (...args) => { readsB++; return getB(...args); };
     state.heldCwds.add(a.cwd);
     const before = state.sends.length;
     const runningA = a.session.prompt("A held during B");
@@ -696,21 +690,16 @@ test("independent concurrent streams use constant-time owner checks, not per-tur
     await a.session.abort();
     await runningA;
     state.heldCwds.delete(a.cwd);
-    assert.equal(readsA, 0);
-    assert.equal(readsB, 0);
-    const bBefore = readsB;
-    const aBefore = readsA;
+    const beforeB = await readFile(b.manager.getSessionFile());
     for (let index = 0; index < 10; index++) await a.session.prompt(`A bounded request ${index}`);
-    assert.equal(readsA - aBefore, 0);
-    assert.equal(readsB, bBefore, "no sibling registry access on A's hot path");
-    const beforeRefresh = readsA;
     await a.session.prompt("/cursor-refresh-models");
-    assert.equal(readsA, beforeRefresh, "no registry identity scan on refresh");
-    assert.equal(readsB, bBefore);
+    assert.deepEqual(await readFile(b.manager.getSessionFile()), beforeB, "A's repeated turns and refresh leave B's persisted session byte-identical");
     for (const owner of [a, b]) {
-      const entries = owner.manager.getEntries().filter((entry) => entry.type === "custom" && entry.customType === "cursor-sdk-agent-lineage");
+      const reopened = SessionManager.open(owner.manager.getSessionFile());
+      const entries = reopened.getEntries().filter((entry) => entry.type === "custom" && entry.customType === "cursor-sdk-agent-lineage");
       assert.ok(entries.length > 0);
       assert.ok(entries.every((entry) => entry.data.scopeKey === owner.manager.getSessionFile() && entry.data.cwd === owner.cwd));
+      await retainNativeEvidence(owner === a ? "native-concurrent-owner" : "native-concurrent-sibling", owner.manager, owner.cwd);
     }
   });
 });

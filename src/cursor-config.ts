@@ -597,6 +597,16 @@ function resolveEnvNamesSafetyField(order: CursorFieldSource[], values: CursorFi
 	return resolveWithCap(buildFieldLayers(order, values), valueFrom("user", values.user), envNamesCap);
 }
 
+export function resolveCursorLocalStoreRoot(
+	{ env = process.env, user }: Pick<ResolveCursorSdkConfigOptions, "env" | "user"> = {},
+): CursorResolvedSetting<string | undefined> {
+	return resolveOrdinaryField(STORE_ROOT_ORDER, {
+		environment: env[CURSOR_STATE_ROOT_ENV]?.trim() ? env[CURSOR_STATE_ROOT_ENV] : undefined,
+		user: user?.local?.storeRoot?.trim() ? user.local.storeRoot : undefined,
+		builtin: undefined,
+	});
+}
+
 export function cursorSdkConfigFromEnv(env: Record<string, string | undefined> = process.env): CursorSdkConfig {
 	const config: CursorSdkConfig = {};
 	const runtime = validateExplicitValue(env[CURSOR_RUNTIME_ENV], CURSOR_RUNTIME_ENV, isCursorRuntime, '"local" or "cloud"');
@@ -806,11 +816,7 @@ export function resolveCursorSdkConfig(options: ResolveCursorSdkConfigOptions = 
 			}),
 		},
 		local: {
-			storeRoot: resolveOrdinaryField(STORE_ROOT_ORDER, {
-				environment: env.local?.storeRoot,
-				user: user?.local?.storeRoot?.trim() ? user.local.storeRoot : undefined,
-				builtin: undefined,
-			}),
+			storeRoot: resolveCursorLocalStoreRoot({ env: options.env, user }),
 			autoReview: resolveOrdinaryField(LOCAL_ORDER, {
 				cli: cli?.local?.autoReview,
 				environment: env.local?.autoReview,

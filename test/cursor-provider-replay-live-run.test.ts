@@ -31,8 +31,9 @@ import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-sessio
 import { estimateCursorPromptMessageTokens } from "../src/context.js";
 import { __testUtils as nativeToolDisplayTestUtils } from "../src/cursor-native-tool-display-state.js";
 import type { Context } from "@earendil-works/pi-ai";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { writeRawTestEvidence } from "./helpers/raw-test-evidence.mjs";
 import { join } from "node:path";
 
 
@@ -343,10 +344,9 @@ describe("streamCursor native replay live run", () => {
 			expect(view.records.filter(record => record.kind === "terminal")).toMatchObject([{ turnId: start.turnId, origin: start.origin, status: "success" }]);
 			const evidence = process.env.PI_CURSOR_TEST_EVIDENCE_DIR;
 			if (evidence) {
-				mkdirSync(evidence, { recursive: true });
-				writeFileSync(join(evidence, "late-raw.jsonl"), readFileSync(reopened.getSessionFile()!));
-				writeFileSync(join(evidence, "late-raw.json"), JSON.stringify({ records: view.records, nativeUsage: secondDone.message.usage }));
-				writeFileSync(join(evidence, "late-raw.journal"), readFileSync(join(root, "sessions", readdirSync(join(root, "sessions")).find(name => name.endsWith(".journal"))!)));
+				writeRawTestEvidence(evidence, "late-raw.jsonl", readFileSync(reopened.getSessionFile()!));
+				writeRawTestEvidence(evidence, "late-raw.json", JSON.stringify({ records: view.records, nativeUsage: secondDone.message.usage }));
+				writeRawTestEvidence(evidence, "late-raw.journal", readFileSync(join(root, "sessions", readdirSync(join(root, "sessions")).find(name => name.endsWith(".journal"))!)));
 			}
 		} finally { rmSync(root, { recursive: true, force: true }); }
 	});

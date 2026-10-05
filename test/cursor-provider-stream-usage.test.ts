@@ -15,12 +15,13 @@ import { captureProviderTestOwnership, streamCursor } from "./helpers/cursor-pro
 import { registerCursorNativeToolDisplayState } from "../src/cursor-native-tool-display-state.js";
 import { streamCursor as streamOwnedCursor } from "../src/cursor-provider.js";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createExtensionTestContext } from "./helpers/pi-harness.js";
 import { captureCursorUsageRecorder, readCursorUsageView } from "../src/cursor-usage-ledger.js";
 import { __testUtils as scopeTestUtils } from "../src/cursor-session-scope.js";
+import { writeRawTestEvidence } from "./helpers/raw-test-evidence.mjs";
 
 describe("streamCursor usage accounting", () => {
 	beforeEach(resetCursorProviderTestState);
@@ -99,10 +100,9 @@ describe("streamCursor usage accounting", () => {
 			expect(view.agents[0]?.wholeAgent).toBeUndefined();
 			const evidence = process.env.PI_CURSOR_TEST_EVIDENCE_DIR;
 			if (evidence) {
-				mkdirSync(evidence, { recursive: true });
-				writeFileSync(join(evidence, "terminal-only.jsonl"), readFileSync(reopened.getSessionFile()!));
-				writeFileSync(join(evidence, "terminal-only.json"), JSON.stringify({ records: view.records, nativeUsage: done.message.usage }));
-				writeFileSync(join(evidence, "terminal-only.journal"), readFileSync(join(root, "sessions", readdirSync(join(root, "sessions")).find(name => name.endsWith(".journal"))!)));
+				writeRawTestEvidence(evidence, "terminal-only.jsonl", readFileSync(reopened.getSessionFile()!));
+				writeRawTestEvidence(evidence, "terminal-only.json", JSON.stringify({ records: view.records, nativeUsage: done.message.usage }));
+				writeRawTestEvidence(evidence, "terminal-only.journal", readFileSync(join(root, "sessions", readdirSync(join(root, "sessions")).find(name => name.endsWith(".journal"))!)));
 			}
 		} finally { rmSync(root, { recursive: true, force: true }); }
 	});

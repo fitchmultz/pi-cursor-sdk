@@ -38,6 +38,7 @@ import {
 	loadCursorSdkUserConfig,
 	mergeCursorSdkConfigForUpdate,
 	resolveCursorFastDefault,
+	resolveCursorLocalStoreRoot,
 	updateCursorSdkConfig,
 } from "./cursor-config.js";
 import {
@@ -51,7 +52,6 @@ import {
 	resolveCursorStatusRuntime,
 	restoreCursorCliState,
 	restoreSessionCursorRuntimeState,
-	resolveEffectiveCursorConfigForContext,
 	type CursorRuntimeStateExtensionApi,
 } from "./cursor-runtime-state.js";
 
@@ -563,7 +563,7 @@ export function registerCursorRuntimeControls(pi: CursorRuntimeControlsExtension
 	pi.registerCommand("cursor-local-resume-cleanup", {
 		description: "Dry-run or delete recorded superseded local Cursor SDK agents",
 		handler: async (args, ctx) => {
-			const storeRoot = resolveEffectiveCursorConfigForContext(ctx).local.storeRoot.value;
+			const storeRoot = resolveCursorLocalStoreRoot({ user: loadCursorSdkUserConfig() }).value;
 			await runCursorSessionAgentCleanupCommand(pi, args, ctx, storeRoot);
 		},
 	});

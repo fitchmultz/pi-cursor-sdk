@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Console } from "node:console";
@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { installCursorSdkOutputFilter, withCursorSdkOutputNoticeHandler, suppressCursorSdkOutput } from "../src/cursor-sdk-output-filter.js";
 import { installCursorSdkOutputFilter as installScriptFilter } from "../scripts/lib/cursor-sdk-output-filter.mjs";
 import { installedBootstrapEmitters } from "./helpers/cursor-sdk-bootstrap.js";
+import { writeRawTestEvidence } from "./helpers/raw-test-evidence.mjs";
 
 function collectOutput(backpressure = false) {
 	const originals = { stdout: process.stdout.write, stderr: process.stderr.write };
@@ -53,7 +54,7 @@ describe("Cursor SDK presentation boundary", () => {
 			expect(completions).toHaveLength(3);
 			for (let i = 0; i < completions.length; i++) expect(completions[i]!.toString()).toContain(sdk.completions[i]);
 			const proof = process.env.PI_CURSOR_BOOTSTRAP_PROOF_DIR;
-			if (proof) writeFileSync(join(proof, `sdk-capture-${colors ? "ansi" : "plain"}.json`), JSON.stringify({ inventory: inventory.toString(), plugin: plugin.toString(), parserWarning: sdk.parserWarning, completions: completions.map(bytes => bytes.toString()), hookNotices: sdk.hookNotices, readerCalls: sdk.readerCalls() }, null, 2));
+			if (proof) writeRawTestEvidence(proof, `sdk-capture-${colors ? "ansi" : "plain"}.json`, JSON.stringify({ inventory: inventory.toString(), plugin: plugin.toString(), parserWarning: sdk.parserWarning, completions: completions.map(bytes => bytes.toString()), hookNotices: sdk.hookNotices, readerCalls: sdk.readerCalls() }, null, 2));
 			output.stdout.length = output.stderr.length = 0;
 			restore = installCursorSdkOutputFilter();
 			let callbacks = 0;

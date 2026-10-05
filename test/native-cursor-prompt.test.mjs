@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
+import { writeRawTestEvidence } from "./helpers/raw-test-evidence.mjs";
 import { concurrentFixture, retainNativeEvidence, setupNativeCursorHarness, state } from "./helpers/native-cursor-harness.mjs";
 
 setupNativeCursorHarness();
@@ -42,8 +43,7 @@ test("native user origin survives hidden notices, budgeted bootstrap, incrementa
     const start = state.sends.length;
     await owner.session.prompt(`OLD_NATIVE_REQUEST ${"old history ".repeat(3000)}`, { images: [image] });
     if (process.env.PI_CURSOR_TEST_EVIDENCE_DIR) {
-      await mkdir(process.env.PI_CURSOR_TEST_EVIDENCE_DIR, { recursive: true });
-      await writeFile(join(process.env.PI_CURSOR_TEST_EVIDENCE_DIR, "native-input-first-send.json"),
+      writeRawTestEvidence(process.env.PI_CURSOR_TEST_EVIDENCE_DIR, "native-input-first-send.json",
         JSON.stringify({ send: state.sends.at(-1), boundary: boundaries.at(-1),
           userImages: owner.manager.buildSessionProjection().messages.findLast(m => m.role === "user").content.filter(b => b.type === "image") }, null, 2));
     }
@@ -82,7 +82,7 @@ test("native user origin survives hidden notices, budgeted bootstrap, incrementa
     assert.equal(continuation.message.images, undefined, "no native user was submitted for this continuation");
     await owner.session.prompt("RESET_ONLY_NATIVE_REQUEST", { images: [latestImage] });
     await retainNativeEvidence("native-input", owner.manager, owner.cwd);
-    if (process.env.PI_CURSOR_TEST_EVIDENCE_DIR) await writeFile(join(process.env.PI_CURSOR_TEST_EVIDENCE_DIR, "native-input-payloads.json"), JSON.stringify({ sends: state.sends.slice(start), boundaries }, null, 2));
+    if (process.env.PI_CURSOR_TEST_EVIDENCE_DIR) writeRawTestEvidence(process.env.PI_CURSOR_TEST_EVIDENCE_DIR, "native-input-payloads.json", JSON.stringify({ sends: state.sends.slice(start), boundaries }, null, 2));
     const resetContinuation = state.sends.at(-1);
     assert.notEqual(resetContinuation.agentId, state.sends.at(-2).agentId, "the native context edit requires a fresh bootstrap");
     assert.match(resetContinuation.message.text, /Background context: CUSTOM_ONLY_CONTINUATION/);
@@ -143,7 +143,7 @@ for (const transform of ["equivalent conversion", "changed payload", "changed or
       }
       const label = `origin-${transform.replaceAll(" ", "-")}`;
       await retainNativeEvidence(label, owner.manager, owner.cwd);
-      if (process.env.PI_CURSOR_TEST_EVIDENCE_DIR) await writeFile(join(process.env.PI_CURSOR_TEST_EVIDENCE_DIR, `${label}-payloads.json`),
+      if (process.env.PI_CURSOR_TEST_EVIDENCE_DIR) writeRawTestEvidence(process.env.PI_CURSOR_TEST_EVIDENCE_DIR, `${label}-payloads.json`,
         JSON.stringify(state.sends.slice(start), null, 2));
     });
   });
@@ -192,6 +192,6 @@ test("offline native Cloud fresh prompts preserve genuine input and notices with
     assert.ok(state.sends.slice(start).every(send => send.message.text.includes("Do not comment on GitHub issues or PRs unless the user asked.")),
       "offline Cloud fresh/custom-only payloads preserve the same GitHub soft guidance");
     await retainNativeEvidence("cloud-native-input", owner.manager, owner.cwd);
-    if (process.env.PI_CURSOR_TEST_EVIDENCE_DIR) await writeFile(join(process.env.PI_CURSOR_TEST_EVIDENCE_DIR, "cloud-native-input-payloads.json"), JSON.stringify(state.sends.slice(start), null, 2));
+    if (process.env.PI_CURSOR_TEST_EVIDENCE_DIR) writeRawTestEvidence(process.env.PI_CURSOR_TEST_EVIDENCE_DIR, "cloud-native-input-payloads.json", JSON.stringify(state.sends.slice(start), null, 2));
   });
 });

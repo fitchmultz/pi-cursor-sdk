@@ -9,6 +9,7 @@ import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { Type } from "typebox";
+import { writeRawTestEvidence } from "./helpers/raw-test-evidence.mjs";
 import { buildCursorPrompt } from "../dist/context.js";
 import { resolveCursorPiContext } from "../dist/cursor-pi-context.js";
 import { cursorLiveRuns, drainCursorLiveRunTurn } from "../dist/cursor-provider-live-run-drain.js";
@@ -261,9 +262,8 @@ test("actual extension loader composes native Cursor auth and rejects a late ins
     const reopened = SessionManager.open(manager.getSessionFile());
     assert.ok(reopened.getBranch().some(entry => entry.type === "model_change" && entry.provider === "cursor" && entry.modelId === "cached-catalog"));
     if (process.env.PI_CURSOR_TEST_EVIDENCE_DIR) {
-      await mkdir(process.env.PI_CURSOR_TEST_EVIDENCE_DIR, { recursive: true });
-      writeFileSync(join(process.env.PI_CURSOR_TEST_EVIDENCE_DIR, "auth-native-model-selection.jsonl"), readFileSync(manager.getSessionFile()));
-      writeFileSync(join(process.env.PI_CURSOR_TEST_EVIDENCE_DIR, "auth-native-accepted-cache.json"), accepted);
+      writeRawTestEvidence(process.env.PI_CURSOR_TEST_EVIDENCE_DIR, "auth-native-model-selection.jsonl", readFileSync(manager.getSessionFile()));
+      writeRawTestEvidence(process.env.PI_CURSOR_TEST_EVIDENCE_DIR, "auth-native-accepted-cache.json", accepted);
     }
     assert.deepEqual(errors, []);
   } finally {

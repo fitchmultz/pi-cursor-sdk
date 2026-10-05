@@ -7,7 +7,7 @@ import type {
 	CursorPiToolBridgeSnapshotApi,
 } from "./cursor-pi-tool-bridge-types.js";
 import { asRecord } from "./cursor-record-utils.js";
-import type { CursorPiToolBridgeRunImpl } from "./cursor-pi-tool-bridge-run.js";
+import { CursorPiToolBridgeRunImpl } from "./cursor-pi-tool-bridge-run.js";
 import {
 	buildCursorPiToolBridgeSnapshot,
 	buildCursorPiToolBridgeSurfaceSignature,
@@ -55,7 +55,6 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 				exposeOverlappingBuiltins: resolveCursorPiToolBridgeBuiltinsEnabled(this.env),
 			})
 			: createEmptySnapshot();
-		const { CursorPiToolBridgeRunImpl } = await import("./cursor-pi-tool-bridge-run.js");
 		const run = new CursorPiToolBridgeRunImpl(this, this.env, snapshot, bridgeEnabled && snapshot.tools.length > 0, options);
 		this.runs.add(run);
 		await run.start();

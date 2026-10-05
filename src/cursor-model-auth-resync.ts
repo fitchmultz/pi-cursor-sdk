@@ -40,8 +40,8 @@ export function createCursorModelAuthResync(apply: (result: CursorCatalogResult)
 				forceRefresh,
 				isCurrent,
 				onFallback: (nextIssue) => {
-				issue = nextIssue;
-			},
+					issue = nextIssue;
+				},
 			});
 			if (!isCurrent()) return;
 			const result = { models, issue };

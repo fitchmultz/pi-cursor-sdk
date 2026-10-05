@@ -71,7 +71,7 @@ Pass criteria:
 
 - `node --version` reports Node 24+.
 - `pi --version` reports official Pi 0.87.1 or the selected official-latest/current-`fitchmultz/pi` compatibility target.
-- `npm ls` shows exact `@cursor/sdk@1.0.35`; development `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` 0.99.1 and host TypeBox 1.3.27; and the bundled bridge runtime closure `@modelcontextprotocol/server@2.1.0`, `@modelcontextprotocol/hono@2.0.1`, `hono@4.13.9`, and `@hono/node-server@2.1.3`.
+- `npm ls` shows exact `@cursor/sdk@1.0.35`; development `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` 0.99.1 with lockfile-resolved 0.99.2 transitives, nested host TypeBox 1.3.27 and root validation TypeBox 1.3.35; and the bundled bridge runtime closure `@modelcontextprotocol/server@2.1.0`, `@modelcontextprotocol/hono@2.0.1`, `hono@4.13.9`, and `@hono/node-server@2.1.3`.
 - `cursor/grok-4.6` appears in the model list.
 - No Cursor key or auth token is printed.
 - If neither `~/.pi/agent/auth.json` cursor auth nor `CURSOR_API_KEY` is available, stop and report the live smoke as blocked.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,4 +37,51 @@ test("default compatibility gate rejects uncommitted artifacts before installati
     assert.match(result.stderr, /Clean checkout required/);
     assert.doesNotMatch(result.stdout, /\$ npm/);
   } finally { rmSync(cwd, { recursive: true, force: true }); }
+});
+
+const { qualifySelectedHost, runCompatibilityCommand } =
+  await import("../scripts/ci-compatibility-phases.mjs");
+
+test("qualification gives build, verify and native contracts independent commands", () => {
+  const calls = [];
+  qualifySelectedHost((command, args) => calls.push([command, args]));
+  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  const campaign = calls.map(([command, args]) =>
+    [command === process.execPath ? "node" : command, ...args].join(" "),
+  ).join(" && ");
+  assert.equal(campaign, packageJson.scripts["check:compat"],
+    "phased qualification must retain every command and native contract in check:compat");
+});
+
+for (const failingPhase of [0, 1, 2]) {
+  test(`qualification stops after failed phase ${failingPhase}`, () => {
+    const calls = [];
+    const failure = new Error("phase failed");
+    assert.throws(() => qualifySelectedHost((command, args) => {
+      calls.push([command, args]);
+      if (calls.length === failingPhase + 1) throw failure;
+    }), error => error === failure);
+    assert.equal(calls.length, failingPhase + 1);
+  });
+}
+
+test("POSIX watchdog stops npm-style descendants before workspace cleanup", {
+  skip: process.platform === "win32",
+}, async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "compat-watchdog-"));
+  const marker = join(cwd, "descendant-survived");
+  const ready = join(cwd, "descendant-ready");
+  try {
+    const descendant = `require('node:fs').writeFileSync(process.argv[2], 'ready'); setTimeout(() => require('node:fs').writeFileSync(process.argv[1], 'survived'), 1500)`;
+    const parent = `require('node:child_process').spawn(process.execPath, ['-e', process.argv[1], process.argv[2], process.argv[3]], {stdio:'ignore'}); setInterval(() => {}, 1000)`;
+    const result = runCompatibilityCommand(process.execPath, ["-e", parent, descendant, marker, ready], {
+      cwd, encoding: "utf8", timeout: 1000,
+    });
+    assert.equal(result.error?.code, "ETIMEDOUT");
+    assert.equal(existsSync(ready), true, "the descendant must actually start before the watchdog fires");
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    assert.equal(existsSync(marker), false, "a descendant must not keep using the workspace after timeout");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });

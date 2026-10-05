@@ -7,6 +7,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 ## Repository map
 
 - `src/index.ts` registers the pi extension, provider, fallback warnings, Cursor runtime controls, native replay wrappers, question tool, and pi tool bridge hooks.
+- `src/cursor-model-auth-resync.ts` owns serialized registration-local catalog discovery, captured runtime-auth fingerprints, retry, supersession and shutdown guards. It checks on session_start or explicit refresh; Pi login/logout do not themselves emit that event.
 - `src/model-discovery.ts` discovers Cursor models, builds pi model metadata, stores per-model metadata, and defines fallback models.
 - `shared/cursor-model-selection-identities.mjs` owns canonical selectable model/context/fast identities and context-window key normalization shared by runtime discovery and the snapshot generator; its `.d.mts` file owns the TypeScript contract.
 - `src/cursor-provider.ts` is a thin `streamCursor()` wrapper that delegates turn execution to the turn runner.
@@ -145,7 +146,7 @@ There is no lint or format script in `package.json` at this time.
 - Keep provider runtime code side-effect-light. Do not write secrets, and do not let cache or discovery failures break response streaming unless the run cannot proceed safely.
 - Add or update tests for behavior changes in `src/`. Prefer focused unit tests over live Cursor calls.
 - If dependency versions change, update `package-lock.json` with npm. Do not manually edit generated dependency output.
-- The bridge runtime closure is bundled and pinned to `@modelcontextprotocol/server@2.1.0`, `@modelcontextprotocol/hono@2.0.1`, `hono@4.13.9`, and `@hono/node-server@2.1.1`. `@cursor/sdk@1.0.35` remains an exact unbundled dependency.
+- The bridge runtime closure is bundled and pinned to `@modelcontextprotocol/server@2.1.0`, `@modelcontextprotocol/hono@2.0.1`, `hono@4.13.9`, and `@hono/node-server@2.1.3`. `@cursor/sdk@1.0.35` remains an exact unbundled dependency.
 - Do not commit `dist/`, `coverage/`, `.env*`, `.pi/`, or package tarballs.
 
 ## Validation and done criteria

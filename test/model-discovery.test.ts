@@ -10,6 +10,8 @@ import {
 	type CursorModelFallbackIssue,
 } from "../src/model-discovery.js";
 import { saveCachedContextWindow, __testUtils as contextWindowCacheTestUtils } from "../src/context-window-cache.js";
+import { loadFreshCachedModels, fingerprintApiKey, saveModelListCache } from "../src/model-list-cache.js";
+import { createCursorModelAuthResync, type CursorCatalogResult } from "../src/cursor-model-auth-resync.js";
 import { FALLBACK_MODEL_ITEMS } from "../src/cursor-fallback-models.generated.js";
 
 vi.mock("node:fs", async (importOriginal) => {
@@ -49,6 +51,7 @@ describe("discoverModels", () => {
 	beforeEach(() => {
 		process.env = { ...originalEnv };
 		delete process.env.CURSOR_API_KEY;
+		delete process.env.PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT;
 		tmpAgentDir = mkdtempSync(join(tmpdir(), "pi-cursor-discovery-"));
 		process.env.PI_CODING_AGENT_DIR = tmpAgentDir;
 		process.argv = ["node", "vitest"];
@@ -97,6 +100,69 @@ describe("discoverModels", () => {
 		expect(issues[0].message).toContain("/cursor-refresh-models");
 		expect(issues[0].message).not.toContain("will fail until pi is restarted");
 		expect(mockedList).not.toHaveBeenCalled();
+	});
+
+	it("hides only the unauthenticated owner catalog without clearing sibling metadata", async () => {
+		process.env.PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT = "1";
+		register([FALLBACK_MODEL_ITEMS.find(model => model.id === "grok-4.6")!]);
+		const selection = buildCursorModelSelection("grok-4.6", "high", false);
+		const issues: CursorModelFallbackIssue[] = [];
+		expect(await discoverModels({ apiKey: null, onFallback: issue => issues.push(issue) })).toEqual([]);
+		expect(issues[0].reason).toBe("missing-api-key");
+		expect(buildCursorModelSelection("grok-4.6", "high", false)).toEqual(selection);
+		expect(getCursorModelMetadata("grok-4.6")).toBeDefined();
+		expect(mockedList).not.toHaveBeenCalled();
+	});
+
+	it("retains fallback models for authenticated discovery failures when hiding is enabled", async () => {
+		process.env.PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT = "1";
+		vi.mocked(Cursor.models.list).mockRejectedValueOnce(new Error("offline"));
+		const issue = vi.fn();
+		const models = await discoverModels({ apiKey: "present-key", forceRefresh: true, onFallback: issue });
+		expect(models.length).toBeGreaterThan(0);
+		expect(issue).toHaveBeenCalledWith(expect.objectContaining({ reason: "discovery-failed" }));
+	});
+
+	it("uses explicit captured logout auth rather than re-reading a newly configured key", async () => {
+		process.env.CURSOR_API_KEY = "new-key";
+		const issues: CursorModelFallbackIssue[] = [];
+		await discoverModels({ apiKey: null, onFallback: issue => issues.push(issue) });
+		expect(issues[0].reason).toBe("missing-api-key");
+		expect(mockedList).not.toHaveBeenCalled();
+	});
+
+	it("retries live discovery after a forced failure even while its fallback cache is fresh", async () => {
+		process.env.CURSOR_API_KEY = "retry-key";
+		saveModelListCache(fingerprintApiKey("retry-key"), [{ id: "cached-model", displayName: "Cached" }]);
+		const apply = vi.fn<(result: CursorCatalogResult) => void>();
+		const catalog = createCursorModelAuthResync(apply);
+		await catalog.refresh();
+		expect(mockedList).not.toHaveBeenCalled();
+		mockedList.mockRejectedValueOnce(new Error("offline"));
+		await catalog.refresh({ force: true });
+		expect(apply.mock.lastCall?.[0].issue?.reason).toBe("cached-after-error");
+		mockedList.mockResolvedValueOnce([{ id: "live-model", displayName: "Live" }]);
+		await catalog.refresh();
+		expect(mockedList).toHaveBeenCalledTimes(2);
+		expect(apply.mock.lastCall?.[0].models.map(model => model.id)).toEqual(["live-model"]);
+		expect(apply.mock.lastCall?.[0].issue).toBeUndefined();
+		await catalog.refresh();
+		expect(mockedList).toHaveBeenCalledTimes(2);
+	});
+
+	it("does not publish superseded SDK results into metadata or the cache", async () => {
+		let current = true;
+		let finish!: (models: ModelListItem[]) => void;
+		mockedList.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+		register([FALLBACK_MODEL_ITEMS.find(model => model.id === "grok-4.6")!]);
+		const result = discoverModels({ apiKey: "superseded-key", forceRefresh: true, isCurrent: () => current });
+		await vi.waitFor(() => expect(finish).toBeDefined());
+		current = false;
+		finish([{ id: "stale-only", displayName: "Stale" }]);
+		expect(await result).toEqual([]);
+		expect(getCursorModelMetadata("grok-4.6")).toBeDefined();
+		expect(getCursorModelMetadata("stale-only")).toBeUndefined();
+		expect(loadFreshCachedModels(fingerprintApiKey("superseded-key"))).toBeUndefined();
 	});
 
 	it("returns fallback models and reports missing key when API key is whitespace", async () => {

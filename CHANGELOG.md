@@ -21,6 +21,7 @@
 
 ### Fixed
 
+- Match started and completed shell aliases with identical arguments when SDK callback IDs differ, avoiding false missing-completion cards while retaining genuinely unmatched shell diagnostics. Adapted from #258.
 - Tell Cursor to comment on GitHub issues and PRs only when the user asks.
 
 ## 0.5.0 - 2026-10-04

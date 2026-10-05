@@ -16,6 +16,10 @@ import type { CursorPiBridgeToolRequest, CursorPiToolBridgeRun } from "./cursor-
 import { getCursorSessionScopeKey } from "./cursor-session-scope.js";
 import type { CursorSdkEventDebugRecorder } from "./cursor-sdk-event-debug.js";
 import { installCursorSdkProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
+import {
+	isCursorAskQuestionBlocked,
+	registerCursorAskQuestionBlockedSync,
+} from "./cursor-ask-question-blocked-state.js";
 
 export class CursorLiveRunAbortError extends Error {
 	constructor() {
@@ -104,6 +108,8 @@ export interface CursorLiveRunCoordinator {
 	waitForProgress(run: CursorLiveRun, signal?: AbortSignal): Promise<void>;
 	withRunLease<T>(run: CursorLiveRun, signal: AbortSignal | undefined, body: () => Promise<T>): Promise<T>;
 	requestIdleDispose(run: CursorLiveRun): void;
+	/** Pause or restart idle-dispose timers to match ask_question UI blocked state (#281). */
+	syncIdleDisposeWithAskQuestionBlocked(): void;
 	release(run: CursorLiveRun): Promise<void>;
 	count(): number;
 }
@@ -493,6 +499,8 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 			clearIdleDisposeTimer(run);
 			state.idleDisposeRequested = true;
 			if (state.leased || state.leaseQueue.length > 0) return;
+			// Keep the dispose request pending while ask_question awaits UI (#281).
+			if (isCursorAskQuestionBlocked()) return;
 			state.idleDisposeRequested = false;
 			state.idleDisposeTimer = setTimeout(() => {
 				void coordinator.release(run).catch(() => {
@@ -500,6 +508,24 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 				});
 			}, deps.getIdleDisposeMs());
 			state.idleDisposeTimer.unref?.();
+		},
+
+		syncIdleDisposeWithAskQuestionBlocked(): void {
+			if (isCursorAskQuestionBlocked()) {
+				for (const run of pendingRuns.values()) {
+					if (run.disposed) continue;
+					const state = getPrivateState(run);
+					if (state.idleDisposeTimer) state.idleDisposeRequested = true;
+					clearIdleDisposeTimer(run);
+				}
+				return;
+			}
+			for (const run of pendingRuns.values()) {
+				if (run.disposed) continue;
+				const state = privateStates.get(run);
+				if (!state?.idleDisposeRequested) continue;
+				coordinator.requestIdleDispose(run);
+			}
 		},
 
 		async release(run): Promise<void> {
@@ -547,5 +573,8 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 		},
 	};
 
+	registerCursorAskQuestionBlockedSync(() => {
+		coordinator.syncIdleDisposeWithAskQuestionBlocked();
+	});
 	return coordinator;
 }

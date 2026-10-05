@@ -22,6 +22,7 @@
 
 ### Changed
 
+- Upgrade development-only ConnectRPC to 2.2.0, retaining the Cursor SDK’s own Connect 1.7.0/Protobuf 1.10.0 transport graph and SDK-relative error-wrapper contracts.
 - Upgrade the bundled MCP bridge cohort to `@modelcontextprotocol/hono@2.0.2` and its required `@modelcontextprotocol/server@2.3.1` peer, Hono 4.13.13, and the development-only MCP client 2.3.1, retaining bounded JSON-body parsing and Host/Origin rejection before request dispatch.
 - Add default-visible `PI_CURSOR_FOOTER`; set it to `0` to hide Cursor runtime/fast/mode/transport status without changing provider behavior.
 - Add `PI_CURSOR_LIVE_RUN_IDLE_DISPOSE_MS` to configure eligible local replay idle cleanup, preserving owned pending-call protection and immediate explicit release (adapted from #283 by @aaalexliu).

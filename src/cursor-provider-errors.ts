@@ -143,7 +143,10 @@ function collectConnectErrorStacks(error: unknown, record: Record<string, unknow
 
 function isConnectError(error: unknown, record: Record<string, unknown> | undefined): boolean {
 	const name = error instanceof Error ? error.name : getErrorStringField(record, "name");
-	return name === "ConnectError";
+	if (name === "ConnectError") return true;
+	// @cursor/sdk convertConnectError re-wraps backend ConnectErrors (name -> NetworkError,
+	// code -> "unavailable") and leaves the original ConnectError on `.cause` without outer details.
+	return getErrorStringField(asRecord(record?.cause), "name") === "ConnectError";
 }
 
 function isUnauthenticatedConnectCode(code: unknown): boolean {
@@ -181,15 +184,19 @@ export function isCursorSdkConnectionStalledError(error: unknown): boolean {
 }
 
 function getCursorConnectSource(error: unknown, record: Record<string, unknown> | undefined): CursorConnectErrorSource {
-	const stack = getErrorStack(error, record);
+	const stack = collectConnectErrorStacks(error, record);
 	// Node/Bun use the SDK's vendored transport; Deno uses connect-web.
 	if (stack.includes("@cursor/sdk")) return "cursor-sdk-stack";
-	const details = Array.isArray(record?.details) ? record.details : [];
-	const hasCursorBackendDetails = details.some((detail) => {
-		const type = getErrorStringField(asRecord(detail), "type");
-		return typeof type === "string" && type.startsWith("aiserver.");
-	});
-	if (hasCursorBackendDetails) return "cursor-backend-details";
+	let current = record;
+	for (let depth = 0; depth < 3 && current; depth += 1) {
+		const details = Array.isArray(current.details) ? current.details : [];
+		const hasCursorBackendDetails = details.some((detail) => {
+			const type = getErrorStringField(asRecord(detail), "type");
+			return typeof type === "string" && type.startsWith("aiserver.");
+		});
+		if (hasCursorBackendDetails) return "cursor-backend-details";
+		current = asRecord(current.cause);
+	}
 	return "generic-connect";
 }
 

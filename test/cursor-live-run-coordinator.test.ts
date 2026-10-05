@@ -13,6 +13,10 @@ import {
 	cursorLiveRuns,
 	drainCursorLiveRunTurn,
 } from "../src/cursor-provider-live-run-drain.js";
+import {
+	resetCursorAskQuestionBlockedStateForTests,
+	setCursorAskQuestionBlocked,
+} from "../src/cursor-ask-question-blocked-state.js";
 import { __testUtils as cursorSdkProcessGuardTestUtils } from "../src/cursor-sdk-process-error-guard.js";
 
 const emitProcessEvent = (event: string | symbol, ...args: unknown[]): boolean =>
@@ -99,6 +103,7 @@ function replayIdFromToolCallId(toolCallId: string): string | undefined {
 describe("cursor live run coordinator", () => {
 	afterEach(() => {
 		vi.useRealTimers();
+		resetCursorAskQuestionBlockedStateForTests();
 	});
 
 	it("matches context tool results after trailing user messages and ignores disposed runs", async () => {
@@ -256,6 +261,55 @@ describe("cursor live run coordinator", () => {
 		releaseLease();
 		await lease;
 		await vi.advanceTimersByTimeAsync(4);
+		expect(coordinator.count()).toBe(1);
+		await vi.advanceTimersByTimeAsync(1);
+		await vi.waitFor(() => expect(coordinator.count()).toBe(0));
+		expect(sdkCancel).toHaveBeenCalledTimes(1);
+		expect(abandonSessionAgent).toHaveBeenCalledWith("scope-1");
+	});
+
+	it("defers idle disposal while cursor_ask_question is blocked on UI (#281)", async () => {
+		vi.useFakeTimers();
+		const { coordinator, abandonSessionAgent } = makeCoordinator({ idleDisposeMs: 5 });
+		const run = startRun(coordinator);
+		const sdkCancel = vi.fn().mockResolvedValue(undefined);
+		coordinator.attachSdkRun(run, { cancel: sdkCancel });
+
+		setCursorAskQuestionBlocked(true);
+		coordinator.syncIdleDisposeWithAskQuestionBlocked();
+		coordinator.requestIdleDispose(run);
+		await vi.advanceTimersByTimeAsync(50);
+		expect(coordinator.count()).toBe(1);
+		expect(sdkCancel).not.toHaveBeenCalled();
+
+		setCursorAskQuestionBlocked(false);
+		coordinator.syncIdleDisposeWithAskQuestionBlocked();
+		await vi.advanceTimersByTimeAsync(4);
+		expect(coordinator.count()).toBe(1);
+		await vi.advanceTimersByTimeAsync(1);
+		await vi.waitFor(() => expect(coordinator.count()).toBe(0));
+		expect(sdkCancel).toHaveBeenCalledTimes(1);
+		expect(abandonSessionAgent).toHaveBeenCalledWith("scope-1");
+	});
+
+	it("pauses an already-scheduled idle dispose when ask_question becomes blocked (#281)", async () => {
+		vi.useFakeTimers();
+		const { coordinator, abandonSessionAgent } = makeCoordinator({ idleDisposeMs: 20 });
+		const run = startRun(coordinator);
+		const sdkCancel = vi.fn().mockResolvedValue(undefined);
+		coordinator.attachSdkRun(run, { cancel: sdkCancel });
+
+		coordinator.requestIdleDispose(run);
+		await vi.advanceTimersByTimeAsync(5);
+		setCursorAskQuestionBlocked(true);
+		coordinator.syncIdleDisposeWithAskQuestionBlocked();
+		await vi.advanceTimersByTimeAsync(50);
+		expect(coordinator.count()).toBe(1);
+		expect(sdkCancel).not.toHaveBeenCalled();
+
+		setCursorAskQuestionBlocked(false);
+		coordinator.syncIdleDisposeWithAskQuestionBlocked();
+		await vi.advanceTimersByTimeAsync(19);
 		expect(coordinator.count()).toBe(1);
 		await vi.advanceTimersByTimeAsync(1);
 		await vi.waitFor(() => expect(coordinator.count()).toBe(0));

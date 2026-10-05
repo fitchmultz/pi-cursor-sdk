@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 const artifactsModule = "../scripts/platform-smoke/artifacts.mjs";
 
@@ -31,6 +31,21 @@ function encodeBinaryText(value: string, encoding: "utf16le" | "utf16be" | "utf3
 }
 
 describe("platform smoke artifact transport", () => {
+	// Cold native compilation has a 30s cap; keep it outside individual test deadlines.
+	beforeAll(async () => {
+		if (process.platform === "win32") return;
+		const { extractPlatformArtifactBundle, formatPlatformArtifactBundle } = await import(artifactsModule);
+		const out = mkdtempSync(join(tmpdir(), "platform-extractor-ready-"));
+		try {
+			const content = Buffer.from("ready");
+			expect(extractPlatformArtifactBundle(out, formatPlatformArtifactBundle({ files: [
+				{ path: "ready.txt", size: content.length, contentBase64: content.toString("base64") },
+			] })).ok).toBe(true);
+		} finally {
+			rmSync(out, { recursive: true, force: true });
+		}
+	}, 35_000);
+
 	const duplicateSecret = "credential-free-review-secret-123456789";
 	const duplicateCases = [
 		{ name: "auth field", text: `{"apiKey":"${duplicateSecret}","apiKey":"placeholder"}`, violation: "potential auth/token assignment" },

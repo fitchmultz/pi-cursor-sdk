@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Give compatibility build, verification and native contracts separate bounded phases; stop timed-out POSIX command descendants before deleting their isolated workspace. Keep individual test deadlines unchanged.
+
 - Keep Cursor SDK and bridge imports in Pi’s static extension graph so compiled-Bun launchers can resolve them; initialize the native parser vendor path before the SDK loads.
 - Preserve network classification through real SDK UNAVAILABLE error wrappers while keeping bounded, scrubbed cause provenance.
 - Protect owned pending pi bridge calls, including human questions, from live-run idle disposal. Restart the normal cleanup window after the last pending call settles; explicit cancellation and shutdown still release the run.

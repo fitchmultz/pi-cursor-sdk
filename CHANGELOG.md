@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Add default-visible `PI_CURSOR_FOOTER`; set it to `0` to hide Cursor runtime/fast/mode/transport status without changing provider behavior.
+
 - Upgrade the exact Cursor SDK dependency to 1.0.35. Preserve recorded local resume and cleanup ownership across its MD5-to-SHA256 workspace-root migration, without merging stores; share atomic same-cwd ownership from first root derivation through admission and store disposal.
 - Add fail-closed rejection of links/non-directories inside SDK/extension-owned store layouts before migration, opening, or temporary removal; higher user-managed ancestor links remain supported as in 0.5.0. Malformed recorded identities fall back or become non-retryable cleanup candidates without unbounded path traversal.
 - Stop suppressing unrelated connect-node-only network process errors during active Cursor turns; SDK-vendored and backend-detail provenance remain scoped.

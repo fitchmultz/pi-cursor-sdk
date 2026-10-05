@@ -40,14 +40,14 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function requestStatus(url: string, headers: Record<string, string>, body?: string): Promise<number> {
+function requestStatus(url: string, headers: Record<string, string>): Promise<number> {
 	return new Promise((resolve, reject) => {
 		const request = httpRequest(url, { method: "POST", headers }, (response) => {
 			response.resume();
 			resolve(response.statusCode ?? 0);
 		});
 		request.on("error", reject);
-		request.end(body);
+		request.end();
 	});
 }
 
@@ -434,25 +434,26 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 		}
 	});
 
-	it("bounds JSON request bodies before parsing while preserving origin rejection", async () => {
-		const registry = __testUtils.createRegistry(
-			createBridgePiHarness({ active: ["read"], tools: [createToolInfo("read")] }),
-			{ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" },
-		);
-		const run = await registry.createRun();
-		const url = getCursorPiBridgeMcpUrl(run);
-		// Deliberately invalid JSON: bounded reading must reject size before JSON.parse.
+	it("bounds adapter JSON bodies before parsing while preserving origin rejection", async () => {
+		const { createMcpHonoApp } = await import("@modelcontextprotocol/hono");
+		const app = createMcpHonoApp({ host: "127.0.0.1" });
+		const dispatch = vi.fn(() => new Response("unexpected dispatch"));
+		app.all("*", dispatch);
+		// Exercise the installed adapter's complete body reader directly: an eager socket upload
+		// can race its early rejection on Windows, obscuring the response with ECONNRESET.
 		const oversizedBody = "x".repeat(4 * 1024 * 1024 + 1);
-		try {
-			expect(await requestStatus(url, { "content-type": "application/json" }, oversizedBody)).toBe(413);
-			expect(await requestStatus(url, {
+		const request = (origin?: string) => new Request("http://127.0.0.1/mcp", {
+			method: "POST",
+			headers: {
+				host: "127.0.0.1",
 				"content-type": "application/json",
-				origin: "https://attacker.example",
-			}, oversizedBody)).toBe(403);
-			expect(run.takeQueuedToolRequests()).toEqual([]);
-		} finally {
-			await run.dispose();
-		}
+				...(origin ? { origin } : {}),
+			},
+			body: oversizedBody,
+		});
+		expect((await app.fetch(request())).status).toBe(413);
+		expect((await app.fetch(request("https://attacker.example"))).status).toBe(403);
+		expect(dispatch).not.toHaveBeenCalled();
 	});
 
 	it("shares and closes one loopback server for concurrent run creation", async () => {

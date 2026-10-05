@@ -622,7 +622,7 @@ describe("streamCursor bridge MCP", () => {
 			await vi.waitFor(() => expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0));
 			expect(error).toBeInstanceOf(Error);
 			expect((error as Error).message).toMatch(cleanup === "bridge deadline" ? /timed out|MCP error/i : /disposed|cancelled|released|MCP error/i);
-			expect(mockDispose).toHaveBeenCalledTimes(1);
+			await vi.waitFor(() => expect(mockDispose).toHaveBeenCalledTimes(1));
 		} finally {
 			if (previousBridgeTimeout === undefined) delete process.env.PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS;
 			else process.env.PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS = previousBridgeTimeout;

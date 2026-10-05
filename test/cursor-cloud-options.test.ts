@@ -83,6 +83,11 @@ describe("Cursor cloud options", () => {
 		});
 		expect(result.agents).toEqual(agents);
 		expect(result).not.toHaveProperty("mcpServers");
+		const empty = buildCursorCloudAgentOptions({
+			apiKey: "test-key", modelSelection: { id: "parent" }, agentMode: "agent",
+			resolvedConfig: resolveCursorSdkConfig({ env: {} }), agents: {},
+		});
+		expect(empty).not.toHaveProperty("agents");
 	});
 	it("omits PR controls when unset and maps explicitly configured false values", () => {
 		const unset = buildCursorCloudAgentOptions({

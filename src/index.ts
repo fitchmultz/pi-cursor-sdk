@@ -42,10 +42,7 @@ export default async function (pi: CursorExtensionApi) {
 	registerCursorUsageLedger(pi);
 	registerCursorUsageCommand(pi);
 	let fallbackIssue: CursorModelFallbackIssue | undefined;
-	const registerCursorProvider = registerCursorProviderBinding(pi, (issue) => {
-		fallbackIssue = issue;
-		setFallbackWarning(issue);
-	});
+	const registerCursorProvider = registerCursorProviderBinding(pi);
 	const setFallbackWarning = registerCursorFallbackIssueWarning(pi);
 	registerCursorSessionAgentLineage(pi);
 	registerCursorSessionAgentLifecycle(pi);
@@ -88,7 +85,10 @@ export default async function (pi: CursorExtensionApi) {
 		},
 	});
 
-	registerCursorProvider(models);
+	registerCursorProvider(models, (issue) => {
+		fallbackIssue = issue;
+		setFallbackWarning(issue);
+	});
 	// Register last so session_shutdown cleanup remains protected until other Cursor handlers finish.
 	registerCursorSdkSessionProcessErrorGuard(pi);
 }

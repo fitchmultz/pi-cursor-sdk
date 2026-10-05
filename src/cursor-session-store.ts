@@ -137,8 +137,8 @@ function retainWorkspaceRoot(cwd: string, workspaceRoot: string, storeRoot: stri
 export async function withCursorSessionStoreIdentities<T>(
 	cwd: string,
 	scopeKey: string,
+	selectedRoot: string | undefined,
 	use: (identities: CursorPersistentStoreIdentities) => Promise<T>,
-	selectedRoot?: string,
 ): Promise<T> {
 	const storeRoot = selectedRoot === undefined ? undefined : normalizeCursorCustomStoreRoot(selectedRoot);
 	const lease = acquireWorkspaceRoot(cwd, storeRoot);
@@ -224,6 +224,7 @@ export async function resolveCursorSessionStoreIdentity(options: {
 	const { cwd, scopeKey, identities, agentId } = options;
 	if (identities.domain === "custom") {
 		if (!options.recordedIdentity || !cursorSessionStoreIdentitiesEqual(options.recordedIdentity, identities.sessionStore)) return undefined;
+		// Cleanup admits each candidate before cached-store reuse, which skips the open-time guard.
 		assertSafeStorePath(identities.sessionStore.stateRoot, dirname(identities.workspaceRoot), "local store");
 		guardCursorCustomStorePath(dirname(identities.workspaceRoot), identities.sessionStore.stateRoot).verify();
 		return identities.sessionStore;
@@ -332,7 +333,7 @@ export async function openCursorSessionStoreForScope(options: {
 		const sessionStore = await openOwnedCursorSessionStore(options.cwd, identity, { removalRoot });
 		return { persistent: false, sessionStore, identities: { sessionStore: identity }, resumeAttemptAllowed: false, resumeFallback: false };
 	}
-	return withCursorSessionStoreIdentities(options.cwd, options.scopeKey, async (identities) => {
+	return withCursorSessionStoreIdentities(options.cwd, options.scopeKey, options.storeRoot, async (identities) => {
 		const resumeIdentity = options.resume ? await resolveCursorSessionStoreIdentity({
 			cwd: options.cwd, scopeKey: options.scopeKey, identities,
 			recordedIdentity: options.resume.identity, agentId: options.resume.agentId,
@@ -350,7 +351,7 @@ export async function openCursorSessionStoreForScope(options: {
 			sessionStore = await openCursorSessionStore(options.cwd, identities.sessionStore, identities.workspaceRoot, identities.storeRoot);
 		}
 		return { persistent: true, sessionStore, identities, resumeAttemptAllowed, resumeFallback };
-	}, options.storeRoot);
+	});
 }
 
 export const __testUtils = {

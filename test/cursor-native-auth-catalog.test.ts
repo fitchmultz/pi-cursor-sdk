@@ -29,7 +29,7 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
 
-async function fixture(configKey?: string) {
+async function fixture(configKey?: string, startSession = true) {
 	const credentials = new InMemoryCredentialStore();
 	const modelsPath = join(root, "models.json");
 	writeFileSync(modelsPath, JSON.stringify({ providers: configKey ? { cursor: { apiKey: configKey } } : {} }));
@@ -39,7 +39,7 @@ async function fixture(configKey?: string) {
 	pi.registerProvider = registry.registerProvider.bind(registry);
 	await extension(pi);
 	const notify = vi.fn();
-	await pi.runSessionStart({ modelRegistry: registry, hasUI: true, ui: { notify } });
+	if (startSession) await pi.runSessionStart({ modelRegistry: registry, hasUI: true, ui: { notify } });
 	return { runtime, registry, credentials, pi, notify, modelsPath };
 }
 
@@ -79,6 +79,18 @@ it("real same-session login/rotation/logout updates cached metadata with zero ca
 	} finally { await pi.runSessionShutdown(); }
 });
 
+it("publishes the authenticated startup cache before warning about the initial fallback", async () => {
+	const { registry, credentials, pi, notify, runtime } = await fixture(undefined, false);
+	await credentials.modify("cursor", async () => ({ type: "api_key", key: "synthetic-startup" }));
+	saveModelListCache(fingerprintApiKey("synthetic-startup"), [item("startup-cached")]);
+	try {
+		await pi.runSessionStart({ modelRegistry: registry, hasUI: true, ui: { notify } });
+		expect(runtime.getModels("cursor").map(model => model.id)).toEqual(["startup-cached"]);
+		expect(notify).not.toHaveBeenCalled();
+		expect(list).not.toHaveBeenCalled();
+	} finally { await pi.runSessionShutdown(); }
+});
+
 it("default no-auth fallback remains available and unresolved stored placeholders do not fake opt-in auth", async () => {
 	vi.stubEnv("PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT", undefined);
 	const { runtime, pi, credentials, registry } = await fixture();
@@ -92,18 +104,27 @@ it("default no-auth fallback remains available and unresolved stored placeholder
 	} finally { await pi.runSessionShutdown(); }
 });
 
-it("keyless provider env resolves native auth, availability and catalog network phase", async () => {
-	const { runtime, registry, credentials, pi } = await fixture();
+it.each([false, true])("credential key/provider env/ambient precedence reaches catalog before native registry capture=%s", async (beforeSessionStart) => {
+	vi.stubEnv("CURSOR_API_KEY", "synthetic-ambient");
+	const { runtime, registry, credentials, pi } = await fixture(undefined, !beforeSessionStart);
 	try {
-		await credentials.modify("cursor", async () => ({ type: "api_key", env: { CURSOR_API_KEY: "synthetic-provider-env" } }));
-		await registry.refresh({ providers: ["cursor"], allowNetwork: false });
-		expect((await registry.getProviderAuth("cursor"))?.auth.apiKey).toBe("synthetic-provider-env");
-		expect((await runtime.getAvailable("cursor")).length).toBeGreaterThan(0);
-		expect(list).not.toHaveBeenCalled();
-		list.mockResolvedValueOnce([item("provider-env-catalog")]);
-		await registry.refresh({ providers: ["cursor"], allowNetwork: true });
-		expect(list).toHaveBeenCalledWith({ apiKey: "synthetic-provider-env" });
-		expect(runtime.getModels("cursor").map(m => m.id)).toEqual(["provider-env-catalog"]);
+		for (const [key, providerEnv, expected] of [
+			["synthetic-stored", "synthetic-provider-env", "synthetic-stored"],
+			["pi-cursor-sdk-cursor-api-key-placeholder", "synthetic-provider-env", "synthetic-provider-env"],
+			[undefined, "synthetic-provider-env", "synthetic-provider-env"],
+			[undefined, "$CURSOR_API_KEY", "synthetic-ambient"],
+		] as const) {
+			await credentials.modify("cursor", async () => ({ type: "api_key", key, env: { CURSOR_API_KEY: providerEnv } }));
+			await registry.refresh({ providers: ["cursor"], allowNetwork: false });
+			expect((await registry.getProviderAuth("cursor"))?.auth.apiKey).toBe(expected);
+			expect((await runtime.getAvailable("cursor")).length).toBeGreaterThan(0);
+			expect(list).not.toHaveBeenCalled();
+			list.mockResolvedValueOnce([item("precedence-catalog")]);
+			await registry.refresh({ providers: ["cursor"], allowNetwork: true, force: true });
+			expect(list).toHaveBeenCalledExactlyOnceWith({ apiKey: expected });
+			expect(runtime.getModels("cursor").map(m => m.id)).toEqual(["precedence-catalog"]);
+			list.mockClear();
+		}
 	} finally { await pi.runSessionShutdown(); }
 });
 

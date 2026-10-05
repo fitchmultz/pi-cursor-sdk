@@ -620,7 +620,11 @@ test("shared runtime requests require their actual session's registration and an
     assert.match(a.session.messages.at(-1).errorMessage, /binding is not active/);
     await b.session.bindExtensions({ mode: "rpc" });
     await a.session.prompt("A cannot enter B registration");
-    assert.match(a.session.messages.at(-1).errorMessage, /request does not belong/);
+    const ownershipError = a.session.messages.at(-1).errorMessage;
+    assert.match(ownershipError, /request does not belong/);
+    assert.match(ownershipError, /Reload this session's extensions/);
+    assert.match(ownershipError, /use independent ModelRuntime instances for sibling sessions/);
+    assert.doesNotMatch(ownershipError, /refresh Cursor models/);
     assert.equal(state.sends.length, beforeSends);
     await b.session.prompt("correct B receipt and registration");
     assert.equal(b.session.messages.at(-1).stopReason, "stop");

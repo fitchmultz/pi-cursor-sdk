@@ -171,13 +171,6 @@ export function saveModelListCache(keyFingerprint: string, models: ModelListItem
 	}
 }
 
-export const __testUtils = {
-	getCachePath,
-	DEFAULT_TTL_MS,
-	DISABLE_ENV_VAR,
-	TTL_ENV_VAR,
-};
-
 /** Delete only our valid regular-file catalog, never a user link or other data. */
 export function clearModelListCache(): void {
 	try {
@@ -187,3 +180,10 @@ export function clearModelListCache(): void {
 		// Cache cleanup is best-effort; it must not break native logout.
 	}
 }
+
+export const __testUtils = {
+	getCachePath,
+	DEFAULT_TTL_MS,
+	DISABLE_ENV_VAR,
+	TTL_ENV_VAR,
+};

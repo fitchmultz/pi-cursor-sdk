@@ -76,6 +76,7 @@ interface PrepareCursorProviderTurnContext extends PrepareCursorProviderTurnPara
 	selection: ModelSelection;
 	fastEnabled: boolean | undefined;
 	agents: AgentOptions["agents"];
+	customSubagentNames: string[] | undefined;
 }
 
 function buildCursorCloudPromptContext(context: Context, handoff: "fresh" | "bootstrap" | "never", nativeSourceRoles?: readonly string[]): Context {
@@ -127,7 +128,7 @@ function buildLocalCursorProviderTurnLifecycle(
 async function prepareCursorCloudProviderTurn(
 	prepareParams: PrepareCursorProviderTurnContext,
 ): Promise<CloudCursorProviderTurnPrepareResult> {
-	const { params, cwd, resolvedApiKey, sdkEventDebug, throwIfAborted, resolvedConfig, agentMode, selection, fastEnabled, agents } = prepareParams;
+	const { params, cwd, resolvedApiKey, sdkEventDebug, throwIfAborted, resolvedConfig, agentMode, selection, fastEnabled, agents, customSubagentNames } = prepareParams;
 	const { model, context, options } = params;
 
 	let restoreCursorSdkOutputFilter: (() => void) | undefined;
@@ -208,7 +209,7 @@ async function prepareCursorCloudProviderTurn(
 			promptOptions,
 			agentMode,
 			localForce: false,
-			...(agents && Object.keys(agents).length ? { customSubagentNames: Object.keys(agents) } : {}),
+			...(customSubagentNames ? { customSubagentNames } : {}),
 		});
 
 		completed = true;
@@ -251,7 +252,7 @@ async function prepareCursorCloudProviderTurn(
 async function prepareCursorLocalProviderTurn(
 	prepareParams: PrepareCursorProviderTurnContext,
 ): Promise<LocalCursorProviderTurnPrepareResult> {
-	const { params, cwd, resolvedApiKey, sdkEventDebug, throwIfAborted, resolvedConfig, agentMode, selection, fastEnabled, agents } = prepareParams;
+	const { params, cwd, resolvedApiKey, sdkEventDebug, throwIfAborted, resolvedConfig, agentMode, selection, fastEnabled, agents, customSubagentNames } = prepareParams;
 	const { model, context, options } = params;
 
 	let restoreCursorSdkOutputFilter: (() => void) | undefined;
@@ -376,7 +377,7 @@ async function prepareCursorLocalProviderTurn(
 			activeToolNames: activeToolNames ? [...activeToolNames] : [],
 			sessionAgentScopeKey,
 			bridgeRunId: bridgeRun?.id,
-			...(agents && Object.keys(agents).length ? { customSubagentNames: Object.keys(agents) } : {}),
+			...(customSubagentNames ? { customSubagentNames } : {}),
 		});
 		const nativeReplayId = createCursorNativeReplayId();
 		const textDeltas: string[] = [];
@@ -474,7 +475,8 @@ export async function prepareCursorProviderTurn(
 	}
 	const agentMode = getCursorProviderAgentModeOrThrow(params.scope.scopeKey);
 	const agents = buildCursorCustomSubagentDefinitions(resolvedConfig.subagents.value);
-	const context: PrepareCursorProviderTurnContext = { ...prepareParams, agentMode, selection, fastEnabled, agents };
+	const customSubagentNames = agents ? Object.keys(agents) : undefined;
+	const context: PrepareCursorProviderTurnContext = { ...prepareParams, agentMode, selection, fastEnabled, agents, customSubagentNames };
 
 	return resolvedConfig.runtime.value === "cloud"
 		? prepareCursorCloudProviderTurn(context)

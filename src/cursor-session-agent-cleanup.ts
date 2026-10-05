@@ -308,7 +308,7 @@ export async function runCursorSessionAgentCleanupCommand(pi: LocalResumeCleanup
 	const failedAgentIds: CursorSessionAgentCleanupFailure[] = [];
 	const openedStores = new Map<string, Awaited<ReturnType<typeof openCursorSessionStore>>>();
 	try {
-		await withCursorSessionStoreIdentities(ctx.cwd, scope.scopeKey, async (identities) => {
+		await withCursorSessionStoreIdentities(ctx.cwd, scope.scopeKey, storeRoot, async (identities) => {
 			const operations = await getSdkOperations();
 			for (const candidate of plan.candidates) {
 				const { agentId } = candidate;
@@ -333,7 +333,7 @@ export async function runCursorSessionAgentCleanupCommand(pi: LocalResumeCleanup
 					});
 				}
 			}
-		}, storeRoot);
+		});
 	} catch (error) {
 		const message = scrubSensitiveText(getString(asRecord(error), "message") ?? String(error));
 		failedAgentIds.push(...plan.candidateAgentIds.map((agentId) => ({ agentId, error: message })));

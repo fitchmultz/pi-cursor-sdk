@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Model, Provider } from "@earendil-works/pi-ai";
-import { cursorApiKeyAuth, normalizeCursorApiKey } from "./cursor-api-key.js";
+import { cursorApiKeyAuth, normalizeCursorApiKey, resolveCursorCredentialApiKey } from "./cursor-api-key.js";
 import { discoverModels, type CursorModelFallbackIssue } from "./model-discovery.js";
 import { clearModelListCache } from "./model-list-cache.js";
 import { captureCursorCloudLifecycleRecorder } from "./cursor-cloud-lifecycle.js";
@@ -12,7 +12,7 @@ import { getCursorSessionScopeSnapshot } from "./cursor-session-scope.js";
 import { captureCursorRequestProjection, resolveCursorRequestProvenance, type CursorRequestProjectionSnapshot, type CursorRequestProvenance } from "./cursor-request-provenance.js";
 import type { CursorSdkOutputNoticeHandler } from "./cursor-sdk-output-filter.js";
 
-export const CURSOR_PROVIDER_OWNERSHIP_ERROR = "Cursor provider ownership is unavailable: this request does not belong to the active Cursor registration. Bind this session's extensions and refresh Cursor models/reload it; use independent ModelRuntime instances for sibling sessions.";
+export const CURSOR_PROVIDER_OWNERSHIP_ERROR = "Cursor provider ownership is unavailable: this request does not belong to the active Cursor registration. Reload this session's extensions to restore its Cursor registration; use independent ModelRuntime instances for sibling sessions.";
 interface ProviderBinding { active: boolean; closed: boolean }
 interface RequestReceipt {
 	binding: ProviderBinding;
@@ -26,7 +26,6 @@ const requestOwners = new WeakMap<object, RequestReceipt>();
 /** One closure per ExtensionAPI, including direct compaction/tree/bug-report streams. */
 export function registerCursorProviderBinding(
 	pi: Pick<ExtensionAPI, "on" | "registerProvider" | "appendEntry">,
-	onCatalog: (issue?: CursorModelFallbackIssue) => void,
 ) {
 	const binding: ProviderBinding = { active: false, closed: false };
 	let registry: ExtensionContext["modelRegistry"] | undefined;
@@ -78,7 +77,7 @@ export function registerCursorProviderBinding(
 		await registry.refresh({ providers: ["cursor"], allowNetwork: false });
 	});
 	pi.on("session_shutdown", () => { binding.active = false; binding.closed = true; registry = undefined; });
-	return (models: Awaited<ReturnType<typeof discoverModels>>) => {
+	return (models: Awaited<ReturnType<typeof discoverModels>>, onCatalog: (issue?: CursorModelFallbackIssue) => void) => {
 		if (binding.closed) return;
 		const toNative = (definitions: typeof models): Model<"cursor-sdk">[] =>
 			definitions.map(({ compat: _compat, ...definition }) => ({
@@ -98,11 +97,8 @@ export function registerCursorProviderBinding(
 				const credential = context.credential;
 				const apiKey = registry
 					? normalizeCursorApiKey(resolved?.auth.apiKey)
-					: credential?.type === "api_key"
-						? normalizeCursorApiKey(credential.key)
-							?? normalizeCursorApiKey(credential.env?.CURSOR_API_KEY)
-							?? normalizeCursorApiKey(process.env.CURSOR_API_KEY)
-						: credential ? undefined : normalizeCursorApiKey(process.env.CURSOR_API_KEY);
+					: credential && credential.type !== "api_key" ? undefined
+						: await resolveCursorCredentialApiKey(credential, async () => process.env.CURSOR_API_KEY);
 				let issue: CursorModelFallbackIssue | undefined;
 				await discoverModels({
 					apiKey, allowNetwork: context.allowNetwork, forceRefresh: context.force, signal: context.signal,

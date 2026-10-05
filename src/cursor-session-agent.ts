@@ -115,10 +115,14 @@ function assertScopeAcceptsAcquire(scopeKey: string): void {
 	terminalDisposedScopeGenerations.delete(scopeKey);
 }
 
-function rethrowSupersededWhenReplacedByDifferentPoolKey(scopeKey: string, poolKey: string, storeRoot: string | undefined, error: unknown): void {
+function samePoolIdentity(entry: SessionCursorAgentPoolEntryBase, poolKey: string, capturedStoreRoot: string | undefined): boolean {
+	return entry.poolKey === poolKey && entry.storeRoot === capturedStoreRoot;
+}
+
+function rethrowSupersededWhenReplacedByDifferentPoolIdentity(scopeKey: string, poolKey: string, storeRoot: string | undefined, error: unknown): void {
 	if (!(error instanceof SessionCursorAgentCreationSupersededError)) return;
 	const replacement = sessionAgentsByScope.get(scopeKey);
-	if (replacement && (replacement.poolKey !== poolKey || replacement.storeRoot !== storeRoot)) {
+	if (replacement && !samePoolIdentity(replacement, poolKey, storeRoot)) {
 		throw error;
 	}
 }
@@ -433,7 +437,7 @@ function leaseFromEntry(
 function getCurrentReadyPoolEntry(scopeKey: string, poolKey: string, storeRoot: string | undefined): SessionCursorAgentReadyEntry | undefined {
 	const current = sessionAgentsByScope.get(scopeKey);
 	if (current?.status !== "ready") return undefined;
-	if (current.poolKey !== poolKey || current.storeRoot !== storeRoot) return undefined;
+	if (!samePoolIdentity(current, poolKey, storeRoot)) return undefined;
 	return current;
 }
 
@@ -586,7 +590,7 @@ export async function acquireSessionCursorAgent(input: SessionCursorAgentCreateP
 		const poolKey = buildSessionAgentPoolKey(scopeKey, params);
 		const state = getSessionCursorAgentPoolState(scopeKey);
 
-		if ((state.status === "ready" || state.status === "busy") && (state.poolKey !== poolKey || state.storeRoot !== params.storeRoot)) {
+		if ((state.status === "ready" || state.status === "busy") && !samePoolIdentity(state, poolKey, params.storeRoot)) {
 			await disposePoolEntryForScope(scopeKey);
 			continue;
 		}
@@ -603,7 +607,7 @@ export async function acquireSessionCursorAgent(input: SessionCursorAgentCreateP
 		}
 
 		if (state.status === "creating") {
-			if (state.poolKey !== poolKey || state.storeRoot !== params.storeRoot) {
+			if (!samePoolIdentity(state, poolKey, params.storeRoot)) {
 				await disposePoolEntryForScope(scopeKey);
 				continue;
 			}
@@ -612,7 +616,7 @@ export async function acquireSessionCursorAgent(input: SessionCursorAgentCreateP
 			} catch (error) {
 				if (error instanceof SessionCursorAgentCreationSupersededError) {
 					assertScopeAcceptsAcquire(scopeKey);
-					rethrowSupersededWhenReplacedByDifferentPoolKey(scopeKey, poolKey, params.storeRoot, error);
+					rethrowSupersededWhenReplacedByDifferentPoolIdentity(scopeKey, poolKey, params.storeRoot, error);
 					continue;
 				}
 				throw error;
@@ -662,7 +666,7 @@ export async function acquireSessionCursorAgent(input: SessionCursorAgentCreateP
 			}
 			if (error instanceof SessionCursorAgentCreationSupersededError) {
 				assertScopeAcceptsAcquire(scopeKey);
-				rethrowSupersededWhenReplacedByDifferentPoolKey(scopeKey, poolKey, params.storeRoot, error);
+				rethrowSupersededWhenReplacedByDifferentPoolIdentity(scopeKey, poolKey, params.storeRoot, error);
 				continue;
 			}
 			throw error;

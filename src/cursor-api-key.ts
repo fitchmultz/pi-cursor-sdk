@@ -1,9 +1,7 @@
-import { readStoredCredential } from "@earendil-works/pi-coding-agent";
-import { envApiKeyAuth, type ApiKeyAuth } from "@earendil-works/pi-ai";
+import { envApiKeyAuth, type ApiKeyAuth, type ApiKeyCredential } from "@earendil-works/pi-ai";
 import { parseEnvBoolean } from "./cursor-env-boolean.js";
 
 export const CURSOR_API_KEY_ENV_VAR = "CURSOR_API_KEY";
-const CURSOR_PROVIDER_ID = "cursor";
 
 // Legacy no-auth availability policy only; never a configured models.json key.
 export const CURSOR_API_KEY_CONFIG_VALUE = "pi-cursor-sdk-cursor-api-key-placeholder";
@@ -26,6 +24,15 @@ export function normalizeCursorApiKey(apiKey?: string): string | undefined {
 	return trimmed;
 }
 
+export async function resolveCursorCredentialApiKey(
+	credential: ApiKeyCredential | undefined,
+	environment: () => Promise<string | undefined>,
+): Promise<string | undefined> {
+	return normalizeCursorApiKey(credential?.key)
+		?? normalizeCursorApiKey(credential?.env?.CURSOR_API_KEY)
+		?? normalizeCursorApiKey(await environment());
+}
+
 export function cursorApiKeyAuth(): ApiKeyAuth {
 	const standard = envApiKeyAuth("Cursor API key", [CURSOR_API_KEY_ENV_VAR]);
 	const auth: ApiKeyAuth = {
@@ -37,9 +44,7 @@ export function cursorApiKeyAuth(): ApiKeyAuth {
 		},
 		async resolve({ ctx, credential, signal }) {
 			signal.throwIfAborted();
-			const key = normalizeCursorApiKey(credential?.key)
-				?? normalizeCursorApiKey(credential?.env?.CURSOR_API_KEY)
-				?? normalizeCursorApiKey(await ctx.env(CURSOR_API_KEY_ENV_VAR));
+			const key = await resolveCursorCredentialApiKey(credential, () => ctx.env(CURSOR_API_KEY_ENV_VAR));
 			signal.throwIfAborted();
 			if (key) return { auth: { apiKey: key }, env: credential?.env, source: credential ? "stored credential" : CURSOR_API_KEY_ENV_VAR };
 			if (!parseEnvBoolean(process.env.PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT, false)) {
@@ -49,17 +54,4 @@ export function cursorApiKeyAuth(): ApiKeyAuth {
 		},
 	};
 	return auth;
-}
-
-function getStoredCursorApiKey(): string | undefined {
-	try {
-		const credential = readStoredCredential(CURSOR_PROVIDER_ID);
-		return resolveCursorApiKey(credential?.type === "api_key" ? credential.key : undefined);
-	} catch {
-		return undefined;
-	}
-}
-
-export function resolveCursorRuntimeApiKey(): Promise<string | undefined> {
-	return Promise.resolve(getStoredCursorApiKey() ?? resolveCursorApiKey(process.env.CURSOR_API_KEY));
 }

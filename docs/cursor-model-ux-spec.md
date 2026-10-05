@@ -589,7 +589,7 @@ Pi's SDK supplies a session-owned `before_provider_headers` callback for ordinar
 
 An explicitly shared ModelRuntime still has only one Cursor registration. A request can run only when its receipt belongs to that registration's active session. Mismatched or missing receipts fail before SDK/storage work:
 
-> Cursor provider ownership is unavailable: this request does not belong to the active Cursor registration. Bind this session's extensions and refresh Cursor models/reload it; use independent ModelRuntime instances for sibling sessions.
+> Cursor provider ownership is unavailable: this request does not belong to the active Cursor registration. Reload this session's extensions to restore its Cursor registration; use independent ModelRuntime instances for sibling sessions.
 
 Pre-bind and shutdown closures also fail closed. Refreshing A while an unstarted shared sibling exists cannot let that sibling enter A's registration, including bug-report streams without lifecycle events. Catalog refresh keeps the native registration's original closure and never re-registers over a sibling, including when auth resolution races a sibling registration. Bare calls to a registered provider without the native headers receipt, including extension calls to `ctx.modelRegistry.streamSimple`, or reuse of a consumed receipt, fail closed. Bind/refresh/reload cannot supply a receipt to that bare API: use the owning AgentSession's native stream path or an independent child AgentSession. Direct `streamCursor` callers must also supply captured ownership, request provenance, and a usage recorder; there is no unbound global fallback. Default independent ModelRuntime instances remain the embedding recommendation.
 

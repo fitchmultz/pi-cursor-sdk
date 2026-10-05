@@ -578,6 +578,8 @@ const CLOUD_ORDER: CursorFieldSource[] = ["cli", "environment", "session", "user
 const LOCAL_ORDER: CursorFieldSource[] = ["cli", "environment", "project", "user", "builtin"];
 const LOCAL_FORCE_ORDER: CursorFieldSource[] = ["cli", "environment", "builtin"];
 const HTTP1_ORDER: CursorFieldSource[] = ["session", "environment", "user", "builtin"];
+const SUBAGENTS_ORDER: CursorFieldSource[] = ["project", "user", "builtin"];
+const STORE_ROOT_ORDER: CursorFieldSource[] = ["environment", "user", "builtin"];
 
 function buildFieldLayers<T>(order: CursorFieldSource[], values: CursorFieldValues<T>): Array<CursorResolvedSetting<T> | undefined> {
 	return order.map((source) => (source === "builtin" ? resolved("builtin", values.builtin as T) : valueFrom(source, values[source])));
@@ -695,7 +697,7 @@ export function resolveCursorSdkConfig(options: ResolveCursorSdkConfigOptions = 
 			},
 			(value) => (value === "cloud" ? 1 : 0),
 		),
-		subagents: resolveOrdinaryField(["project", "user", "builtin"], {
+		subagents: resolveOrdinaryField(SUBAGENTS_ORDER, {
 			project: parseCustomSubagents(project?.subagents),
 			user: parseCustomSubagents(user?.subagents),
 			builtin: undefined,
@@ -804,7 +806,7 @@ export function resolveCursorSdkConfig(options: ResolveCursorSdkConfigOptions = 
 			}),
 		},
 		local: {
-			storeRoot: resolveOrdinaryField(["environment", "user", "builtin"], {
+			storeRoot: resolveOrdinaryField(STORE_ROOT_ORDER, {
 				environment: env.local?.storeRoot,
 				user: user?.local?.storeRoot?.trim() ? user.local.storeRoot : undefined,
 				builtin: undefined,

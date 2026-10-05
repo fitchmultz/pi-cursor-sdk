@@ -76,7 +76,7 @@ describe("canonical native request provenance", () => {
 
 describe("provider header receipts and operation membership", () => {
 	async function binding() {
-		const f = fixture(); const pi = createPiHarness(); registerCursorSessionScope(pi); registerCursorNativeToolDisplayState(pi); const register = registerCursorProviderBinding(pi, () => {}); register([]);
+		const f = fixture(); const pi = createPiHarness(); registerCursorSessionScope(pi); registerCursorNativeToolDisplayState(pi); const register = registerCursorProviderBinding(pi); register([], () => {});
 		const ctx = createExtensionTestContext({ cwd: "/tmp/provenance-owner", sessionManager: { getBranch: () => f.manager.getBranch(), buildSessionProjection: () => f.manager.buildSessionProjection(), getSessionId: () => f.manager.getSessionId(), getSessionFile: () => undefined } });
 		await pi.invokeEventWithContext("session_start", { type: "session_start", reason: "startup" }, ctx);
 		const stream = pi._registered[0]!.config.streamSimple! as ReturnType<typeof createCursorLazyStream>;
@@ -147,7 +147,7 @@ describe("provider header receipts and operation membership", () => {
 			const runtime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, modelsStorePath: join(root, "models.json"), allowModelNetwork: false });
 			runtime.registerProvider("cursor", { api: "cursor-sdk", apiKey: "offline-fixture", baseUrl: "http://127.0.0.1", models: [modelConfig] });
 			const loader = new DefaultResourceLoader({ cwd: root, agentDir, settingsManager, noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true, systemPromptOverride: () => "Offline binding test.", extensionFactories: [pi => {
-				registerCursorSessionScope(pi); registerCursorNativeToolDisplayState(pi); registerCursorProviderBinding(pi, () => {})([modelConfig]);
+				registerCursorSessionScope(pi); registerCursorNativeToolDisplayState(pi); registerCursorProviderBinding(pi)([modelConfig], () => {});
 			}] });
 			await loader.reload();
 			({ session } = await createAgentSession({ cwd: root, agentDir, modelRuntime: runtime, model: runtime.getModel("cursor", "test-model")!, resourceLoader: loader, settingsManager, sessionManager: manager, tools: [] }));

@@ -794,7 +794,7 @@ Pull-request CI runs that suite once per selected host: the latest stable offici
 For authorized uncommitted repairs, qualify an isolated immutable working-tree snapshot without committing:
 
 ```bash
-node scripts/ci-compatibility.mjs --working-tree --official-only --versions 0.87.1,0.99.1,1.0.2
+node scripts/ci-compatibility.mjs --working-tree --official-only --versions 0.87.1,0.99.1,1.0.3
 ```
 
 This builds and packs the snapshot, checks package loading, and exercises actual official native provider/session flows. The default invocation still requires a clean checkout and includes the maintained fork. `--help` documents selection and exit codes.

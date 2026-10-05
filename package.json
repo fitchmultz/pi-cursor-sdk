@@ -184,7 +184,7 @@
     "@earendil-works/pi-ai": "0.99.2",
     "@earendil-works/pi-coding-agent": "0.99.2",
     "@earendil-works/pi-tui": "0.99.2",
-    "@modelcontextprotocol/client": "2.1.0",
+    "@modelcontextprotocol/client": "2.3.1",
     "@types/node": "24.19.1",
     "@typescript/typescript6": "6.0.2",
     "@xterm/xterm": "6.0.0",

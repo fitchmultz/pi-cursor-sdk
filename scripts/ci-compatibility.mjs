@@ -2,6 +2,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { NATIVE_COMPATIBILITY_TEST_FILES, qualifySelectedHost, runCompatibilityCommand } from "./ci-compatibility-phases.mjs";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -73,11 +74,11 @@ if (automation) {
   };
 }
 
-function run(command, args, cwd = source, capture = false) {
+function run(command, args, cwd = source, capture = false, commandEnv = env) {
   console.log(`$ ${command} ${args.join(" ")}`);
-  const result = spawnSync(command, args, {
+  const result = runCompatibilityCommand(command, args, {
     cwd,
-    env,
+    env: commandEnv,
     encoding: "utf8",
     shell: process.platform === "win32" && command === "npm",
     stdio: capture ? "pipe" : "inherit",
@@ -160,7 +161,7 @@ try {
     if (args.includes("--select-only")) {
       console.log(`Selected official Pi ${selected.version} for native platform checks.`);
     } else {
-      run("npm", ["run", "check:compat"]);
+      qualifySelectedHost(run);
       // Retain latest-SDK emit, but pack the reviewed locked runtime bundle.
       run("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]);
       Object.assign(env, { PI_COMPAT_EXPECTED_PACKAGE_DIR: official.packageDir,
@@ -191,7 +192,7 @@ try {
       Object.assign(env, { PI_COMPAT_HOST: "fork", PI_COMPAT_EXPECTED_VERSION: forkSelected.version,
         PI_COMPAT_EXPECTED_PACKAGE_DIR: forkSelected.packageDir, PI_PACKAGE_DIR: forkSelected.packageDir,
         PI_HOST_INDEX: forkSelected.index, PI_HOST_CLI: forkSelected.cli });
-      run("npm", ["run", "check:compat"]);
+      qualifySelectedHost(run);
       probe("fork-npm", forkHost.packageDir, npmExtension);
       probe("fork-git", forkHost.packageDir, gitExtension);
       console.log("Official Pi and the current fork load both installed Cursor extension forms offline.");
@@ -244,9 +245,7 @@ try {
       probe(`official-${version}`, host, npmExtension);
       if (args.includes("--working-tree")) {
         const nativeEnv = { ...env, PI_CURSOR_TEST_HOST: join(host, "dist", "index.js") };
-        const result = spawnSync(process.execPath, ["--test", "test/ci-compatibility.test.mjs", "test/native-provider.test.mjs", "test/native-cursor-flow.test.mjs"], { cwd: gitExtension, env: nativeEnv, stdio: "inherit", timeout: 180_000 });
-        if (result.error) throw result.error;
-        assert.equal(result.status, 0, `Official ${version} native qualification failed`);
+        run(process.execPath, ["--test", ...NATIVE_COMPATIBILITY_TEST_FILES], gitExtension, false, nativeEnv);
       }
     }
     if (!args.includes("--official-only")) {

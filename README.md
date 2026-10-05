@@ -258,7 +258,7 @@ The `:fast` and `:slow` aliases are available only for Cursor models whose catal
 
 Composer 2 and Composer 2.5 can default to fast. Use `--cursor-no-fast` or a `:slow` virtual alias for a one-shot no-fast Composer run. In print mode (`-p`), `--cursor-no-fast` is silent and does not write `~/.pi/agent/cursor-sdk.json`.
 
-In interactive mode, the footer shows Cursor status only while a Cursor model is active. Fast-capable models show fast state explicitly, and fast and plan mode share one Cursor status value so they do not overwrite each other:
+In interactive mode, the footer shows Cursor status only while a Cursor model is active. Set `PI_CURSOR_FOOTER=0` to hide this status; it is visible by default. This controls display only: runtime, mode, and transport selection and validation are unchanged. Fast-capable models show fast state explicitly, and fast and plan mode share one Cursor status value so they do not overwrite each other:
 
 ```text
 cursor:local · fast:n/a
@@ -499,6 +499,8 @@ Overlapping built-in pi tools (`read`, `bash`, `write`, `edit`, `grep`, `find`, 
 
 Cursor-native tool replay is separate from the bridge. Replay cards are display-only recorded Cursor SDK activity. They never re-run Cursor-side commands, reapply Cursor edits, call MCP servers, or mutate pi state. See [Cursor native tool replay](docs/cursor-native-tool-replay.md).
 
+Footer display control: `PI_CURSOR_FOOTER=0` hides the Cursor status without hiding Pi's model or usage footer. Like other boolean controls, it accepts `0`, `false`, `off`, `none`, `no`, and `disabled` to hide; `1`, `true`, `on`, `yes`, and `enabled` to show (case-insensitive). Unset, blank, or unrecognized values keep the default visible status.
+
 Bridge controls:
 
 ```bash
@@ -643,7 +645,7 @@ That does not mean the model cannot think. It means the Cursor SDK does not expo
 
 ### I do not see `cursor:local` / `cursor:cloud` or `plan` in the footer
 
-The Cursor footer appears only while a Cursor model is active. Fast-capable local models show `cursor:local · fast:on` or `cursor:local · fast:off`; Cursor models without a fast parameter show `cursor:local · fast:n/a`. Cloud runtime shows `cursor:cloud · fast:n/a`. Cursor SDK mode is the default `agent` mode when `plan` is absent. When both are active, pi shows one combined Cursor status such as `cursor:local · fast:on · plan` or `cursor:cloud · fast:n/a · plan`.
+The Cursor footer appears only while a Cursor model is active and `PI_CURSOR_FOOTER` is enabled (the default). Remove `PI_CURSOR_FOOTER=0` or set it to `1` to restore the status. Fast-capable local models show `cursor:local · fast:on` or `cursor:local · fast:off`; Cursor models without a fast parameter show `cursor:local · fast:n/a`. Cloud runtime shows `cursor:cloud · fast:n/a`. Cursor SDK mode is the default `agent` mode when `plan` is absent. When both are active, pi shows one combined Cursor status such as `cursor:local · fast:on · plan` or `cursor:cloud · fast:n/a · plan`.
 
 ### My Cursor app settings or rules do not seem to apply
 

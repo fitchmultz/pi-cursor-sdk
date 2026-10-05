@@ -10,6 +10,7 @@
 
 ### Changed
 
+- Add default-visible `PI_CURSOR_FOOTER`; set it to `0` to hide Cursor runtime/fast/mode/transport status without changing provider behavior.
 - `cursor_ask_question` now requires `PI_CURSOR_ASK_QUESTION=1`; Cursor proceeds with a stated assumption by default.
 - Add opt-in `PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT` while keeping provider login. Recheck catalog auth at session start or explicit refresh with owned warning state, retry after discovery failures, and discard superseded/shutdown results (adapted from #300/#301 by @yansigit). `/login` and `/logout` still require explicit refresh for immediate catalog changes.
 

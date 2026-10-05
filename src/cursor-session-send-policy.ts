@@ -21,14 +21,14 @@ export interface CursorSessionSendPlan {
 	reason: CursorSessionSendReason;
 }
 
-export function planCursorSessionSend(sendState: SessionCursorAgentSendState, context: Context): CursorSessionSendPlan {
+export function planCursorSessionSend(sendState: SessionCursorAgentSendState, context: Context, nativeSourceRoles?: readonly string[]): CursorSessionSendPlan {
 	if (!sendState.bootstrapped) {
 		return { mode: "bootstrap", resetAgent: false, reason: "initial" };
 	}
 	if (sendState.incrementalSendCount >= MAX_COMPLETED_INCREMENTAL_SENDS_BEFORE_REBOOTSTRAP) {
 		return { mode: "bootstrap", resetAgent: true, reason: "incremental_threshold" };
 	}
-	if (shouldBootstrapCursorContext(sendState, context)) {
+	if (shouldBootstrapCursorContext(sendState, context, nativeSourceRoles)) {
 		return { mode: "bootstrap", resetAgent: true, reason: "context_divergence" };
 	}
 	return { mode: "incremental", resetAgent: false, reason: "incremental" };

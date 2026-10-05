@@ -123,7 +123,7 @@ export function getToolFingerprint(value: unknown): string {
 
 export function getStartedToolCallFingerprint(toolCall: unknown): string {
 	const name = getToolName(toolCall);
-	// SDK callbacks can use different shell aliases for the same invocation.
+	// Accept legacy shell aliases; this does not establish that the SDK emits alias-changing pairs.
 	// Keep exact argument matching; assistant text alone is not completion proof.
 	const toolName = normalizeCursorToolName(name) === "shell" ? "shell" : name;
 	return getToolFingerprint({ toolName, args: getToolArgs(toolCall) });

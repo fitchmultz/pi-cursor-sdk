@@ -57,6 +57,11 @@ export async function installedCursorModules() {
 		},
 		n: (value: any) => value?.__esModule ? () => value.default : () => value,
 		o: (target: object, key: string) => Object.hasOwn(target, key),
+		factorySource: (name: string): string => {
+			const factory = table![name];
+			if (!factory) throw new Error(`Installed SDK module missing: ${name}`);
+			return factory.toString();
+		},
 	});
 	return load;
 }

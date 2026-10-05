@@ -22,6 +22,7 @@ import {
 	CURSOR_LOCAL_FORCE_ENV,
 	CURSOR_LOCAL_RESUME_ENV,
 	CURSOR_HTTP1_ENV,
+	CURSOR_STATE_ROOT_ENV,
 	cursorFastDefaultsFromConfig,
 	getCursorSdkProjectConfigPath,
 	getCursorSdkUserConfigPath,
@@ -29,6 +30,7 @@ import {
 	loadCursorSdkConfigForUpdate,
 	loadCursorSdkUserConfig,
 	mergeCursorSdkConfig,
+	parseCursorSdkConfig,
 	resolveCursorFastDefault,
 	resolveCursorSdkConfig,
 	saveCursorSdkProjectConfig,
@@ -79,6 +81,43 @@ describe("Cursor SDK config resolver", () => {
 		rmSync(root, { recursive: true, force: true });
 	});
 
+	it("validates named subagents individually without forwarding unsupported fields", () => {
+		const valid = { description: " Review ", prompt: " Be thorough ", model: " inherit ", thinking: "max", fast: false, mcpServers: ["secret"] };
+		const parsed = parseCursorSdkConfig({ subagents: {
+			reviewer: valid, constructor: valid, toString: valid,
+			optional: { description: "D", prompt: "P", model: 1, thinking: "ultra", fast: "true" },
+			"bad name": valid, ["a".repeat(65)]: valid, "1start": valid,
+			empty: { description: " ", prompt: "P" }, missing: { description: "D" }, array: [], nil: null,
+		} });
+		const expected = { description: "Review", prompt: "Be thorough", model: "inherit", thinking: "max", fast: false };
+		expect(parsed?.subagents).toEqual({
+			reviewer: expected, constructor: expected, toString: expected, optional: { description: "D", prompt: "P" },
+		});
+		expect(Object.hasOwn(parsed!.subagents!, "constructor")).toBe(true);
+	});
+
+	it("replaces the whole user subagent set only with a usable trusted project set", () => {
+		const user = { subagents: { userAgent: { description: "D", prompt: "P" } } };
+		const project = { subagents: { projectAgent: { description: "Other", prompt: "P" } } };
+		expect(resolveCursorSdkConfig({ env: {}, user, project }).subagents).toEqual({
+			value: project.subagents, source: "project", trustLevel: "trusted-project",
+		});
+		for (const project of [{ subagents: {} }, { subagents: { invalid: { description: "", prompt: "P" } } }]) {
+			expect(resolveCursorSdkConfig({ env: {}, user, project: parseCursorSdkConfig(project) }).subagents.value).toEqual(user.subagents);
+		}
+		expect(resolveCursorSdkConfig({ env: { PI_CURSOR_SUBAGENTS: JSON.stringify(project.subagents) }, cli: project, session: project, builtIn: project }).subagents.value).toBeUndefined();
+
+		saveCursorSdkUserConfig(user, getCursorSdkUserConfigPath(agentDir));
+		saveCursorSdkProjectConfig(cwd, project);
+		const loaded = loadCursorSdkConfig({ cwd, agentDir, projectTrusted: false });
+		expect(resolveCursorSdkConfig({ env: {}, ...loaded }).subagents.value).toEqual(user.subagents);
+		expect(resolveCursorSdkConfig({ env: {}, ...loadCursorSdkConfig({ cwd, agentDir, projectTrusted: true }) }).subagents.value).toEqual(project.subagents);
+		updateCursorSdkConfig(getCursorSdkUserConfigPath(agentDir), current => ({ ...withCursorFastDefaults(
+			mergeCursorSdkConfig(current, { runtime: "local", local: { useHttp1ForAgent: true } }), new Map([["composer-2", false]]),
+		) }));
+		expect(loadCursorSdkUserConfig(getCursorSdkUserConfigPath(agentDir)).subagents).toEqual(user.subagents);
+	});
+
 	it("resolves ordinary settings by CLI, env, trusted project, user, built-in order", () => {
 		const user = { runtime: "cloud" as const };
 		const project = { runtime: "local" as const };
@@ -125,6 +164,25 @@ describe("Cursor SDK config resolver", () => {
 			value: false,
 			source: "builtin",
 		});
+	});
+
+	it("selects persistent storage only from environment or user and preserves invalid winners across saves", () => {
+		const other = { local: { storeRoot: join(root, "ignored") } };
+		const layers = { env: {}, cli: other, project: other, session: other, builtIn: other };
+		expect(resolveCursorSdkConfig(layers).local.storeRoot).toMatchObject({ value: undefined, source: "builtin" });
+		const user = { local: { storeRoot: join(root, "user") } };
+		expect(resolveCursorSdkConfig({ ...layers, user }).local.storeRoot).toMatchObject({ value: user.local.storeRoot, source: "user" });
+		expect(resolveCursorSdkConfig({ ...layers, user, env: { [CURSOR_STATE_ROOT_ENV]: "relative/invalid" } }).local.storeRoot)
+			.toMatchObject({ value: "relative/invalid", source: "environment" });
+		expect(resolveCursorSdkConfig({ ...layers, user, env: { [CURSOR_STATE_ROOT_ENV]: "  " } }).local.storeRoot)
+			.toMatchObject({ value: user.local.storeRoot, source: "user" });
+		const path = getCursorSdkUserConfigPath(agentDir);
+		saveCursorSdkUserConfig({ local: { storeRoot: "~/invalid" } }, path);
+		const loaded = loadCursorSdkUserConfig(path);
+		saveCursorSdkUserConfig(mergeCursorSdkConfig(loaded, { local: { resume: false } }), path);
+		expect(resolveCursorSdkConfig({ env: {}, user: loadCursorSdkUserConfig(path) }).local.storeRoot)
+			.toMatchObject({ value: "~/invalid", source: "user" });
+		expect(existsSync(join(root, "user"))).toBe(false);
 	});
 
 	it("rejects invalid explicit CLI runtime and cloud-context overrides before lower layers", () => {
@@ -569,17 +627,6 @@ describe("Cursor SDK config resolver", () => {
 			session: { cloud: { repo: "session-repo" } },
 		}).cloud;
 		expect(cloud.repo).toMatchObject({ value: "session-repo", source: "session" });
-	});
-
-	it("ignores cli, environment, and session for subagents (per-field source order)", () => {
-		const subagents = { reviewer: { description: "Session.", prompt: "Session." } };
-
-		expect(resolveCursorSdkConfig({ env: {}, session: { subagents } }).subagents).toMatchObject({ value: {}, source: "builtin" });
-		expect(resolveCursorSdkConfig({ env: { PI_CURSOR_SUBAGENTS: JSON.stringify(subagents) } }).subagents).toMatchObject({
-			value: {},
-			source: "builtin",
-		});
-		expect(resolveCursorSdkConfig({ env: {}, cli: { subagents } }).subagents).toMatchObject({ value: {}, source: "builtin" });
 	});
 
 	it("resolves local safety controls by CLI, env, project, user, built-in order", () => {

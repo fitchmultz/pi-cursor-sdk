@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { Agent, createAgentPlatform, type LocalAgentStore } from "@cursor/sdk";
-import { SqliteLocalAgentStore } from "@cursor/sdk/sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	buildCursorSessionStateRoot,
@@ -158,44 +158,38 @@ describe("cursor session store identity", () => {
 		}
 	});
 
-	it("opens isolated SQLite stores that can write concurrently", async () => {
+	it("opens custom session/cwd-isolated SQLite stores with public persistence and exact deletion", async () => {
 		storeTestUtils.setSdkOperations(undefined);
 		const root = mkdtempSync(join(tmpdir(), "pi-cursor-session-stores-"));
+		const options = { cwd: root, persistent: true, storeRoot: join(root, "custom") };
 		const [first, second] = await Promise.all([
-			SqliteLocalAgentStore.open({ workspaceRef: root, stateRoot: join(root, "first") }),
-			SqliteLocalAgentStore.open({ workspaceRef: root, stateRoot: join(root, "second") }),
+			openCursorSessionStoreForScope({ ...options, scopeKey: "first" }),
+			openCursorSessionStoreForScope({ ...options, scopeKey: "second" }),
 		]);
 		try {
-			await Promise.all([
-				first.agents.create({ agent: {
-					agentId: "agent-first",
-					cwd: root,
-					status: "idle",
-					createdAt: 1,
-					updatedAt: 1,
-				} }),
-				second.agents.create({ agent: {
-					agentId: "agent-second",
-					cwd: root,
-					status: "idle",
-					createdAt: 1,
-					updatedAt: 1,
-				} }),
-			]);
-			expect(await first.agents.get({ agentId: "agent-first" })).toMatchObject({ agentId: "agent-first" });
-			expect(await first.agents.get({ agentId: "agent-second" })).toBeNull();
-			expect(await Agent.messages.list("agent-first", { runtime: "local", cwd: root, store: first })).toEqual([]);
-			const platform = await createAgentPlatform({
-				localStore: second,
-				workspaceRef: root,
-				scopedWorkspaceRef: root,
-			});
+			const workspace = join(realpathSync(root), "custom", createHash("sha256").update(resolve(root)).digest("hex").slice(0, 32));
+			expect(first.sessionStore.identity.stateRoot).toBe(buildCursorSessionStateRoot(workspace, "first"));
+			expect(second.sessionStore.identity.stateRoot).toBe(buildCursorSessionStateRoot(workspace, "second"));
+			expect(existsSync(join(first.sessionStore.identity.stateRoot, "index.db"))).toBe(true);
+			const otherCwd = await openCursorSessionStoreForScope({ ...options, cwd: join(root, "other"), scopeKey: "first" });
+			expect(otherCwd.sessionStore.identity.stateRoot).not.toBe(first.sessionStore.identity.stateRoot);
+			await otherCwd.sessionStore.dispose();
+			expect(existsSync(join(home, ".cursor"))).toBe(false);
+			await Promise.all([first, second].map((selected, index) => selected.sessionStore.store.agents.create({ agent: {
+				agentId: index === 0 ? "agent-first" : "agent-second", cwd: root, status: "idle", createdAt: 1, updatedAt: 1,
+			} })));
+			expect(await first.sessionStore.store.agents.get({ agentId: "agent-second" })).toBeNull();
+			expect(await Agent.messages.list("agent-first", { runtime: "local", cwd: root, store: first.sessionStore.store })).toEqual([]);
+			const platform = await createAgentPlatform({ localStore: second.sessionStore.store, workspaceRef: root, scopedWorkspaceRef: root });
 			expect(await platform.getAgent("agent-second")).toMatchObject({ agentId: "agent-second" });
-			await Agent.delete("agent-first", { cwd: root, store: first });
-			expect(await first.agents.get({ agentId: "agent-first" })).toBeNull();
-			expect(await second.agents.get({ agentId: "agent-second" })).toMatchObject({ agentId: "agent-second" });
+			await Agent.delete("agent-first", { cwd: root, store: first.sessionStore.store });
+			expect(await first.sessionStore.store.agents.get({ agentId: "agent-first" })).toBeNull();
+		} finally { await Promise.all([first.sessionStore.dispose(), second.sessionStore.dispose()]); }
+		const reopened = await openCursorSessionStoreForScope({ ...options, scopeKey: "second" });
+		try {
+			expect(await reopened.sessionStore.store.agents.get({ agentId: "agent-second" })).toMatchObject({ agentId: "agent-second" });
 		} finally {
-			await Promise.all([first.dispose(), second.dispose()]);
+			await reopened.sessionStore.dispose();
 			rmSync(root, { recursive: true, force: true });
 		}
 	});

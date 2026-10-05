@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync } from "node:fs";
+import { existsSync, lstatSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep, toNamespacedPath } from "node:path";
 import type { LocalAgentStore } from "@cursor/sdk";
 import { loadCursorSdk } from "./cursor-sdk-runtime.js";
+import { guardCursorCustomStorePath, normalizeCursorCustomStoreRoot, prepareCursorCustomStoreRoot } from "./cursor-custom-store-path.js";
 
 export interface CursorSessionStoreIdentity {
 	readonly version: 1;
@@ -17,10 +18,18 @@ export interface OpenCursorSessionStore {
 	dispose(): Promise<void>;
 }
 
-interface CursorPersistentStoreIdentities {
-	defaultStore: CursorSessionStoreIdentity;
+type CursorPersistentStoreIdentities = {
+	workspaceRoot: string;
 	sessionStore: CursorSessionStoreIdentity;
-}
+} & ({
+	domain: "default";
+	defaultStore: CursorSessionStoreIdentity;
+	storeRoot?: never;
+} | {
+	domain: "custom";
+	storeRoot: string;
+	defaultStore?: never;
+});
 
 export type CursorSessionStoreSelection = {
 	sessionStore: OpenCursorSessionStore;
@@ -42,51 +51,7 @@ interface CursorSessionStoreSdkOperations {
 }
 
 let sdkOperationsForTests: CursorSessionStoreSdkOperations | undefined;
-interface WorkspaceRootOwnership {
-	key: string;
-	cwd: string;
-	root: Promise<string>;
-	resolvedRoot?: string;
-	users: number;
-}
-const activeWorkspaceRoots = new Map<string, WorkspaceRootOwnership>();
-const activeWorkspaceRootsByPath = new Map<string, WorkspaceRootOwnership>();
-const activeWorkspaceRootCounts = new Map<string, number>();
-
-export function resolveCursorStoreRootBase(cwd: string, raw: string | undefined): string | undefined {
-	if (raw === undefined) return undefined;
-	if (!raw.trim() || /[\x00-\x1f\x7f]/.test(raw)) throw new Error("Invalid Cursor local storeRoot path");
-	const value = raw.trim();
-	const expanded = value === "~" ? homedir() : value.startsWith("~/") ? join(homedir(), value.slice(2)) : value;
-	return resolve(cwd, expanded);
-}
-
-export function buildCursorCustomWorkspaceRoot(base: string, cwd: string): string {
-	return join(base, "pi-cursor-sdk", `cwd-${createHash("sha256").update(cwd).digest("hex")}`);
-}
-
-/** Recognizes a configured identity only for cleanup retry classification, never admission. */
-export function isCanonicalConfiguredSessionStoreIdentity(cwd: string, scopeKey: string, identity: CursorSessionStoreIdentity | undefined): boolean {
-	if (!identity || identity.version !== 1 || !isAbsolute(identity.stateRoot)) return false;
-	const base = dirname(dirname(dirname(dirname(identity.stateRoot))));
-	return identity.stateRoot === buildCursorSessionStateRoot(buildCursorCustomWorkspaceRoot(base, cwd), scopeKey);
-}
-
-/** Pure retry classification; restoring the default must still pass ordinary identity admission. */
-export function isCanonicalDefaultSessionStoreIdentity(cwd: string, scopeKey: string, identity: CursorSessionStoreIdentity | undefined): boolean {
-	if (!identity || identity.version !== 1 || !isAbsolute(identity.stateRoot)) return false;
-	const prefix = defaultWorkspacePrefix(cwd);
-	const { current, legacy } = workspaceHashes(cwd);
-	return [current, legacy].some((hash) => {
-		if (!hash) return false;
-		const root = join(prefix, hash);
-		return identity.stateRoot === root || identity.stateRoot === buildCursorSessionStateRoot(root, scopeKey);
-	});
-}
-
-function workspacePathKey(cwd: string, root: string): string {
-	return JSON.stringify([cwd, root]);
-}
+const activeWorkspaceRoots = new Map<string, { root: Promise<string>; users: number }>();
 // ponytail: leases protect only extension-owned stores in this process. Other SDK
 // users/processes must stop before upgrade; a cross-process lock belongs in the SDK.
 
@@ -114,7 +79,7 @@ async function getSdkOperations(): Promise<CursorSessionStoreSdkOperations> {
 	};
 }
 
-function leaseWorkspaceRoot(ownership: WorkspaceRootOwnership) {
+function leaseWorkspaceRoot(key: string, ownership: { root: Promise<string>; users: number }) {
 	ownership.users++;
 	let released = false;
 	return {
@@ -122,70 +87,69 @@ function leaseWorkspaceRoot(ownership: WorkspaceRootOwnership) {
 		release: () => {
 			if (released) return;
 			released = true;
-			if (--ownership.users === 0) {
-				activeWorkspaceRoots.delete(ownership.key);
-				const count = (activeWorkspaceRootCounts.get(ownership.cwd) ?? 1) - 1;
-				if (count === 0) activeWorkspaceRootCounts.delete(ownership.cwd);
-				else activeWorkspaceRootCounts.set(ownership.cwd, count);
-				if (ownership.resolvedRoot) activeWorkspaceRootsByPath.delete(workspacePathKey(ownership.cwd, ownership.resolvedRoot));
-			}
+			if (--ownership.users === 0) activeWorkspaceRoots.delete(key);
 		},
 	};
 }
 
-function acquireWorkspaceRoot(cwd: string, storeRootBase?: string) {
-	const base = resolveCursorStoreRootBase(cwd, storeRootBase);
-	const key = JSON.stringify([cwd, base ?? null]);
-	let ownership = activeWorkspaceRoots.get(key);
-	if (!ownership) {
-		ownership = { key, cwd, users: 0, root: Promise.resolve("") };
-		const captured = ownership;
-		// Publish ownership before SDK loading or its migration-capable getter.
-		captured.root = Promise.resolve().then(async () => {
-			let root: string;
-			if (base) {
-				root = buildCursorCustomWorkspaceRoot(base, cwd);
-				assertSafeStorePath(root, dirname(root), "custom local store");
-				mkdirSync(dirname(root), { recursive: true, mode: 0o700 });
-				assertSafeStorePath(root, dirname(root), "custom local store");
-			} else {
-				const operations = await getSdkOperations();
-				assertSafeWorkspaceLayout(cwd);
-				root = await operations.getDefaultStateRoot(cwd);
-				assertSafeStorePath(root, dirname(root), "local store");
-			}
-			captured.resolvedRoot = root;
-			activeWorkspaceRootsByPath.set(workspacePathKey(cwd, root), captured);
-			return root;
-		});
-		activeWorkspaceRoots.set(key, captured);
-		activeWorkspaceRootCounts.set(cwd, (activeWorkspaceRootCounts.get(cwd) ?? 0) + 1);
-	}
-	return leaseWorkspaceRoot(ownership);
+function workspaceLeaseKey(cwd: string, storeRoot: string | undefined): string {
+	return JSON.stringify([cwd, storeRoot ?? null]);
 }
 
-function retainWorkspaceRoot(cwd: string, workspaceRoot: string) {
-	const ownership = activeWorkspaceRootsByPath.get(workspacePathKey(cwd, workspaceRoot));
+function acquireWorkspaceRoot(cwd: string, storeRoot: string | undefined) {
+	const key = workspaceLeaseKey(cwd, storeRoot);
+	let ownership = activeWorkspaceRoots.get(key);
 	if (!ownership) {
-		throw new Error(activeWorkspaceRootCounts.has(cwd)
-			? "Cursor local workspace ownership root mismatch"
-			: "Cursor local workspace ownership is not active");
+		ownership = {
+			// Publish ownership synchronously, before SDK loading or the public getter.
+			root: Promise.resolve().then(async () => {
+				if (storeRoot !== undefined) {
+					const root = prepareCursorCustomStoreRoot(storeRoot);
+					return join(root, createHash("sha256").update(resolve(cwd)).digest("hex").slice(0, 32));
+				}
+				const operations = await getSdkOperations();
+				assertSafeWorkspaceLayout(cwd);
+				const root = await operations.getDefaultStateRoot(cwd);
+				assertSafeStorePath(root, dirname(root), "local store");
+				return root;
+			}),
+			users: 0,
+		};
+		activeWorkspaceRoots.set(key, ownership);
 	}
-	return leaseWorkspaceRoot(ownership);
+	return leaseWorkspaceRoot(key, ownership);
+}
+
+function retainWorkspaceRoot(cwd: string, workspaceRoot: string, storeRoot: string | undefined) {
+	const key = workspaceLeaseKey(cwd, storeRoot);
+	const ownership = activeWorkspaceRoots.get(key);
+	if (!ownership) throw new Error("Cursor local workspace ownership is not active");
+	const lease = leaseWorkspaceRoot(key, ownership);
+	return {
+		...lease,
+		root: lease.root.then((root) => {
+			if (root !== workspaceRoot) throw new Error("Cursor local workspace ownership root mismatch");
+			return root;
+		}),
+	};
 }
 
 export async function withCursorSessionStoreIdentities<T>(
 	cwd: string,
 	scopeKey: string,
 	use: (identities: CursorPersistentStoreIdentities) => Promise<T>,
-	storeRootBase?: string,
+	selectedRoot?: string,
 ): Promise<T> {
-	const lease = acquireWorkspaceRoot(cwd, storeRootBase);
+	const storeRoot = selectedRoot === undefined ? undefined : normalizeCursorCustomStoreRoot(selectedRoot);
+	const lease = acquireWorkspaceRoot(cwd, storeRoot);
 	try {
-		const defaultStateRoot = await lease.root;
+		const workspaceRoot = await lease.root;
 		return await use({
-			defaultStore: { version: 1, stateRoot: defaultStateRoot },
-			sessionStore: { version: 1, stateRoot: buildCursorSessionStateRoot(defaultStateRoot, scopeKey) },
+			workspaceRoot,
+			sessionStore: { version: 1, stateRoot: buildCursorSessionStateRoot(workspaceRoot, scopeKey) },
+			...(storeRoot === undefined
+				? { domain: "default" as const, defaultStore: { version: 1 as const, stateRoot: workspaceRoot } }
+				: { domain: "custom" as const, storeRoot }),
 		});
 	} finally { lease.release(); }
 }
@@ -229,16 +193,12 @@ function workspaceHashes(cwd: string): { current: string; legacy: string | undef
 	}
 }
 
-function defaultWorkspacePrefix(cwd: string): string {
-	const slug = cwd.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
-	return join(homedir(), ".cursor", "projects", slug, "sdk-agent-store");
-}
-
 function assertSafeWorkspaceLayout(cwd: string): void {
 	// ponytail: SDK 1.0.35 has no public read-only root resolver; use one when exposed.
 	// This pure layout is contract-verified against its factory and public getter;
 	// guard it before that getter can rename MD5 history through an owned link.
-	const prefix = defaultWorkspacePrefix(cwd);
+	const slug = cwd.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
+	const prefix = join(homedir(), ".cursor", "projects", slug, "sdk-agent-store");
 	const { current, legacy } = workspaceHashes(cwd);
 	for (const hash of [current, legacy]) {
 		if (hash) assertSafeStorePath(join(prefix, hash), prefix, "local store");
@@ -262,6 +222,12 @@ export async function resolveCursorSessionStoreIdentity(options: {
 	agentId: string;
 }): Promise<CursorSessionStoreIdentity | undefined> {
 	const { cwd, scopeKey, identities, agentId } = options;
+	if (identities.domain === "custom") {
+		if (!options.recordedIdentity || !cursorSessionStoreIdentitiesEqual(options.recordedIdentity, identities.sessionStore)) return undefined;
+		assertSafeStorePath(identities.sessionStore.stateRoot, dirname(identities.workspaceRoot), "local store");
+		guardCursorCustomStorePath(dirname(identities.workspaceRoot), identities.sessionStore.stateRoot).verify();
+		return identities.sessionStore;
+	}
 	const legacyRoot = legacyWorkspaceRoot(cwd, identities.defaultStore.stateRoot);
 	const legacyDefault = legacyRoot ? { version: 1 as const, stateRoot: legacyRoot } : undefined;
 	// Version-1 handles predate recorded identities and used the default workspace
@@ -298,10 +264,10 @@ export async function resolveCursorSessionStoreIdentity(options: {
 async function openOwnedCursorSessionStore(
 	cwd: string,
 	identity: CursorSessionStoreIdentity,
-	options: { workspaceRoot: string } | { removalRoot: string },
+	options: { workspaceRoot: string; storeRoot?: string } | { removalRoot: string },
 ): Promise<OpenCursorSessionStore> {
 	const openedIdentity = Object.freeze({ ...identity });
-	const lease = "workspaceRoot" in options ? retainWorkspaceRoot(cwd, options.workspaceRoot) : undefined;
+	const lease = "workspaceRoot" in options ? retainWorkspaceRoot(cwd, options.workspaceRoot, options.storeRoot) : undefined;
 	const removalRoot = "removalRoot" in options ? options.removalRoot : undefined;
 	const removeTemporaryStore = async () => {
 		if (removalRoot) {
@@ -309,26 +275,33 @@ async function openOwnedCursorSessionStore(
 			await rm(removalRoot, { recursive: true, force: true });
 		}
 	};
-	let store: LocalAgentStore & { dispose(): Promise<void> };
+	let store: (LocalAgentStore & { dispose(): Promise<void> }) | undefined;
 	try {
 		await lease?.root;
 		const base = "workspaceRoot" in options ? dirname(options.workspaceRoot) : options.removalRoot;
 		assertSafeStorePath(openedIdentity.stateRoot, base, "local store");
-		store = await (await getSdkOperations()).openSqliteStore({
+		const guard = "workspaceRoot" in options && options.storeRoot !== undefined
+			? guardCursorCustomStorePath(base, openedIdentity.stateRoot) : undefined;
+		const operations = await getSdkOperations();
+		guard?.verify();
+		store = await operations.openSqliteStore({
 			workspaceRef: cwd,
 			stateRoot: toNamespacedPath(openedIdentity.stateRoot),
 		});
+		guard?.verify();
 	} catch (error) {
+		await store?.dispose().catch(() => undefined);
 		lease?.release();
 		await removeTemporaryStore().catch(() => undefined);
 		throw error;
 	}
+	const openedStore = store;
 	return {
 		identity: openedIdentity,
-		store,
+		store: openedStore,
 		dispose: async () => {
 			try {
-				await store.dispose();
+				await openedStore.dispose();
 			} finally {
 				lease?.release();
 				await removeTemporaryStore();
@@ -341,15 +314,16 @@ export function openCursorSessionStore(
 	cwd: string,
 	identity: CursorSessionStoreIdentity,
 	workspaceRoot: string,
+	storeRoot?: string,
 ): Promise<OpenCursorSessionStore> {
-	return openOwnedCursorSessionStore(cwd, identity, { workspaceRoot });
+	return openOwnedCursorSessionStore(cwd, identity, { workspaceRoot, storeRoot });
 }
 
 export async function openCursorSessionStoreForScope(options: {
 	cwd: string;
 	scopeKey: string;
 	persistent: boolean;
-	storeRootBase?: string;
+	storeRoot?: string;
 	resume?: { identity?: CursorSessionStoreIdentity; agentId: string };
 }): Promise<CursorSessionStoreSelection> {
 	if (!options.persistent) {
@@ -368,15 +342,15 @@ export async function openCursorSessionStoreForScope(options: {
 		const selectedIdentity = resumeIdentity ?? identities.sessionStore;
 		let sessionStore: OpenCursorSessionStore;
 		try {
-			sessionStore = await openCursorSessionStore(options.cwd, selectedIdentity, identities.defaultStore.stateRoot);
+			sessionStore = await openCursorSessionStore(options.cwd, selectedIdentity, identities.workspaceRoot, identities.storeRoot);
 		} catch (error) {
 			if (!resumeIdentity || cursorSessionStoreIdentitiesEqual(resumeIdentity, identities.sessionStore)) throw error;
 			resumeAttemptAllowed = false;
 			resumeFallback = true;
-			sessionStore = await openCursorSessionStore(options.cwd, identities.sessionStore, identities.defaultStore.stateRoot);
+			sessionStore = await openCursorSessionStore(options.cwd, identities.sessionStore, identities.workspaceRoot, identities.storeRoot);
 		}
 		return { persistent: true, sessionStore, identities, resumeAttemptAllowed, resumeFallback };
-	}, options.storeRootBase);
+	}, options.storeRoot);
 }
 
 export const __testUtils = {

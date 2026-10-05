@@ -224,7 +224,7 @@ export interface PiHarness extends EventHarness {
 		args?: string,
 		ctxOverrides?: ExtensionCommandContextOverrides,
 	) => Promise<void>;
-	_registered: Array<{ name: string; config: ProviderConfig }>;
+	_registered: Array<{ name: string; config: ProviderConfig; provider?: import("@earendil-works/pi-ai").Provider }>;
 	_commands: Map<string, RegisteredCommandOptions>;
 	_tools: RegisteredTool[];
 	_activeToolNames: () => string[];

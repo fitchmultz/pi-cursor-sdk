@@ -694,7 +694,7 @@ describe("Cursor SDK lazy runtime imports", () => {
 		});
 
 		const { discoverModels } = await import("../src/model-discovery.js");
-		const models = await discoverModels();
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY, allowNetwork: false });
 
 		expect(models.map((entry) => entry.id)).toEqual(["composer-2"]);
 		expect(list).not.toHaveBeenCalled();

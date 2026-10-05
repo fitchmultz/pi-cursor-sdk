@@ -14,6 +14,13 @@ import {
 import { captureProviderTestOwnership, streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { registerCursorNativeToolDisplayState } from "../src/cursor-native-tool-display-state.js";
 import { streamCursor as streamOwnedCursor } from "../src/cursor-provider.js";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createExtensionTestContext } from "./helpers/pi-harness.js";
+import { captureCursorUsageRecorder, readCursorUsageView } from "../src/cursor-usage-ledger.js";
+import { __testUtils as scopeTestUtils } from "../src/cursor-session-scope.js";
 
 describe("streamCursor usage accounting", () => {
 	beforeEach(resetCursorProviderTestState);
@@ -54,37 +61,50 @@ describe("streamCursor usage accounting", () => {
 		}));
 	});
 
-	it("ignores returned RunResult usage when no turn-ended usage was applied", async () => {
-		const mockSend = vi.fn().mockResolvedValue(asMockCursorRun({
-			id: "run-1",
-			agentId: "agent-1",
-			status: "finished",
-			wait: vi.fn().mockResolvedValue({
-				id: "run-1",
-				status: "finished",
-				result: "done",
-				usage: {
-					inputTokens: 1_125_429,
-					outputTokens: 7_049,
-					cacheReadTokens: 1_015_493,
-					cacheWriteTokens: 0,
-					totalTokens: 2_147_971,
-				},
-			}),
-		}));
-		mockCreatedAgent({
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
-
-		const stream = streamCursor(makeModel(), makeContext(), { apiKey: "test-key" });
-		const events = await collectEvents(stream);
-		const done = getDoneEvent(events);
-
-		expect(done.message.usage.cacheRead).toBe(0);
-		expect(done.message.usage.cacheWrite).toBe(0);
-		expect(done.message.usage.input).toBeLessThan(1_125_429);
-		expect(done.message.usage.totalTokens).toBeLessThan(1_125_429);
+	it("ignores returned RunResult usage for occupancy but persists its terminal-only facts", async () => {
+		const root = mkdtempSync(join(tmpdir(), "cursor-terminal-usage-"));
+		try {
+			const manager = SessionManager.create(root, join(root, "sessions"));
+			manager.appendMessage({ role: "user", content: "Hello", timestamp: 1 });
+			scopeTestUtils.set(root, manager.getSessionFile());
+			const model = makeModel(), context = makeContext(), pi = createPiHarness();
+			registerCursorNativeToolDisplayState(pi);
+			const ownership = captureProviderTestOwnership(model, context, undefined, pi);
+			pi.appendEntry.mockImplementation((type, data) => { manager.appendCustomEntry(type, data); });
+			const ctx = { ...createExtensionTestContext({ cwd: root }), sessionManager: manager };
+			ownership.usageRecorder = captureCursorUsageRecorder(pi, ctx);
+			const usage = { inputTokens: 1_405_237, outputTokens: 9_680, cacheReadTokens: 1_297_860,
+				cacheWriteTokens: 107_320, totalTokens: 2_820_097, reasoningTokens: 3_641 };
+			mockCreatedAgent({
+				send: vi.fn().mockResolvedValue(asMockCursorRun({ id: "run-1", agentId: "agent-1", status: "finished",
+					wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished", result: "done", usage }),
+				})),
+				[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+			});
+			const done = getDoneEvent(await collectEvents(streamOwnedCursor(model, context, { apiKey: "test-key" }, ownership)));
+			expect(done.message.usage.cacheRead).toBe(0);
+			expect(done.message.usage.cacheWrite).toBe(0);
+			expect(done.message.usage.input).toBeLessThan(model.contextWindow);
+			expect(done.message.usage.totalTokens).toBeLessThan(model.contextWindow);
+			const reopened = SessionManager.open(manager.getSessionFile()!);
+			const view = readCursorUsageView(pi, { ...ctx, sessionManager: reopened });
+			const start = view.records.find(record => record.kind === "start")!;
+			const terminals = view.records.filter(record => record.kind === "terminal");
+			expect(terminals).toHaveLength(1);
+			expect(terminals[0]).toMatchObject({ turnId: start.turnId, origin: start.origin, status: "success", waitUsage: usage });
+			expect(start.origin).toMatchObject({ sessionId: reopened.getSessionId(), sessionFile: reopened.getSessionFile() });
+			expect(view.records.filter(record => record.kind === "run")).toMatchObject([{ turnId: start.turnId, origin: start.origin, runId: "run-1" }]);
+			expect(start).toMatchObject({ data: { agentId: "agent-1" } });
+			expect(view.records.filter(record => record.kind === "raw")).toEqual([]);
+			expect(view.agents[0]?.wholeAgent).toBeUndefined();
+			const evidence = process.env.PI_CURSOR_TEST_EVIDENCE_DIR;
+			if (evidence) {
+				mkdirSync(evidence, { recursive: true });
+				writeFileSync(join(evidence, "terminal-only.jsonl"), readFileSync(reopened.getSessionFile()!));
+				writeFileSync(join(evidence, "terminal-only.json"), JSON.stringify({ records: view.records, nativeUsage: done.message.usage }));
+				writeFileSync(join(evidence, "terminal-only.journal"), readFileSync(join(root, "sessions", readdirSync(join(root, "sessions")).find(name => name.endsWith(".journal"))!)));
+			}
+		} finally { rmSync(root, { recursive: true, force: true }); }
 	});
 
 	it("uses real per-turn SDK usage instead of prompt estimates or RunResult usage", async () => {

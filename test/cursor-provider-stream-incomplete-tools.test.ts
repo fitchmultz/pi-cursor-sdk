@@ -8,23 +8,84 @@ import {
 	collectThinkingDeltas,
 	hasEventType,
 	type CursorDeltaHandler,
-	type CursorStepHandler,
 	mockCreatedAgent,
 	asMockCursorRun,
 } from "./helpers/cursor-provider-harness.js";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";
-import type { SendOptions } from "@cursor/sdk";
+import type { InteractionUpdate, SendOptions, ToolCallStartedUpdate, ToolCallCompletedUpdate } from "@cursor/sdk";
+import { installedCursorModules } from "./helpers/cursor-sdk-installed-modules.js";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-type CursorOnStepPayload = Parameters<NonNullable<SendOptions["onStep"]>>[0];
-
-
 describe("streamCursor incomplete tools", () => {
 	beforeEach(resetCursorProviderTestState);
 
-	it.each(["bash", "run_terminal_cmd"])("replays a completed %s alias without a stale shell missing-completion trace", async name => {
+	it("reconciles and deduplicates public shell callbacks produced by the installed SDK accumulator", async () => {
+		const started = {
+			type: "tool-call-started", callId: "shell-1", modelCallId: "model-shell-1",
+			toolCall: { type: "shell", args: { command: "echo completed" } },
+		} satisfies ToolCallStartedUpdate;
+		const completed = {
+			...started, type: "tool-call-completed",
+			toolCall: {
+				...started.toolCall,
+				result: { status: "success", value: {
+					stdout: "completed\n", stderr: "", exitCode: 0, signal: "", executionTime: 1,
+				} },
+			},
+		} satisfies ToolCallCompletedUpdate;
+		const sdk = await vi.importActual<typeof import("@cursor/sdk")>("@cursor/sdk");
+		expect(sdk.ToolCallStartedUpdateSchema.parse(started)).toEqual(started);
+		expect(sdk.ToolCallCompletedUpdateSchema.parse(completed)).toEqual(completed);
+		expect(sdk.ToolCallStartedUpdateSchema.safeParse({
+			...started, toolCall: { name: "shell", args: started.toolCall.args },
+		}).success).toBe(false);
+
+		const modules = await installedCursorModules();
+		const Accumulator = Object.values(modules("./src/agent/run-interaction-accumulator.ts")).find(
+			(value: any) => typeof value === "function" && typeof value.prototype?.apply === "function",
+		) as new (options: Pick<SendOptions, "onDelta" | "onStep">) => { apply(update: InteractionUpdate): Promise<void> };
+		expect(Accumulator).toBeTypeOf("function");
+		const callbacks: unknown[] = [];
+		const send = vi.fn(async (_msg: unknown, opts: SendOptions = {}) => {
+			const accumulator = new Accumulator({
+				onDelta: async args => {
+					callbacks.push({ channel: "delta", ...args });
+					await opts.onDelta?.(args);
+				},
+				onStep: async args => {
+					callbacks.push({ channel: "step", ...args });
+					await opts.onStep?.(args);
+				},
+			});
+			// These are schema-checked test inputs to the real installed producer,
+			// not a service capture or evidence of an alias-changing start/completion.
+			await accumulator.apply(started);
+			await accumulator.apply(completed);
+			return asMockCursorRun({
+				id: "run-shell-contract", agentId: "agent-1", status: "finished",
+				wait: vi.fn().mockResolvedValue({ id: "run-shell-contract", status: "finished", result: "done" }),
+			});
+		});
+		mockCreatedAgent({ send });
+		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		// Independent drift guard: onStep preserves the ToolCall, adds no ID,
+		// and fires before the completed delta in this installed accumulator.
+		expect(callbacks).toEqual([
+			{ channel: "delta", update: started },
+			{ channel: "step", step: { type: "toolCall", message: completed.toolCall } },
+			{ channel: "delta", update: completed },
+		]);
+		const trace = collectThinkingDeltas(events);
+		expect(trace.match(/\$ echo completed/g)).toHaveLength(1);
+		expect(trace).toContain("completed\n");
+		expect(trace).not.toContain("did not complete");
+		expect(collectTextDeltas(events)).toBe("done");
+	});
+
+	// Legacy alias/ID combinations are compatibility inputs, not public SDK captures.
+	it.each(["bash", "run_terminal_cmd"])("replays a legacy %s alias without a stale shell missing-completion trace", async name => {
 		const send = vi.fn(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
 			opts.onDelta({ update: { type: "tool-call-started", callId: "shell-start", toolCall: { name: "shell", args: { command: "echo completed" } } } });
 			opts.onDelta({ update: { type: "tool-call-completed", callId: "different-completion-id", toolCall: {
@@ -41,10 +102,10 @@ describe("streamCursor incomplete tools", () => {
 	});
 
 	it("retains a different unmatched shell after another shell completes and assistant text succeeds", async () => {
-		const send = vi.fn(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
-			opts.onDelta({ update: { type: "tool-call-started", callId: "unmatched-shell", toolCall: { name: "shell", args: { command: "sleep 10" } } } });
-			opts.onDelta({ update: { type: "tool-call-completed", callId: "other-shell", toolCall: {
-				name: "bash", args: { command: "echo completed" }, result: { status: "success", value: { stdout: "completed", exitCode: 0 } },
+		const send = vi.fn(async (_msg: unknown, opts: SendOptions = {}) => {
+			await opts.onDelta?.({ update: { type: "tool-call-started", callId: "unmatched-shell", modelCallId: "model-unmatched", toolCall: { type: "shell", args: { command: "sleep 10" } } } });
+			await opts.onDelta?.({ update: { type: "tool-call-completed", callId: "other-shell", modelCallId: "model-other", toolCall: {
+				type: "shell", args: { command: "echo completed" }, result: { status: "success", value: { stdout: "completed", stderr: "", exitCode: 0, signal: "", executionTime: 1 } },
 			} } });
 			return asMockCursorRun({ id: "run-unmatched", agentId: "agent-1", status: "finished", wait: vi.fn().mockResolvedValue({ id: "run-unmatched", status: "finished", result: "done" }) });
 		});
@@ -256,19 +317,18 @@ describe("streamCursor incomplete tools", () => {
 			expect(trace).toContain("Error: missing.txt: No such file");
 		});
 
-		it("still surfaces explicit onStep Cursor tool errors", async () => {
-			const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler; onStep: CursorStepHandler }) => {
-				opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "read", args: { path: "missing.txt" } }, callId: "c1" } });
-				opts.onStep({
+		it("surfaces explicit SDK-shaped onStep tool errors without a step ID", async () => {
+			const mockSend = vi.fn(async (_msg: unknown, opts: SendOptions = {}) => {
+				await opts.onDelta?.({ update: { type: "tool-call-started", toolCall: { type: "read", args: { path: "missing.txt" } }, callId: "c1", modelCallId: "model-read-1" } });
+				await opts.onStep?.({
 					step: {
 						type: "toolCall",
-						id: "c1",
 						message: {
 							type: "read",
 							args: { path: "missing.txt" },
-							result: { status: "error", error: "missing.txt: No such file" },
+							result: { status: "error", error: { message: "missing.txt: No such file" } },
 						},
-					} as CursorOnStepPayload["step"],
+					},
 				});
 				return asMockCursorRun({
 					id: "run-1",
@@ -290,7 +350,8 @@ describe("streamCursor incomplete tools", () => {
 			const trace = collectThinkingDeltas(events);
 
 			expect(trace).toContain("read missing.txt");
-			expect(trace).toContain("Error: missing.txt: No such file");
+			expect(trace).toContain("Error:");
+			expect(trace).toContain("missing.txt: No such file");
 			expect(trace).not.toContain("Cursor tool started without a completion event");
 		});
 

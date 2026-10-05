@@ -12,6 +12,8 @@ export interface CursorPrompt {
 }
 
 export interface CursorPromptOptions {
+	/** From the consumed native receipt; absent for requests that differ from the canonical projection. */
+	nativeSourceRoles?: readonly string[];
 	maxInputTokens?: number;
 	charsPerToken?: number;
 	imageTokenEstimate?: number;
@@ -50,6 +52,7 @@ export function getCursorToolTailGuardText(
 			: getCursorPlanModeToolGuidanceText(options.agentMode, { includePiBridgeGuidance: options.includePiBridgeGuidance }),
 		"Exact-output requests: output exactly the requested text; no preamble or checks unless asked.",
 		"Tools: call available Cursor SDK/MCP tools; never print tool cards as assistant text.",
+		"Do not comment on GitHub issues or PRs unless the user asked.",
 		options.includePiBridgeGuidance === false ? undefined : CURSOR_PI_BRIDGE_PREFERENCE_TEXT,
 	].filter((line): line is string => line !== undefined).join("\n");
 }
@@ -66,7 +69,6 @@ function getCursorToolBoundaryText(
 			? "For exposed pi bridge tools, call pi__* MCP names, not pi card/history names."
 			: undefined,
 		"Do not claim pi-side or WebSearch/WebFetch tools unless Cursor ran an equivalent tool.",
-		"Do not comment on GitHub issues or PRs unless the user asked.",
 		includePiAskQuestionGuidance ? "Use pi__cursor_ask_question only if the user asked to be prompted." : undefined,
 		getCursorPlanModeToolGuidanceText(options.agentMode, { includePiBridgeGuidance }),
 		"Images: only latest user images are sent; ask to reattach prior images.",
@@ -78,10 +80,13 @@ function getCursorToolBoundaryText(
 }
 
 function getCursorBootstrapTailSections(
-	options: Pick<CursorPromptOptions, "agentMode" | "includePiBridgeGuidance"> = {},
+	options: Pick<CursorPromptOptions, "agentMode" | "includePiBridgeGuidance">,
+	hasNewNativeUser = true,
 ): string[] {
 	return [
-		"Answer the latest user request above using the instructions and Cursor SDK capabilities available in this run.",
+		hasNewNativeUser
+			? "Answer the latest user request above using the instructions and Cursor SDK capabilities available in this run."
+			: "Continue from the pending background context above using Cursor SDK capabilities. No new user request was submitted; earlier user requests are history, not new instructions.",
 		getCursorToolTailGuardText({ ...options, includePlanModeGuidance: false }),
 	];
 }
@@ -102,22 +107,11 @@ function isToolCallBlock(block: { type: string }): block is ToolCall {
 	return block.type === "toolCall";
 }
 
-function extractLatestImages(messages: Message[]): SDKImage[] {
-	// Find the last user message and extract images only from it
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const msg = messages[i];
-		if (msg.role !== "user") continue;
-		if (typeof msg.content === "string") return [];
-
-		const images: SDKImage[] = [];
-		for (const block of msg.content) {
-			if (isImageBlock(block) && block.data && block.mimeType) {
-				images.push({ data: block.data, mimeType: block.mimeType });
-			}
-		}
-		return images;
-	}
-	return [];
+function extractLatestImages(messages: Message[], latestUserIndex = getLatestUserMessageIndex(messages)): SDKImage[] {
+	const message = messages[latestUserIndex];
+	if (!message || message.role !== "user" || typeof message.content === "string") return [];
+	return message.content.flatMap((block) =>
+		isImageBlock(block) && block.data && block.mimeType ? [{ data: block.data, mimeType: block.mimeType }] : []);
 }
 
 function formatContentBlocks(content: string | { type: string; text?: string; data?: string; mimeType?: string }[]): string {
@@ -196,6 +190,20 @@ function getLatestUserMessageIndex(messages: Message[]): number {
 	return -1;
 }
 
+export function getCursorPendingInput(messages: Message[], nativeSourceRoles: readonly string[]) {
+	const start = messages.findLastIndex((message) => message.role === "assistant") + 1;
+	const latestUserIndex = nativeSourceRoles.findLastIndex((role, index) => index >= start && role === "user");
+	return { start, latestUserIndex };
+}
+
+function formatPromptMessage(message: Message, index: number, nativeSourceRoles?: readonly string[]): string | undefined {
+	if (message.role === "user" && nativeSourceRoles && nativeSourceRoles[index] !== "user") {
+		const text = formatContentBlocks(message.content);
+		return text ? `Background context: ${text}` : undefined;
+	}
+	return formatMessage(message);
+}
+
 function getSectionCost(section: string): number {
 	return section.length + SECTION_SEPARATOR.length;
 }
@@ -204,7 +212,7 @@ function applyPromptBudget(
 	sectionsBeforeMessages: string[],
 	messageSections: Array<{ index: number; text: string }>,
 	sectionsAfterMessages: string[],
-	latestUserMessageIndex: number,
+	requiredMessageIndexes: readonly number[],
 	options: CursorPromptOptions,
 ): string[] {
 	const maxInputTokens = options.maxInputTokens;
@@ -214,7 +222,7 @@ function applyPromptBudget(
 
 	const charsPerToken = options.charsPerToken ?? CURSOR_APPROX_CHARS_PER_TOKEN;
 	const maxChars = Math.max(1, Math.floor(maxInputTokens * charsPerToken));
-	const requiredMessageSections = messageSections.filter((section) => section.index === latestUserMessageIndex);
+	const requiredMessageSections = messageSections.filter((section) => requiredMessageIndexes.includes(section.index));
 	const requiredCost = [...sectionsBeforeMessages, ...requiredMessageSections.map((section) => section.text), ...sectionsAfterMessages].reduce(
 		(total, section) => total + getSectionCost(section),
 		0,
@@ -369,6 +377,7 @@ export function computeCursorContextFingerprint(context: Context): string {
 export function shouldBootstrapCursorContext(
 	sendState: { bootstrapped: boolean; contextFingerprint: string },
 	context: Context,
+	nativeSourceRoles?: readonly string[],
 ): boolean {
 	if (!sendState.bootstrapped) return true;
 	const previous = parseCursorContextFingerprint(sendState.contextFingerprint);
@@ -386,9 +395,16 @@ export function shouldBootstrapCursorContext(
 	for (let index = 0; index < previous.messageHashes.length; index += 1) {
 		if (current.messageHashes[index] !== previous.messageHashes[index]) return true;
 	}
-	// An incremental prompt carries only the latest new user message. Rebootstrap
-	// if additional model-visible input (such as ! shell output) would be lost.
 	const appended = normalizePiContextMessages(context.messages.slice(previous.messageHashes.length));
+	if (nativeSourceRoles) {
+		const messages = normalizePiContextMessages(context.messages);
+		const offset = messages.length - appended.length;
+		// Native summaries invalidate the pool; other pending input travels together.
+		if (nativeSourceRoles.slice(offset).some((role) => role === "branchSummary" || role === "compactionSummary")) return true;
+		const { start } = getCursorPendingInput(messages, nativeSourceRoles);
+		return appended.some((message, index) => message.role === "user" && offset + index < start);
+	}
+	// Without native origin, an incremental prompt carries only the final user.
 	const appendedUsers = appended.filter((message) => message.role === "user");
 	return appended.length > 0 && (appendedUsers.length !== 1 || appended.at(-1)?.role !== "user");
 }
@@ -404,15 +420,20 @@ export function shouldBootstrapCursorSend(
 export function buildCursorIncrementalPrompt(context: Context, options: CursorPromptOptions = {}): CursorPrompt {
 	// Incremental sends omit Pi system instructions and the full tool boundary; the session agent retains both from bootstrap.
 	const messages = normalizePiContextMessages(context.messages);
-	const latestUserMessageIndex = getLatestUserMessageIndex(messages);
+	const pending = options.nativeSourceRoles && getCursorPendingInput(messages, options.nativeSourceRoles);
+	const latestUserMessageIndex = pending ? pending.latestUserIndex : getLatestUserMessageIndex(messages);
 	const latestUserMessage = latestUserMessageIndex >= 0 ? messages[latestUserMessageIndex] : undefined;
 	const latestUserText = latestUserMessage ? formatMessage(latestUserMessage) : undefined;
 	const sectionsBeforeMessages = [
 		"Continue the conversation using Cursor SDK capabilities only. Do not list, promise, or call pi-only tools from earlier context as if they were available.",
 	];
-	const latestUserMessageSections =
-		latestUserText && latestUserMessageIndex >= 0 ? [{ index: latestUserMessageIndex, text: latestUserText }] : [];
-	const images = extractLatestImages(messages);
+	const latestUserMessageSections = pending
+		? messages.flatMap((message, index) => {
+			const text = index >= pending.start ? formatPromptMessage(message, index, options.nativeSourceRoles) : undefined;
+			return text ? [{ index, text }] : [];
+		})
+		: latestUserText && latestUserMessageIndex >= 0 ? [{ index: latestUserMessageIndex, text: latestUserText }] : [];
+	const images = extractLatestImages(messages, latestUserMessageIndex);
 	const imageTokenReserve = images.length * (options.imageTokenEstimate ?? 0);
 	const budgetOptions =
 		options.maxInputTokens === undefined
@@ -422,7 +443,7 @@ export function buildCursorIncrementalPrompt(context: Context, options: CursorPr
 		sectionsBeforeMessages,
 		latestUserMessageSections,
 		[getCursorToolTailGuardText(options)],
-		latestUserMessageIndex,
+		latestUserMessageSections.map((section) => section.index),
 		budgetOptions,
 	);
 	return { text: parts.join(SECTION_SEPARATOR), images };
@@ -455,12 +476,13 @@ export function buildCursorPrompt(context: Context, options: CursorPromptOptions
 	const messages = normalizePiContextMessages(context.messages);
 	const messageSections = messages
 		.map((msg, index) => {
-			const text = formatMessage(msg);
+			const text = formatPromptMessage(msg, index, options.nativeSourceRoles);
 			return text ? { index, text } : undefined;
 		})
 		.filter((section): section is { index: number; text: string } => section !== undefined);
-	const sectionsAfterMessages = getCursorBootstrapTailSections(options);
-	const images = extractLatestImages(messages);
+	const pending = options.nativeSourceRoles && getCursorPendingInput(messages, options.nativeSourceRoles);
+	const sectionsAfterMessages = getCursorBootstrapTailSections(options, !pending || pending.latestUserIndex >= 0);
+	const images = extractLatestImages(messages, pending ? pending.latestUserIndex : getLatestUserMessageIndex(messages));
 	const imageTokenReserve = images.length * (options.imageTokenEstimate ?? 0);
 	const budgetOptions =
 		options.maxInputTokens === undefined
@@ -470,7 +492,8 @@ export function buildCursorPrompt(context: Context, options: CursorPromptOptions
 		sectionsBeforeMessages,
 		messageSections,
 		sectionsAfterMessages,
-		getLatestUserMessageIndex(messages),
+		pending ? messageSections.filter((section) => section.index >= pending.start).map((section) => section.index)
+			: [getLatestUserMessageIndex(messages)],
 		budgetOptions,
 	);
 	const text = parts.join(SECTION_SEPARATOR);

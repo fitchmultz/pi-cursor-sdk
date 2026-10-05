@@ -233,9 +233,10 @@ describe("extension registration and discovery", () => {
 		const [call] = pi._registered;
 		expect(call.name).toBe("cursor");
 		expect(call.config.name).toBe("Cursor");
-		expect(call.config.apiKey).toBe("pi-cursor-sdk-cursor-api-key-placeholder");
+		expect(call.config.apiKey).toBeUndefined();
+		expect(call.provider?.auth.apiKey?.login).toEqual(expect.any(Function));
 		expect(call.config.api).toBe("cursor-sdk");
-		expect(call.config.models).toBe(mockModels);
+		expect(call.config.models).toEqual([expect.objectContaining(mockModels[0])]);
 		expect(call.config.streamSimple).toEqual(expect.any(Function));
 	});
 
@@ -611,40 +612,26 @@ describe("extension registration and discovery", () => {
 		expect(call.config.models).toHaveLength(2);
 	});
 
-	it("refreshes Cursor models through a live command without reload", async () => {
-		const startupModels = [makeProviderModelConfig("composer-2", { name: "Cursor Composer 2" })];
-		const refreshedModels = [
-			makeProviderModelConfig("gpt-5.5@1m", {
-				name: "GPT-5.5 @ 1m",
-				reasoning: true,
-				contextWindow: 1_000_000,
-			}),
-		];
-		mockedDiscover.mockResolvedValueOnce(startupModels).mockResolvedValueOnce(refreshedModels);
+	it.each([
+		{ result: { aborted: true, errors: new Map() }, message: "Cursor model catalog refresh was cancelled." },
+		{ result: { aborted: false, errors: new Map([["cursor", new Error("synthetic failure")]]) }, message: "Cursor model catalog refresh failed; the previous catalog was retained." },
+	])("reports native refresh failure truthfully: $message", async ({ result, message }) => {
+		mockedDiscover.mockResolvedValueOnce([]);
 		const pi = createExtensionPi();
 		await extensionFactory(pi);
 		const notify = vi.fn();
-		const getApiKeyForProvider = vi.fn().mockResolvedValue(" registry-key ");
-
-		await pi.runCommand(
-			"cursor-refresh-models",
-			"",
-			createExtensionCommandContext({
-				hasUI: true,
-				model: undefined,
-				modelRegistry: { getApiKeyForProvider } as never,
-				ui: { notify },
-			}),
-		);
-
-		expect(getApiKeyForProvider).toHaveBeenCalledWith("cursor");
-		expect(mockedDiscover).toHaveBeenNthCalledWith(2, expect.objectContaining({ apiKey: "registry-key", forceRefresh: true }));
-		expect(mockedDiscover).toHaveBeenCalledTimes(2);
-		expect(pi.registerProvider).toHaveBeenCalledTimes(2);
-		expect(pi._registered[0].config.models).toBe(startupModels);
-		expect(pi._registered[1].config.models).toBe(refreshedModels);
-		expect(pi._registered[1].config.streamSimple).toBe(pi._registered[0].config.streamSimple);
-		expect(notify).toHaveBeenCalledWith("Cursor model catalog refreshed with 1 model.", "info");
+		const refresh = vi.fn().mockResolvedValue(result);
+		const signal = new AbortController().signal;
+		await pi.runCommand("cursor-refresh-models", "", createExtensionCommandContext({
+			hasUI: true,
+			modelRegistry: { refresh } as never,
+			signal,
+			ui: { notify },
+		}));
+		expect(refresh).toHaveBeenCalledWith({ providers: ["cursor"], allowNetwork: true, force: true, signal });
+		expect(pi.registerProvider).toHaveBeenCalledOnce();
+		expect(mockedDiscover).toHaveBeenCalledOnce();
+		expect(notify).toHaveBeenCalledWith(message, "warning");
 	});
 
 	it("refreshes the current Cursor SDK agent config through a command", async () => {
@@ -698,34 +685,6 @@ describe("extension registration and discovery", () => {
 		);
 
 		expect(notify).toHaveBeenCalledWith("Cursor config refresh is available only for Cursor models.", "info");
-	});
-
-	it("warns when live Cursor model refresh does not use a live catalog", async () => {
-		mockedDiscover
-			.mockResolvedValueOnce([])
-			.mockImplementationOnce(async (options: DiscoverOptions) => {
-				options?.onFallback?.({ reason: "missing-api-key", message: "missing key; using fallback models" });
-				return [];
-			});
-		const pi = createExtensionPi();
-		await extensionFactory(pi);
-		const notify = vi.fn();
-
-		await pi.runCommand(
-			"cursor-refresh-models",
-			"",
-			createExtensionCommandContext({
-				hasUI: true,
-				model: undefined,
-				ui: { notify },
-			}),
-		);
-
-		expect(pi.registerProvider).toHaveBeenCalledTimes(2);
-		expect(notify).toHaveBeenCalledWith(
-			"Cursor model catalog refresh did not use a live catalog: missing key; using fallback models",
-			"warning",
-		);
 	});
 
 	it("notifies interactive users when fallback models are registered", async () => {

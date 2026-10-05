@@ -39,7 +39,8 @@ describe("CursorToolCompletionLedger", () => {
 		expect(ledger.hasStartedToolCall("call-a")).toBe(false);
 	});
 
-	it("keeps ambiguous identical shell starts unless a completion supplies an exact ID", () => {
+	// Legacy alias inputs exercise the unknown-tool boundary, not observed SDK callbacks.
+	it("keeps ambiguous identical legacy shell starts unless a completion supplies an exact ID", () => {
 		const ledger = new CursorToolCompletionLedger();
 		const shell = { name: "shell", args: { command: "echo repeated" } };
 		ledger.registerStartedToolCall("shell-a", shell);
@@ -50,7 +51,7 @@ describe("CursorToolCompletionLedger", () => {
 		expect(ledger.hasStartedToolCall("shell-a")).toBe(true);
 	});
 
-	it("does not reconcile shell aliases with different arguments or bridge tool names", () => {
+	it("does not reconcile legacy shell aliases with different arguments or bridge tool names", () => {
 		const ledger = new CursorToolCompletionLedger();
 		ledger.registerStartedToolCall("shell-a", { name: "shell", args: { command: "echo one" } });
 		expect(ledger.removeStartedToolCallForStep({ name: "bash", args: { command: "echo two" } }, "other")).toBeUndefined();

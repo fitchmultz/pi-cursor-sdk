@@ -1,39 +1,24 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { createRequire, registerHooks } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import test, { after } from "node:test";
+import { fileURLToPath } from "node:url";
+import test from "node:test";
 import { createAssistantMessageEventStream, InMemoryCredentialStore } from "@earendil-works/pi-ai";
-const { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } = await import(
-  process.env.PI_CURSOR_TEST_HOST ?? "@earendil-works/pi-coding-agent"
-);
+import { concurrentFixture, createAgentSession, DefaultResourceLoader, ModelRuntime, PiAgent, retainNativeEvidence, seedOfflineCatalog,
+  SessionManager, SettingsManager, setupNativeCursorHarness } from "./helpers/native-cursor-harness.mjs";
 import { Type } from "typebox";
 import { state } from "./fixtures/native-cursor-sdk.mjs";
 import { CLOUD_LIFECYCLE_ENTRY_TYPE, CLOUD_LIFECYCLE_JOURNAL_PREFIX } from "../shared/cursor-cloud-lifecycle-constants.mjs";
 
-// Use the selected host's public Agent export, not another installed agent-core.
-const hostRequire = createRequire(import.meta.resolve(process.env.PI_CURSOR_TEST_HOST ?? "@earendil-works/pi-coding-agent"));
-const corePackagePath = hostRequire.resolve("@earendil-works/pi-agent-core/package.json");
-const corePackage = JSON.parse(await readFile(corePackagePath, "utf8"));
-const { Agent: PiAgent } = await import(pathToFileURL(join(dirname(corePackagePath), corePackage.exports["."].import)));
-
-// PI_CURSOR_TEST_HOST selects an isolated supported host SDK for qualification.
-// Only the external Cursor transport/storage is substituted. This is a real
-// host loader, registered Cursor provider, agent scheduler and persisted session.
-const fixtureUrl = new URL("./fixtures/native-cursor-sdk.mjs", import.meta.url).href;
-const hooks = registerHooks({ resolve(specifier, context, nextResolve) {
-  if (specifier === "@cursor/sdk" || specifier === "@cursor/sdk/sqlite") return { url: fixtureUrl, shortCircuit: true };
-  return nextResolve(specifier, context);
-} });
-after(() => hooks.deregister());
+setupNativeCursorHarness();
 
 test("registered Cursor provider preserves native bridge, replay, usage, queues, tree, compaction, abort and reload", { timeout: 60000 }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), "cursor-native-flow-"));
   const agentDir = join(root, "agent");
   await mkdir(agentDir);
+  await seedOfflineCatalog(agentDir);
   const previousEnv = { ...process.env };
   Object.assign(process.env, {
     PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: "1", PI_CURSOR_SETTING_SOURCES: "none",
@@ -151,75 +136,35 @@ test("registered Cursor provider preserves native bridge, replay, usage, queues,
   }
 });
 
-async function concurrentFixture(t, run) {
-  const root = await mkdtemp(join(tmpdir(), "cursor-native-owners-"));
-  const previousEnv = { ...process.env };
-  const sessions = [];
-  const errors = [];
-  const originalFetch = globalThis.fetch;
-  Object.assign(process.env, {
-    PI_CODING_AGENT_DIR: join(root, "agent"), PI_OFFLINE: "1", PI_CURSOR_SETTING_SOURCES: "none",
-    CURSOR_API_KEY: "offline-fixture-only", PI_CURSOR_NATIVE_TOOL_DISPLAY: "1",
-    PI_CURSOR_ASK_QUESTION: "0", PI_CURSOR_LOCAL_RESUME: "0", PI_CURSOR_SDK_EVENT_DEBUG: "1",
+test("native request receipts route bounded capability notices only to their owning persisted session", { timeout: 30000 }, async (t) => {
+  await concurrentFixture(t, async ({ create }) => {
+    const a = await create("notice-owner"), b = await create("notice-sibling");
+    const proof = process.env.PI_CURSOR_BOOTSTRAP_PROOF_DIR;
+    const capture = proof && JSON.parse(await readFile(join(proof, "sdk-capture-ansi.json"), "utf8"));
+    const plugin = capture?.plugin ?? "[local-plugins-bootstrap] loadUserLocalPlugin outside rejected: symlink target /outside is outside /local-root {}\n";
+    const parser = capture?.parserWarning ?? "shell-parser: tree-sitter natives are unavailable in this artifact; shell command analysis degrades to parsingFailed";
+    state.outputByCwd.set(a.cwd, [{ stream: "stderr", bytes: plugin + plugin + parser + "\n" }]);
+    const stdout = process.stdout.write, stderr = process.stderr.write, retained = [];
+    const collect = (bytes, encoding, callback) => { retained.push(Buffer.from(bytes).toString()); (typeof encoding === "function" ? encoding : callback)?.(); return true; };
+    try {
+      process.stdout.write = process.stderr.write = collect;
+      await Promise.all([a.session.prompt("notice owner request"), b.session.prompt("notice sibling request")]);
+    } finally { process.stdout.write = stdout; process.stderr.write = stderr; }
+    const persisted = await readFile(a.manager.getSessionFile(), "utf8");
+    const notices = a.manager.getEntries().filter(e => e.type === "custom" && e.customType === "pi-cursor-sdk:capability-notice");
+    assert.deepEqual(notices.map(e => e.data.kind), ["outsidePlugin", "parserUnavailable"]);
+    assert.ok(notices.every(e => e.data.message.length < 200));
+    assert.doesNotMatch(persisted, /symlink target|\/outside|local-root|managed_skills|natives are unavailable in this artifact/);
+    assert.doesNotMatch(await readFile(b.manager.getSessionFile(), "utf8"), /capability-notice/);
+    assert.match(retained.join(""), /Cursor skipped a local plugin/);
+    assert.match(retained.join(""), /Cursor shell analysis is degraded/);
+    assert.doesNotMatch(retained.join(""), /local-plugins-bootstrap|managed_skills|shell-parser:/);
+    await a.session.prompt("after notices");
+    assert.doesNotMatch(state.sends.at(-1).message.text, /Cursor skipped a local plugin|Cursor shell analysis is degraded/);
+    await retainNativeEvidence("native-notice-owner", a.manager, a.cwd);
+    await retainNativeEvidence("native-notice-sibling", b.manager, b.cwd);
   });
-  globalThis.fetch = (input, options) => {
-    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
-    assert.equal(url.hostname, "127.0.0.1");
-    return originalFetch(input, options);
-  };
-  async function create(name, { tool, runtime, manager: inheritedManager, bind = true, preferences = [], flags = {}, compaction = {}, beforeExtensions = [], afterExtensions = [] } = {}) {
-    const cwd = join(root, name);
-    await mkdir(cwd);
-    const settingsManager = SettingsManager.inMemory({
-      defaultTools: ["fixture_bridge"], compaction: { enabled: false, keepRecentTokens: 1, ...compaction }, retry: { enabled: false },
-    });
-    const loader = new DefaultResourceLoader({
-      cwd, agentDir: process.env.PI_CODING_AGENT_DIR, settingsManager,
-      noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
-      additionalExtensionPaths: [...beforeExtensions, fileURLToPath(new URL("../", import.meta.url)), ...afterExtensions],
-      systemPromptOverride: () => `OWNER_${name}`,
-    });
-    await loader.reload();
-    assert.deepEqual(loader.getExtensions().errors, []);
-    const manager = inheritedManager ?? SessionManager.create(cwd, join(root, "sessions"));
-    for (const [type, data] of preferences) manager.appendCustomEntry(type, data);
-    const { session } = await createAgentSession({
-      cwd, resourceLoader: loader, settingsManager, sessionManager: manager,
-      ...(runtime ? { modelRuntime: runtime } : {}),
-      customTools: [{ name: "fixture_bridge", label: "Fixture bridge", description: `Owned by ${name}`,
-        parameters: Type.Object({ value: Type.String() }),
-        execute: tool ?? (async () => ({ content: [{ type: "text", text: name }], details: {} })),
-      }],
-    });
-    sessions.push(session);
-    for (const [name, value] of Object.entries(flags)) session.extensionRunner.setFlagValue(name, value);
-    if (bind) await session.bindExtensions({ mode: "rpc", onError: (error) => errors.push(error) });
-    const model = session.modelRuntime.getModel("cursor", "fixture");
-    assert.ok(model);
-    await session.setModel(model);
-    return { session, manager, cwd };
-  }
-  try {
-    await mkdir(process.env.PI_CODING_AGENT_DIR);
-    await run({ root, create });
-    assert.deepEqual(errors, []);
-  } finally {
-    state.cloudMutationWait?.release.resolve();
-    for (const session of sessions.reverse()) {
-      await session.abort();
-      await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
-      session.dispose();
-    }
-    state.heldCwds.clear();
-    state.failedCwds.clear();
-    state.cloudMutationWait = undefined;
-    state.usageByCwd.clear();
-    globalThis.fetch = originalFetch;
-    for (const key of Object.keys(process.env)) if (!(key in previousEnv)) delete process.env[key];
-    Object.assign(process.env, previousEnv);
-    await rm(root, { recursive: true, force: true });
-  }
-}
+});
 
 for (const runtime of ["local", "cloud"]) {
   test(`real ${runtime} fork inheriting a pending bridge result cannot drain, block or dispose its parent`, { timeout: 60000 }, async (t) => {
@@ -443,11 +388,118 @@ test("real parent bridge tool launches a child before parent turn_end without jo
   });
 });
 
+async function shortIdleExtension(root) {
+  const idle = join(root, "short-idle.mjs");
+  await writeFile(idle, `import { __testUtils } from ${JSON.stringify(new URL("../dist/cursor-provider.js", import.meta.url).href)};
+      export default function(pi) {
+        __testUtils.setCursorNativeReplayIdleDisposeMs(20);
+        pi.on("session_shutdown", () => __testUtils.resetCursorNativeReplayIdleDisposeMs());
+      }`);
+  return idle;
+}
+
+for (const cleanup of ["answer", "abort", "shutdown", "deadline"]) {
+  const title = cleanup === "answer"
+    ? "real deferred bridged question survives idle abandonment and resumes the same SDK run"
+    : `real pending bridge work still cleans up exactly once on ${cleanup}`;
+  test(title, { timeout: 60000 }, async (t) => {
+    await concurrentFixture(t, async ({ root, create }) => {
+      if (cleanup === "deadline") process.env.PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS = "500";
+      const idle = await shortIdleExtension(root);
+      const entered = Promise.withResolvers();
+      const answer = Promise.withResolvers();
+      let actualToolCallId;
+      let executionAborts = 0;
+      const owner = await create(`pending-${cleanup}`, { beforeExtensions: [idle], tool: async (id, _args, signal) => {
+        actualToolCallId = id;
+        const abort = () => { executionAborts++; answer.reject(new Error("owned execution aborted")); };
+        signal.addEventListener("abort", abort, { once: true });
+        entered.resolve();
+        try { await answer.promise; }
+        finally { signal.removeEventListener("abort", abort); }
+        return { content: [{ type: "text", text: "delayed owned answer" }], details: {} };
+      } });
+      const before = { sends: state.sends.length, results: state.bridgeResults.length };
+      const outputReady = Promise.withResolvers(), outputEmitted = Promise.withResolvers();
+      const proof = process.env.PI_CURSOR_BOOTSTRAP_PROOF_DIR;
+      const capture = proof && JSON.parse(await readFile(join(proof, "sdk-capture-ansi.json"), "utf8"));
+      const plugin = capture?.plugin ?? "[local-plugins-bootstrap] loadUserLocalPlugin outside rejected: symlink target /outside is outside /local-root {}\n";
+      const parser = capture?.parserWarning ?? "shell-parser: tree-sitter natives are unavailable in this artifact; shell command analysis degrades to parsingFailed";
+      state.waitOutputByCwd.set(owner.cwd, { ready: outputReady.promise, emitted: outputEmitted.resolve,
+        bytes: [{ stream: "stderr", bytes: plugin + plugin + parser + "\n" }, ...(capture ? [{ stream: "stdout", bytes: capture.inventory }] : [])] });
+      const stdout = process.stdout.write, stderr = process.stderr.write, retained = [];
+      const collect = (bytes, encoding, callback) => { retained.push(Buffer.from(bytes).toString()); (typeof encoding === "function" ? encoding : callback)?.(); return true; };
+      process.stdout.write = process.stderr.write = collect;
+      const running = owner.session.prompt("BRIDGE_FIXTURE");
+      try {
+        await entered.promise;
+        const liveSink = process.stderr.write;
+        assert.notEqual(liveSink, collect, "sink lease survives the actual Pi tool-use stream ending");
+        outputReady.resolve();
+        await outputEmitted.promise; // fixture run.wait is still deferred on the real pending bridge
+        assert.equal(process.stderr.write, liveSink, "diagnostic uses the same lease, not a replacement");
+        assert.doesNotMatch(retained.join(""), /local-plugins-bootstrap|managed_skills|shell-parser:/);
+        assert.match(retained.join(""), /Cursor skipped a local plugin/);
+        assert.match(retained.join(""), /Cursor shell analysis is degraded/);
+        const send = state.sends[before.sends];
+        await delay(80, undefined, { signal: t.signal });
+        assert.equal(state.cancelled.includes(send.runId), false, "pending Pi execution is not idle abandonment");
+        assert.equal(state.disposed.includes(send.agentId), false);
+        assert.equal(state.bridgeResults.length, before.results);
+        if (cleanup === "answer") answer.resolve();
+        else if (cleanup === "abort") await owner.session.abort();
+        else if (cleanup === "shutdown") await owner.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+        await running;
+        assert.equal(state.sends.length, before.sends + 1, "no fresh SDK send for continuation or cleanup");
+        if (cleanup === "answer") {
+          assert.equal(executionAborts, 0);
+          assert.equal(state.bridgeResults.length, before.results + 1);
+          assert.deepEqual(state.bridgeResults.at(-1).content, [{ type: "text", text: "delayed owned answer" }]);
+          assert.equal(owner.session.messages.at(-1).stopReason, "stop", owner.session.messages.at(-1).errorMessage);
+          const persisted = (await readFile(owner.manager.getSessionFile(), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+          const calls = persisted.filter(e => e.type === "message" && e.message.role === "assistant")
+            .flatMap(e => e.message.content.filter(c => c.type === "toolCall"));
+          const results = persisted.filter(e => e.type === "message" && e.message.role === "toolResult").map(e => e.message);
+          assert.equal(calls.length, 1);
+          assert.equal(calls[0].id, actualToolCallId);
+          assert.equal(results.length, 1);
+          assert.equal(results[0].toolCallId, actualToolCallId);
+          assert.equal(results[0].isError, false);
+          assert.match(JSON.stringify(results[0].content), /delayed owned answer/);
+          assert.equal(state.created.filter(e => e.options.local?.cwd === owner.cwd).length, 1);
+          assert.ok(persisted.some(e => e.type === "custom" && e.customType === "cursor-sdk-agent-lineage" && e.data.agentId === send.agentId));
+          const facts = persisted.filter(e => e.type === "custom" && e.customType === "pi-cursor-sdk:usage-v1").map(e => e.data);
+          assert.ok(facts.some(fact => fact.kind === "run" && fact.runId === send.runId && fact.origin.sessionFile === owner.manager.getSessionFile()));
+          assert.ok(facts.some(fact => fact.kind === "terminal" && fact.status === "success"));
+        } else {
+          // SDK/MCP completion and its existing fail-closed finalizer are asynchronous.
+          while (!state.disposed.includes(send.agentId)) await delay(5, undefined, { signal: t.signal });
+          assert.equal(executionAborts, 1);
+          assert.equal(state.cancelled.filter(id => id === send.runId).length, 1);
+          assert.equal(state.disposed.filter(id => id === send.agentId).length, 1);
+          assert.ok(state.stores.filter(store => store.workspaceRef === owner.cwd).every(store => store.disposed));
+        }
+        await retainNativeEvidence(`pending-bridge-${cleanup === "answer" ? "idle" : cleanup}`, owner.manager, owner.cwd);
+        assert.equal(process.stdout.write, collect, "completion/cancellation restores stdout");
+        assert.equal(process.stderr.write, collect, "completion/cancellation restores stderr");
+        const notices = owner.manager.getEntries().filter(e => e.type === "custom" && e.customType === "pi-cursor-sdk:capability-notice");
+        assert.deepEqual(notices.map(e => e.data.kind), ["outsidePlugin", "parserUnavailable"]);
+        assert.ok(notices.every(e => e.data.message.length < 200));
+        assert.doesNotMatch(await readFile(owner.manager.getSessionFile(), "utf8"), /symlink target|natives are unavailable in this artifact/);
+      } finally { outputReady.resolve(); answer.resolve(); await running; process.stdout.write = stdout; process.stderr.write = stderr; }
+    });
+  });
+}
+
 for (const operation of ["compact", "tree", "bugreport"]) {
   test(`idle A ${operation} after B binds retains A's direct-stream storage and persisted lineage`, { timeout: 60000 }, async (t) => {
-    await concurrentFixture(t, async ({ create }) => {
+    await concurrentFixture(t, async ({ root, create }) => {
+      await writeFile(join(root, "agent", "cursor-sdk.json"), JSON.stringify({
+        subagents: { reviewer: { description: "Review changes", prompt: "Review the work.", model: "inherit" } },
+      }));
       const a = await create("A", { flags: { "cursor-mode": "plan" } });
       await a.session.prompt("first A");
+      assert.deepEqual(Object.keys(state.created.find(agent => agent.agentId === state.sends.at(-1).agentId).options.agents), ["reviewer"]);
       const branchTarget = a.manager.getEntries().find((entry) => entry.type === "message" && entry.message.role === "user").id;
       await a.session.prompt("second A");
       const b = await create("B");
@@ -457,15 +509,25 @@ for (const operation of ["compact", "tree", "bugreport"]) {
       const storesBefore = state.stores.length;
       const derivationsBefore = state.defaultRootCwds.length;
       const lineageBefore = a.manager.getEntries().filter(e => e.type === "custom" && ["cursor-sdk-agent-lineage", "cursor-sdk-agent-resume"].includes(e.customType));
-      if (operation === "compact") await a.session.compact();
-      else if (operation === "tree") await a.session.navigateTree(branchTarget, { summarize: true });
-      else await a.session.summarizeForBugReport({ hint: "summarize A", signal: t.signal });
+      const previousRoot = process.env.PI_CURSOR_SDK_STATE_ROOT;
+      try {
+        if (operation !== "bugreport") process.env.PI_CURSOR_SDK_STATE_ROOT = "unusable-relative-persistent-root";
+        if (operation === "compact") await a.session.compact();
+        else if (operation === "tree") await a.session.navigateTree(branchTarget, { summarize: true });
+        else await a.session.summarizeForBugReport({ hint: "summarize A", signal: t.signal });
+      } finally {
+        if (previousRoot === undefined) delete process.env.PI_CURSOR_SDK_STATE_ROOT;
+        else process.env.PI_CURSOR_SDK_STATE_ROOT = previousRoot;
+      }
       assert.ok(state.sends.length > before, "real host issued a direct auxiliary stream");
       for (const send of state.sends.slice(before)) {
         const agent = state.created.find((entry) => entry.agentId === send.agentId);
         assert.equal(agent.options.local.cwd, a.cwd);
         if (operation !== "bugreport") assertIsolatedSummary(agent, send);
-        else assert.equal(agent.options.mode, "plan", "no public bug-report purpose hook: ordinary capabilities stay intact");
+        else {
+          assert.equal(agent.options.mode, "plan", "no public bug-report purpose hook: ordinary capabilities stay intact");
+          assert.deepEqual(Object.keys(agent.options.agents), ["reviewer"]);
+        }
       }
       if (operation !== "bugreport") {
         assert.equal(new Set(state.sends.slice(before).map(send => send.agentId)).size, state.sends.length - before, "each native summary gets a fresh agent");
@@ -488,6 +550,7 @@ for (const operation of ["compact", "tree", "bugreport"]) {
       assert.equal(resumed.options.local.cwd, a.cwd);
       assert.equal(resumed.options.mode, "plan");
       assert.ok(resumed.options.mcpServers?.pi_tools, "ordinary bridge restored after summary");
+      assert.deepEqual(Object.keys(resumed.options.agents), ["reviewer"]);
       await retainNativeEvidence(`auxiliary-${operation}`, a.manager, a.cwd);
     });
   });
@@ -550,9 +613,8 @@ test("shared runtime requests require their actual session's registration and an
   await concurrentFixture(t, async ({ create }) => {
     const a = await create("shared-A");
     await a.session.prompt("A before sharing");
-    const ownStream = a.session.modelRuntime.getRegisteredProviderConfig("cursor").streamSimple;
     const b = await create("shared-B", { runtime: a.session.modelRuntime, bind: false });
-    const staleStream = a.session.modelRuntime.getRegisteredProviderConfig("cursor").streamSimple;
+    const staleStream = a.session.modelRuntime.getProvider("cursor").streamSimple;
     const beforeSends = state.sends.length;
     await a.session.prompt("cannot use unbound B closure");
     assert.match(a.session.messages.at(-1).errorMessage, /binding is not active/);
@@ -569,7 +631,9 @@ test("shared runtime requests require their actual session's registration and an
     const staleResult = await staleStream(a.session.model, { messages: [] }, { apiKey: "offline-fixture-only" }).result();
     assert.match(staleResult.errorMessage, /binding is not active/);
     await a.session.prompt("/cursor-refresh-models");
-    assert.equal(a.session.modelRuntime.getRegisteredProviderConfig("cursor").streamSimple, ownStream);
+    assert.equal(a.session.modelRuntime.getProvider("cursor").streamSimple, staleStream, "catalog refresh cannot replace the sibling's native registration");
+    await a.session.reload();
+    assert.notEqual(a.session.modelRuntime.getProvider("cursor").streamSimple, staleStream);
     await a.session.prompt("A recovered with its own request receipt");
     assert.equal(a.session.messages.at(-1).stopReason, "stop");
     assert.equal(state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId).options.local.cwd, a.cwd);
@@ -586,6 +650,7 @@ for (const operation of ["ordinary", "bugreport"]) {
       await a.session.prompt("/cursor-refresh-models");
       await c.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
       await a.session.prompt("/cursor-refresh-models");
+      await a.session.reload();
       const beforeA = await readFile(a.manager.getSessionFile(), "utf8");
       const beforeSends = state.sends.length;
       const beforeStores = state.stores.length;
@@ -646,27 +711,28 @@ test("independent concurrent streams use constant-time owner checks, not per-tur
   });
 });
 
-test("catalog refresh awaiting auth registers only its owner; sibling requests cannot enter it", { timeout: 60000 }, async (t) => {
+test("catalog refresh awaiting auth cannot replace a sibling's native registration", { timeout: 60000 }, async (t) => {
   await concurrentFixture(t, async ({ create }) => {
     const a = await create("refresh-A");
-    const ownStream = a.session.modelRuntime.getRegisteredProviderConfig("cursor").streamSimple;
+    const ownStream = a.session.modelRuntime.getProvider("cursor").streamSimple;
     const registry = a.session.extensionRunner.getModelRegistry();
     const enteredAuth = Promise.withResolvers();
     const auth = Promise.withResolvers();
-    registry.getApiKeyForProvider = () => { enteredAuth.resolve(); return auth.promise; };
+    const getProviderAuth = registry.getProviderAuth.bind(registry);
+    registry.getProviderAuth = async (...args) => { enteredAuth.resolve(); await auth.promise; return getProviderAuth(...args); };
     const refreshing = a.session.prompt("/cursor-refresh-models");
     await enteredAuth.promise;
     const b = await create("refresh-B", { runtime: a.session.modelRuntime });
     const before = state.sends.length;
     auth.resolve("offline-fixture-only");
     await refreshing;
-    assert.equal(a.session.modelRuntime.getRegisteredProviderConfig("cursor").streamSimple, ownStream);
-    await b.session.prompt("B cannot enter refreshed A");
-    assert.match(b.session.messages.at(-1).errorMessage, /request does not belong/);
+    assert.notEqual(a.session.modelRuntime.getProvider("cursor").streamSimple, ownStream);
+    await a.session.prompt("A cannot enter B after stale refresh");
+    assert.match(a.session.messages.at(-1).errorMessage, /request does not belong/);
     assert.equal(state.sends.length, before);
-    await a.session.prompt("A owns refreshed registration");
-    assert.equal(a.session.messages.at(-1).stopReason, "stop");
-    assert.equal(state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId).options.local.cwd, a.cwd);
+    await b.session.prompt("B retains its native registration");
+    assert.equal(b.session.messages.at(-1).stopReason, "stop");
+    assert.equal(state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId).options.local.cwd, b.cwd);
   });
 });
 
@@ -685,9 +751,9 @@ test("native request headers retain identity and other handlers' mutations; miss
     }
     try {
       const a = await create("headers-A", { beforeExtensions: [before], afterExtensions: [after] });
-      const config = a.session.modelRuntime.getRegisteredProviderConfig("cursor");
+      const config = a.session.modelRuntime.getProvider("cursor");
       const headers = [];
-      a.session.modelRuntime.registerProvider("cursor", { ...config, streamSimple: (model, context, options) => {
+      a.session.extensionRunner.getModelRegistry().registerProvider({ ...config, streamSimple: (model, context, options) => {
         headers.push(options.headers);
         return config.streamSimple(model, context, options);
       } });
@@ -744,9 +810,9 @@ test("native sibling CLI flags retain owned runtime, mode, fast and per-binding 
     await c.session.prompt("C force only once");
     assert.equal(state.sends.at(-1).force, undefined);
     await a.session.bindExtensions({ mode: "rpc" });
-    const beforeReloadStream = a.session.modelRuntime.getRegisteredProviderConfig("cursor").streamSimple;
+    const beforeReloadStream = a.session.modelRuntime.getProvider("cursor").streamSimple;
     await a.session.reload();
-    assert.notEqual(a.session.modelRuntime.getRegisteredProviderConfig("cursor").streamSimple, beforeReloadStream, "reload replaces the provider closure");
+    assert.notEqual(a.session.modelRuntime.getProvider("cursor").streamSimple, beforeReloadStream, "reload replaces the provider closure");
     await a.session.prompt("A rebinding/reload does not reset its run's force");
     assert.equal(a.session.messages.at(-1).stopReason, "stop", a.session.messages.at(-1).errorMessage);
     assert.equal(state.sends.at(-1).force, undefined);
@@ -819,29 +885,12 @@ for (const scenario of ["context edit", "retained clock skew", "equal checkpoint
   });
 }
 
-async function retainNativeEvidence(label, manager, cwd) {
-  const directory = process.env.PI_CURSOR_TEST_EVIDENCE_DIR;
-  if (!directory) return;
-  await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, `${label}.jsonl`), await readFile(manager.getSessionFile()));
-  await writeFile(join(directory, `${label}.json`), JSON.stringify({
-    sessionFile: manager.getSessionFile(), sessionId: manager.getSessionId(),
-    host: process.env.PI_CURSOR_TEST_HOST ?? "@earendil-works/pi-coding-agent",
-    agents: state.created.filter(agent => agent.options.local?.cwd === cwd).map(agent => ({
-      agentId: agent.agentId, disposed: state.disposed.includes(agent.agentId),
-      mode: agent.options.mode, tools: agent.options.tools,
-      settingSources: agent.options.local.settingSources,
-      storeRoot: agent.options.local.store?.stateRoot,
-      mcpServers: Object.keys(agent.options.mcpServers ?? {}),
-    })),
-  }, null, 2));
-}
-
 function assertIsolatedSummary(agent, send) {
   assert.deepEqual(agent.options.tools, [], "summary disables SDK tools, not just Pi declarations");
   assert.equal(agent.options.mode, "agent");
   assert.deepEqual(agent.options.local.settingSources, []);
   assert.equal(agent.options.mcpServers, undefined);
+  assert.equal(agent.options.agents, undefined, "summary has no configured native delegates");
   assert.equal(send.mode, "agent");
   assert.doesNotMatch(send.message.text, /Callable tool surfaces this run:|Cursor SDK mode is plan for this run/);
   assert.ok(state.disposed.includes(agent.agentId), "summary agent disposed before native operation completes");

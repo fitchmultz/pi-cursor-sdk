@@ -30,10 +30,8 @@ import { partitionNativeToolsByActiveContext } from "./cursor-native-replay-rout
 import type { CursorSdkEventDebugRecorder } from "./cursor-sdk-event-debug.js";
 
 export const DEFAULT_CURSOR_NATIVE_REPLAY_IDLE_DISPOSE_MS = 5 * 60 * 1000;
-export const CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV = "PI_CURSOR_LIVE_RUN_IDLE_DISPOSE_MS";
-
-export function parseCursorNativeReplayIdleDisposeMs(raw: string | undefined): number {
-	if (!raw || !/^[0-9]+$/.test(raw)) return DEFAULT_CURSOR_NATIVE_REPLAY_IDLE_DISPOSE_MS;
+function parseCursorNativeReplayIdleDisposeMs(raw: string | undefined): number {
+	if (!raw || /[^0-9]/.test(raw)) return DEFAULT_CURSOR_NATIVE_REPLAY_IDLE_DISPOSE_MS;
 	const value = Number(raw);
 	return value >= 1 && value <= 2147483647 ? value : DEFAULT_CURSOR_NATIVE_REPLAY_IDLE_DISPOSE_MS;
 }
@@ -57,7 +55,7 @@ export async function abandonSessionCursorAgent(scopeKey: string | undefined): P
 }
 
 export const cursorLiveRuns = createCursorLiveRunCoordinator({
-	getIdleDisposeMs: () => cursorNativeReplayIdleDisposeMsOverride ?? parseCursorNativeReplayIdleDisposeMs(process.env[CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV]),
+	getIdleDisposeMs: () => cursorNativeReplayIdleDisposeMsOverride ?? parseCursorNativeReplayIdleDisposeMs(process.env.PI_CURSOR_LIVE_RUN_IDLE_DISPOSE_MS),
 	deleteNativeToolDisplay: deleteCursorNativeToolDisplay,
 	abandonSessionAgent: (scopeKey) => abandonSessionCursorAgent(scopeKey),
 });

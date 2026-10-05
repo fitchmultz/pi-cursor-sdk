@@ -1,7 +1,5 @@
 import type { LocalAgentStore } from "@cursor/sdk";
 import type { ExtensionAPI, ExtensionCommandContext, SessionEntry } from "@earendil-works/pi-coding-agent";
-import { resolveEffectiveCursorConfig } from "./cursor-runtime-state.js";
-import { getCursorSessionSettings } from "./cursor-session-settings.js";
 import { asRecord, getString } from "./cursor-record-utils.js";
 import { fsyncExistingRegularFile } from "./cursor-durable-fs.js";
 import { scrubSensitiveText } from "./cursor-sensitive-text.js";
@@ -21,8 +19,6 @@ import {
 	withCursorSessionStoreIdentities,
 	openCursorSessionStore,
 	resolveCursorSessionStoreIdentity,
-	isCanonicalConfiguredSessionStoreIdentity,
-	isCanonicalDefaultSessionStoreIdentity,
 } from "./cursor-session-store.js";
 
 export const CURSOR_SESSION_AGENT_CLEANUP_ENTRY_TYPE = "cursor-sdk-agent-cleanup";
@@ -268,7 +264,7 @@ function appendDurableCleanupEntry(
 	return fsyncExistingRegularFile(sessionFile);
 }
 
-export async function runCursorSessionAgentCleanupCommand(pi: LocalResumeCleanupApi, args: string, ctx: LocalResumeCleanupCommandContext): Promise<void> {
+export async function runCursorSessionAgentCleanupCommand(pi: LocalResumeCleanupApi, args: string, ctx: LocalResumeCleanupCommandContext, storeRoot?: string): Promise<void> {
 	const usage = "Usage: /cursor-local-resume-cleanup [--dry-run|--yes]";
 	const tokens = args.trim().split(/\s+/).filter(Boolean);
 	const dryRun = tokens.length === 0 || (tokens.length === 1 && tokens[0] === "--dry-run");
@@ -312,19 +308,11 @@ export async function runCursorSessionAgentCleanupCommand(pi: LocalResumeCleanup
 	const failedAgentIds: CursorSessionAgentCleanupFailure[] = [];
 	const openedStores = new Map<string, Awaited<ReturnType<typeof openCursorSessionStore>>>();
 	try {
-		const storeRootBase = resolveEffectiveCursorConfig({
-			cwd: ctx.cwd, scopeKey: scope.scopeKey,
-			projectTrusted: getCursorSessionSettings(scope.scopeKey).projectTrusted,
-		}).local.storeRoot.value;
 		await withCursorSessionStoreIdentities(ctx.cwd, scope.scopeKey, async (identities) => {
 			const operations = await getSdkOperations();
 			for (const candidate of plan.candidates) {
 				const { agentId } = candidate;
 				try {
-					// Identityless legacy entries belong to the SDK default, never a newly configured base.
-					if (storeRootBase !== undefined && !candidate.storeIdentity) {
-						throw new Error("Restore the default Cursor local store configuration before cleaning this legacy agent");
-					}
 					const identity = await resolveCursorSessionStoreIdentity({
 						cwd: ctx.cwd, scopeKey: scope.scopeKey,
 						identities, recordedIdentity: candidate.storeIdentity, agentId,
@@ -332,7 +320,7 @@ export async function runCursorSessionAgentCleanupCommand(pi: LocalResumeCleanup
 					if (!identity) throw new InvalidCursorSessionStoreIdentityError("Recorded Cursor local store identity is not valid for this pi session");
 					let openedStore = openedStores.get(identity.stateRoot);
 					if (!openedStore) {
-						openedStore = await openCursorSessionStore(ctx.cwd, identity, identities.defaultStore.stateRoot);
+						openedStore = await openCursorSessionStore(ctx.cwd, identity, identities.workspaceRoot, identities.storeRoot);
 						openedStores.set(identity.stateRoot, openedStore);
 					}
 					await operations.delete(agentId, { cwd: ctx.cwd, store: openedStore.store });
@@ -341,14 +329,11 @@ export async function runCursorSessionAgentCleanupCommand(pi: LocalResumeCleanup
 					failedAgentIds.push({
 						agentId,
 						error: scrubSensitiveText(getString(asRecord(error), "message") ?? String(error)),
-						...(error instanceof InvalidCursorSessionStoreIdentityError
-						&& !isCanonicalConfiguredSessionStoreIdentity(ctx.cwd, scope.scopeKey, candidate.storeIdentity)
-						&& !isCanonicalDefaultSessionStoreIdentity(ctx.cwd, scope.scopeKey, candidate.storeIdentity)
-							? { retryable: false } : {}),
+						...(error instanceof InvalidCursorSessionStoreIdentityError ? { retryable: false } : {}),
 					});
 				}
 			}
-		}, storeRootBase);
+		}, storeRoot);
 	} catch (error) {
 		const message = scrubSensitiveText(getString(asRecord(error), "message") ?? String(error));
 		failedAgentIds.push(...plan.candidateAgentIds.map((agentId) => ({ agentId, error: message })));

@@ -36,7 +36,7 @@ export function createBridgePiHarness(options: { active: string[]; tools: ToolIn
 /** Canonical configurable fake pi surface for extension, provider, and session tests. */
 export function createPiHarness(options: PiHarnessOptions = {}): PiHarness {
 	const eventApi = createHarnessEventApi();
-	const registered: Array<{ name: string; config: ProviderConfig }> = [];
+	const registered: PiHarness["_registered"] = [];
 	const commands = new Map<string, RegisteredCommandOptions>();
 	const tools: RegisteredTool[] = [];
 	const initialTools =
@@ -65,9 +65,20 @@ export function createPiHarness(options: PiHarnessOptions = {}): PiHarness {
 	};
 
 	const registerProvider = vi.fn((providerOrName: Provider | string, config?: ProviderConfig) => {
-		if (typeof providerOrName !== "string" || !config) {
-			throw new Error("Native providers are outside this harness's registration contract");
+		if (typeof providerOrName !== "string") {
+			registered.push({
+				name: providerOrName.id,
+				provider: providerOrName,
+				config: {
+					name: providerOrName.name, baseUrl: providerOrName.baseUrl,
+					api: providerOrName.getModels()[0]?.api ?? "cursor-sdk",
+					models: [...providerOrName.getModels()],
+					streamSimple: providerOrName.streamSimple,
+				},
+			});
+			return;
 		}
+		if (!config) throw new Error("Missing legacy provider config");
 		registered.push({ name: providerOrName, config });
 	});
 	const registerTool = vi.fn<ExtensionAPI["registerTool"]>((tool) => {

@@ -15,7 +15,7 @@ if (args.includes("--help") || args.includes("-h")) {
 CI resolves latest stable official Pi and maintained fork main once; supplied identities stay frozen.
 --select-only installs the selected official graph for subsequent native platform checks.
 
-Manual qualification: node scripts/ci-compatibility.mjs [--working-tree] [--official-only] [--versions 0.87.1,0.99.1,1.0.2]
+Manual qualification: node scripts/ci-compatibility.mjs [--working-tree] [--official-only] [--versions 0.87.1,0.99.1,1.0.3]
 Default manual invocation requires a clean checkout and checks official minimum/latest and current fork offline.
 --working-tree  Build an isolated snapshot of tracked and nonignored new files, without committing.
 --official-only Skip the fork clone/build.
@@ -24,7 +24,7 @@ Manual selection flags cannot be combined with --automation.
 
 Examples:
   node scripts/ci-compatibility.mjs --automation ../automation
-  node scripts/ci-compatibility.mjs --working-tree --official-only --versions 0.87.1,0.99.1,1.0.2
+  node scripts/ci-compatibility.mjs --working-tree --official-only --versions 0.87.1,0.99.1,1.0.3
 Exit codes: 0 success/help; 1 qualification or invalid argument failure.`);
   process.exit(0);
 }

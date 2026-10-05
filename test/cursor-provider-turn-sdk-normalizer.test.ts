@@ -4,7 +4,8 @@ import { CursorShellOutputTracker } from "../src/cursor-provider-turn-shell-outp
 import { CursorToolCompletionLedger } from "../src/cursor-provider-turn-tool-ledger.js";
 
 describe("resolveCursorToolCompletion", () => {
-	it.each(["delta", "step"] as const)("reconciles a shell start with an aliased %s completion and different ID", source => {
+	// Compatibility inputs, not captured or public SDK 1.0.35 callback payloads.
+	it.each(["delta", "step"] as const)("reconciles a legacy shell alias in a %s completion with a different ID", source => {
 		const ledger = new CursorToolCompletionLedger();
 		const shellOutput = new CursorShellOutputTracker();
 		ledger.registerStartedToolCall("started-shell", { name: "shell", args: { command: "echo done" } });

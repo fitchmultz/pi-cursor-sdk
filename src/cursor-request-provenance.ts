@@ -5,6 +5,8 @@ import type { Api, Context, Model } from "@earendil-works/pi-ai";
 export interface CursorRequestProvenance {
 	readonly purpose: "normal" | "compaction" | "tree";
 	readonly occupancyFloor?: number;
+	/** Canonical native source roles in converted conversation order, only for an equivalent request. */
+	readonly nativeSourceRoles?: readonly string[];
 }
 
 interface Measurement {
@@ -14,10 +16,11 @@ interface Measurement {
 	readonly tokens: number;
 }
 
-/** Receipt data contains hashes and scalars only, never conversation text. */
+/** Receipt data contains hashes and source-role/accounting scalars only, never conversation text. */
 export interface CursorRequestProjectionSnapshot {
 	readonly digest: string;
 	readonly measurements: readonly Measurement[];
+	readonly nativeSourceRoles: readonly string[];
 }
 
 function projectionDigest(messages: readonly unknown[]): string {
@@ -49,7 +52,13 @@ export function captureCursorRequestProjection(manager: ExtensionContext["sessio
 			measurements.push(Object.freeze({ api: message.api, provider: message.provider, model: message.model, tokens }));
 		}
 	}
-	return Object.freeze({ digest: projectionDigest(convertToLlm(projection.messages)), measurements: Object.freeze(measurements) });
+	const nativeSourceRoles = projection.messages.flatMap((message) =>
+		message.role === "system" ? [] : convertToLlm([message]).map(() => message.role));
+	return Object.freeze({
+		digest: projectionDigest(convertToLlm(projection.messages)),
+		measurements: Object.freeze(measurements),
+		nativeSourceRoles: Object.freeze(nativeSourceRoles),
+	});
 }
 
 export function resolveCursorRequestProvenance(
@@ -58,7 +67,13 @@ export function resolveCursorRequestProvenance(
 	context: Context,
 	purpose: CursorRequestProvenance["purpose"],
 ): CursorRequestProvenance {
+	// ponytail: canonical native origin only. Unmatched transforms stay conservative;
+	// upgrade if Pi exposes final request-bound source provenance.
 	if (purpose !== "normal" || snapshot.digest !== projectionDigest(context.messages)) return Object.freeze({ purpose });
 	const measurement = snapshot.measurements.findLast((item) => item.api === model.api && item.provider === model.provider && item.model === model.id && item.tokens <= model.contextWindow);
-	return Object.freeze({ purpose, ...(measurement ? { occupancyFloor: measurement.tokens } : {}) });
+	return Object.freeze({
+		purpose,
+		nativeSourceRoles: snapshot.nativeSourceRoles,
+		...(measurement ? { occupancyFloor: measurement.tokens } : {}),
+	});
 }

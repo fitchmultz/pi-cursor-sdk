@@ -70,8 +70,20 @@ describe("Cursor cloud options", () => {
 		expect(result).not.toHaveProperty("local");
 		expect(result).not.toHaveProperty("mcpServers");
 		expect(result).not.toHaveProperty("agentId");
+		expect(result).not.toHaveProperty("agents");
 	});
 
+	it("passes full custom model selections to public cloud options without adding MCP", () => {
+		const agents = { reviewer: { description: "D", prompt: "P", model: { id: "fixture", params: [
+			{ id: "context", value: "large" }, { id: "fast", value: "false" }, { id: "reasoning", value: "high" },
+		] } } };
+		const result = buildCursorCloudAgentOptions({
+			apiKey: "test-key", modelSelection: { id: "parent" }, agentMode: "agent",
+			resolvedConfig: resolveCursorSdkConfig({ env: {} }), agents,
+		});
+		expect(result.agents).toEqual(agents);
+		expect(result).not.toHaveProperty("mcpServers");
+	});
 	it("omits PR controls when unset and maps explicitly configured false values", () => {
 		const unset = buildCursorCloudAgentOptions({
 			apiKey: "test-key",

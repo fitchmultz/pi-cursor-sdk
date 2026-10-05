@@ -145,12 +145,12 @@ export class CursorRunFinalizer {
 		sendResult: CursorProviderTurnSendResult | undefined,
 		liveCompletion: CursorLiveRunCompletion | undefined,
 	): Promise<void> {
-		this.safeCleanup(() => prepared?.restoreCursorSdkOutputFilter());
 		const abortRegistration = sendResult?.abortRegistration;
 		this.params.runnerParams.sdkEventDebugRef.current = undefined;
 		if (liveCompletion) {
 			void liveCompletion.waitCompletion
 				.finally(async () => {
+					this.safeCleanup(() => prepared?.restoreCursorSdkOutputFilter());
 					if (abortRegistration) {
 						this.safeCleanup(() => abortRegistration.signal.removeEventListener("abort", abortRegistration.listener));
 					}
@@ -160,6 +160,7 @@ export class CursorRunFinalizer {
 				.catch(() => {});
 			return;
 		}
+		this.safeCleanup(() => prepared?.restoreCursorSdkOutputFilter());
 		if (abortRegistration) {
 			this.safeCleanup(() => abortRegistration.signal.removeEventListener("abort", abortRegistration.listener));
 		}

@@ -576,9 +576,11 @@ describe("streamCursor bridge MCP", () => {
 		}
 	});
 
-	it("protects pending bridge MCP waits until explicit release and still abandons the session agent", async () => {
+	it.each(["explicit release", "bridge deadline"] as const)("protects pending bridge MCP waits until %s and still abandons the session agent", async (cleanup) => {
+		const previousBridgeTimeout = process.env.PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS;
 		process.env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS = "1";
 		cursorProviderTestUtils.setCursorNativeReplayIdleDisposeMs(1);
+		if (cleanup === "bridge deadline") process.env.PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS = "500";
 		registerBridgeForProviderTest({
 			active: ["read"],
 			tools: [createTestToolInfo("read", Type.Object({ path: Type.String() }), "Read files")],
@@ -615,13 +617,15 @@ describe("streamCursor bridge MCP", () => {
 			await new Promise((resolve) => setTimeout(resolve, 20));
 			expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(1);
 			expect(mockDispose).not.toHaveBeenCalled();
-			await cursorProviderTestUtils.releaseAllPendingCursorLiveRunsForTests();
-			expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
+			if (cleanup === "explicit release") await cursorProviderTestUtils.releaseAllPendingCursorLiveRunsForTests();
 			const error = await callErrorPromise;
+			await vi.waitFor(() => expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0));
 			expect(error).toBeInstanceOf(Error);
-				expect((error as Error).message).toMatch(/disposed|cancelled|released|MCP error/i);
+			expect((error as Error).message).toMatch(cleanup === "bridge deadline" ? /timed out|MCP error/i : /disposed|cancelled|released|MCP error/i);
 			expect(mockDispose).toHaveBeenCalledTimes(1);
 		} finally {
+			if (previousBridgeTimeout === undefined) delete process.env.PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS;
+			else process.env.PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS = previousBridgeTimeout;
 			await client.close().catch(() => undefined);
 			await transport.close().catch(() => undefined);
 		}

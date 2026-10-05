@@ -86,6 +86,11 @@ describe("cursor pi tool bridge CallTool deadline", () => {
 			tools: [createBuiltinToolInfo("bash", Type.Object({ command: Type.String() }), "Run shell commands")],
 		});
 		const run = await registerCursorPiToolBridge(pi).createRun();
+		const oldOwner = vi.fn();
+		const currentOwner = vi.fn();
+		const detachOldOwner = run.onPendingToolCallsChanged(oldOwner);
+		const detachCurrentOwner = run.onPendingToolCallsChanged(currentOwner);
+		detachOldOwner();
 		const client = new Client({ name: "pi-cursor-sdk-test", version: "1.0.0" });
 		const transport = new StreamableHTTPClientTransport(new URL(getCursorPiBridgeMcpUrl(run)));
 		await client.connect(transport);
@@ -107,6 +112,10 @@ describe("cursor pi tool bridge CallTool deadline", () => {
 			expect(abort).toHaveBeenCalledOnce();
 			expect(__testUtils.getActiveBridgeToolExecutionAbortCount()).toBe(0);
 			expect(run.hasPendingPiToolCallId(request.piToolCallId)).toBe(false);
+			expect(run.hasPendingToolCalls()).toBe(false);
+			expect(oldOwner).not.toHaveBeenCalled();
+			expect(currentOwner).toHaveBeenCalledTimes(2);
+			detachCurrentOwner();
 		} finally {
 			await client.close().catch(() => undefined);
 			await transport.close().catch(() => undefined);

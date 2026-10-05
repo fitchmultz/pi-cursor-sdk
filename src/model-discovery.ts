@@ -9,8 +9,7 @@ import type { ModelThinkingLevel, ThinkingLevelMap } from "@earendil-works/pi-ai
 import { getCursorModelSelectionIdentities } from "../shared/cursor-model-selection-identities.mjs";
 import { loadContextWindowCache } from "./context-window-cache.js";
 import { loadCursorSdk } from "./cursor-sdk-runtime.js";
-import { resolveCursorApiKey, resolveCursorRuntimeApiKey } from "./cursor-api-key.js";
-import { parseEnvBoolean } from "./cursor-env-boolean.js";
+import { normalizeCursorApiKey, resolveCursorApiKey } from "./cursor-api-key.js";
 import { sanitizeCursorProviderError } from "./cursor-provider-errors.js";
 import {
 	fingerprintApiKey,
@@ -29,7 +28,7 @@ const AUTH_SETUP_HINT = "/login (Use an API key -> Cursor) or CURSOR_API_KEY; st
 const CATALOG_REFRESH_HINT =
 	"After adding auth to an already-started pi session, run /cursor-refresh-models to refresh the full live Cursor model catalog without restarting pi.";
 
-export type CursorModelFallbackReason = "missing-api-key" | "discovery-failed" | "empty-model-list" | "cached-after-error";
+export type CursorModelFallbackReason = "missing-api-key" | "cache-only" | "discovery-failed" | "empty-model-list" | "cached-after-error";
 
 export interface CursorModelFallbackIssue {
 	reason: CursorModelFallbackReason;
@@ -39,17 +38,14 @@ export interface CursorModelFallbackIssue {
 
 export interface DiscoverModelsOptions {
 	onFallback?: (issue: CursorModelFallbackIssue) => void;
-	apiKey?: string | null;
-	/** Reject results from a superseded or closed registration before publishing metadata/cache. */
-	isCurrent?: () => boolean;
-	// Bypass the on-disk model cache and always hit the live catalog. Used by the
-	// /cursor-refresh-models command; the startup path leaves this false so warm
-	// boots skip the slow network round-trip.
+	apiKey?: string;
+	allowNetwork?: boolean;
+	signal?: AbortSignal;
+	/** Native publication owns models, metadata, cache and warning changes together. */
+	publish?: (models: ProviderModelConfig[], update: () => void) => Promise<boolean>;
+	// Bypass cache reads only when network is allowed; cache-only phases
+	// still prefer the matching catalog, even when forced.
 	forceRefresh?: boolean;
-}
-
-async function getDiscoveryApiKey(apiKey?: string | null): Promise<string | undefined> {
-	return apiKey === null ? undefined : resolveCursorApiKey(apiKey) ?? resolveCursorRuntimeApiKey();
 }
 
 export interface CursorModelMetadata {
@@ -260,8 +256,8 @@ function toModelConfig(metadata: CursorModelMetadata, name: string): ProviderMod
 	};
 }
 
-function registerModelItems(items: ModelListItem[]): ProviderModelConfig[] {
-	metadataByPiModelId.clear();
+function registerModelItems(items: ModelListItem[], metadataMap = metadataByPiModelId): ProviderModelConfig[] {
+	metadataMap.clear();
 	const contextWindowCache = loadContextWindowCache();
 	return getCursorModelSelectionIdentities(items).map(({ model: item, selectionModelId, context, fastOverride, piModelId, contextWindowKey, baseContextWindowKey }) => {
 		const defaultParams = getDefaultParams(item);
@@ -277,7 +273,7 @@ function registerModelItems(items: ModelListItem[]): ProviderModelConfig[] {
 			[piModelId, contextWindowKey, baseContextWindowKey],
 			fastOverride,
 		);
-		metadataByPiModelId.set(piModelId, metadata);
+		metadataMap.set(piModelId, metadata);
 		const alias = selectionModelId === item.id ? undefined : selectionModelId;
 		return toModelConfig(metadata, getModelName(item, context, alias, fastOverride));
 	});
@@ -358,26 +354,34 @@ export function buildCursorModelSelection(
 }
 
 async function useFallbackModels(options: DiscoverModelsOptions, issue: CursorModelFallbackIssue): Promise<ProviderModelConfig[]> {
-	options.onFallback?.(issue);
 	const { FALLBACK_MODEL_ITEMS } = await import("./cursor-fallback-models.generated.js");
-	return options.isCurrent?.() === false ? [] : registerModelItems(FALLBACK_MODEL_ITEMS);
+	return publishModelItems(FALLBACK_MODEL_ITEMS, options, issue);
 }
 
-export const HIDE_MODELS_WHEN_LOGGED_OUT_ENV = "PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT";
-
-export function resolveHideModelsWhenLoggedOut(env: Record<string, string | undefined> = process.env): boolean {
-	return parseEnvBoolean(env[HIDE_MODELS_WHEN_LOGGED_OUT_ENV], false);
+async function publishModelItems(
+	items: ModelListItem[],
+	options: DiscoverModelsOptions,
+	issue?: CursorModelFallbackIssue,
+	cacheFingerprint?: string,
+): Promise<ProviderModelConfig[]> {
+	options.signal?.throwIfAborted();
+	const metadata = new Map<string, CursorModelMetadata>();
+	const models = registerModelItems(items, metadata);
+	const update = () => {
+		metadataByPiModelId.clear();
+		for (const [id, value] of metadata) metadataByPiModelId.set(id, value);
+		if (cacheFingerprint) saveModelListCache(cacheFingerprint, items);
+		if (issue) options.onFallback?.(issue);
+	};
+	if (options.publish) await options.publish(models, update);
+	else update();
+	return models;
 }
 
 export async function discoverModels(options: DiscoverModelsOptions = {}): Promise<ProviderModelConfig[]> {
-	const apiKey = await getDiscoveryApiKey(options.apiKey);
-	if (options.isCurrent?.() === false) return [];
+	options.signal?.throwIfAborted();
+	const apiKey = normalizeCursorApiKey(options.apiKey);
 	if (!apiKey) {
-		if (resolveHideModelsWhenLoggedOut()) {
-			options.onFallback?.({ reason: "missing-api-key", message: `Cursor model discovery needs an API key from ${AUTH_SETUP_HINT}. Extension models are hidden until auth exists. ${CATALOG_REFRESH_HINT}` });
-			// An empty owner catalog must not clear metadata used by sibling registrations.
-			return [];
-		}
 		return useFallbackModels(options, {
 			reason: "missing-api-key",
 			message: `Cursor model discovery needs an API key from ${AUTH_SETUP_HINT}. Using fallback Cursor models so /login and model selection still work; fallback models can run once auth exists. ${CATALOG_REFRESH_HINT}`,
@@ -386,40 +390,49 @@ export async function discoverModels(options: DiscoverModelsOptions = {}): Promi
 
 	const keyFingerprint = fingerprintApiKey(apiKey);
 
-	if (!options.forceRefresh) {
-		const cachedModels = loadFreshCachedModels(keyFingerprint);
+	if (!options.forceRefresh || options.allowNetwork === false) {
+		const cachedModels = options.allowNetwork === false
+			? loadAnyCachedModelCatalog(keyFingerprint)?.models
+			: loadFreshCachedModels(keyFingerprint);
 		if (cachedModels && cachedModels.length > 0) {
-			return registerModelItems(cachedModels);
+			return publishModelItems(cachedModels, options);
 		}
+	}
+
+	if (options.allowNetwork === false) {
+		return useFallbackModels(options, {
+			reason: "cache-only",
+			message: `Using fallback Cursor models until a live catalog is requested. ${CATALOG_REFRESH_HINT}`,
+		});
 	}
 
 	try {
 		const { Cursor } = await loadCursorSdk();
-		if (options.isCurrent?.() === false) return [];
+		options.signal?.throwIfAborted();
+		// SDK 1.0.35 CursorRequestOptions has no caller signal. A late response
+		// still cannot publish outside the native generation that requested it.
 		const models = await Cursor.models.list({ apiKey });
-		if (options.isCurrent?.() === false) return [];
+		options.signal?.throwIfAborted();
 		if (models.length > 0) {
-			saveModelListCache(keyFingerprint, models);
-			return registerModelItems(models);
+			return publishModelItems(models, options, undefined, keyFingerprint);
 		}
 		return useFallbackModels(options, {
 			reason: "empty-model-list",
 			message: `Cursor model discovery returned no models. Using fallback Cursor models; verify ${AUTH_SETUP_HINT}. ${CATALOG_REFRESH_HINT}`,
 		});
 	} catch (error) {
-		if (options.isCurrent?.() === false) return [];
+		options.signal?.throwIfAborted();
 		const errorMessage = sanitizeCursorProviderError(error, apiKey);
 		// Prefer a previously cached catalog over the generic bundled fallback when
 		// a live refresh fails (e.g. transient network/auth errors), but keep the
 		// provenance visible so refresh commands do not claim a live refresh worked.
 		const cachedCatalog = loadAnyCachedModelCatalog(keyFingerprint);
 		if (cachedCatalog && cachedCatalog.models.length > 0) {
-			options.onFallback?.({
+			return publishModelItems(cachedCatalog.models, options, {
 				reason: "cached-after-error",
 				message: `Cursor model discovery failed; using cached Cursor model catalog from ${new Date(cachedCatalog.fetchedAt).toISOString()}. ${errorMessage}`,
 				errorMessage,
 			});
-			return registerModelItems(cachedCatalog.models);
 		}
 		return useFallbackModels(options, {
 			reason: "discovery-failed",

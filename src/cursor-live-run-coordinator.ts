@@ -501,9 +501,10 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 			state.idleDisposeRequested = true;
 			if (state.leased || state.leaseQueue.length > 0 ||
 				[run.bridgeRun, run.sessionBridgeRun].some((bridge) => bridge?.hasPendingToolCalls())) return;
-			state.idleDisposeRequested = false;
 			state.idleDisposeTimer = setTimeout(() => {
-				if ([run.bridgeRun, run.sessionBridgeRun].some((bridge) => bridge?.hasPendingToolCalls())) {
+				state.idleDisposeTimer = undefined;
+				if (state.leased || state.leaseQueue.length > 0 ||
+					[run.bridgeRun, run.sessionBridgeRun].some((bridge) => bridge?.hasPendingToolCalls())) {
 					coordinator.requestIdleDispose(run);
 					return;
 				}

@@ -19,7 +19,7 @@ import {
 } from "./helpers/cursor-provider-harness.js";
 import { CursorPiToolBridgeRunImpl } from "../src/cursor-pi-tool-bridge-run.js";
 import { __testUtils as cursorSdkProcessGuardTestUtils } from "../src/cursor-sdk-process-error-guard.js";
-import { streamCursor } from "../src/cursor-provider.js";
+import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,6 +27,7 @@ import { join } from "node:path";
 const emitProcessEvent = (event: string | symbol, ...args: unknown[]): boolean =>
 	(process.emit as (event: string | symbol, ...args: unknown[]) => boolean).call(process, event, ...args);
 
+// Synthetic auth input with a normalized frame from the retained .35 transport capture.
 function makeUnauthenticatedConnectError(): Error & { rawMessage: string; code: number } {
 	const error = new Error("[unauthenticated] Error") as Error & { rawMessage: string; code: number };
 	error.name = "ConnectError";
@@ -35,7 +36,7 @@ function makeUnauthenticatedConnectError(): Error & { rawMessage: string; code: 
 	error.stack =
 		"ConnectError: [unauthenticated] Error\n" +
 		"    at file:///repo/node_modules/@connectrpc/connect/dist/esm/protocol-connect/error-json.js:53:19\n" +
-		"    at file:///repo/node_modules/@cursor/sdk/dist/esm/index.js:8:1086456";
+		"    at file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:19228";
 	return error;
 }
 

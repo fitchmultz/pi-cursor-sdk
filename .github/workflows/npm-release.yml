@@ -1,0 +1,45 @@
+name: npm release
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 12 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    permissions:
+      contents: write
+    if: vars.NPM_RELEASE_ENABLED == 'true' && github.ref == 'refs/heads/main' && github.repository_owner == 'fitchmultz'
+    uses: fitchmultz/.github/.github/workflows/npm-release-plan.yml@3b7a5f72d9c2d67d6fb53ef7bd308b005c385af3 # main
+    with:
+      automation-ref: 3b7a5f72d9c2d67d6fb53ef7bd308b005c385af3 # main
+
+  checks:
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
+    uses: ./.github/workflows/pi-compatibility.yml
+    with:
+      official-version: ${{ needs.plan.outputs.official-version }}
+      fork-ref: ${{ needs.plan.outputs.fork-ref }}
+
+  publish:
+    needs: [plan, checks]
+    if: needs.plan.outputs.release == 'true'
+    permissions:
+      contents: write
+      id-token: write
+    uses: fitchmultz/.github/.github/workflows/npm-release.yml@3b7a5f72d9c2d67d6fb53ef7bd308b005c385af3 # main
+    with:
+      automation-ref: 3b7a5f72d9c2d67d6fb53ef7bd308b005c385af3 # main
+      source-ref: ${{ needs.plan.outputs.source }}
+      official-version: ${{ needs.plan.outputs.official-version }}
+      fork-ref: ${{ needs.plan.outputs.fork-ref }}

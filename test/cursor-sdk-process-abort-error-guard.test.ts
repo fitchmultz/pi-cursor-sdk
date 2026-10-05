@@ -7,12 +7,14 @@ import {
 const emitProcessEvent = (event: string | symbol, ...args: unknown[]): boolean =>
 	(process.emit as (event: string | symbol, ...args: unknown[]) => boolean).call(process, event, ...args);
 
+// Synthetic inputs use retained .35 offline harness frames with normalized repo
+// prefixes; Ho's line 5 is harness-relative, not an installed-source location.
 function makeCursorSdkStalledRepeatedlyRetriableError(): Error {
 	const error = new Error("Connection stalled repeatedly");
 	error.name = "RetriableError";
 	error.stack =
 		"RetriableError: Connection stalled repeatedly\n" +
-		"    at Q (/repo/node_modules/@cursor/sdk/dist/esm/34.js:1:62073)";
+		"    at Ho (/repo/node_modules/@cursor/sdk/dist/esm/689.js:5:99)";
 	return error;
 }
 
@@ -20,8 +22,8 @@ function makeCursorSdkRawAbortDomException(): DOMException {
 	const error = new DOMException("This operation was aborted", "AbortError");
 	error.stack =
 		"AbortError: This operation was aborted\n" +
-		"    at AbortSignal.abort (/repo/node_modules/@cursor/sdk/dist/esm/34.js:1:5705)\n" +
-		"    at Y.onStall (/repo/node_modules/@cursor/sdk/dist/esm/34.js:1:75246)";
+		"    at AbortSignal.l (file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:13744)\n" +
+		"    at Object.onStall (/repo/node_modules/@cursor/sdk/dist/esm/689.js:1:111574)";
 	return error;
 }
 
@@ -30,7 +32,7 @@ function makeCursorSdkRawAbortError(): Error {
 	error.name = "AbortError";
 	error.stack =
 		"AbortError: This operation was aborted\n" +
-		"    at abort (/repo/node_modules/@cursor/sdk/dist/esm/index.js:1:1125976)";
+		"    at AbortSignal.l (file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:13744)";
 	return error;
 }
 

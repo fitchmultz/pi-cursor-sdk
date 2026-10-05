@@ -4,14 +4,8 @@ import { prepareCursorSessionForCompaction } from "../src/cursor-session-compact
 import { cursorLiveRuns } from "../src/cursor-provider-live-run-drain.js";
 import { __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
 import { acquireSessionCursorAgent, __testUtils as sessionAgentTestUtils } from "../src/cursor-session-agent.js";
-import {
-	persistCursorSessionAgentResumeHandle,
-	registerCursorSessionAgentResume,
-	__testUtils as resumeTestUtils,
-} from "../src/cursor-session-agent-resume.js";
-import { registerCursorSessionScope, __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
+import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
 import { resetCursorProviderTestState } from "./helpers/cursor-provider-harness.js";
-import { createPiHarness } from "./helpers/pi-harness.js";
 
 describe("prepareCursorSessionForCompaction", () => {
 	beforeEach(resetCursorProviderTestState);
@@ -74,65 +68,4 @@ describe("prepareCursorSessionForCompaction", () => {
 		expect(mockDispose).toHaveBeenCalledTimes(1);
 	});
 
-	it("drops a pending resume handle and suppresses persist for the summarizer send", async () => {
-		const scopeKey = "/tmp/sessions/test.jsonl";
-		const pi = createPiHarness();
-		registerCursorSessionScope(pi);
-		registerCursorSessionAgentResume(pi);
-		await pi.runSessionStart({ cwd: "/tmp/project", sessionManager: { getSessionFile: () => scopeKey, getSessionId: () => "session-1" } });
-		persistCursorSessionAgentResumeHandle({
-			runtime: "local",
-			agentId: "agent-summarizer",
-			poolKey: "pool-1",
-			sendState: { bootstrapped: true, contextFingerprint: "one-message", incrementalSendCount: 0 },
-			storeIdentity: { version: 1, stateRoot: "/tmp/store" },
-		});
-		expect(resumeTestUtils.state.pendingHandle?.agentId).toBe("agent-summarizer");
-
-		await prepareCursorSessionForCompaction(scopeKey);
-
-		expect(resumeTestUtils.state.pendingHandle).toBeUndefined();
-		expect(resumeTestUtils.isResumeHandlePersistSuppressed()).toBe(true);
-		persistCursorSessionAgentResumeHandle({
-			runtime: "local",
-			agentId: "agent-summarizer-2",
-			poolKey: "pool-1",
-			sendState: { bootstrapped: true, contextFingerprint: "one-message", incrementalSendCount: 0 },
-			storeIdentity: { version: 1, stateRoot: "/tmp/store" },
-		});
-		expect(resumeTestUtils.state.pendingHandle).toBeUndefined();
-	});
-
-	it("keeps persist suppressed across turn_end during compaction", async () => {
-		const scopeKey = "/tmp/sessions/test.jsonl";
-		const pi = createPiHarness();
-		registerCursorSessionScope(pi);
-		registerCursorSessionAgentResume(pi);
-		await pi.runSessionStart({ cwd: "/tmp/project", sessionManager: { getSessionFile: () => scopeKey, getSessionId: () => "session-1" } });
-		await prepareCursorSessionForCompaction(scopeKey);
-		persistCursorSessionAgentResumeHandle({
-			runtime: "local",
-			agentId: "agent-summarizer",
-			poolKey: "pool-1",
-			sendState: { bootstrapped: true, contextFingerprint: "one-message", incrementalSendCount: 0 },
-			storeIdentity: { version: 1, stateRoot: "/tmp/store" },
-		});
-		await pi.runTurnEnd({}, {
-			sessionManager: {
-				getSessionFile: vi.fn(() => scopeKey),
-				getSessionId: vi.fn(() => "session-1"),
-				getBranch: vi.fn(() => []),
-			},
-		});
-		expect(pi.appendEntry).not.toHaveBeenCalled();
-		expect(resumeTestUtils.isResumeHandlePersistSuppressed()).toBe(true);
-		persistCursorSessionAgentResumeHandle({
-			runtime: "local",
-			agentId: "agent-summarizer-2",
-			poolKey: "pool-1",
-			sendState: { bootstrapped: true, contextFingerprint: "one-message", incrementalSendCount: 0 },
-			storeIdentity: { version: 1, stateRoot: "/tmp/store" },
-		});
-		expect(resumeTestUtils.state.pendingHandle).toBeUndefined();
-	});
 });

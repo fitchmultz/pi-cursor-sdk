@@ -333,7 +333,8 @@ if (!windows.includes("for($i=0;$i -lt 10") || !windows.includes("$w=$e.Replace(
 	it("packages smoke scripts and platform smoke docs", () => {
 		const result = run("npm", ["pack", "--dry-run", "--json"]);
 		expect(result.status).toBe(0);
-		const [pack] = JSON.parse(result.stdout) as Array<{ name: string; version: string; files: Array<{ path: string }> }>;
+		// npm 11 returns an array; npm 12 keys the same records by package name.
+		const [pack] = Object.values(JSON.parse(result.stdout) as Record<string, { name: string; version: string; files: Array<{ path: string }> }>);
 		const paths = new Set(pack.files.map((file) => file.path));
 
 		expect(pack.name).toBe("pi-cursor-sdk");

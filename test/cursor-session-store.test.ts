@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Agent, createAgentPlatform, type LocalAgentStore } from "@cursor/sdk";
-import { describe, expect, it } from "vitest";
+import { SqliteLocalAgentStore } from "@cursor/sdk/sqlite";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	buildCursorSessionStateRoot,
 	hashCursorSessionStoreScope,
@@ -12,29 +13,39 @@ import {
 } from "../src/cursor-session-store.js";
 
 describe("cursor session store identity", () => {
+	let home: string;
+
+	beforeEach(() => {
+		home = mkdtempSync(join(tmpdir(), "pi-cursor-session-store-home-"));
+		vi.stubEnv("HOME", home);
+		vi.stubEnv("USERPROFILE", home);
+	});
+
+	afterEach(() => {
+		storeTestUtils.setSdkOperations(undefined);
+		vi.unstubAllEnvs();
+		rmSync(home, { recursive: true, force: true });
+	});
+
 	it("derives a stable session root below the SDK workspace state root", () => {
 		const scopeKey = "/tmp/sessions/example.jsonl";
 		expect(hashCursorSessionStoreScope(scopeKey)).toBe("9983782212ce97faa33c17445f21670d");
-		expect(buildCursorSessionStateRoot("/sdk/workspace", scopeKey, true)).toBe(
+		expect(buildCursorSessionStateRoot("/sdk/workspace", scopeKey)).toBe(
 			join("/sdk/workspace", "pi-sessions", "9983782212ce97faa33c17445f21670d"),
 		);
 	});
 
-	it("separates persisted pi sessions and gives every fileless open a temporary root", () => {
-		const first = buildCursorSessionStateRoot("/sdk/workspace", "session-a", true);
-		const second = buildCursorSessionStateRoot("/sdk/workspace", "session-b", true);
-		const anonymous = buildCursorSessionStateRoot("/sdk/workspace", "__anonymous__", false);
+	it("separates persisted pi sessions", () => {
+		const first = buildCursorSessionStateRoot("/sdk/workspace", "session-a");
+		const second = buildCursorSessionStateRoot("/sdk/workspace", "session-b");
 
 		expect(first).not.toBe(second);
-		expect(anonymous).not.toBe(buildCursorSessionStateRoot("/sdk/workspace", "__anonymous__", false));
-		expect(anonymous).toContain(join(tmpdir(), "pi-cursor-sdk-"));
-		expect(anonymous).toContain("pi-sessions");
 	});
 
 	it("never resumes a fileless acquisition from the shared default store", async () => {
 		const workspaceRoot = mkdtempSync(join(tmpdir(), "pi-cursor-fileless-shared-store-"));
 		storeTestUtils.setSdkOperations({
-			getDefaultStateRoot: () => workspaceRoot,
+			getDefaultStateRoot: () => join(workspaceRoot, "sdk-owned"),
 			openSqliteStore: async () => ({
 				dispose: async () => {},
 			}) as unknown as LocalAgentStore & { dispose(): Promise<void> },
@@ -44,11 +55,10 @@ describe("cursor session store identity", () => {
 				cwd: workspaceRoot,
 				scopeKey: "ephemeral",
 				persistent: false,
-				hasResumeHandle: true,
-				resumeIdentity: { version: 1, stateRoot: workspaceRoot },
+				resume: { identity: { version: 1, stateRoot: join(workspaceRoot, "sdk-owned") }, agentId: "previous-agent" },
 			});
 			expect(selection.resumeAttemptAllowed).toBe(false);
-			expect(selection.sessionStore.identity.stateRoot).not.toBe(workspaceRoot);
+			expect(selection.sessionStore.identity.stateRoot).not.toBe(join(workspaceRoot, "sdk-owned"));
 			await selection.sessionStore.dispose();
 		} finally {
 			storeTestUtils.setSdkOperations(undefined);
@@ -63,7 +73,6 @@ describe("cursor session store identity", () => {
 			cwd: root,
 			scopeKey: "ephemeral",
 			persistent: false,
-			hasResumeHandle: false,
 		});
 		const removalRoot = dirname(dirname(selection.sessionStore.identity.stateRoot));
 		expect(existsSync(selection.sessionStore.identity.stateRoot)).toBe(true);
@@ -84,8 +93,7 @@ describe("cursor session store identity", () => {
 			cwd: workspaceRoot,
 			scopeKey: "persisted-session",
 			persistent: true,
-			hasResumeHandle: true,
-			resumeIdentity: { version: 1, stateRoot: sharedRoot },
+			resume: { identity: { version: 1, stateRoot: sharedRoot }, agentId: "previous-agent" },
 		});
 		try {
 			expect(selection.resumeAttemptAllowed).toBe(false);
@@ -98,11 +106,35 @@ describe("cursor session store identity", () => {
 		}
 	});
 
+	it("refuses temporary removal after an owned component is replaced by a link", async () => {
+		storeTestUtils.setSdkOperations({
+			getDefaultStateRoot: () => join(home, "workspace"),
+			openSqliteStore: async ({ stateRoot }) => {
+				mkdirSync(stateRoot, { recursive: true });
+				return { dispose: async () => {} } as unknown as LocalAgentStore & { dispose(): Promise<void> };
+			},
+		});
+		const selection = await openCursorSessionStoreForScope({
+			cwd: home, scopeKey: "temporary", persistent: false,
+		});
+		const removalRoot = dirname(dirname(selection.sessionStore.identity.stateRoot));
+		const outside = join(home, "user-managed");
+		mkdirSync(outside);
+		const marker = join(outside, "keep.txt");
+		writeFileSync(marker, "keep");
+		rmSync(removalRoot, { recursive: true });
+		symlinkSync(outside, removalRoot, process.platform === "win32" ? "junction" : "dir");
+		try {
+			await expect(selection.sessionStore.dispose()).rejects.toThrow("removal path contains a link");
+			expect(existsSync(marker)).toBe(true);
+		} finally { rmSync(removalRoot); }
+	});
+
 	it("removes a temporary root even when SQLite disposal fails", async () => {
 		const workspaceRoot = mkdtempSync(join(tmpdir(), "pi-cursor-store-dispose-failure-"));
 		let stateRoot = "";
 		storeTestUtils.setSdkOperations({
-			getDefaultStateRoot: () => workspaceRoot,
+			getDefaultStateRoot: () => join(workspaceRoot, "sdk-owned"),
 			openSqliteStore: async (options) => {
 				stateRoot = options.stateRoot;
 				mkdirSync(stateRoot, { recursive: true });
@@ -116,7 +148,6 @@ describe("cursor session store identity", () => {
 				cwd: workspaceRoot,
 				scopeKey: "ephemeral",
 				persistent: false,
-				hasResumeHandle: false,
 			});
 			const removalRoot = dirname(dirname(stateRoot));
 			await expect(selection.sessionStore.dispose()).rejects.toThrow("dispose failed");
@@ -131,19 +162,19 @@ describe("cursor session store identity", () => {
 		storeTestUtils.setSdkOperations(undefined);
 		const root = mkdtempSync(join(tmpdir(), "pi-cursor-session-stores-"));
 		const [first, second] = await Promise.all([
-			openCursorSessionStore(root, { version: 1, stateRoot: join(root, "first") }),
-			openCursorSessionStore(root, { version: 1, stateRoot: join(root, "second") }),
+			SqliteLocalAgentStore.open({ workspaceRef: root, stateRoot: join(root, "first") }),
+			SqliteLocalAgentStore.open({ workspaceRef: root, stateRoot: join(root, "second") }),
 		]);
 		try {
 			await Promise.all([
-				first.store.agents.create({ agent: {
+				first.agents.create({ agent: {
 					agentId: "agent-first",
 					cwd: root,
 					status: "idle",
 					createdAt: 1,
 					updatedAt: 1,
 				} }),
-				second.store.agents.create({ agent: {
+				second.agents.create({ agent: {
 					agentId: "agent-second",
 					cwd: root,
 					status: "idle",
@@ -151,21 +182,72 @@ describe("cursor session store identity", () => {
 					updatedAt: 1,
 				} }),
 			]);
-			expect(await first.store.agents.get({ agentId: "agent-first" })).toMatchObject({ agentId: "agent-first" });
-			expect(await first.store.agents.get({ agentId: "agent-second" })).toBeNull();
-			expect(await Agent.messages.list("agent-first", { runtime: "local", cwd: root, store: first.store })).toEqual([]);
+			expect(await first.agents.get({ agentId: "agent-first" })).toMatchObject({ agentId: "agent-first" });
+			expect(await first.agents.get({ agentId: "agent-second" })).toBeNull();
+			expect(await Agent.messages.list("agent-first", { runtime: "local", cwd: root, store: first })).toEqual([]);
 			const platform = await createAgentPlatform({
-				localStore: second.store,
+				localStore: second,
 				workspaceRef: root,
 				scopedWorkspaceRef: root,
 			});
 			expect(await platform.getAgent("agent-second")).toMatchObject({ agentId: "agent-second" });
-			await Agent.delete("agent-first", { cwd: root, store: first.store });
-			expect(await first.store.agents.get({ agentId: "agent-first" })).toBeNull();
-			expect(await second.store.agents.get({ agentId: "agent-second" })).toMatchObject({ agentId: "agent-second" });
+			await Agent.delete("agent-first", { cwd: root, store: first });
+			expect(await first.agents.get({ agentId: "agent-first" })).toBeNull();
+			expect(await second.agents.get({ agentId: "agent-second" })).toMatchObject({ agentId: "agent-second" });
 		} finally {
 			await Promise.all([first.dispose(), second.dispose()]);
 			rmSync(root, { recursive: true, force: true });
 		}
+	});
+
+	it.each(["derive", "open", "dispose"] as const)("releases same-cwd ownership after %s failure", async (failure) => {
+		let calls = 0;
+		let fail = true;
+		const root = join(home, "owned");
+		storeTestUtils.setSdkOperations({
+			getDefaultStateRoot: async () => {
+				calls++;
+				if (fail && failure === "derive") throw new Error("derive failed");
+				return root;
+			},
+			openSqliteStore: async () => {
+				if (fail && failure === "open") throw new Error("open failed");
+				return { dispose: async () => {
+					if (fail && failure === "dispose") throw new Error("dispose failed");
+				} } as unknown as LocalAgentStore & { dispose(): Promise<void> };
+			},
+		});
+		const options = { cwd: home, scopeKey: "first", persistent: true };
+		const first = openCursorSessionStoreForScope(options);
+		if (failure === "dispose") {
+			await expect((await first).sessionStore.dispose()).rejects.toThrow("dispose failed");
+		} else if (failure === "derive") {
+			const sibling = openCursorSessionStoreForScope({ ...options, scopeKey: "sibling" });
+			await Promise.all([first, sibling].map((selection) => expect(selection).rejects.toThrow("derive failed")));
+		} else {
+			await expect(first).rejects.toThrow(`${failure} failed`);
+		}
+		fail = false;
+		const next = await openCursorSessionStoreForScope({ ...options, scopeKey: "next" });
+		await next.sessionStore.dispose();
+		expect(calls).toBe(2);
+	});
+
+	it("rejects missing or mismatched workspace ownership instead of adopting it and releases the failed open", async () => {
+		const root = join(home, "owned");
+		const getter = vi.fn(() => root);
+		storeTestUtils.setSdkOperations({
+			getDefaultStateRoot: getter,
+			openSqliteStore: async () => ({ dispose: async () => {} }) as unknown as LocalAgentStore & { dispose(): Promise<void> },
+		});
+		const options = { cwd: home, scopeKey: "first", persistent: true };
+		await expect(openCursorSessionStore(home, { version: 1, stateRoot: root }, root)).rejects.toThrow("ownership is not active");
+		const first = await openCursorSessionStoreForScope(options);
+		const wrong = join(home, "wrong");
+		await expect(openCursorSessionStore(home, { version: 1, stateRoot: wrong }, wrong)).rejects.toThrow("ownership root mismatch");
+		await first.sessionStore.dispose();
+		const next = await openCursorSessionStoreForScope(options);
+		await next.sessionStore.dispose();
+		expect(getter).toHaveBeenCalledTimes(2);
 	});
 });

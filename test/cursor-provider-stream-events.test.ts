@@ -16,7 +16,8 @@ import {
 	asMockSdkAgent,
 	mockedCreate,
 } from "./helpers/cursor-provider-harness.js";
-import { streamCursor, __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
+import { streamCursor } from "./helpers/cursor-provider-ownership.js";
+import { __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
 import type { Context } from "@earendil-works/pi-ai";
 
 

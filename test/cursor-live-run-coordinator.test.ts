@@ -42,10 +42,11 @@ function makeCursorSdkAbortConnectError(): Error & { rawMessage: string; code: n
 	error.rawMessage = "This operation was aborted";
 	error.code = 1;
 	error.cause = new DOMException("This operation was aborted", "AbortError");
+	// Synthetic canceled input; vendored frames are from the retained SDK 1.0.35 offline capture.
 	error.stack =
 		"ConnectError: [canceled] This operation was aborted\n" +
-		"    at file:///repo/node_modules/@connectrpc/connect-node/dist/esm/node-universal-client.js:293:63\n" +
-		"    at file:///repo/node_modules/@cursor/sdk/dist/esm/index.js:8:1086456\n" +
+		"    at i (file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:809)\n" +
+		"    at AbortSignal.l (file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:13744)\n" +
 		"Caused by: AbortError";
 	return error;
 }

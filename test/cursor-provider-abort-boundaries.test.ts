@@ -6,7 +6,8 @@ import type { SendOptions } from "@cursor/sdk";
 import type { AssistantMessage, AssistantMessageEvent } from "@earendil-works/pi-ai";
 import { AgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { streamCursor, __testUtils } from "../src/cursor-provider.js";
+import { streamCursor } from "./helpers/cursor-provider-ownership.js";
+import { __testUtils } from "../src/cursor-provider.js";
 import {
 	asMockCursorRun, collectEvents, collectTextDeltas, getDoneEvent, getErrorEvent, makeContext, makeModel,
 	mockCreatedAgent, registerNativeToolDisplayForTest, resetCursorProviderTestState,

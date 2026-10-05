@@ -70,7 +70,7 @@ describe("Cursor ripgrep path", () => {
 		}
 	});
 
-	it("locks installed @cursor/sdk 1.0.32 Agent.create ripgrep contract", () => {
+	it("locks the installed SDK Agent.create ripgrep contract", () => {
 		const bundle = readInstalledPackageDistText("@cursor/sdk");
 
 		// Absolute CURSOR_RIPGREP_PATH wins; otherwise platform-package lookup, then PATH, then configure.

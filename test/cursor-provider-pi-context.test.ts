@@ -9,7 +9,8 @@ import {
 	connectMcpClient, getCreatedAgentOptions, getPiToolsMcpUrlFromAgentCreateOptions,
 } from "./helpers/cursor-provider-harness.js";
 import { registerCursorNativeToolDisplayState, __testUtils as nativeToolDisplayTestUtils } from "../src/cursor-native-tool-display-state.js";
-import { streamCursor, __testUtils } from "../src/cursor-provider.js";
+import { streamCursor } from "./helpers/cursor-provider-ownership.js";
+import { __testUtils } from "../src/cursor-provider.js";
 import { buildCursorPrompt, computeCursorContextFingerprint, shouldBootstrapCursorContext } from "../src/context.js";
 import { getActiveContextToolNames } from "../src/cursor-context-tools.js";
 import { resolveCursorPiContext } from "../src/cursor-pi-context.js";

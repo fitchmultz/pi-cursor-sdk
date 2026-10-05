@@ -71,7 +71,6 @@ interface CursorSessionResumeState {
 	lastBranchHandle?: CursorSessionAgentResumeEntryData;
 	pendingHandle?: PendingCursorSessionAgentResumeHandle;
 	unownedUserEntryIds: Set<string>;
-	resumeHandlePersistSuppressed?: boolean;
 }
 
 let lastBoundState: CursorSessionResumeState = {
@@ -82,8 +81,6 @@ let lastBoundState: CursorSessionResumeState = {
 	unownedUserEntryIds: new Set(),
 };
 
-// Compaction summarizer sends commit a one-message resume handle. Drop it so the
-// next normal turn_end cannot persist that lineage (#223).
 const statesByScope = new Map<string, CursorSessionResumeState>();
 
 function getResumeState(scopeKey?: string): CursorSessionResumeState {
@@ -91,17 +88,6 @@ function getResumeState(scopeKey?: string): CursorSessionResumeState {
 		return statesByScope.get(scopeKey) ?? lastBoundState;
 	}
 	return lastBoundState;
-}
-
-export function suppressCursorSessionAgentResumeHandlePersist(scopeKey?: string): void {
-	const state = getResumeState(scopeKey);
-	if (scopeKey !== undefined && state.scopeKey !== scopeKey) return;
-	state.resumeHandlePersistSuppressed = true;
-	state.pendingHandle = undefined;
-}
-
-export function allowCursorSessionAgentResumeHandlePersist(): void {
-	getResumeState().resumeHandlePersistSuppressed = false;
 }
 
 function hashParts(parts: readonly string[]): string {
@@ -388,7 +374,6 @@ export function getMatchingCursorSessionAgentResumeHandle(poolKey: string, scope
 export function persistCursorSessionAgentResumeHandle(input: PendingCursorSessionAgentResumeHandle, scopeKey?: string): void {
 	const state = getResumeState(scopeKey);
 	if (scopeKey !== undefined && state.scopeKey !== scopeKey) return;
-	if (state.resumeHandlePersistSuppressed) return;
 	if (!isCursorLocalAgentId(input.agentId)) return;
 	state.pendingHandle = {
 		runtime: input.runtime,
@@ -400,11 +385,6 @@ export function persistCursorSessionAgentResumeHandle(input: PendingCursorSessio
 }
 
 function flushPendingCursorSessionAgentResumeHandle(branch: readonly SessionEntry[], state: CursorSessionResumeState): void {
-	if (state.resumeHandlePersistSuppressed) {
-		state.pendingHandle = undefined;
-		restoreFromBranch(branch, branch, state);
-		return;
-	}
 	restoreFromBranch(branch, branch, state);
 	const pending = state.pendingHandle;
 	state.pendingHandle = undefined;
@@ -483,13 +463,14 @@ export function registerCursorSessionAgentResume(pi: CursorSessionAgentResumeExt
 		}
 		restoreFromSessionManager(ctx.sessionManager);
 	});
+	pi.on("session_before_compact", () => {
+		state.pendingHandle = undefined;
+	});
 	pi.on("session_compact_failed", () => {
 		state.pendingHandle = undefined;
-		state.resumeHandlePersistSuppressed = false;
 	});
 	pi.on("session_compact", (event, ctx) => {
 		state.pendingHandle = undefined;
-		state.resumeHandlePersistSuppressed = false;
 		const branch = ctx.sessionManager.getBranch();
 		if (branch.length > 0) {
 			restoreFromSessionManager(ctx.sessionManager);
@@ -525,7 +506,6 @@ function resetStateForTests(): void {
 	state.lastBranchHandle = undefined;
 	state.pendingHandle = undefined;
 	state.unownedUserEntryIds = new Set();
-	state.resumeHandlePersistSuppressed = false;
 	statesByScope.clear();
 }
 
@@ -535,5 +515,4 @@ export const __testUtils = {
 	reset: resetStateForTests,
 	set: setStateForTests,
 	get state() { return getResumeState(); },
-	isResumeHandlePersistSuppressed: () => getResumeState().resumeHandlePersistSuppressed === true,
 };

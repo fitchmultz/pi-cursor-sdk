@@ -1,6 +1,6 @@
 import { toNamespacedPath } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { streamCursor } from "../src/cursor-provider.js";
+import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
 import { buildCursorSessionStateRoot } from "../src/cursor-session-store.js";
 import {
@@ -39,7 +39,7 @@ describe("streamCursor session store", () => {
 		const store = storeMock.stores[0];
 		expect(storeMock.openSqliteStore).toHaveBeenCalledWith({
 			workspaceRef: process.cwd(),
-			stateRoot: toNamespacedPath(buildCursorSessionStateRoot("/tmp/cursor-sdk-state", scopeKey, true)),
+			stateRoot: toNamespacedPath(buildCursorSessionStateRoot("/tmp/cursor-sdk-state/workspace", scopeKey)),
 		});
 		expect(mockedCreate.mock.calls[0][0].local?.store).toBe(store);
 		expect(mockedMessagesList).toHaveBeenCalledWith("agent-1", expect.objectContaining({ store }));

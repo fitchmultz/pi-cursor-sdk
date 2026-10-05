@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Changed
+
+- Upgrade the exact Cursor SDK dependency to 1.0.35. Preserve recorded local resume and cleanup ownership across its MD5-to-SHA256 workspace-root migration, without merging stores; share atomic same-cwd ownership from first root derivation through admission and store disposal.
+- Add fail-closed rejection of links/non-directories inside SDK/extension-owned store layouts before migration, opening, or temporary removal; higher user-managed ancestor links remain supported as in 0.5.0. Malformed recorded identities fall back or become non-retryable cleanup candidates without unbounded path traversal.
+- Stop suppressing unrelated connect-node-only network process errors during active Cursor turns; SDK-vendored and backend-detail provenance remain scoped.
+- Qualify vendored Node transport abort/stall provenance and HTTP/2 defaults, and keep scoped MCP timeout overrides independent of minified class/argument names. The existing SDK 1.0.32 catalog capture and checkpoint limits are unchanged.
+
+## 0.5.0 - 2026-10-04
+
+### Breaking Changes
+
+- Bare `ctx.modelRegistry.complete(...)` and `ctx.modelRegistry.streamSimple(...)` calls are unsupported for Cursor models because they lack native session ownership receipts. Custom compaction and other integrations must use the owning AgentSession's stream path or an independent child AgentSession; bind/refresh/reload does not migrate bare calls. See [embedding migration guidance](README.md#embedded-sessions-report-concurrent-cursor-turns).
+
+### Changed
+
+- Refresh the SDK-derived fallback catalog to 45 models, including Claude Sonnet 5.5, GLM 5.3, and GLM 5.3 Flash. Preserve existing checkpoint-derived context windows.
+
 ### Fixed
 
 - Isolate concurrent and nested in-process Cursor sessions, including direct compaction/tree/bug-report streams, bridge/replay state, pooled agents, storage, journals, and debug artifacts (#217, #234). Native request-header ownership receipts reject mismatched shared ModelRuntime calls with recovery guidance rather than choosing a sibling.
@@ -11,9 +28,16 @@
 - Resolve the installed Cursor SDK native parser package before SDK initialization, preserving explicit `CURSOR_TREE_SITTER_VENDOR_DIR` overrides (#232).
 - Improve diagnostics with bounded, scrubbed structured errors and causes without diagnosing loader or ambiguous session-authentication failures as invalid API keys. The underlying compiled/embedded-host and idle-session failures reported in #228, #233, and #247 remain open.
 - Bound bridge tool-call IDs while preserving unique calls and matching results (#237; thanks @gwatkins-arista).
-- Keep skill activation callable with its catalog/descriptions intact and a stable system prompt (#244).
+- Keep skill activation callable with its catalog/descriptions intact and a stable system prompt (#244). Each registered session owns its skill catalog, so a sibling's same-named skill or catalog reset cannot change activation.
 - Map SDK `reasoning_effort` controls to Pi thinking without changing SDK defaults.
-- Stop post-compaction occupancy floors from reusing retained pre-compaction measurements, including after Pi converts the summary to a user message. Use the compaction timestamp rather than comparing token totals, so genuine new context can grow past the old `tokensBefore` value without being discarded.
+- Repair context floors using the owning native projection, actual request equivalence, model compatibility, and source order after compaction/context edits—not timestamps, summary-looking text, or `tokensBefore`. Keep fresh LOCAL SDK usage authoritative and native components coherent so cumulative bills cannot trigger repeated false compaction.
+- Isolate LOCAL compaction/tree summaries in fresh text-only agents and temporary stores, without conversation tools/MCP/bridge/manifest/replay, plan mode, or resume lineage. Await cleanup before summary terminal emission; ordinary capabilities remain intact.
+- Preserve every raw turn and original reported/terminal snapshot separately from disjoint public billed data in durable origin/branch journals. Remove process-only UUID watermarks; retain delayed/revised/aggregate-only/error/abort/reopen facts without inventing branch attribution.
+
+### Added
+
+- `/cursor-usage` view, bounded public billing refresh, exclusive private JSON export, and recovery help, leaving Pi's default footer and configured-price estimates intact. Reports unavailable/pending settlement, shared or unknown history, journal gaps, other-branch facts and unclaimed records honestly. No private billing fallback or native invoice-total claim.
+- Offline working-tree qualification for exact official Pi releases without committing, including native compaction, summary cleanup and billing regressions.
 
 ## 0.4.0 - 2026-09-26
 

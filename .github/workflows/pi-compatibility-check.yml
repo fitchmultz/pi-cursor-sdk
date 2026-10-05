@@ -2,9 +2,29 @@ name: Pi compatibility check
 
 on:
   workflow_call:
+    inputs:
+      official-version:
+        description: Official stable version resolved for this run; blank resolves latest
+        type: string
+        default: ''
+      fork-ref:
+        description: Maintained fork commit resolved for this run; blank resolves main
+        type: string
+        default: ''
 
 jobs:
+  resolve:
+    permissions:
+      contents: read
+    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@3b7a5f72d9c2d67d6fb53ef7bd308b005c385af3 # main
+    with:
+      automation-ref: 3b7a5f72d9c2d67d6fb53ef7bd308b005c385af3 # main
+      official-version: ${{ inputs.official-version }}
+      fork-ref: ${{ inputs.fork-ref }}
+
   compatibility:
+    needs: resolve
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 9
     permissions:
@@ -14,6 +34,11 @@ jobs:
       PI_TELEMETRY: '0'
       PI_CURSOR_SETTING_SOURCES: none
     steps:
+      - name: Require resolved latest hosts
+        shell: bash
+        env:
+          RESOLVE: ${{ needs.resolve.result }}
+        run: test "$RESOLVE" = success
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -21,11 +46,30 @@ jobs:
         with:
           node-version: '24.21.0'
           cache: npm
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: fitchmultz/.github
+          ref: 3b7a5f72d9c2d67d6fb53ef7bd308b005c385af3 # main
+          path: automation
+          persist-credentials: false
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - run: npm run check:compat
-      - run: node scripts/ci-compatibility.mjs
+      - name: Qualify both frozen latest host graphs and installed forms
+        env:
+          OFFICIAL_VERSION: ${{ needs.resolve.outputs.official-version }}
+          FORK_REF: ${{ needs.resolve.outputs.fork-ref }}
+          PI_COMPAT_EVIDENCE_DIR: ${{ runner.temp }}/cursor-hosts
+        run: node scripts/ci-compatibility.mjs --automation automation --official-version "$OFFICIAL_VERSION" --fork-ref "$FORK_REF"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: cursor-hosts
+          path: ${{ runner.temp }}/cursor-hosts
+          if-no-files-found: error
+          retention-days: 3
 
   native-platforms:
+    needs: resolve
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -39,6 +83,11 @@ jobs:
       PI_TELEMETRY: '0'
       PI_CURSOR_SETTING_SOURCES: none
     steps:
+      - name: Require resolved latest hosts
+        shell: bash
+        env:
+          RESOLVE: ${{ needs.resolve.result }}
+        run: test "$RESOLVE" = success
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -46,9 +95,29 @@ jobs:
         with:
           node-version: '24.21.0'
           cache: npm
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: fitchmultz/.github
+          ref: 3b7a5f72d9c2d67d6fb53ef7bd308b005c385af3 # main
+          path: automation
+          persist-credentials: false
       - run: npm ci --no-audit --no-fund
+      - name: Select the frozen latest official graph
+        shell: bash
+        env:
+          OFFICIAL_VERSION: ${{ needs.resolve.outputs.official-version }}
+          PI_COMPAT_EVIDENCE_DIR: ${{ runner.temp }}/native-host
+        run: node scripts/ci-compatibility.mjs --automation automation --official-version "$OFFICIAL_VERSION" --select-only
+      - run: npm run build
       - run: node -e "require('node-pty')"
       - run: npm run check:platform-smoke
       - run: npm test -- --testTimeout=15000
       - run: npm run typecheck
       - run: npm pack --dry-run
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: cursor-native-host-${{ matrix.os }}
+          path: ${{ runner.temp }}/native-host
+          if-no-files-found: error
+          retention-days: 3

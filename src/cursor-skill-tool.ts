@@ -29,14 +29,12 @@ type CursorActivateSkillParams = {
 };
 
 interface CursorSkillActivationDetails {
-	name?: string;
-	filePath?: string;
-	baseDir?: string;
+	name: string;
+	filePath: string;
+	baseDir: string;
 	resources: string[];
 	availableSkillNames: string[];
 }
-
-let currentSkillsByName = new Map<string, Skill>();
 
 function escapeXml(value: string): string {
 	return value
@@ -51,40 +49,11 @@ function getVisibleSkills(skills: readonly Skill[] | undefined): Skill[] {
 	return (skills ?? []).filter((skill) => !skill.disableModelInvocation);
 }
 
-function setCurrentSkills(skills: readonly Skill[] | undefined): void {
-	currentSkillsByName = new Map(getVisibleSkills(skills).map((skill) => [skill.name, skill]));
-}
-
-function getAvailableSkillNames(): string[] {
-	return [...currentSkillsByName.keys()].sort();
-}
-
 function resolveEffectiveRuntimeForSkillLifecycle(
 	cursorModel: boolean,
 	ctx: Pick<ExtensionContext, "cwd"> & Partial<Pick<ExtensionContext, "isProjectTrusted">>,
 ): CursorRuntime {
 	return cursorModel ? resolveEffectiveCursorConfigForContext(ctx).runtime.value : "local";
-}
-
-function shouldExposeSkillTool(model: ExtensionContext["model"], runtime: CursorRuntime): boolean {
-	return runtime === "local" && isCursorModel(model) && resolveCursorPiToolBridgeEnabled() && currentSkillsByName.size > 0;
-}
-
-function syncCursorSkillToolForModel(
-	pi: Pick<ExtensionAPI, "getActiveTools" | "setActiveTools">,
-	model: ExtensionContext["model"],
-	runtime: CursorRuntime,
-): void {
-	const activeToolNames = new Set(pi.getActiveTools());
-	const shouldBeActive = !arePiToolsDisabled(pi) && shouldExposeSkillTool(model, runtime);
-	const alreadyActive = activeToolNames.has(CURSOR_ACTIVATE_SKILL_TOOL_NAME);
-	if (shouldBeActive === alreadyActive) return;
-	if (shouldBeActive) {
-		activeToolNames.add(CURSOR_ACTIVATE_SKILL_TOOL_NAME);
-	} else {
-		activeToolNames.delete(CURSOR_ACTIVATE_SKILL_TOOL_NAME);
-	}
-	pi.setActiveTools([...activeToolNames]);
 }
 
 export function formatCursorSkillsForPrompt(skills: readonly Skill[]): string {
@@ -157,16 +126,6 @@ async function listSkillResourcePaths(baseDir: string): Promise<string[]> {
 	return resources;
 }
 
-function buildActivationDetails(skill: Skill | undefined, resources: string[] = []): CursorSkillActivationDetails {
-	return {
-		name: skill?.name,
-		filePath: skill?.filePath,
-		baseDir: skill ? dirname(skill.filePath) : undefined,
-		resources,
-		availableSkillNames: getAvailableSkillNames(),
-	};
-}
-
 function formatSkillResources(resources: readonly string[]): string {
 	if (resources.length === 0) return "<skill_resources />";
 	return [
@@ -190,6 +149,30 @@ function wrapSkillContent(skill: Skill, content: string, resources: readonly str
 }
 
 export function registerCursorSkillTool(pi: CursorSkillToolExtensionApi): void {
+	let currentSkillsByName = new Map<string, Skill>();
+
+	function setCurrentSkills(skills: readonly Skill[] | undefined): void {
+		currentSkillsByName = new Map(getVisibleSkills(skills).map((skill) => [skill.name, skill]));
+	}
+
+	function getAvailableSkillNames(): string[] {
+		return [...currentSkillsByName.keys()].sort();
+	}
+
+	function syncCursorSkillToolForModel(model: ExtensionContext["model"], runtime: CursorRuntime): void {
+		const activeToolNames = new Set(pi.getActiveTools());
+		const shouldBeActive = !arePiToolsDisabled(pi) && runtime === "local" && isCursorModel(model)
+			&& resolveCursorPiToolBridgeEnabled() && currentSkillsByName.size > 0;
+		const alreadyActive = activeToolNames.has(CURSOR_ACTIVATE_SKILL_TOOL_NAME);
+		if (shouldBeActive === alreadyActive) return;
+		if (shouldBeActive) {
+			activeToolNames.add(CURSOR_ACTIVATE_SKILL_TOOL_NAME);
+		} else {
+			activeToolNames.delete(CURSOR_ACTIVATE_SKILL_TOOL_NAME);
+		}
+		pi.setActiveTools([...activeToolNames]);
+	}
+
 	pi.registerTool({
 		name: CURSOR_ACTIVATE_SKILL_TOOL_NAME,
 		label: "Cursor skill",
@@ -216,7 +199,13 @@ export function registerCursorSkillTool(pi: CursorSkillToolExtensionApi): void {
 				]);
 				return {
 					content: [{ type: "text" as const, text: wrapSkillContent(skill, content, resources) }],
-					details: buildActivationDetails(skill, resources),
+					details: {
+						name: skill.name,
+						filePath: skill.filePath,
+						baseDir: dirname(skill.filePath),
+						resources,
+						availableSkillNames: getAvailableSkillNames(),
+					} satisfies CursorSkillActivationDetails,
 				};
 			} catch (error) {
 				throw new Error(
@@ -228,7 +217,7 @@ export function registerCursorSkillTool(pi: CursorSkillToolExtensionApi): void {
 
 	const clearSkillsAndSync = (model: ExtensionContext["model"], runtime: CursorRuntime = "local"): void => {
 		setCurrentSkills([]);
-		syncCursorSkillToolForModel(pi, model, runtime);
+		syncCursorSkillToolForModel(model, runtime);
 	};
 
 	registerCursorModelLifecycle(pi, {
@@ -242,7 +231,7 @@ export function registerCursorSkillTool(pi: CursorSkillToolExtensionApi): void {
 			const cursorModel = isCursorModel(ctx.model);
 			const runtime = resolveEffectiveRuntimeForSkillLifecycle(cursorModel, ctx);
 			if (!cursorModel || runtime === "cloud") setCurrentSkills([]);
-			syncCursorSkillToolForModel(pi, ctx.model, runtime);
+			syncCursorSkillToolForModel(ctx.model, runtime);
 		},
 		beforeAgentStart: (event, ctx) => {
 			const cursorModel = isCursorModel(ctx.model);
@@ -252,18 +241,10 @@ export function registerCursorSkillTool(pi: CursorSkillToolExtensionApi): void {
 			} else {
 				setCurrentSkills([]);
 			}
-			syncCursorSkillToolForModel(pi, ctx.model, runtime);
+			syncCursorSkillToolForModel(ctx.model, runtime);
 			const resolved = resolveCursorSkillSystemPrompt(event.systemPrompt, ctx.model, event.systemPromptOptions, runtime);
 			if (resolved === event.systemPrompt) return undefined;
 			return { systemPrompt: resolved };
 		},
 	});
 }
-
-export const __testUtils = {
-	AVAILABLE_SKILLS_SECTION_PATTERN,
-	buildActivationDetails,
-	setCurrentSkills,
-	listSkillResourcePaths,
-	wrapSkillContent,
-};

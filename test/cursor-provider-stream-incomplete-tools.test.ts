@@ -12,7 +12,7 @@ import {
 	mockCreatedAgent,
 	asMockCursorRun,
 } from "./helpers/cursor-provider-harness.js";
-import { streamCursor } from "../src/cursor-provider.js";
+import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import type { SendOptions } from "@cursor/sdk";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

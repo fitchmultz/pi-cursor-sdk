@@ -473,11 +473,9 @@ async function createSessionAgentEntry(
 			cwd: params.cwd,
 			scopeKey,
 			persistent: persistentStore,
-			hasResumeHandle: resumeHandle !== undefined,
-			resumeIdentity: resumeHandle?.storeIdentity,
+			resume: resumeHandle ? { identity: resumeHandle.storeIdentity, agentId: resumeHandle.agentId } : undefined,
 		});
 		sessionStore = storeSelection.sessionStore;
-		const { identities } = storeSelection;
 		const resumeAttemptAllowed = storeSelection.resumeAttemptAllowed;
 		let resumeNotice = storeSelection.resumeFallback ? LOCAL_RESUME_FALLBACK_NOTICE : undefined;
 		const buildAgentOptions = () => ({
@@ -502,9 +500,11 @@ async function createSessionAgentEntry(
 				resumed = true;
 			} catch {
 				if (persistentStore) resumeNotice = LOCAL_RESUME_FALLBACK_NOTICE;
-				if (!cursorSessionStoreIdentitiesEqual(sessionStore.identity, identities.sessionStore)) {
+				if (storeSelection.persistent && !cursorSessionStoreIdentitiesEqual(sessionStore.identity, storeSelection.identities.sessionStore)) {
+					const { identities } = storeSelection;
+					const replacement = await openCursorSessionStore(params.cwd, identities.sessionStore, identities.defaultStore.stateRoot);
 					await sessionStore.dispose().catch(() => undefined);
-					sessionStore = await openCursorSessionStore(params.cwd, identities.sessionStore);
+					sessionStore = replacement;
 				}
 			}
 		}

@@ -9,11 +9,50 @@ import {
 	type CursorDeltaHandler,
 	mockCreatedAgent,
 	asMockCursorRun,
+	createPiHarness,
 } from "./helpers/cursor-provider-harness.js";
-import { streamCursor } from "../src/cursor-provider.js";
+import { captureProviderTestOwnership, streamCursor } from "./helpers/cursor-provider-ownership.js";
+import { registerCursorNativeToolDisplayState } from "../src/cursor-native-tool-display-state.js";
+import { streamCursor as streamOwnedCursor } from "../src/cursor-provider.js";
 
 describe("streamCursor usage accounting", () => {
 	beforeEach(resetCursorProviderTestState);
+
+	it("blocks SDK send when the captured usage claim cannot be appended", async () => {
+		const send = vi.fn();
+		const dispose = vi.fn().mockResolvedValue(undefined);
+		mockCreatedAgent({ send, [Symbol.asyncDispose]: dispose });
+		const model = makeModel();
+		const context = makeContext();
+		const pi = createPiHarness();
+		registerCursorNativeToolDisplayState(pi);
+		const ownership = captureProviderTestOwnership(model, context, undefined, pi);
+		pi.appendEntry.mockImplementation(() => { throw new Error("claim write failed"); });
+		const events = await collectEvents(streamOwnedCursor(model, context, { apiKey: "test-key" }, ownership));
+		expect(getErrorEvent(events).error.errorMessage).toContain("claim write failed");
+		expect(send).not.toHaveBeenCalled();
+		expect(dispose).toHaveBeenCalledOnce();
+	});
+
+	it.each(["finished", "error", "cancelled"] as const)("records the actual %s terminal on the captured origin", async status => {
+		const model = makeModel();
+		const context = makeContext();
+		const pi = createPiHarness();
+		registerCursorNativeToolDisplayState(pi);
+		const ownership = captureProviderTestOwnership(model, context, undefined, pi);
+		mockCreatedAgent({ send: vi.fn(async () => {
+			expect(pi.appendEntry).toHaveBeenCalledWith("pi-cursor-sdk:usage-origin-v1", expect.any(Object));
+			return asMockCursorRun({
+				id: "run-accounted", agentId: "agent-1", status,
+				wait: vi.fn().mockResolvedValue({ id: "run-accounted", status, result: "done" }),
+			});
+		}) });
+		await collectEvents(streamOwnedCursor(model, context, { apiKey: "test-key" }, ownership));
+		expect(pi.appendEntry).toHaveBeenCalledWith("pi-cursor-sdk:usage-v1", expect.objectContaining({
+			kind: "terminal", status: status === "finished" ? "success" : status === "cancelled" ? "abort" : "error",
+			origin: expect.objectContaining({ sessionFile: undefined }),
+		}));
+	});
 
 	it("ignores returned RunResult usage when no turn-ended usage was applied", async () => {
 		const mockSend = vi.fn().mockResolvedValue(asMockCursorRun({

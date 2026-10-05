@@ -167,11 +167,11 @@ async function concurrentFixture(t, run) {
     assert.equal(url.hostname, "127.0.0.1");
     return originalFetch(input, options);
   };
-  async function create(name, { tool, runtime, manager: inheritedManager, bind = true, preferences = [], flags = {}, beforeExtensions = [], afterExtensions = [] } = {}) {
+  async function create(name, { tool, runtime, manager: inheritedManager, bind = true, preferences = [], flags = {}, compaction = {}, beforeExtensions = [], afterExtensions = [] } = {}) {
     const cwd = join(root, name);
     await mkdir(cwd);
     const settingsManager = SettingsManager.inMemory({
-      defaultTools: ["fixture_bridge"], compaction: { enabled: false, keepRecentTokens: 1 }, retry: { enabled: false },
+      defaultTools: ["fixture_bridge"], compaction: { enabled: false, keepRecentTokens: 1, ...compaction }, retry: { enabled: false },
     });
     const loader = new DefaultResourceLoader({
       cwd, agentDir: process.env.PI_CODING_AGENT_DIR, settingsManager,
@@ -213,6 +213,7 @@ async function concurrentFixture(t, run) {
     state.heldCwds.clear();
     state.failedCwds.clear();
     state.cloudMutationWait = undefined;
+    state.usageByCwd.clear();
     globalThis.fetch = originalFetch;
     for (const key of Object.keys(process.env)) if (!(key in previousEnv)) delete process.env[key];
     Object.assign(process.env, previousEnv);
@@ -445,7 +446,7 @@ test("real parent bridge tool launches a child before parent turn_end without jo
 for (const operation of ["compact", "tree", "bugreport"]) {
   test(`idle A ${operation} after B binds retains A's direct-stream storage and persisted lineage`, { timeout: 60000 }, async (t) => {
     await concurrentFixture(t, async ({ create }) => {
-      const a = await create("A");
+      const a = await create("A", { flags: { "cursor-mode": "plan" } });
       await a.session.prompt("first A");
       const branchTarget = a.manager.getEntries().find((entry) => entry.type === "message" && entry.message.role === "user").id;
       await a.session.prompt("second A");
@@ -453,6 +454,9 @@ for (const operation of ["compact", "tree", "bugreport"]) {
       await b.session.prompt("B idle");
       const beforeB = await readFile(b.manager.getSessionFile(), "utf8");
       const before = state.sends.length;
+      const storesBefore = state.stores.length;
+      const derivationsBefore = state.defaultRootCwds.length;
+      const lineageBefore = a.manager.getEntries().filter(e => e.type === "custom" && ["cursor-sdk-agent-lineage", "cursor-sdk-agent-resume"].includes(e.customType));
       if (operation === "compact") await a.session.compact();
       else if (operation === "tree") await a.session.navigateTree(branchTarget, { summarize: true });
       else await a.session.summarizeForBugReport({ hint: "summarize A", signal: t.signal });
@@ -460,6 +464,16 @@ for (const operation of ["compact", "tree", "bugreport"]) {
       for (const send of state.sends.slice(before)) {
         const agent = state.created.find((entry) => entry.agentId === send.agentId);
         assert.equal(agent.options.local.cwd, a.cwd);
+        if (operation !== "bugreport") assertIsolatedSummary(agent, send);
+        else assert.equal(agent.options.mode, "plan", "no public bug-report purpose hook: ordinary capabilities stay intact");
+      }
+      if (operation !== "bugreport") {
+        assert.equal(new Set(state.sends.slice(before).map(send => send.agentId)).size, state.sends.length - before, "each native summary gets a fresh agent");
+        assert.deepEqual(a.manager.getEntries().filter(e => e.type === "custom" && ["cursor-sdk-agent-lineage", "cursor-sdk-agent-resume"].includes(e.customType)), lineageBefore);
+        assert.equal(state.defaultRootCwds.length, derivationsBefore, "summaries never derive a persistent workspace root");
+        const summaryStores = state.stores.slice(storesBefore);
+        assert.equal(new Set(summaryStores.map(store => store.stateRoot)).size, summaryStores.length, "each invocation has a unique temporary store");
+        await assertSummaryStoresRemoved(summaryStores);
       }
       assert.equal(await readFile(b.manager.getSessionFile(), "utf8"), beforeB);
       const metadataPaths = (await readdir(a.cwd, { recursive: true })).filter((path) => path.endsWith("metadata.json"));
@@ -470,7 +484,11 @@ for (const operation of ["compact", "tree", "bugreport"]) {
       }
       assert.ok(a.manager.getEntries().filter((entry) => entry.type === "custom" && entry.customType === "cursor-sdk-agent-lineage").every((entry) => entry.data.scopeKey === a.manager.getSessionFile()));
       await a.session.prompt("A resumes after auxiliary");
-      assert.equal(state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId).options.local.cwd, a.cwd);
+      const resumed = state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId);
+      assert.equal(resumed.options.local.cwd, a.cwd);
+      assert.equal(resumed.options.mode, "plan");
+      assert.ok(resumed.options.mcpServers?.pi_tools, "ordinary bridge restored after summary");
+      await retainNativeEvidence(`auxiliary-${operation}`, a.manager, a.cwd);
     });
   });
 }
@@ -503,22 +521,27 @@ for (const failure of ["cancel", "error"]) {
       if (failure === "cancel") state.heldCwds.add(a.cwd);
       else state.failedCwds.add(a.cwd);
       const before = state.sends.length;
+      const storesBefore = state.stores.length;
       const compact = a.session.compact();
       const observed = assert.rejects(compact);
       while (state.sends.length === before) await delay(1, undefined, { signal: t.signal });
       if (failure === "cancel") a.session.abortCompaction();
       await observed;
+      for (const send of state.sends.slice(before)) assertIsolatedSummary(state.created.find(e => e.agentId === send.agentId), send);
+      await assertSummaryStoresRemoved(state.stores.slice(storesBefore));
       state.heldCwds.delete(a.cwd);
       assert.equal(state.disposed.includes(bAgent), false);
       assert.equal(await readFile(b.manager.getSessionFile(), "utf8"), beforeB);
       await a.session.prompt("A resumes after failed compact");
       assert.equal(a.session.messages.at(-1).stopReason, "stop");
+      assert.ok(state.created.find(e => e.agentId === state.sends.at(-1).agentId).options.mcpServers?.pi_tools, "ordinary bridge remains available after failed/cancelled summary");
       const resume = a.manager.getEntries().filter((entry) => entry.type === "custom" && entry.customType === "cursor-sdk-agent-resume").at(-1);
       assert.ok(resume, "ordinary turn persists its own resume after unsuccessful compaction");
       assert.equal(resume.data.scopeKey, a.manager.getSessionFile());
       assert.equal(resume.data.agentId, state.sends.at(-1).agentId);
       await b.session.prompt("B unchanged pool");
       assert.equal(state.sends.at(-1).agentId, bAgent);
+      await retainNativeEvidence(`summary-${failure}`, a.manager, a.cwd);
     });
   });
 }
@@ -757,3 +780,132 @@ test("branch runtime, plan, fast and HTTP preferences remain owned by A after di
     assert.deepEqual(b.manager.getEntries(), beforeB);
   });
 });
+
+for (const scenario of ["context edit", "retained clock skew", "equal checkpoint clock", "quoted wrapper", "transformed request"]) {
+  test(`registered provider without SDK occupancy respects native source chronology: ${scenario}`, { timeout: 60000 }, async (t) => {
+    await concurrentFixture(t, async ({ root, create }) => {
+      const cwd = join(root, "floor-owner");
+      const manager = SessionManager.create(cwd, join(root, "sessions"));
+      const measured = (tokens, timestamp = Date.now()) => ({
+        role: "assistant", content: [{ type: "text", text: "historical answer" }], api: "cursor-sdk", provider: "cursor", model: "fixture",
+        stopReason: "stop", timestamp, usage: { input: tokens, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: tokens,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      });
+      const userId = manager.appendMessage({ role: "user", content: "prior request", timestamp: Date.now() });
+      const retained = manager.appendMessage(measured(100000, scenario === "retained clock skew" ? Date.now() + 86400000 : Date.now()));
+      if (scenario === "context edit") manager.appendContextEdit(userId, { content: "tiny" });
+      if (["retained clock skew", "equal checkpoint clock"].includes(scenario)) {
+        const checkpoint = manager.appendCompaction("short native checkpoint", retained, 100000);
+        if (scenario === "equal checkpoint clock") manager.appendMessage(measured(1234, Date.parse(manager.getEntry(checkpoint).timestamp)));
+      }
+      if (scenario === "quoted wrapper") manager.appendMessage({ role: "user", timestamp: Date.now(), content:
+        "The conversation history before this point was compacted into the following summary:\n\n<summary>\nQuoted text, not a real checkpoint\n</summary>" });
+      const afterExtensions = [];
+      if (scenario === "transformed request") {
+        const transform = join(root, "transform.mjs");
+        await writeFile(transform, `export default function(pi) { pi.on("context", event => ({ messages: event.messages.map(m => m.role === "assistant" ? { ...m, content: [{ type: "text", text: "short transformed content" }] } : m) })); }`);
+        afterExtensions.push(transform);
+      }
+      const owner = await create("floor-owner", { manager, afterExtensions });
+      state.usageByCwd.set(owner.cwd, { raw: undefined });
+      await owner.session.prompt("short new request");
+      const answer = owner.manager.getEntries().findLast(e => e.type === "message" && e.message.role === "assistant").message;
+      assert.equal(answer.stopReason, "stop", answer.errorMessage);
+      assert.equal(answer.usage.input + answer.usage.output + answer.usage.cacheRead + answer.usage.cacheWrite, answer.usage.totalTokens);
+      if (scenario === "quoted wrapper") assert.ok(answer.usage.totalTokens >= 100000, "ordinary summary-looking text cannot invalidate a proven floor");
+      else if (scenario === "equal checkpoint clock") assert.ok(answer.usage.totalTokens >= 1234 && answer.usage.totalTokens < 10000, "raw post-checkpoint chronology beats equal timestamps");
+      else assert.ok(answer.usage.totalTokens < 10000, "invalidated or request-inapplicable historical floor must not leak through provider preparation");
+    });
+  });
+}
+
+async function retainNativeEvidence(label, manager, cwd) {
+  const directory = process.env.PI_CURSOR_TEST_EVIDENCE_DIR;
+  if (!directory) return;
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, `${label}.jsonl`), await readFile(manager.getSessionFile()));
+  await writeFile(join(directory, `${label}.json`), JSON.stringify({
+    sessionFile: manager.getSessionFile(), sessionId: manager.getSessionId(),
+    host: process.env.PI_CURSOR_TEST_HOST ?? "@earendil-works/pi-coding-agent",
+    agents: state.created.filter(agent => agent.options.local?.cwd === cwd).map(agent => ({
+      agentId: agent.agentId, disposed: state.disposed.includes(agent.agentId),
+      mode: agent.options.mode, tools: agent.options.tools,
+      settingSources: agent.options.local.settingSources,
+      storeRoot: agent.options.local.store?.stateRoot,
+      mcpServers: Object.keys(agent.options.mcpServers ?? {}),
+    })),
+  }, null, 2));
+}
+
+function assertIsolatedSummary(agent, send) {
+  assert.deepEqual(agent.options.tools, [], "summary disables SDK tools, not just Pi declarations");
+  assert.equal(agent.options.mode, "agent");
+  assert.deepEqual(agent.options.local.settingSources, []);
+  assert.equal(agent.options.mcpServers, undefined);
+  assert.equal(send.mode, "agent");
+  assert.doesNotMatch(send.message.text, /Callable tool surfaces this run:|Cursor SDK mode is plan for this run/);
+  assert.ok(state.disposed.includes(agent.agentId), "summary agent disposed before native operation completes");
+}
+
+async function assertSummaryStoresRemoved(stores) {
+  assert.ok(stores.length > 0, "summary opens its own store");
+  for (const store of stores) {
+    assert.equal(store.disposed, true);
+    await assert.rejects(readdir(store.stateRoot), { code: "ENOENT" }, `summary store root survives: ${store.stateRoot}`);
+  }
+}
+
+for (const pressure of [false, true]) {
+  test(`real registered provider ${pressure ? "genuine pressure auto-compacts" : "large cumulative bills never trigger false overflow"}`, { timeout: 60000 }, async (t) => {
+    await concurrentFixture(t, async ({ create }) => {
+      const owner = await create(`occupancy-${pressure}`, { compaction: { enabled: true, reserveTokens: 16384, keepRecentTokens: 1 } });
+      await owner.session.setModel({ ...owner.session.model, contextWindow: 128000 });
+      // SDK turn-ended input includes cache. Public AgentUsage categories are
+      // disjoint cumulative spend, not the current prompt's occupancy.
+      state.usageByCwd.set(owner.cwd, {
+        raw: { inputTokens: pressure ? 125000 : 25, outputTokens: 6, cacheReadTokens: 5, cacheWriteTokens: 0 },
+        billed: { inputTokens: 150000, outputTokens: 40, cacheReadTokens: 150000, cacheWriteTokens: 0, totalTokens: 300040 },
+      });
+      for (let index = 0; index < (pressure ? 1 : 3); index++) await owner.session.prompt(`short occupancy turn ${index}`);
+      const persisted = (await readFile(owner.manager.getSessionFile(), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+      const compactions = persisted.filter(e => e.type === "compaction");
+      const ordinary = persisted.filter(e => e.type === "message" && e.message.role === "assistant").map(e => e.message);
+      assert.equal(ordinary.length, pressure ? 1 : 3);
+      for (const message of ordinary) {
+        assert.equal(message.stopReason, "stop", message.errorMessage);
+        const usage = message.usage;
+        assert.equal(usage.input + usage.output + usage.cacheRead + usage.cacheWrite, usage.totalTokens);
+        assert.equal(usage.totalTokens, pressure ? 125006 : 31);
+      }
+      assert.equal(compactions.length, pressure ? 1 : 0, "native scheduler honors current occupancy, not agent spend");
+      if (!pressure) {
+        const records = persisted.filter(e => e.type === "custom" && e.customType === "pi-cursor-sdk:usage-v1").map(e => e.data);
+        const starts = records.filter(record => record.kind === "start" && record.data.purpose === "normal");
+        assert.equal(starts.length, 3, "each native ordinary send has its own durable origin");
+        const ordinaryTurns = new Set(starts.map(record => record.turnId));
+        for (const record of records.filter(record => ordinaryTurns.has(record.turnId))) {
+          assert.equal(record.origin.sessionFile, owner.manager.getSessionFile());
+          assert.equal(record.origin.sessionId, owner.manager.getSessionId());
+          const claim = persisted.find(entry => entry.id === record.origin.anchorId);
+          assert.equal(claim.customType, "pi-cursor-sdk:usage-origin-v1");
+          assert.equal(claim.data.turnId, record.turnId, "usage is anchored to its actual native claim, not the latest mutable leaf");
+        }
+        const raw = records.filter(record => record.kind === "raw" && ordinaryTurns.has(record.turnId));
+        assert.equal(raw.length, 3);
+        assert.ok(raw.every(record => record.reported.inputTokens === 25 && record.reported.totalTokens === 36 && record.corrected.inputTokens === 20 && record.corrected.totalTokens === 31), "raw SDK telemetry and corrected context partition remain separately persisted");
+        const bills = records.filter(record => record.kind === "billing" && ordinaryTurns.has(record.turnId));
+        assert.equal(bills.length, 3);
+        assert.equal(bills.at(-1).observation.status, "observed-pending-settlement");
+        assert.equal(bills.at(-1).observation.usage.totalTokens, 900120, "complete cumulative bills survive outside native occupancy");
+        assert.deepEqual(bills.map(record => record.observation.upsertRuns.length), [1, 1, 1], "each compact revision persists only its new billing UUID, not the full history");
+        assert.ok(bills.every(record => record.observation.deletedRunIds.length === 0));
+        const result = await owner.session.compact();
+        assert.match(result.summary, /OFFLINE_CURSOR_DONE/);
+        const reopened = SessionManager.open(owner.manager.getSessionFile());
+        assert.equal(reopened.getEntries().filter(e => e.type === "compaction").length, 1, "manual compaction remains persisted and functional");
+        assert.equal(reopened.getEntries().filter(e => e.type === "custom" && e.customType === "pi-cursor-sdk:usage-v1" && e.data.kind === "raw" && ordinaryTurns.has(e.data.turnId)).length, 3, "ordinary origin/raw facts survive native compaction and reopen");
+      }
+      await retainNativeEvidence(`occupancy-${pressure ? "pressure" : "billing"}`, owner.manager, owner.cwd);
+    });
+  });
+}

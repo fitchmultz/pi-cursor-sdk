@@ -28,7 +28,7 @@
 - Add fail-closed rejection of links/non-directories inside SDK/extension-owned store layouts before migration, opening, or temporary removal; higher user-managed ancestor links remain supported as in 0.5.0. Malformed recorded identities fall back or become non-retryable cleanup candidates without unbounded path traversal.
 - Stop suppressing unrelated connect-node-only network process errors during active Cursor turns; SDK-vendored and backend-detail provenance remain scoped.
 - Qualify vendored Node transport abort/stall provenance and HTTP/2 defaults, and keep scoped MCP timeout overrides independent of minified class/argument names. Refresh catalog generator provenance to SDK 1.0.35; the 45-model metadata and checkpoint limits are unchanged.
-- Upgrade root TypeBox validation to 1.3.35 while retaining direct Pi 0.99.1 dependencies, lockfile-resolved 0.99.2 transitives and nested TypeBox 1.3.27; update Vitest to 5.0.3.
+- Upgrade root TypeBox validation to 1.3.35 and align direct Pi dependencies with lockfile-resolved 0.99.2 transitives and nested TypeBox 1.3.27; update Vitest to 5.0.3.
 
 ## 0.5.0 - 2026-10-04
 

@@ -16,10 +16,6 @@ import type { CursorPiBridgeToolRequest, CursorPiToolBridgeRun } from "./cursor-
 import { getCursorSessionScopeKey } from "./cursor-session-scope.js";
 import type { CursorSdkEventDebugRecorder } from "./cursor-sdk-event-debug.js";
 import { installCursorSdkProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
-import {
-	isCursorAskQuestionBlocked,
-	registerCursorAskQuestionBlockedSync,
-} from "./cursor-ask-question-blocked-state.js";
 
 export class CursorLiveRunAbortError extends Error {
 	constructor() {
@@ -108,8 +104,6 @@ export interface CursorLiveRunCoordinator {
 	waitForProgress(run: CursorLiveRun, signal?: AbortSignal): Promise<void>;
 	withRunLease<T>(run: CursorLiveRun, signal: AbortSignal | undefined, body: () => Promise<T>): Promise<T>;
 	requestIdleDispose(run: CursorLiveRun): void;
-	/** Pause or restart idle-dispose timers to match ask_question UI blocked state (#281). */
-	syncIdleDisposeWithAskQuestionBlocked(): void;
 	release(run: CursorLiveRun): Promise<void>;
 	count(): number;
 }
@@ -159,6 +153,7 @@ interface CursorLiveRunPrivateState {
 	waiters: Set<ProgressWaiter>;
 	idleDisposeTimer?: ReturnType<typeof setTimeout>;
 	idleDisposeRequested: boolean;
+	pendingCallUnsubscribers?: Array<() => void>;
 	leased: boolean;
 	leaseQueue: LeaseWaiter[];
 	releasing?: Promise<void>;
@@ -319,6 +314,12 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 				leased: false,
 				leaseQueue: [],
 			});
+			const state = getPrivateState(run);
+			state.pendingCallUnsubscribers = [...new Set([run.bridgeRun, run.sessionBridgeRun])].flatMap((bridge) =>
+				bridge ? [bridge.onPendingToolCallsChanged(() => {
+					if (state.idleDisposeRequested || state.idleDisposeTimer) coordinator.requestIdleDispose(run);
+				})] : [],
+			);
 			pendingRuns.set(run.id, run);
 			pendingRunIdsByScopeKey.set(sessionAgentScopeKey, run.id);
 			return run;
@@ -498,34 +499,19 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 			const state = getPrivateState(run);
 			clearIdleDisposeTimer(run);
 			state.idleDisposeRequested = true;
-			if (state.leased || state.leaseQueue.length > 0) return;
-			// Keep the dispose request pending while ask_question awaits UI (#281).
-			if (isCursorAskQuestionBlocked()) return;
+			if (state.leased || state.leaseQueue.length > 0 ||
+				[run.bridgeRun, run.sessionBridgeRun].some((bridge) => bridge?.hasPendingToolCalls())) return;
 			state.idleDisposeRequested = false;
 			state.idleDisposeTimer = setTimeout(() => {
+				if ([run.bridgeRun, run.sessionBridgeRun].some((bridge) => bridge?.hasPendingToolCalls())) {
+					coordinator.requestIdleDispose(run);
+					return;
+				}
 				void coordinator.release(run).catch(() => {
 					// Idle dispose must not leave release failures as unhandled rejections.
 				});
 			}, deps.getIdleDisposeMs());
 			state.idleDisposeTimer.unref?.();
-		},
-
-		syncIdleDisposeWithAskQuestionBlocked(): void {
-			if (isCursorAskQuestionBlocked()) {
-				for (const run of pendingRuns.values()) {
-					if (run.disposed) continue;
-					const state = getPrivateState(run);
-					if (state.idleDisposeTimer) state.idleDisposeRequested = true;
-					clearIdleDisposeTimer(run);
-				}
-				return;
-			}
-			for (const run of pendingRuns.values()) {
-				if (run.disposed) continue;
-				const state = privateStates.get(run);
-				if (!state?.idleDisposeRequested) continue;
-				coordinator.requestIdleDispose(run);
-			}
 		},
 
 		async release(run): Promise<void> {
@@ -535,6 +521,12 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 				if (run.disposed) return;
 				const abandoned = !isSuccessfulCursorLiveRun(run);
 				run.disposed = true;
+				for (const unsubscribe of state.pendingCallUnsubscribers ?? []) {
+					try { unsubscribe(); } catch {
+						// Cleanup continues even if an observer cannot detach.
+					}
+				}
+				state.pendingCallUnsubscribers = [];
 				unregister(run);
 				clearIdleDisposeTimer(run);
 				state.idleDisposeRequested = false;
@@ -573,8 +565,5 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 		},
 	};
 
-	registerCursorAskQuestionBlockedSync(() => {
-		coordinator.syncIdleDisposeWithAskQuestionBlocked();
-	});
 	return coordinator;
 }

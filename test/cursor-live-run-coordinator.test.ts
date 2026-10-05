@@ -13,10 +13,6 @@ import {
 	cursorLiveRuns,
 	drainCursorLiveRunTurn,
 } from "../src/cursor-provider-live-run-drain.js";
-import {
-	resetCursorAskQuestionBlockedStateForTests,
-	setCursorAskQuestionBlocked,
-} from "../src/cursor-ask-question-blocked-state.js";
 import { __testUtils as cursorSdkProcessGuardTestUtils } from "../src/cursor-sdk-process-error-guard.js";
 
 const emitProcessEvent = (event: string | symbol, ...args: unknown[]): boolean =>
@@ -64,6 +60,8 @@ function makeBridgeRun(id: string, pendingPiToolCallIds: string[] = []): CursorP
 		takeQueuedToolRequests: vi.fn(() => []),
 		resolveToolResults: vi.fn().mockResolvedValue(undefined),
 		resolveToolResultsFromContext: vi.fn().mockResolvedValue(undefined),
+		hasPendingToolCalls: () => pending.size > 0,
+		onPendingToolCallsChanged: () => () => {},
 		hasPendingPiToolCallId: vi.fn((piToolCallId: string) => pending.has(piToolCallId)),
 		isBridgeMcpToolCall: vi.fn(() => false),
 		setOnToolRequest: vi.fn(),
@@ -103,7 +101,6 @@ function replayIdFromToolCallId(toolCallId: string): string | undefined {
 describe("cursor live run coordinator", () => {
 	afterEach(() => {
 		vi.useRealTimers();
-		resetCursorAskQuestionBlockedStateForTests();
 	});
 
 	it("matches context tool results after trailing user messages and ignores disposed runs", async () => {
@@ -268,53 +265,73 @@ describe("cursor live run coordinator", () => {
 		expect(abandonSessionAgent).toHaveBeenCalledWith("scope-1");
 	});
 
-	it("defers idle disposal while cursor_ask_question is blocked on UI (#281)", async () => {
+	it.each(["bridgeRun", "sessionBridgeRun"] as const)("defers idle disposal for owned pending calls on %s and restarts the full window after settlement", async (slot) => {
 		vi.useFakeTimers();
-		const { coordinator, abandonSessionAgent } = makeCoordinator({ idleDisposeMs: 5 });
-		const run = startRun(coordinator);
-		const sdkCancel = vi.fn().mockResolvedValue(undefined);
-		coordinator.attachSdkRun(run, { cancel: sdkCancel });
-
-		setCursorAskQuestionBlocked(true);
-		coordinator.syncIdleDisposeWithAskQuestionBlocked();
+		const { coordinator } = makeCoordinator({ idleDisposeMs: 300_000 });
+		let pending = true;
+		let notify = () => {};
+		const unsubscribe = vi.fn();
+		const bridge = makeBridgeRun("owned-question");
+		bridge.hasPendingToolCalls = () => pending;
+		bridge.onPendingToolCallsChanged = (listener) => { notify = listener; return unsubscribe; };
+		const run = startRun(coordinator, { [slot]: bridge });
+		const sibling = startRun(coordinator, { id: "sibling", scopeKey: "other-scope" });
+		const cancel = vi.fn().mockResolvedValue(undefined);
+		coordinator.attachSdkRun(run, { cancel });
 		coordinator.requestIdleDispose(run);
-		await vi.advanceTimersByTimeAsync(50);
-		expect(coordinator.count()).toBe(1);
-		expect(sdkCancel).not.toHaveBeenCalled();
-
-		setCursorAskQuestionBlocked(false);
-		coordinator.syncIdleDisposeWithAskQuestionBlocked();
-		await vi.advanceTimersByTimeAsync(4);
-		expect(coordinator.count()).toBe(1);
+		coordinator.requestIdleDispose(sibling);
+		await vi.advanceTimersByTimeAsync(300_001);
+		expect(run.disposed).toBe(false);
+		expect(sibling.disposed).toBe(true);
+		expect(cancel).not.toHaveBeenCalled();
+		pending = false;
+		notify();
+		await vi.advanceTimersByTimeAsync(299_999);
+		expect(run.disposed).toBe(false);
 		await vi.advanceTimersByTimeAsync(1);
-		await vi.waitFor(() => expect(coordinator.count()).toBe(0));
-		expect(sdkCancel).toHaveBeenCalledTimes(1);
-		expect(abandonSessionAgent).toHaveBeenCalledWith("scope-1");
+		expect(run.disposed).toBe(true);
+		expect(cancel).toHaveBeenCalledOnce();
+		expect(unsubscribe).toHaveBeenCalledOnce();
 	});
 
-	it("pauses an already-scheduled idle dispose when ask_question becomes blocked (#281)", async () => {
+	it("deduplicates identical bridge slots, rechecks silent pending state, and tolerates unsubscribe failures", async () => {
 		vi.useFakeTimers();
-		const { coordinator, abandonSessionAgent } = makeCoordinator({ idleDisposeMs: 20 });
-		const run = startRun(coordinator);
-		const sdkCancel = vi.fn().mockResolvedValue(undefined);
-		coordinator.attachSdkRun(run, { cancel: sdkCancel });
-
+		const { coordinator } = makeCoordinator({ idleDisposeMs: 5 });
+		let pending = false;
+		const unsubscribe = vi.fn(() => { throw new Error("detach failed"); });
+		const bridge = makeBridgeRun("same-bridge");
+		bridge.hasPendingToolCalls = () => pending;
+		bridge.onPendingToolCallsChanged = vi.fn(() => unsubscribe);
+		const run = startRun(coordinator, { bridgeRun: bridge, sessionBridgeRun: bridge });
 		coordinator.requestIdleDispose(run);
-		await vi.advanceTimersByTimeAsync(5);
-		setCursorAskQuestionBlocked(true);
-		coordinator.syncIdleDisposeWithAskQuestionBlocked();
-		await vi.advanceTimersByTimeAsync(50);
-		expect(coordinator.count()).toBe(1);
-		expect(sdkCancel).not.toHaveBeenCalled();
+		pending = true;
+		await vi.advanceTimersByTimeAsync(10);
+		expect(run.disposed).toBe(false);
+		expect(bridge.onPendingToolCallsChanged).toHaveBeenCalledOnce();
+		await coordinator.release(run);
+		expect(unsubscribe).toHaveBeenCalledOnce();
+		expect(bridge.cancel).toHaveBeenCalledOnce();
+		expect(coordinator.count()).toBe(0);
+	});
 
-		setCursorAskQuestionBlocked(false);
-		coordinator.syncIdleDisposeWithAskQuestionBlocked();
-		await vi.advanceTimersByTimeAsync(19);
-		expect(coordinator.count()).toBe(1);
-		await vi.advanceTimersByTimeAsync(1);
-		await vi.waitFor(() => expect(coordinator.count()).toBe(0));
-		expect(sdkCancel).toHaveBeenCalledTimes(1);
-		expect(abandonSessionAgent).toHaveBeenCalledWith("scope-1");
+	it("cancels an armed idle timer when a call becomes pending and preserves explicit release", async () => {
+		vi.useFakeTimers();
+		const { coordinator } = makeCoordinator({ idleDisposeMs: 5 });
+		let pending = false;
+		let notify = () => {};
+		const bridge = makeBridgeRun("owned-question");
+		bridge.hasPendingToolCalls = () => pending;
+		bridge.onPendingToolCallsChanged = (listener) => { notify = listener; return () => {}; };
+		const run = startRun(coordinator, { bridgeRun: bridge });
+		coordinator.requestIdleDispose(run);
+		await vi.advanceTimersByTimeAsync(4);
+		pending = true;
+		notify();
+		await vi.advanceTimersByTimeAsync(30);
+		expect(run.disposed).toBe(false);
+		await coordinator.release(run);
+		expect(run.disposed).toBe(true);
+		expect(bridge.cancel).toHaveBeenCalledOnce();
 	});
 
 	it("releases successful runs idempotently without abandoning pooled session resources", async () => {

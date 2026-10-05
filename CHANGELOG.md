@@ -6,6 +6,7 @@
 
 ### Fixed
 
+- Bound artifact gzip output during compression at the existing public size cap, retaining the same fail-closed limit evidence and individual test deadlines.
 - Give compatibility build, verification and native contracts separate bounded phases; stop timed-out POSIX command descendants before deleting their isolated workspace. Keep individual test deadlines unchanged.
 
 - Keep Cursor SDK and bridge imports in Pi’s static extension graph so compiled-Bun launchers can resolve them; initialize the native parser vendor path before the SDK loads.

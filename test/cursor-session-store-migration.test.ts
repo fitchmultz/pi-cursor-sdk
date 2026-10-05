@@ -9,7 +9,7 @@ import net from "node:net";
 import tls from "node:tls";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, sep } from "node:path";
+import { basename, dirname, join, sep, toNamespacedPath } from "node:path";
 import { Agent, getDefaultSdkStateRoot } from "@cursor/sdk";
 import { SqliteLocalAgentStore } from "@cursor/sdk/sqlite";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -30,7 +30,7 @@ const agentId = "agent-before-upgrade";
 // under the prefix obtained from the current public getter, not a guessed HOME layout.
 function identity(root: string) { return { version: 1 as const, stateRoot: root }; }
 async function seed(root: string, id = agentId, workspace = cwd) {
-	const opened = await SqliteLocalAgentStore.open({ workspaceRef: cwd, stateRoot: root });
+	const opened = await SqliteLocalAgentStore.open({ workspaceRef: cwd, stateRoot: toNamespacedPath(root) });
 	try {
 		// Inspected installed public create path: omitting model skips catalog
 		// validation. Seed SDK-owned metadata, not an invented agent record.
@@ -56,7 +56,7 @@ async function select(root: string, scopeKey = "session-a", id = agentId) {
 	});
 }
 async function assertHistory(root: string, id = agentId) {
-	const opened = await SqliteLocalAgentStore.open({ workspaceRef: cwd, stateRoot: root });
+	const opened = await SqliteLocalAgentStore.open({ workspaceRef: cwd, stateRoot: toNamespacedPath(root) });
 	try {
 		expect(await opened.runs.get({ agentId: id, runId: `run-${id}` })).toMatchObject({ result: "retained answer" });
 		expect((await opened.runEvents.list({ runId: `run-${id}` })).items).toHaveLength(1);
@@ -575,7 +575,7 @@ describe("installed SDK root migration with real SQLite", () => {
 				phase: "result", deletedAgentIds: [agentId], protectedAgentIds: ["agent-active"],
 			} });
 			open.mockRestore();
-			const owned = await SqliteLocalAgentStore.open({ workspaceRef: cwd, stateRoot: sessionRoot });
+			const owned = await SqliteLocalAgentStore.open({ workspaceRef: cwd, stateRoot: toNamespacedPath(sessionRoot) });
 			try {
 				expect(await owned.agents.get({ agentId })).toBeNull();
 				expect(await owned.agents.get({ agentId: "agent-active" })).toMatchObject({ cwd });
@@ -626,7 +626,7 @@ describe("installed SDK root migration with real SQLite", () => {
 		const selection = await select(old, scopeKey, "agent-active");
 		await selection.sessionStore.dispose();
 		const migrated = buildCursorSessionStateRoot(currentRoot, scopeKey);
-		const opened = await SqliteLocalAgentStore.open({ workspaceRef: cwd, stateRoot: migrated });
+		const opened = await SqliteLocalAgentStore.open({ workspaceRef: cwd, stateRoot: toNamespacedPath(migrated) });
 		try {
 			if (kind === "delete-failure") {
 				expect(await opened.agents.get({ agentId })).toMatchObject({ agentId });

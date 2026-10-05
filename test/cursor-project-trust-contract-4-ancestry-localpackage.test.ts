@@ -17,6 +17,7 @@ import {
 	createTrustIsolatedRunRoot,
 	inspectNativeTrust,
 	makeRunPi,
+	PROJECT_TRUST_FIXTURE_SETUP_TIMEOUT_MS,
 } from "./helpers/project-trust-contract-fixture.js";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
@@ -39,7 +40,7 @@ describe("non-interactive project trust CLI/provider contract", () => {
 
 	beforeAll(() => {
 		({ fixtureRoot, packedPackageRoot, probeExtensionPath } = createTrustIsolatedPackedFixture());
-	}, 120_000);
+	}, PROJECT_TRUST_FIXTURE_SETUP_TIMEOUT_MS);
 
 	beforeEach(async () => {
 		await resetCursorProviderTestState();

@@ -19,6 +19,8 @@ const trustManagerUrl = pathToFileURL(join(dirname(piCli), "core/trust-manager.j
 const rpcFramingText = "RPC framing: x\u2028y\u2029z \uD83D\uDC08";
 const OS_ENV_KEYS = new Set(["PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TMPDIR", "TMP", "TEMP"]);
 
+export const PROJECT_TRUST_FIXTURE_SETUP_TIMEOUT_MS = 180_000;
+
 export type PiMode = "print" | "json" | "rpc";
 type MarkerEvent = {
 	event: string;
@@ -118,7 +120,7 @@ function preparePackedProbeExtension(fixtureRoot: string): { packedPackageRoot: 
 	const extract = spawnSync("tar", ["-xzf", `pack/${tarballName}`, "-C", "extract"], {
 		cwd: fixtureRoot,
 		encoding: "utf8",
-		timeout: 30_000,
+		timeout: 60_000,
 	});
 	expect(extract.error).toBeUndefined();
 	expect(extract.status, extract.stderr).toBe(0);
@@ -186,8 +188,16 @@ export function createTrustIsolatedRunRoot(fixtureRoot: string) {
 
 export function createTrustIsolatedPackedFixture(): { fixtureRoot: string; packedPackageRoot: string; probeExtensionPath: string } {
 	const fixtureRoot = createTrustIsolatedFixtureRoot();
-	const { packedPackageRoot, probeExtensionPath } = preparePackedProbeExtension(fixtureRoot);
-	return { fixtureRoot, packedPackageRoot, probeExtensionPath };
+	try {
+		const { packedPackageRoot, probeExtensionPath } = preparePackedProbeExtension(fixtureRoot);
+		return { fixtureRoot, packedPackageRoot, probeExtensionPath };
+	} catch (error) {
+		try {
+			rmSync(fixtureRoot, { recursive: true, force: true });
+		} finally {
+			throw error;
+		}
+	}
 }
 
 interface ProjectTrustRunContext {

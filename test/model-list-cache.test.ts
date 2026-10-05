@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { ModelListItem } from "@cursor/sdk";
 import {
+	clearModelListCache,
 	fingerprintApiKey,
 	getModelCacheTtlMs,
 	isModelCacheDisabled,
@@ -37,6 +38,15 @@ describe("model-list-cache", () => {
 	afterEach(() => {
 		rmSync(tmpAgentDir, { recursive: true, force: true });
 		process.env = originalEnv;
+	});
+
+	it("removes saved and corrupt catalogs and reports absence", () => {
+		expect(clearModelListCache()).toBe(false);
+		saveModelListCache(fp, MODELS);
+		expect(clearModelListCache()).toBe(true);
+		expect(loadFreshCachedModels(fp)).toBeUndefined();
+		writeFileSync(__testUtils.getCachePath(), "corrupt");
+		expect(clearModelListCache()).toBe(true);
 	});
 
 	it("round-trips a saved catalog for a matching key", () => {

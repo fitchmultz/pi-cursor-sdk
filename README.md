@@ -124,7 +124,7 @@ Then, inside pi:
 4. Paste your Cursor SDK API key.
 5. The key is saved in pi's native `~/.pi/agent/auth.json`.
 
-If pi started without a key, fallback Cursor models still register so `/login` is reachable. After `/login`, fallback model runs can use the stored key, and `/cursor-refresh-models` refreshes the full live Cursor model catalog discovered from the Cursor SDK without restarting pi.
+If pi started without a key, fallback Cursor models still register so `/login` is reachable. Set `PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT=1` to hide extension-discovered Cursor models when neither stored Cursor auth nor `CURSOR_API_KEY` exists. The default remains off; provider login remains available. Pi gives the registered extension catalog precedence over `models.json` additions, so those additions are also hidden. Authentication errors with a present key still use the fallback catalog. After `/login`, fallback model runs can use the stored key, and `/cursor-refresh-models` refreshes the full live Cursor model catalog discovered from the Cursor SDK without restarting pi.
 
 Note: if `/login` shows `Cursor ✓ key in models.json` but you have not saved a Cursor key and `CURSOR_API_KEY` is unset, that status is a pi auth-status limitation. A real Cursor SDK API key is still required for Cursor runs.
 
@@ -141,11 +141,13 @@ One-shot setup:
 pi --api-key "your-key" --model cursor/grok-4.6 --cursor-no-fast -p "Say ok only."
 ```
 
-Startup discovery intentionally does not parse Pi CLI arguments. It uses the stored `cursor` key in `~/.pi/agent/auth.json`, then `CURSOR_API_KEY`; without either, the bundled fallback catalog registers. Provider turns still receive Pi's resolved `--api-key`. `/cursor-refresh-models` and `/cursor-cloud` mutations ask Pi's ModelRegistry for provider `cursor`, so command-time auth follows Pi's provider-scoped resolution and is normalized through `CURSOR_API_KEY` placeholders before reaching the Cursor SDK.
+Catalog discovery checks stored/env auth again at the next `session_start` (for example, a new session) and on `/cursor-refresh-models`. Pi's `/login` and `/logout` do not emit `session_start`; run `/cursor-refresh-models` to update catalog visibility immediately afterward. Failed live discovery remains retryable at the next check. Auth changes invalidate the disk cache, and a completed refresh cannot update a sibling or shut-down registration.
+
+Startup discovery intentionally does not parse Pi CLI arguments. It uses the stored `cursor` key in `~/.pi/agent/auth.json`, then `CURSOR_API_KEY`; without either, the bundled fallback catalog registers unless `PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT` is enabled. Provider turns still receive Pi's resolved `--api-key`. `/cursor-refresh-models` and `/cursor-cloud` mutations ask Pi's ModelRegistry for provider `cursor`, so command-time auth follows Pi's provider-scoped resolution and is normalized through `CURSOR_API_KEY` placeholders before reaching the Cursor SDK.
 
 ### Model catalog cache
 
-To avoid a live `Cursor.models.list` network round-trip on every pi startup, the discovered catalog is cached on disk at `~/.pi/agent/cursor-sdk-model-list.json` (written `0600`, keyed by an API-key fingerprint — the key itself is never stored). Warm startups within the cache TTL skip the network call; the SDK remains in the static extension graph for compiled-Bun loading. `/cursor-refresh-models` always bypasses the cache and refreshes the live catalog. If a refresh fails, a previously cached catalog is preferred over the generic bundled fallback.
+To avoid a live `Cursor.models.list` network round-trip on every pi startup, the discovered catalog is cached on disk at `~/.pi/agent/cursor-sdk-model-list.json` (written `0600`, keyed by an API-key fingerprint — the key itself is never stored). Warm startups within the cache TTL skip the model-list network call; the SDK remains in the static extension graph for compiled-Bun loading. `/cursor-refresh-models` always bypasses the cache and refreshes the live catalog. If a refresh fails, a previously cached catalog is preferred over the generic bundled fallback.
 
 ```bash
 # Cache lifetime in milliseconds (default 86400000 = 24h).

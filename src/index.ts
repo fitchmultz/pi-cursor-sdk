@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { discoverModels, type CursorModelFallbackIssue } from "./model-discovery.js";
+import type { CursorModelFallbackIssue } from "./model-discovery.js";
+import { createCursorModelAuthResync } from "./cursor-model-auth-resync.js";
 import { registerCursorRuntimeControls } from "./cursor-state.js";
 import { registerCursorNativeToolDisplay } from "./cursor-native-tool-display-registration.js";
 import { registerCursorPiToolBridge } from "./cursor-pi-tool-bridge.js";
@@ -56,39 +57,38 @@ export default async function (pi: CursorExtensionApi) {
 	registerCursorAgentsContextDedup(pi);
 	registerCursorOverflowNormalization(pi);
 	let fallbackIssue: CursorModelFallbackIssue | undefined;
-	const models = await discoverModels({
-		onFallback: (issue) => {
-			fallbackIssue = issue;
-		},
+	let setFallbackIssue: (issue: CursorModelFallbackIssue | undefined) => void = () => {};
+	const catalog = createCursorModelAuthResync((result) => {
+		registerCursorProvider(result.models);
+		fallbackIssue = result.issue;
+		setFallbackIssue(result.issue);
 	});
-
-	if (fallbackIssue) {
-		registerCursorFallbackIssueWarning(pi, fallbackIssue);
-	}
+	// Resync precedes warning dispatch so login cannot emit a stale missing-key warning.
+	pi.on("session_start", async () => {
+		await catalog.refresh();
+	});
+	pi.on("session_shutdown", () => {
+		catalog.close();
+	});
+	await catalog.refresh();
+	setFallbackIssue = registerCursorFallbackIssueWarning(pi, fallbackIssue);
 
 	pi.registerCommand("cursor-refresh-models", {
 		description: "Refresh the live Cursor model catalog without restarting pi",
 		handler: async (_args, ctx) => {
-			let refreshFallbackIssue: CursorModelFallbackIssue | undefined;
-			const apiKey = resolveCursorApiKey(await ctx.modelRegistry.getApiKeyForProvider("cursor"));
-			const refreshedModels = await discoverModels({
-				apiKey,
-				forceRefresh: true,
-				onFallback: (issue) => {
-					refreshFallbackIssue = issue;
-				},
+			const result = await catalog.refresh({
+				force: true,
+				resolveCommandKey: async () => resolveCursorApiKey(await ctx.modelRegistry.getApiKeyForProvider("cursor")),
 			});
-			registerCursorProvider(refreshedModels);
-			if (!ctx.hasUI) return;
-			if (refreshFallbackIssue) {
-				ctx.ui.notify(`Cursor model catalog refresh did not use a live catalog: ${refreshFallbackIssue.message}`, "warning");
+			if (!result || !ctx.hasUI) return;
+			if (result.issue) {
+				ctx.ui.notify(`Cursor model catalog refresh did not use a live catalog: ${result.issue.message}`, "warning");
 			} else {
-				ctx.ui.notify(`Cursor model catalog refreshed with ${refreshedModels.length} model${refreshedModels.length === 1 ? "" : "s"}.`, "info");
+				ctx.ui.notify(`Cursor model catalog refreshed with ${result.models.length} model${result.models.length === 1 ? "" : "s"}.`, "info");
 			}
 		},
 	});
 
-	registerCursorProvider(models);
 	// Register last so session_shutdown cleanup remains protected until other Cursor handlers finish.
 	registerCursorSdkSessionProcessErrorGuard(pi);
 }

@@ -40,14 +40,14 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function requestStatus(url: string, headers: Record<string, string>): Promise<number> {
+function requestStatus(url: string, headers: Record<string, string>, body?: string): Promise<number> {
 	return new Promise((resolve, reject) => {
 		const request = httpRequest(url, { method: "POST", headers }, (response) => {
 			response.resume();
 			resolve(response.statusCode ?? 0);
 		});
 		request.on("error", reject);
-		request.end();
+		request.end(body);
 	});
 }
 
@@ -429,6 +429,27 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 		try {
 			expect(await requestStatus(url, { host: "attacker.example" })).toBe(403);
 			expect(await requestStatus(url, { origin: "https://attacker.example" })).toBe(403);
+		} finally {
+			await run.dispose();
+		}
+	});
+
+	it("bounds JSON request bodies before parsing while preserving origin rejection", async () => {
+		const registry = __testUtils.createRegistry(
+			createBridgePiHarness({ active: ["read"], tools: [createToolInfo("read")] }),
+			{ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" },
+		);
+		const run = await registry.createRun();
+		const url = getCursorPiBridgeMcpUrl(run);
+		// Deliberately invalid JSON: bounded reading must reject size before JSON.parse.
+		const oversizedBody = "x".repeat(4 * 1024 * 1024 + 1);
+		try {
+			expect(await requestStatus(url, { "content-type": "application/json" }, oversizedBody)).toBe(413);
+			expect(await requestStatus(url, {
+				"content-type": "application/json",
+				origin: "https://attacker.example",
+			}, oversizedBody)).toBe(403);
+			expect(run.takeQueuedToolRequests()).toEqual([]);
 		} finally {
 			await run.dispose();
 		}

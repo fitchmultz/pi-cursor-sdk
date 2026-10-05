@@ -324,7 +324,13 @@ function compressPlatformArtifactBundle(bundle) {
 	if (!validatePlatformArtifactBundle(bundle)) throw new Error("platform artifact bundle exceeds decoded limits");
 	const serialized = Buffer.from(JSON.stringify(bundle));
 	if (serialized.length > MAX_INFLATED_BUNDLE_JSON_BYTES) throw new Error("platform artifact bundle exceeds inflated JSON limit");
-	const compressed = gzipSync(serialized, { level: 9 });
+	let compressed;
+	try {
+		compressed = gzipSync(serialized, { level: 9, maxOutputLength: MAX_COMPRESSED_BUNDLE_BYTES });
+	} catch (error) {
+		if (error?.code === "ERR_BUFFER_TOO_LARGE") throw new Error("platform artifact bundle exceeds compressed limit");
+		throw error;
+	}
 	if (compressed.length > MAX_COMPRESSED_BUNDLE_BYTES) throw new Error("platform artifact bundle exceeds compressed limit");
 	return compressed;
 }

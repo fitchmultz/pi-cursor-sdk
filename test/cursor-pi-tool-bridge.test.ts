@@ -434,6 +434,28 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 		}
 	});
 
+	it("bounds adapter JSON bodies before parsing while preserving origin rejection", async () => {
+		const { createMcpHonoApp } = await import("@modelcontextprotocol/hono");
+		const app = createMcpHonoApp({ host: "127.0.0.1" });
+		const dispatch = vi.fn(() => new Response("unexpected dispatch"));
+		app.all("*", dispatch);
+		// Exercise the installed adapter's complete body reader directly: an eager socket upload
+		// can race its early rejection on Windows, obscuring the response with ECONNRESET.
+		const oversizedBody = "x".repeat(4 * 1024 * 1024 + 1);
+		const request = (origin?: string) => new Request("http://127.0.0.1/mcp", {
+			method: "POST",
+			headers: {
+				host: "127.0.0.1",
+				"content-type": "application/json",
+				...(origin ? { origin } : {}),
+			},
+			body: oversizedBody,
+		});
+		expect((await app.fetch(request())).status).toBe(413);
+		expect((await app.fetch(request("https://attacker.example"))).status).toBe(403);
+		expect(dispatch).not.toHaveBeenCalled();
+	});
+
 	it("shares and closes one loopback server for concurrent run creation", async () => {
 		const registry = __testUtils.createRegistry(
 			createBridgePiHarness({ active: ["read"], tools: [createToolInfo("read")] }),

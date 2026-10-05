@@ -22,6 +22,7 @@ import {
 	openCursorSessionStore,
 	resolveCursorSessionStoreIdentity,
 	isCanonicalConfiguredSessionStoreIdentity,
+	isCanonicalDefaultSessionStoreIdentity,
 } from "./cursor-session-store.js";
 
 export const CURSOR_SESSION_AGENT_CLEANUP_ENTRY_TYPE = "cursor-sdk-agent-cleanup";
@@ -320,6 +321,10 @@ export async function runCursorSessionAgentCleanupCommand(pi: LocalResumeCleanup
 			for (const candidate of plan.candidates) {
 				const { agentId } = candidate;
 				try {
+					// Identityless legacy entries belong to the SDK default, never a newly configured base.
+					if (storeRootBase !== undefined && !candidate.storeIdentity) {
+						throw new Error("Restore the default Cursor local store configuration before cleaning this legacy agent");
+					}
 					const identity = await resolveCursorSessionStoreIdentity({
 						cwd: ctx.cwd, scopeKey: scope.scopeKey,
 						identities, recordedIdentity: candidate.storeIdentity, agentId,
@@ -337,7 +342,8 @@ export async function runCursorSessionAgentCleanupCommand(pi: LocalResumeCleanup
 						agentId,
 						error: scrubSensitiveText(getString(asRecord(error), "message") ?? String(error)),
 						...(error instanceof InvalidCursorSessionStoreIdentityError
-							&& !isCanonicalConfiguredSessionStoreIdentity(ctx.cwd, scope.scopeKey, candidate.storeIdentity)
+						&& !isCanonicalConfiguredSessionStoreIdentity(ctx.cwd, scope.scopeKey, candidate.storeIdentity)
+						&& !isCanonicalDefaultSessionStoreIdentity(ctx.cwd, scope.scopeKey, candidate.storeIdentity)
 							? { retryable: false } : {}),
 					});
 				}

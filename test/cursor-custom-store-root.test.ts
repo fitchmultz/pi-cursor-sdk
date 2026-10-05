@@ -1,10 +1,11 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SqliteLocalAgentStore } from "@cursor/sdk/sqlite";
 import { CURSOR_STORE_ROOT_ENV, loadCursorSdkProjectConfig, loadCursorSdkUserConfig, parseCursorSdkConfig, resolveCursorSdkConfig } from "../src/cursor-config.js";
-import { buildCursorCustomWorkspaceRoot, buildCursorSessionStateRoot, isCanonicalConfiguredSessionStoreIdentity, openCursorSessionStoreForScope, resolveCursorStoreRootBase, withCursorSessionStoreIdentities, __testUtils as storeTests } from "../src/cursor-session-store.js";
+import { buildCursorCustomWorkspaceRoot, buildCursorSessionStateRoot, isCanonicalConfiguredSessionStoreIdentity, isCanonicalDefaultSessionStoreIdentity, openCursorSessionStoreForScope, resolveCursorStoreRootBase, withCursorSessionStoreIdentities, __testUtils as storeTests } from "../src/cursor-session-store.js";
 import { __testUtils as sessionAgents } from "../src/cursor-session-agent.js";
 import { installCursorSessionStoreMock } from "./helpers/cursor-session-store.js";
 
@@ -67,6 +68,23 @@ describe("configured local store root", () => {
 		expect(isCanonicalConfiguredSessionStoreIdentity(cwd, "scope", { ...identity, stateRoot: stateRoot + "/" })).toBe(false);
 		expect(isCanonicalConfiguredSessionStoreIdentity(cwd, "scope", { ...identity, stateRoot: stateRoot.replace("pi-sessions", "pi-sessions/..//pi-sessions") })).toBe(false);
 		expect(isCanonicalConfiguredSessionStoreIdentity(cwd, "scope", { ...identity, stateRoot: "relative" })).toBe(false);
+	});
+
+	it("classifies only exact default layouts for retry without touching storage", () => {
+		const cwd = join(base, "workspace");
+		const slug = cwd.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
+		for (const algorithm of ["sha256", "md5"]) {
+			const root = join(homedir(), ".cursor", "projects", slug, "sdk-agent-store", createHash(algorithm).update(cwd).digest("hex"));
+			const identity = { version: 1 as const, stateRoot: buildCursorSessionStateRoot(root, "scope") };
+			expect(isCanonicalDefaultSessionStoreIdentity(cwd, "scope", identity)).toBe(true);
+			expect(isCanonicalDefaultSessionStoreIdentity(cwd, "scope", { ...identity, stateRoot: root })).toBe(true);
+			expect(isCanonicalDefaultSessionStoreIdentity(cwd, "other", identity)).toBe(false);
+			expect(isCanonicalDefaultSessionStoreIdentity(join(base, "other"), "scope", identity)).toBe(false);
+			expect(isCanonicalDefaultSessionStoreIdentity(cwd, "scope", { ...identity, stateRoot: identity.stateRoot + "/" })).toBe(false);
+			expect(isCanonicalDefaultSessionStoreIdentity(cwd, "scope", { ...identity, stateRoot: identity.stateRoot.replace("pi-sessions", "pi-sessions/../pi-sessions") })).toBe(false);
+		}
+		expect(isCanonicalDefaultSessionStoreIdentity(cwd, "scope", undefined)).toBe(false);
+		expect(isCanonicalDefaultSessionStoreIdentity(cwd, "scope", { version: 1, stateRoot: "/tmp/untrusted-store" })).toBe(false);
 	});
 
 	it("does not read an untrusted project's malformed store path", () => {

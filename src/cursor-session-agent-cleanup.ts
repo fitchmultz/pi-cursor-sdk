@@ -1,5 +1,7 @@
 import type { LocalAgentStore } from "@cursor/sdk";
 import type { ExtensionAPI, ExtensionCommandContext, SessionEntry } from "@earendil-works/pi-coding-agent";
+import { resolveEffectiveCursorConfig } from "./cursor-runtime-state.js";
+import { getCursorSessionSettings } from "./cursor-session-settings.js";
 import { asRecord, getString } from "./cursor-record-utils.js";
 import { fsyncExistingRegularFile } from "./cursor-durable-fs.js";
 import { scrubSensitiveText } from "./cursor-sensitive-text.js";
@@ -19,6 +21,7 @@ import {
 	withCursorSessionStoreIdentities,
 	openCursorSessionStore,
 	resolveCursorSessionStoreIdentity,
+	isCanonicalConfiguredSessionStoreIdentity,
 } from "./cursor-session-store.js";
 
 export const CURSOR_SESSION_AGENT_CLEANUP_ENTRY_TYPE = "cursor-sdk-agent-cleanup";
@@ -308,6 +311,10 @@ export async function runCursorSessionAgentCleanupCommand(pi: LocalResumeCleanup
 	const failedAgentIds: CursorSessionAgentCleanupFailure[] = [];
 	const openedStores = new Map<string, Awaited<ReturnType<typeof openCursorSessionStore>>>();
 	try {
+		const storeRootBase = resolveEffectiveCursorConfig({
+			cwd: ctx.cwd, scopeKey: scope.scopeKey,
+			projectTrusted: getCursorSessionSettings(scope.scopeKey).projectTrusted,
+		}).local.storeRoot.value;
 		await withCursorSessionStoreIdentities(ctx.cwd, scope.scopeKey, async (identities) => {
 			const operations = await getSdkOperations();
 			for (const candidate of plan.candidates) {
@@ -329,11 +336,13 @@ export async function runCursorSessionAgentCleanupCommand(pi: LocalResumeCleanup
 					failedAgentIds.push({
 						agentId,
 						error: scrubSensitiveText(getString(asRecord(error), "message") ?? String(error)),
-						...(error instanceof InvalidCursorSessionStoreIdentityError ? { retryable: false } : {}),
+						...(error instanceof InvalidCursorSessionStoreIdentityError
+							&& !isCanonicalConfiguredSessionStoreIdentity(ctx.cwd, scope.scopeKey, candidate.storeIdentity)
+							? { retryable: false } : {}),
 					});
 				}
 			}
-		});
+		}, storeRootBase);
 	} catch (error) {
 		const message = scrubSensitiveText(getString(asRecord(error), "message") ?? String(error));
 		failedAgentIds.push(...plan.candidateAgentIds.map((agentId) => ({ agentId, error: message })));

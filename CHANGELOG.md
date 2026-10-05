@@ -4,6 +4,10 @@
 
 ## 0.5.1 - 2026-10-05
 
+### Added
+
+- Allow owned per-cwd/session persistent local stores beneath a configured `local.storeRoot` or `PI_CURSOR_SDK_STATE_ROOT`, preserving default SDK migration when unset. Adapted from #236.
+
 ### Fixed
 
 - Give compatibility build, verification and native contracts separate bounded phases; stop timed-out POSIX command descendants before deleting their isolated workspace. Keep individual test deadlines unchanged.

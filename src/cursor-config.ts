@@ -36,6 +36,17 @@ export const CURSOR_SANDBOX_ENV = "PI_CURSOR_SANDBOX";
 export const CURSOR_LOCAL_FORCE_ENV = "PI_CURSOR_LOCAL_FORCE";
 export const CURSOR_LOCAL_RESUME_ENV = "PI_CURSOR_LOCAL_RESUME";
 export const CURSOR_HTTP1_ENV = "PI_CURSOR_HTTP_1_1";
+export const CURSOR_STORE_ROOT_ENV = "PI_CURSOR_SDK_STATE_ROOT";
+
+export class CursorSdkConfigValidationError extends Error {}
+
+function parseStoreRoot(value: unknown): string | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value !== "string" || !value.trim() || /[\x00-\x1f\x7f]/.test(value)) {
+		throw new CursorSdkConfigValidationError("Invalid Cursor local storeRoot: use a non-empty filesystem path without control characters");
+	}
+	return value.trim();
+}
 
 export type CursorConfigSource = "cli" | "environment" | "project" | "user" | "session" | "model-alias" | "builtin";
 export type CursorConfigTrustLevel = "one-shot" | "environment" | "trusted-project" | "user" | "session" | "model-catalog" | "builtin";
@@ -73,6 +84,7 @@ export interface CursorSdkConfig {
 		force?: boolean;
 		resume?: boolean;
 		useHttp1ForAgent?: boolean;
+		storeRoot?: string;
 	};
 }
 
@@ -113,6 +125,7 @@ export interface CursorResolvedSdkConfig {
 		force: CursorResolvedSetting<boolean>;
 		resume: CursorResolvedSetting<boolean>;
 		useHttp1ForAgent: CursorResolvedSetting<boolean>;
+		storeRoot: CursorResolvedSetting<string | undefined>;
 	};
 }
 
@@ -275,6 +288,8 @@ export function parseCursorSdkConfig(value: unknown): CursorSdkConfig | undefine
 	const local = asRecord(record.local);
 	if (local) {
 		const parsedLocal: NonNullable<CursorSdkConfig["local"]> = {};
+		const storeRoot = parseStoreRoot(local.storeRoot);
+		if (storeRoot !== undefined) parsedLocal.storeRoot = storeRoot;
 		if (typeof local.autoReview === "boolean") parsedLocal.autoReview = local.autoReview;
 		if (typeof local.sandbox === "boolean") parsedLocal.sandbox = local.sandbox;
 		if (typeof local.force === "boolean") parsedLocal.force = local.force;
@@ -300,7 +315,8 @@ function readCursorSdkConfigFile(path: string): CursorSdkConfig {
 	if (!existsSync(path)) return {};
 	try {
 		return parseCursorSdkConfig(JSON.parse(readFileSync(path, "utf-8"))) ?? {};
-	} catch {
+	} catch (error) {
+		if (error instanceof CursorSdkConfigValidationError) throw error;
 		return {};
 	}
 }
@@ -605,13 +621,15 @@ export function cursorSdkConfigFromEnv(env: Record<string, string | undefined> =
 	const force = parseOptionalEnvBoolean(env[CURSOR_LOCAL_FORCE_ENV]);
 	const resume = parseOptionalEnvBoolean(env[CURSOR_LOCAL_RESUME_ENV]);
 	const useHttp1ForAgent = parseOptionalEnvBoolean(env[CURSOR_HTTP1_ENV]);
-	if (autoReview !== undefined || sandbox !== undefined || force !== undefined || resume !== undefined || useHttp1ForAgent !== undefined) {
+	const storeRoot = parseStoreRoot(env[CURSOR_STORE_ROOT_ENV]);
+	if (autoReview !== undefined || sandbox !== undefined || force !== undefined || resume !== undefined || useHttp1ForAgent !== undefined || storeRoot !== undefined) {
 		config.local = {
 			...(autoReview !== undefined ? { autoReview } : {}),
 			...(sandbox !== undefined ? { sandboxOptions: { enabled: sandbox } } : {}),
 			...(force !== undefined ? { force } : {}),
 			...(resume !== undefined ? { resume } : {}),
 			...(useHttp1ForAgent !== undefined ? { useHttp1ForAgent } : {}),
+			...(storeRoot !== undefined ? { storeRoot } : {}),
 		};
 	}
 	return config;
@@ -752,6 +770,13 @@ export function resolveCursorSdkConfig(options: ResolveCursorSdkConfigOptions = 
 			}),
 		},
 		local: {
+			storeRoot: resolveOrdinaryField(LOCAL_ORDER, {
+				cli: parseStoreRoot(cli?.local?.storeRoot),
+				environment: env.local?.storeRoot,
+				project: parseStoreRoot(project?.local?.storeRoot),
+				user: parseStoreRoot(user?.local?.storeRoot),
+				builtin: undefined,
+			}),
 			autoReview: resolveOrdinaryField(LOCAL_ORDER, {
 				cli: cli?.local?.autoReview,
 				environment: env.local?.autoReview,

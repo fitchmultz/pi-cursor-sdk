@@ -106,10 +106,15 @@ describe("custom persistent store native filesystem boundary", () => {
 		const seeded = await openCursorSessionStoreForScope(options);
 		await seeded.sessionStore.dispose();
 		const dispose = vi.spyOn(SqliteLocalAgentStore.prototype, "dispose");
+		let opened: SqliteLocalAgentStore | undefined;
 		storeTests.setSdkOperations({
 			getDefaultStateRoot: () => { throw new Error("custom must not derive default"); },
 			openSqliteStore: async (sdkOptions) => {
-				const opened = await SqliteLocalAgentStore.open(sdkOptions);
+				opened = await SqliteLocalAgentStore.open(sdkOptions);
+				// Windows cannot unlink an open SQLite file. Close the real public
+				// store first; the owner must still reject the missing captured leaf
+				// and dispose this same returned store (SDK disposal is idempotent).
+				await opened.dispose();
 				rmSync(join(sdkOptions.stateRoot, "index.db"));
 				return opened;
 			},
@@ -117,8 +122,14 @@ describe("custom persistent store native filesystem boundary", () => {
 		const pending = openCursorSessionStoreForScope(options);
 		try {
 			await expect(pending).rejects.toThrow("disappeared SQLite file");
-			expect(dispose).toHaveBeenCalledOnce();
-		} finally { await (await pending.catch(() => undefined))?.sessionStore.dispose(); }
+			expect(existsSync(join(seeded.sessionStore.identity.stateRoot, "index.db"))).toBe(false);
+			expect(dispose).toHaveBeenCalledTimes(2); // fixture close, then owner rejection cleanup
+			expect(dispose.mock.contexts[0]).toBe(opened);
+			expect(dispose.mock.contexts[1]).toBe(opened);
+		} finally {
+			await (await pending.catch(() => undefined))?.sessionStore.dispose();
+			await opened?.dispose(); // also owns cleanup if mutation fails before return
+		}
 	});
 
 	it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("rejects a root-owned destination without chmod or SQLite side effects", async () => {

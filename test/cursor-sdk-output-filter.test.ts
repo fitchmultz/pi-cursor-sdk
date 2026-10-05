@@ -2,10 +2,10 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Console } from "node:console";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { installCursorSdkOutputFilter, withCursorSdkOutputNoticeHandler, suppressCursorSdkOutput } from "../src/cursor-sdk-output-filter.js";
 import { installCursorSdkOutputFilter as installScriptFilter } from "../scripts/lib/cursor-sdk-output-filter.mjs";
-import { installedBootstrapEmitters } from "./helpers/cursor-sdk-bootstrap.js";
+import { prepareInstalledBootstrapEmitters } from "./helpers/cursor-sdk-bootstrap.js";
 import { writeRawTestEvidence } from "./helpers/raw-test-evidence.mjs";
 
 function collectOutput(backpressure = false) {
@@ -26,6 +26,9 @@ function collectOutput(backpressure = false) {
 // Dependency execution owns signature drift/confinement; sink replay owns byte
 // framing/restoration, not the timing of real Agent/backend emissions.
 describe("Cursor SDK presentation boundary", () => {
+	let installedBootstrapEmitters: Awaited<ReturnType<typeof prepareInstalledBootstrapEmitters>>;
+	beforeAll(async () => { installedBootstrapEmitters = await prepareInstalledBootstrapEmitters(); });
+
 	it.each([false, true])("frames installed printer/guard/completion/hook bytes with colors=%s", async (colors) => {
 		const output = collectOutput();
 		const root = mkdtempSync(join(tmpdir(), "cursor-output-contract-"));

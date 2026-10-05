@@ -6,7 +6,7 @@ import ts from "@typescript/typescript6";
 import { installedCursorModules } from "./cursor-sdk-installed-modules.js";
 
 /** Execute the installed printer and the actual confinement branch, not Agent/send. */
-export async function installedBootstrapEmitters(useColors: boolean) {
+export async function prepareInstalledBootstrapEmitters() {
 	const modules = await installedCursorModules();
 	const source = modules.factorySource("./src/agent/local-executor.ts");
 	const ast = ts.createSourceFile("local-executor.js", `(${source})`, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
@@ -32,21 +32,6 @@ export async function installedBootstrapEmitters(useColors: boolean) {
 		if (!call || !ts.isIdentifier(call.expression)) throw new Error(`Installed call contract changed: ${property}`);
 		return call.expression.text;
 	}
-	const previous = { force: process.env.FORCE_COLOR, no: process.env.NO_COLOR };
-	delete process.env.NO_COLOR;
-	process.env.FORCE_COLOR = useColors ? "1" : "0";
-	// The logger's default backend is constructed at factory evaluation.
-	let core: any, logger: any;
-	try {
-		core = modules("../context/dist/core.js");
-		logger = modules("../context/dist/logger.js");
-	} finally {
-		if (previous.force === undefined) delete process.env.FORCE_COLOR; else process.env.FORCE_COLOR = previous.force;
-		if (previous.no === undefined) delete process.env.NO_COLOR; else process.env.NO_COLOR = previous.no;
-	}
-	const contextFactory = Object.values(core).filter((value): value is () => any => typeof value === "function" && value.length === 0);
-	const loggerFactory = Object.values(logger).filter((value): value is (name: string) => any => typeof value === "function");
-	if (contextFactory.length !== 1 || loggerFactory.length !== 1) throw new Error("Installed context/logger exports changed");
 	const inventory = find(ts.isFunctionExpression, '"managed_skills.startup_inventory"');
 	const load = find(ts.isFunctionExpression, '"loadUserLocalPlugins: no home directory available, skipping"');
 	const pluginLogger = find(ts.isObjectLiteralExpression, '"[local-plugins-bootstrap]"');
@@ -74,18 +59,11 @@ export async function installedBootstrapEmitters(useColors: boolean) {
 	const pathNamespace = descendants(paths.expression, ts.isIdentifier)[0] as ts.Identifier;
 	const readDir = descendants(load, n => ts.isPropertyAccessExpression(n) && n.name.text === "readdir")[0] as ts.PropertyAccessExpression;
 	const fsNamespace = descendants(readDir.expression, ts.isIdentifier)[0] as ts.Identifier;
-	let readerCalls = 0;
-	const plugin = runInNewContext(`let ${bound.getText(ast)}; const ${storage.getText(ast)}; ${getSink.getText(ast)}
+	const pluginSource = `let ${bound.getText(ast)}; const ${storage.getText(ast)}; ${getSink.getText(ast)}
 		const ${facadeName}=${facade.initializer!.getText(ast)}; ${guard.getText(ast)}
-		({ load: (${load.getText(ast)}), logger: (${pluginLogger.getText(ast)}) })`, {
-		console, process, performance, [asyncNamespace.expression.getText(ast)]: { AsyncLocalStorage },
-		[pathNamespace.text]: path, [fsNamespace.text]: fs,
-		[(reader.expression as ts.Identifier).text]: () => { readerCalls++; throw new Error("Outside guard reached plugin reader"); },
-	});
+		({ load: (${load.getText(ast)}), logger: (${pluginLogger.getText(ast)}) })`;
 	const inventoryLogger = callName(inventory, "info");
-	const emitInventory = runInNewContext(`(${inventory.getText(ast)})`, {
-		[pathNamespace.text]: path, [inventoryLogger]: loggerFactory[0]!("builtin-skills-sync"),
-	});
+	const inventorySource = `(${inventory.getText(ast)})`;
 	const completions = [
 		"LocalCursorRulesService load completed",
 		"AgentSkillsCursorRulesService load completed",
@@ -108,30 +86,65 @@ export async function installedBootstrapEmitters(useColors: boolean) {
 	const defaultLogger = find(ts.isVariableDeclaration, `${hooks.parameters[2]!.initializer!.getText(ast)}=`);
 	const hookFormat = find(ts.isTemplateExpression, "[hooks] ${");
 	const formatParameter = hookFormat.templateSpans[0]!.expression.getText(ast);
-	const formatHook = runInNewContext(`(${formatParameter}) => ${hookFormat.getText(ast)}`) as (message: string) => string;
-	const convertHook = runInNewContext(`const ${toolMap.getText(ast)}, ${unsupported.getText(ast)}, ${defaultLogger.getText(ast)};
-		${hookDefinition.getText(ast)}; (${hooks.getText(ast)})`);
-	const hookNotices: string[] = [];
-	for (const [event, matchers] of [
-		["SessionStart", ["startup", "resume", "clear", "compact"]],
-		["PreCompact", ["manual", "auto"]],
-		["PreToolUse", ["Glob"]],
-	] as const) {
-		for (const matcher of matchers) {
-			const warnings: string[] = [];
-			convertHook({ matcher, hooks: [{ type: "command", command: "true" }] }, event, { warn: (message: string) => warnings.push(formatHook(message)) });
-			// Glob also emits a meaningful all-tools-skipped warning: do not filter it.
-			if (!warnings[0]) throw new Error(`Installed hook warning changed: ${event}/${matcher}`);
-			hookNotices.push(warnings[0]);
+	const hookFormatSource = `(${formatParameter}) => ${hookFormat.getText(ast)}`;
+	const hookSource = `const ${toolMap.getText(ast)}, ${unsupported.getText(ast)}, ${defaultLogger.getText(ast)};
+		${hookDefinition.getText(ast)}; (${hooks.getText(ast)})`;
+	const parserWarning = find(ts.isStringLiteral, "shell-parser: tree-sitter natives are unavailable").text;
+	const asyncNamespaceName = asyncNamespace.expression.getText(ast);
+	const pathNamespaceName = pathNamespace.text, fsNamespaceName = fsNamespace.text;
+	const readerName = (reader.expression as ts.Identifier).text;
+
+	// Discovery is complete before any process-output capture. Binding always
+	// evaluates fresh exports/VM contexts, including the retained-console case.
+	return async (useColors: boolean) => {
+		const freshModules = await installedCursorModules();
+		const previous = { force: process.env.FORCE_COLOR, no: process.env.NO_COLOR };
+		delete process.env.NO_COLOR;
+		process.env.FORCE_COLOR = useColors ? "1" : "0";
+		let core: any, logger: any;
+		try {
+			core = freshModules("../context/dist/core.js");
+			logger = freshModules("../context/dist/logger.js");
+		} finally {
+			if (previous.force === undefined) delete process.env.FORCE_COLOR; else process.env.FORCE_COLOR = previous.force;
+			if (previous.no === undefined) delete process.env.NO_COLOR; else process.env.NO_COLOR = previous.no;
 		}
-	}
-	return {
-		inventory: () => emitInventory(contextFactory[0]!().withName("syncBuiltinSkills"), "/unused", [], { skills: {} }),
-		plugins: (home: string) => plugin.load({ userHomeDir: home, log: plugin.logger }),
-		readerCalls: () => readerCalls,
-		parserWarning: find(ts.isStringLiteral, "shell-parser: tree-sitter natives are unavailable").text,
-		completions,
-		hookNotices,
-		completion: (message: string) => loggerFactory[0]!("cursor-rules").info(contextFactory[0]!().withName("loadRules"), message),
+		const contextFactory = Object.values(core).filter((value): value is () => any => typeof value === "function" && value.length === 0);
+		const loggerFactory = Object.values(logger).filter((value): value is (name: string) => any => typeof value === "function");
+		if (contextFactory.length !== 1 || loggerFactory.length !== 1) throw new Error("Installed context/logger exports changed");
+		let readerCalls = 0;
+		const plugin = runInNewContext(pluginSource, {
+			console, process, performance, [asyncNamespaceName]: { AsyncLocalStorage },
+			[pathNamespaceName]: path, [fsNamespaceName]: fs,
+			[readerName]: () => { readerCalls++; throw new Error("Outside guard reached plugin reader"); },
+		});
+		const emitInventory = runInNewContext(inventorySource, {
+			[pathNamespaceName]: path, [inventoryLogger]: loggerFactory[0]!("builtin-skills-sync"),
+		});
+		const formatHook = runInNewContext(hookFormatSource) as (message: string) => string;
+		const convertHook = runInNewContext(hookSource);
+		const hookNotices: string[] = [];
+		for (const [event, matchers] of [
+			["SessionStart", ["startup", "resume", "clear", "compact"]],
+			["PreCompact", ["manual", "auto"]],
+			["PreToolUse", ["Glob"]],
+		] as const) {
+			for (const matcher of matchers) {
+				const warnings: string[] = [];
+				convertHook({ matcher, hooks: [{ type: "command", command: "true" }] }, event, { warn: (message: string) => warnings.push(formatHook(message)) });
+				// Glob also emits a meaningful all-tools-skipped warning: do not filter it.
+				if (!warnings[0]) throw new Error(`Installed hook warning changed: ${event}/${matcher}`);
+				hookNotices.push(warnings[0]);
+			}
+		}
+		return {
+			inventory: () => emitInventory(contextFactory[0]!().withName("syncBuiltinSkills"), "/unused", [], { skills: {} }),
+			plugins: (home: string) => plugin.load({ userHomeDir: home, log: plugin.logger }),
+			readerCalls: () => readerCalls,
+			parserWarning,
+			completions: [...completions],
+			hookNotices,
+			completion: (message: string) => loggerFactory[0]!("cursor-rules").info(contextFactory[0]!().withName("loadRules"), message),
+		};
 	};
 }

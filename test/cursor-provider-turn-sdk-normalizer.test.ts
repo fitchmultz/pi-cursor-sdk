@@ -4,6 +4,23 @@ import { CursorShellOutputTracker } from "../src/cursor-provider-turn-shell-outp
 import { CursorToolCompletionLedger } from "../src/cursor-provider-turn-tool-ledger.js";
 
 describe("resolveCursorToolCompletion", () => {
+	it.each(["delta", "step"] as const)("reconciles a shell start with an aliased %s completion and different ID", source => {
+		const ledger = new CursorToolCompletionLedger();
+		const shellOutput = new CursorShellOutputTracker();
+		ledger.registerStartedToolCall("started-shell", { name: "shell", args: { command: "echo done" } });
+		shellOutput.onShellToolStarted("started-shell");
+		shellOutput.appendShellOutputDelta({ stream: "stdout", data: "done" });
+		const clear = vi.fn();
+		const resolution = resolveCursorToolCompletion({
+			source, callId: "completed-shell", toolCall: {
+				name: "bash", args: { command: "echo done" }, result: { status: "success", value: {} },
+			}, ledger, shellOutput, onClearStartedCallId: clear,
+		});
+		expect(resolution).toMatchObject({ action: "handle", matchedStartedCallId: "started-shell", toolCall: { result: { value: { stdout: "done" } } } });
+		expect(clear).toHaveBeenCalledWith("started-shell");
+		expect([...ledger.startedToolCallEntries()]).toEqual([]);
+	});
+
 	it("keeps started tool args when the completed Cursor update only contains a result", () => {
 		const ledger = new CursorToolCompletionLedger();
 		const shellOutput = new CursorShellOutputTracker();

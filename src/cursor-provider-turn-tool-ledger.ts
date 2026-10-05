@@ -1,3 +1,4 @@
+import { normalizeCursorToolName } from "./cursor-tool-presentation-registry.js";
 import { getToolArgs, getToolName } from "./cursor-transcript-utils.js";
 
 export type CursorToolDisplaySource = "started" | "fallback" | "transcript";
@@ -53,12 +54,12 @@ export class CursorToolCompletionLedger {
 			return stepId;
 		}
 		const fingerprint = getStartedToolCallFingerprint(toolCall);
-		for (const [callId, startedToolCall] of this.startedToolCalls) {
-			if (getStartedToolCallFingerprint(startedToolCall) !== fingerprint) continue;
-			this.clearStartedToolCall(callId);
-			return callId;
-		}
-		return undefined;
+		const matches = [...this.startedToolCalls].filter(([, started]) => getStartedToolCallFingerprint(started) === fingerprint);
+		// Identical concurrent shells cannot be joined safely without a matching ID.
+		if (normalizeCursorToolName(getToolName(toolCall)) === "shell" && matches.length !== 1) return undefined;
+		const callId = matches[0]?.[0];
+		if (callId !== undefined) this.clearStartedToolCall(callId);
+		return callId;
 	}
 
 	recordCompletedIdentity(identity: string): void {
@@ -121,5 +122,9 @@ export function getToolFingerprint(value: unknown): string {
 }
 
 export function getStartedToolCallFingerprint(toolCall: unknown): string {
-	return getToolFingerprint({ toolName: getToolName(toolCall), args: getToolArgs(toolCall) });
+	const name = getToolName(toolCall);
+	// SDK callbacks can use different shell aliases for the same invocation.
+	// Keep exact argument matching; assistant text alone is not completion proof.
+	const toolName = normalizeCursorToolName(name) === "shell" ? "shell" : name;
+	return getToolFingerprint({ toolName, args: getToolArgs(toolCall) });
 }

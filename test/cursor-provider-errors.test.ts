@@ -1,4 +1,5 @@
-import { AuthenticationError, IntegrationNotConnectedError } from "@cursor/sdk";
+import { AuthenticationError, IntegrationNotConnectedError, convertConnectError } from "@cursor/sdk";
+import { ConnectError, Code } from "@connectrpc/connect";
 import { describe, expect, it } from "vitest";
 import { makeCursorSdkStallAbortWrapperConnectError } from "./helpers/cursor-sdk-stall-error.js";
 import {
@@ -407,6 +408,25 @@ describe("cursor-provider-errors", () => {
 		const message = sanitizeCursorProviderError(error, "test-key");
 
 		expect(classification).toEqual({ kind: "network", source: "cursor-backend-details" });
+		expect(message).toContain("Network error");
+		expect(message).toContain("failed during network or service I/O");
+		expect(message).not.toContain("[unavailable] Error");
+	});
+
+	it("classifies a backend UNAVAILABLE ConnectError after @cursor/sdk re-wraps it as NetworkError (#265)", () => {
+		const raw = new ConnectError("Error", Code.Unavailable);
+		(raw as { details: Array<{ type: string }> }).details = [{ type: "aiserver.v1.ErrorDetails" }];
+		const error = convertConnectError(raw);
+
+		expect(error.name).toBe("NetworkError");
+		expect((error as { code?: unknown }).code).toBe("unavailable");
+		expect(error.message).toBe("[unavailable] Error");
+		expect((error as { details?: unknown }).details).toBeUndefined();
+		expect((error.cause as Error).name).toBe("ConnectError");
+		expect((error.cause as { code?: unknown }).code).toBe(14);
+
+		expect(classifyCursorConnectError(error)).toEqual({ kind: "network", source: "cursor-sdk-stack" });
+		const message = sanitizeCursorProviderError(error, "test-key");
 		expect(message).toContain("Network error");
 		expect(message).toContain("failed during network or service I/O");
 		expect(message).not.toContain("[unavailable] Error");

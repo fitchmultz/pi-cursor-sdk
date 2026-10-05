@@ -67,6 +67,7 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 	private readonly knownMcpToolNames: ReadonlySet<string>;
 	private readonly knownCursorMcpCallIds = new Set<string>();
 	private readonly queuedRequests: CursorPiBridgeToolRequest[] = [];
+	private readonly pendingToolCallListeners = new Set<() => void>();
 	private readonly pendingByPiToolCallId = new Map<string, PendingBridgeCall>();
 	private readonly pendingByBridgeCallId = new Map<string, PendingBridgeCall>();
 	private readonly pendingByCursorMcpCallId = new Map<string, PendingBridgeCall>();
@@ -190,6 +191,23 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 		return this.pendingByPiToolCallId.has(piToolCallId);
 	}
 
+	hasPendingToolCalls(): boolean {
+		return this.pendingCount() > 0;
+	}
+
+	onPendingToolCallsChanged(listener: () => void): () => void {
+		this.pendingToolCallListeners.add(listener);
+		return () => { this.pendingToolCallListeners.delete(listener); };
+	}
+
+	private notifyPendingToolCallsChanged(): void {
+		for (const listener of this.pendingToolCallListeners) {
+			try { listener(); } catch {
+				// Observers must not prevent call registration or protocol settlement.
+			}
+		}
+	}
+
 	cancelPendingPiToolCallId(piToolCallId: string, reason: string): boolean {
 		const pending = this.pendingByPiToolCallId.get(piToolCallId);
 		if (!pending) return false;
@@ -234,6 +252,7 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 		if (this.disposed) return;
 		this.disposed = true;
 		this.cancel("Cursor pi tool bridge run disposed");
+		this.pendingToolCallListeners.clear();
 		await waitForProtocolFlush();
 		await Promise.allSettled([
 			this.mcpTransport?.close(),
@@ -315,6 +334,7 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 			this.pendingByBridgeCallId.set(request.bridgeCallId, pending);
 			this.pendingByCursorMcpCallId.set(cursorMcpCallId, pending);
 			this.knownCursorMcpCallIds.add(cursorMcpCallId);
+			this.notifyPendingToolCallsChanged();
 			pending.timeout = setTimeout(() => {
 				const reason = `Cursor pi bridge CallTool timed out after ${this.callTimeoutMs} ms`;
 				this.rejectAndAbortPending(pending, new Error(reason));
@@ -438,5 +458,6 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 		if (pending.request.cursorMcpCallId) this.pendingByCursorMcpCallId.delete(pending.request.cursorMcpCallId);
 		const queuedIndex = this.queuedRequests.findIndex((request) => request.bridgeCallId === pending.request.bridgeCallId);
 		if (queuedIndex >= 0) this.queuedRequests.splice(queuedIndex, 1);
+		this.notifyPendingToolCallsChanged();
 	}
 }

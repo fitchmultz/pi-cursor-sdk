@@ -10,6 +10,7 @@ import { getCursorModelSelectionIdentities } from "../shared/cursor-model-select
 import { loadContextWindowCache } from "./context-window-cache.js";
 import { loadCursorSdk } from "./cursor-sdk-runtime.js";
 import { resolveCursorApiKey, resolveCursorRuntimeApiKey } from "./cursor-api-key.js";
+import { parseEnvBoolean } from "./cursor-env-boolean.js";
 import { sanitizeCursorProviderError } from "./cursor-provider-errors.js";
 import {
 	fingerprintApiKey,
@@ -38,15 +39,17 @@ export interface CursorModelFallbackIssue {
 
 export interface DiscoverModelsOptions {
 	onFallback?: (issue: CursorModelFallbackIssue) => void;
-	apiKey?: string;
+	apiKey?: string | null;
+	/** Reject results from a superseded or closed registration before publishing metadata/cache. */
+	isCurrent?: () => boolean;
 	// Bypass the on-disk model cache and always hit the live catalog. Used by the
 	// /cursor-refresh-models command; the startup path leaves this false so warm
 	// boots skip the slow network round-trip.
 	forceRefresh?: boolean;
 }
 
-async function getDiscoveryApiKey(apiKey?: string): Promise<string | undefined> {
-	return resolveCursorApiKey(apiKey) ?? resolveCursorRuntimeApiKey();
+async function getDiscoveryApiKey(apiKey?: string | null): Promise<string | undefined> {
+	return apiKey === null ? undefined : resolveCursorApiKey(apiKey) ?? resolveCursorRuntimeApiKey();
 }
 
 export interface CursorModelMetadata {
@@ -357,12 +360,24 @@ export function buildCursorModelSelection(
 async function useFallbackModels(options: DiscoverModelsOptions, issue: CursorModelFallbackIssue): Promise<ProviderModelConfig[]> {
 	options.onFallback?.(issue);
 	const { FALLBACK_MODEL_ITEMS } = await import("./cursor-fallback-models.generated.js");
-	return registerModelItems(FALLBACK_MODEL_ITEMS);
+	return options.isCurrent?.() === false ? [] : registerModelItems(FALLBACK_MODEL_ITEMS);
+}
+
+export const HIDE_MODELS_WHEN_LOGGED_OUT_ENV = "PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT";
+
+export function resolveHideModelsWhenLoggedOut(env: Record<string, string | undefined> = process.env): boolean {
+	return parseEnvBoolean(env[HIDE_MODELS_WHEN_LOGGED_OUT_ENV], false);
 }
 
 export async function discoverModels(options: DiscoverModelsOptions = {}): Promise<ProviderModelConfig[]> {
 	const apiKey = await getDiscoveryApiKey(options.apiKey);
+	if (options.isCurrent?.() === false) return [];
 	if (!apiKey) {
+		if (resolveHideModelsWhenLoggedOut()) {
+			options.onFallback?.({ reason: "missing-api-key", message: `Cursor model discovery needs an API key from ${AUTH_SETUP_HINT}. Extension models are hidden until auth exists. ${CATALOG_REFRESH_HINT}` });
+			// An empty owner catalog must not clear metadata used by sibling registrations.
+			return [];
+		}
 		return useFallbackModels(options, {
 			reason: "missing-api-key",
 			message: `Cursor model discovery needs an API key from ${AUTH_SETUP_HINT}. Using fallback Cursor models so /login and model selection still work; fallback models can run once auth exists. ${CATALOG_REFRESH_HINT}`,
@@ -380,7 +395,9 @@ export async function discoverModels(options: DiscoverModelsOptions = {}): Promi
 
 	try {
 		const { Cursor } = await loadCursorSdk();
+		if (options.isCurrent?.() === false) return [];
 		const models = await Cursor.models.list({ apiKey });
+		if (options.isCurrent?.() === false) return [];
 		if (models.length > 0) {
 			saveModelListCache(keyFingerprint, models);
 			return registerModelItems(models);
@@ -390,6 +407,7 @@ export async function discoverModels(options: DiscoverModelsOptions = {}): Promi
 			message: `Cursor model discovery returned no models. Using fallback Cursor models; verify ${AUTH_SETUP_HINT}. ${CATALOG_REFRESH_HINT}`,
 		});
 	} catch (error) {
+		if (options.isCurrent?.() === false) return [];
 		const errorMessage = sanitizeCursorProviderError(error, apiKey);
 		// Prefer a previously cached catalog over the generic bundled fallback when
 		// a live refresh fails (e.g. transient network/auth errors), but keep the

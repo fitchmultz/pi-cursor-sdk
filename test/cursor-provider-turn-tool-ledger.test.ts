@@ -39,6 +39,25 @@ describe("CursorToolCompletionLedger", () => {
 		expect(ledger.hasStartedToolCall("call-a")).toBe(false);
 	});
 
+	it("keeps ambiguous identical shell starts unless a completion supplies an exact ID", () => {
+		const ledger = new CursorToolCompletionLedger();
+		const shell = { name: "shell", args: { command: "echo repeated" } };
+		ledger.registerStartedToolCall("shell-a", shell);
+		ledger.registerStartedToolCall("shell-b", shell);
+		expect(ledger.removeStartedToolCallForStep({ ...shell, name: "bash" }, "other-id")).toBeUndefined();
+		expect([...ledger.startedToolCallEntries()]).toHaveLength(2);
+		expect(ledger.removeStartedToolCallForStep({ ...shell, name: "bash" }, "shell-b")).toBe("shell-b");
+		expect(ledger.hasStartedToolCall("shell-a")).toBe(true);
+	});
+
+	it("does not reconcile shell aliases with different arguments or bridge tool names", () => {
+		const ledger = new CursorToolCompletionLedger();
+		ledger.registerStartedToolCall("shell-a", { name: "shell", args: { command: "echo one" } });
+		expect(ledger.removeStartedToolCallForStep({ name: "bash", args: { command: "echo two" } }, "other")).toBeUndefined();
+		expect(ledger.removeStartedToolCallForStep({ name: "pi__bash", args: { command: "echo one" } }, "other")).toBeUndefined();
+		expect(ledger.hasStartedToolCall("shell-a")).toBe(true);
+	});
+
 	it("tracks bridge-started call ids separately from normal starts", () => {
 		const ledger = new CursorToolCompletionLedger();
 		ledger.markBridgeStarted("bridge-1");

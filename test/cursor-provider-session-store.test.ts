@@ -1,3 +1,5 @@
+// Install the external SDK transport mock before the static provider dependency graph evaluates.
+import "./helpers/cursor-provider-harness.js";
 import { toNamespacedPath } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";

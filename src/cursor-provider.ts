@@ -29,6 +29,7 @@ import type { CursorCloudLifecycleRecorder } from "./cursor-cloud-lifecycle.js";
 import type { CursorRequestProvenance } from "./cursor-request-provenance.js";
 import type { CursorUsageRecorder } from "./cursor-usage-ledger.js";
 import { runExclusiveCursorSessionTurn, __testUtils as cursorSessionTurnQueueTestUtils } from "./cursor-session-turn-queue.js";
+import { withCursorSdkOutputNoticeHandler, type CursorSdkOutputNoticeHandler } from "./cursor-sdk-output-filter.js";
 
 function makeInitialMessage(model: Model<Api>): AssistantMessage {
 	return {
@@ -57,6 +58,7 @@ export interface CursorProviderOwnership {
 	recordCloudLifecycle: CursorCloudLifecycleRecorder;
 	request: CursorRequestProvenance;
 	usageRecorder: CursorUsageRecorder;
+	reportSdkNotice?: CursorSdkOutputNoticeHandler;
 }
 
 export function streamCursor(
@@ -92,7 +94,7 @@ export function streamCursor(
 			stream.push({ type: "start", partial });
 			await runExclusiveCursorSessionTurn(
 				scope.scopeKey,
-				() => runner.run(installCursorSdkProcessErrorGuard()),
+				() => withCursorSdkOutputNoticeHandler(ownership.reportSdkNotice, () => runner.run(installCursorSdkProcessErrorGuard())),
 				options?.signal,
 			);
 		} catch (error) {

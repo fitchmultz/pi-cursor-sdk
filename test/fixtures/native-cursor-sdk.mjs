@@ -13,6 +13,7 @@ export const state = globalThis[Symbol.for("pi-cursor-native-fixture")] ??= {
   configured: [], defaultRootCwds: [],
   usageByCwd: new Map(),
   cloudMutations: [],
+  outputByCwd: new Map(), waitOutputByCwd: new Map(),
 };
 export const Cursor = {
   configure(options) { state.configured.push(options); },
@@ -69,9 +70,11 @@ export const Agent = {
       },
       [Symbol.asyncDispose]: async () => { state.disposed.push(agentId); },
       send: async (message, sendOptions) => {
+        // Diagnostic transport controls, not a real SDK/backend timing claim.
+        for (const { stream, bytes } of state.outputByCwd.get(options.local?.cwd) ?? []) process[stream].write(bytes);
         const index = state.sends.length + 1;
-        state.sends.push({ agentId, message, mode: sendOptions.mode, force: sendOptions.local?.force });
         const id = `run-fixture-${index}`;
+        state.sends.push({ agentId, runId: id, message, mode: sendOptions.mode, force: sendOptions.local?.force });
         const request = [...message.text.matchAll(/(?:^|\n)User: ([^\n]*)/g)].at(-1)?.[1] ?? "";
         let status = "running";
         let settle;
@@ -90,7 +93,15 @@ export const Agent = {
           unsupportedReason: () => "offline fixture",
           conversation: async () => [],
           onDidChangeStatus: () => () => {},
-          wait: () => completion,
+          wait: async () => {
+            const output = state.waitOutputByCwd.get(options.local?.cwd);
+            if (output) {
+              await output.ready;
+              for (const { stream, bytes } of output.bytes) process[stream].write(bytes);
+              output.emitted();
+            }
+            return completion;
+          },
           cancel: async () => { status = "cancelled"; state.cancelled.push(id); settle({ id, status }); },
         };
         if (request.includes("CANCEL_FIXTURE") || state.heldCwds.has(options.local?.cwd)) return run;

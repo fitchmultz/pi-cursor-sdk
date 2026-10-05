@@ -40,13 +40,14 @@ describe("model-list-cache", () => {
 		process.env = originalEnv;
 	});
 
-	it("removes saved and corrupt catalogs and reports absence", () => {
-		expect(clearModelListCache()).toBe(false);
+	it("removes only a valid owned catalog and leaves invalid files untouched", () => {
+		clearModelListCache();
 		saveModelListCache(fp, MODELS);
-		expect(clearModelListCache()).toBe(true);
+		clearModelListCache();
 		expect(loadFreshCachedModels(fp)).toBeUndefined();
 		writeFileSync(__testUtils.getCachePath(), "corrupt");
-		expect(clearModelListCache()).toBe(true);
+		clearModelListCache();
+		expect(readFileSync(__testUtils.getCachePath(), "utf8")).toBe("corrupt");
 	});
 
 	it("round-trips a saved catalog for a matching key", () => {

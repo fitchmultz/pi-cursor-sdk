@@ -85,6 +85,7 @@ const packageJson = require("../package.json") as { files: string[] };
 
 /** Type-only exports that intentionally have no runtime .mjs value. */
 const DECLARATION_TYPE_ONLY_EXPORTS: Record<string, readonly string[]> = {
+	"shared/cursor-sdk-output-filter.d.mts": ["CursorSdkCapabilityNotice", "CursorSdkOutputNoticeHandler"],
 	"shared/cursor-model-selection-identities.d.mts": ["CursorModelSelectionIdentity"],
 	"scripts/cloud-runtime-smoke.d.mts": [
 		"CloudSmokeBranchLaneEvidence",

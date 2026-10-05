@@ -1,48 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { Type } from "typebox";
 import {
-	resetCursorProviderTestState,
-	mockedCreate,
-	mockedCreateAgentPlatform,
-	makeModel,
-	makeContext,
-	makeAssistantMessage,
-	collectEvents,
-	collectTextDeltas,
-	collectThinkingDeltas,
-	getEventsOfType,
-	getDoneEvent,
-	getErrorEvent,
-	getTextEndEvent,
-	hasEventType,
-	isToolCallBlock,
-	isCursorToolStreamEvent,
-	getCreatedAgentOptions,
-	createMockAgentPlatform,
-	registerBridgeForProviderTest,
-	registerNativeToolDisplayForTest,
-	connectMcpClient,
-	createBuiltinToolInfo,
-	createTestToolInfo,
-	cursorModelItems,
-	type CursorDeltaHandler,
-	type CursorStepHandler,
-	type RegisteredTool,
-	mockCreatedAgent,
-	asMockSdkAgent,
-	asMockCursorRun,
-	getPiToolsMcpUrlFromAgentCreateOptions,
+	resetCursorProviderTestState, mockedCreate, makeModel, makeContext,
+	collectEvents, mockCreatedAgent, asMockSdkAgent, asMockCursorRun,
 } from "./helpers/cursor-provider-harness.js";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";
-import { __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
-import { estimateCursorPromptMessageTokens } from "../src/context.js";
-import { __testUtils as sessionAgentTestUtils } from "../src/cursor-session-agent.js";
-import { __testUtils as cursorPiToolBridgeTestUtils } from "../src/cursor-pi-tool-bridge.js";
-import { __testUtils as nativeToolDisplayTestUtils } from "../src/cursor-native-tool-display-state.js";
-import type { Context } from "@earendil-works/pi-ai";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 
 
@@ -126,100 +87,46 @@ describe("streamCursor bridge settings", () => {
 		);
 	});
 
-	it("suppresses all direct Cursor SDK startup writes when setting sources are enabled", async () => {
-		process.env.PI_CURSOR_SETTING_SOURCES = "all";
-		const stdoutChunks: string[] = [];
-		const stderrChunks: string[] = [];
-		const originalStdoutWrite = process.stdout.write;
-		const originalStderrWrite = process.stderr.write;
-		const createCollector = (chunks: string[]) =>
-			((
-				chunk: string | Uint8Array,
-				encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
-				callback?: (error?: Error | null) => void,
-			): boolean => {
-				chunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
-				const done = typeof encodingOrCallback === "function" ? encodingOrCallback : callback;
-				done?.();
-				return true;
-			}) as typeof process.stdout.write;
-		process.stdout.write = createCollector(stdoutChunks);
-		process.stderr.write = createCollector(stderrChunks) as typeof process.stderr.write;
-		const consoleSpy = vi.spyOn(console, "log").mockImplementation((message?: unknown) => {
-			process.stdout.write(`${String(message)}\n`);
-		});
-		const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation((message?: unknown) => {
-			process.stderr.write(`${String(message)}\n`);
-		});
+	it.each(["finished", "failed", "aborted"] as const)("owns filtering from prepare through send/wait and restores after %s", async (outcome) => {
+		const chunks: Buffer[] = [];
+		const original = process.stderr.write;
+		const collector = ((chunk: string | Uint8Array, encoding?: BufferEncoding | ((error?: Error | null) => void), callback?: (error?: Error | null) => void) => {
+			chunks.push(Buffer.from(chunk));
+			(typeof encoding === "function" ? encoding : callback)?.();
+			return true;
+		}) as typeof process.stderr.write;
+		process.stderr.write = collector;
+		const controller = new AbortController();
 		try {
-			const mockSend = vi.fn().mockImplementation(async () => {
-				process.stdout.write("VISIBLE non-startup stdout\n");
-				process.stderr.write("VISIBLE non-startup stderr\n");
-				console.log("VISIBLE non-startup console");
-				console.warn(
-					'[hooks] SessionStart trigger matcher "startup" is not supported in Cursor, hooks will fire for all triggers',
-				);
-				console.warn('[hooks] Tool "Glob" is not supported in Cursor and will be ignored');
-				process.stdout.write('18:05:57.959 INFO  managed_skills.removed ctx=syncBuiltinSkills meta={skill_id: "clone"}\n');
-				process.stderr.write('18:05:57.961 INFO  managed_skills.removed ctx=syncBuiltinSkills meta={skill_id: "cursor"}\n');
-				console.log('18:05:57.962 INFO  managed_skills.removed ctx=syncBuiltinSkills meta={skill_id: "cursor-sdk"}');
-				process.stderr.write("Error initializing ignore mapping for /tmp/project: permission denied\n");
-				console.warn("Ripgrep path not configured. Call configureRipgrepPath() at startup.");
-				return asMockCursorRun({
-					id: "run-1",
-					agentId: "agent-1",
-					status: "finished",
-					wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
-					cancel: vi.fn(),
-					supports: () => true,
-					unsupportedReason: () => undefined,
-				});
-			});
+			// Synthetic orchestration fixture, not SDK/backend callback timing.
+			const noise = '18:05:57.959 INFO  managed_skills.removed ctx=syncBuiltinSkills meta={skill_id: "clone"}\n';
 			mockedCreate.mockImplementationOnce(async () => {
-				process.stdout.write('INFO managed_skills.removed meta={skill_id:"clone"}\n');
-				process.stderr.write("INFO managed_skills.removed stderr\n");
-				console.log("INFO managed_skills.removed via console");
-				process.stdout.write("UNEXPECTED startup stdout with test-key\n");
-				process.stderr.write("UNEXPECTED startup stderr with test-key\n");
-				console.log("UNEXPECTED startup console with test-key");
+				process.stderr.write("creation-only diagnostic\n");
 				return asMockSdkAgent({
 					agentId: "agent-1",
-					send: mockSend,
+					send: async () => {
+						process.stderr.write(noise.slice(0, 25));
+						process.stderr.write(noise.slice(25) + "VISIBLE first-send diagnostic\n");
+						if (outcome === "failed") throw new Error("controlled send failure");
+						return asMockCursorRun({
+							id: "run-1", agentId: "agent-1", status: "finished",
+							wait: async () => {
+								process.stderr.write(noise + "VISIBLE wait diagnostic\n");
+								if (outcome === "aborted") controller.abort();
+								return { id: "run-1", status: outcome === "aborted" ? "cancelled" : "finished" };
+							},
+							cancel: vi.fn().mockResolvedValue(undefined), supports: () => true, unsupportedReason: () => undefined,
+						});
+					},
 					[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
 				});
 			});
-
-			await collectEvents(streamCursor(makeModel("composer-2"), makeContext(), { apiKey: "test-key" }));
-		} finally {
-			process.stdout.write = originalStdoutWrite;
-			process.stderr.write = originalStderrWrite;
-		}
-
-		expect(stdoutChunks.join("")).not.toContain("[hooks]");
-		expect(stderrChunks.join("")).not.toContain("[hooks]");
-		expect(stdoutChunks.join("")).not.toContain("Error initializing ignore mapping for");
-		expect(stderrChunks.join("")).not.toContain("Error initializing ignore mapping for");
-		expect(stdoutChunks.join("")).not.toContain("Ripgrep path not configured");
-		expect(stderrChunks.join("")).not.toContain("Ripgrep path not configured");
-		expect(stdoutChunks.join("")).not.toContain("managed_skills.removed");
-		expect(stderrChunks.join("")).not.toContain("managed_skills.removed");
-		expect(stdoutChunks.join("")).not.toContain("UNEXPECTED startup");
-		expect(stderrChunks.join("")).not.toContain("UNEXPECTED startup");
-		expect(stdoutChunks.join("")).not.toContain("test-key");
-		expect(stderrChunks.join("")).not.toContain("test-key");
-		expect(stdoutChunks.join("")).toContain("VISIBLE non-startup stdout");
-		expect(stdoutChunks.join("")).toContain("VISIBLE non-startup console");
-		expect(stderrChunks.join("")).toContain("VISIBLE non-startup stderr");
-		expect(consoleSpy).not.toHaveBeenCalledWith("INFO managed_skills.removed via console");
-		expect(consoleSpy).not.toHaveBeenCalledWith("UNEXPECTED startup console with test-key");
-		expect(consoleSpy).not.toHaveBeenCalledWith('18:05:57.962 INFO  managed_skills.removed ctx=syncBuiltinSkills meta={skill_id: "cursor-sdk"}');
-		expect(consoleSpy).toHaveBeenCalledWith("VISIBLE non-startup console");
-		expect(consoleWarnSpy).not.toHaveBeenCalledWith(
-			'[hooks] SessionStart trigger matcher "startup" is not supported in Cursor, hooks will fire for all triggers',
-		);
-		expect(consoleWarnSpy).not.toHaveBeenCalledWith('[hooks] Tool "Glob" is not supported in Cursor and will be ignored');
-		consoleSpy.mockRestore();
-		consoleWarnSpy.mockRestore();
+			const events = await collectEvents(streamCursor(makeModel("composer-2"), makeContext(), { apiKey: "test-key", signal: controller.signal }));
+			expect(process.stderr.write).toBe(collector);
+			process.stderr.write("VISIBLE after restore\n");
+			expect(Buffer.concat(chunks).toString()).toBe(`VISIBLE first-send diagnostic\n${outcome === "failed" ? "" : "VISIBLE wait diagnostic\n"}VISIBLE after restore\n`);
+			expect(events.some(event => event.type === (outcome === "finished" ? "done" : "error"))).toBe(true);
+		} finally { process.stderr.write = original; }
 	});
 
 	it("allows Cursor setting sources to be narrowed", async () => {

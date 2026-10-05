@@ -68,16 +68,18 @@ async function assertHistory(root: string, id = agentId) {
 	} finally { await opened.dispose(); }
 }
 
-function recordCleanupCandidate(manager: SessionManager, root: string) {
+function recordCleanupCandidate(manager: SessionManager, root: string, withIdentity = true) {
 	const scopeKey = cursorSessionScopeKeyForManager(manager);
 	const branchHash = resumeTests.hashBranchStep(resumeTests.EMPTY_BRANCH_HASH, manager.getBranch()[0]!);
 	manager.appendCustomEntry(CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE, {
-		version: 2, runtime: "local", agentId: "agent-active",
+		version: withIdentity ? 2 : 1, runtime: "local", agentId: "agent-active",
 		scopeKey, sessionFile: manager.getSessionFile()!, sessionId: manager.getSessionId(), cwd,
 		poolKey: "unchanged-pool", branchPathHash: branchHash, compactionGeneration: 0,
 		sendState: { bootstrapped: true, contextFingerprint: "saved", incrementalSendCount: 2 },
-		createdAt: new Date().toISOString(), storeIdentity: identity(root),
-		cleanupCandidates: [{ agentId, storeIdentity: identity(root) }, { agentId: "agent-active", storeIdentity: identity(root) }],
+		createdAt: new Date().toISOString(),
+		...(withIdentity ? { storeIdentity: identity(root),
+			cleanupCandidates: [{ agentId, storeIdentity: identity(root) }, { agentId: "agent-active", storeIdentity: identity(root) }],
+		} : { cleanupCandidateAgentIds: [agentId, "agent-active"] }),
 	});
 }
 
@@ -179,6 +181,141 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 	vi.unstubAllEnvs();
 	rmSync(home, { recursive: true, force: true });
+});
+
+describe("custom storage admission and durable cleanup with installed SQLite", () => {
+	async function customSelection(storeRoot: string, scopeKey: string, recordedRoot?: string) {
+		return openCursorSessionStoreForScope({ cwd, scopeKey, persistent: true, storeRoot,
+			...(recordedRoot ? { resume: { identity: identity(recordedRoot), agentId } } : {}),
+		});
+	}
+
+	it.each(["other-root", "default", "md5", "workspace", "wrong-scope", "malformed", "v1"] as const)(
+		"rejects %s resume addresses before opening them, preserving colliding histories", async (kind) => {
+			const rootA = join(home, "custom-A");
+			const rootB = join(home, "custom-B");
+			const a = await customSelection(rootA, "session-a");
+			const old = a.sessionStore.identity.stateRoot;
+			await a.sessionStore.dispose();
+			const b = await customSelection(rootB, "session-a");
+			const current = b.sessionStore.identity.stateRoot;
+			await b.sessionStore.dispose();
+			const recorded = kind === "default" ? currentRoot : kind === "md5" ? legacyRoot :
+				kind === "workspace" ? dirname(dirname(current)) : kind === "wrong-scope" ? buildCursorSessionStateRoot(dirname(dirname(current)), "other") :
+				kind === "malformed" ? current.replace("pi-sessions", "pi-sessions//") : old;
+			await seed(old);
+			await seed(current);
+			if (kind === "default" || kind === "md5") await seed(recorded);
+			const oldHashes = fileHashes(old);
+			const getter = vi.fn(getDefaultSdkStateRoot);
+			const opened = vi.fn((options: { workspaceRef: string; stateRoot: string }) => SqliteLocalAgentStore.open(options));
+			storeTests.setSdkOperations({ getDefaultStateRoot: getter, openSqliteStore: opened });
+			const selected = await openCursorSessionStoreForScope({ cwd, scopeKey: "session-a", persistent: true, storeRoot: rootB,
+				resume: { ...(kind === "v1" ? {} : { identity: identity(recorded) }), agentId },
+			});
+			try {
+				expect(selected.resumeAttemptAllowed).toBe(false);
+				expect(selected.resumeFallback).toBe(true);
+				expect(selected.sessionStore.identity.stateRoot).toBe(current);
+				expect(opened.mock.calls.map(([options]) => options.stateRoot)).toEqual([toNamespacedPath(current)]);
+				expect(getter).not.toHaveBeenCalled();
+			} finally { await selected.sessionStore.dispose(); }
+			expect(fileHashes(old)).toEqual(oldHashes);
+			await assertHistory(old);
+			await assertHistory(current);
+			if (kind === "default" || kind === "md5") await assertHistory(recorded);
+			const restarted = await customSelection(rootB, "session-a", current);
+			expect(restarted.resumeAttemptAllowed).toBe(true);
+			await restarted.sessionStore.dispose();
+		},
+	);
+
+	it.each(["current", "concurrent-current", "other-root", "v1", "repair-current-link"] as const)(
+		"durably cleans only the current session identity (%s) while protecting both native branches", async (kind) => {
+			const manager = SessionManager.create(cwd, join(home, "pi-sessions"));
+			manager.appendMessage({ role: "user", content: "saved branch", timestamp: 1 });
+			const branchPoint = manager.getLeafId()!;
+			const scopeKey = cursorSessionScopeKeyForManager(manager);
+			const rootA = join(home, "custom-A");
+			const rootB = join(home, "custom-B");
+			const a = await customSelection(rootA, scopeKey);
+			const old = a.sessionStore.identity.stateRoot;
+			await a.sessionStore.dispose();
+			const b = await customSelection(rootB, scopeKey);
+			const current = b.sessionStore.identity.stateRoot;
+			await b.sessionStore.dispose();
+			await seed(old);
+			for (const id of [agentId, "agent-active", "agent-sibling"]) await seed(current, id);
+			recordCleanupCandidate(manager, kind === "other-root" ? old : current, kind !== "v1");
+			const active = manager.getEntries().at(-1)!;
+			assert(active.type === "custom");
+			const data = active.data as Record<string, unknown>;
+			manager.branch(branchPoint);
+			manager.appendCustomEntry(CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE, { ...data, agentId: "agent-sibling" });
+			manager.branch(active.id);
+			if (kind === "v1") {
+				const { storeIdentity: _identity, cleanupCandidates: _candidates, ...legacy } = data;
+				manager.appendCustomEntry(CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE, { ...legacy, version: 1, cleanupCandidateAgentIds: [agentId, "agent-active", "agent-sibling"] });
+			} else {
+				manager.appendCustomEntry(CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE, { ...data,
+					cleanupCandidates: [agentId, "agent-active", "agent-sibling"].map(id => ({ agentId: id, storeIdentity: identity(kind === "other-root" ? old : current) })),
+				});
+			}
+			const retainedA = kind === "concurrent-current" ? await customSelection(rootA, scopeKey, old) : undefined;
+			const oldHashes = fileHashes(old);
+			try {
+				const held = `${current}-held`;
+				if (kind === "repair-current-link") {
+					renameSync(current, held);
+					symlinkSync(old, current, process.platform === "win32" ? "junction" : "dir");
+				}
+				const getter = vi.fn(getDefaultSdkStateRoot);
+				const remove = vi.spyOn(Agent, "delete");
+				storeTests.setSdkOperations({ getDefaultStateRoot: getter, openSqliteStore: options => SqliteLocalAgentStore.open(options) });
+				const cleanup = async (args = "--yes", storeRoot = rootB) => {
+					const reopened = SessionManager.open(manager.getSessionFile()!);
+					await runCursorSessionAgentCleanupCommand({ appendEntry: (type, entry) => reopened.appendCustomEntry(type, entry) }, args,
+						{ cwd, sessionManager: reopened, ui: { notify: vi.fn() } }, storeRoot);
+					return SessionManager.open(manager.getSessionFile()!);
+				};
+				let reopened = await cleanup();
+				const result = reopened.getEntries().at(-1)!;
+				expect(result).toMatchObject({ data: { phase: "result", protectedAgentIds: ["agent-active", "agent-sibling"] } });
+				expect(reopened.getEntries().slice(-2)[0]).toMatchObject({ data: { phase: "intent", candidateAgentIds: [agentId] } });
+				if (kind === "other-root" || kind === "v1") {
+					expect(result).toMatchObject({ data: { deletedAgentIds: [], failedAgentIds: [{ agentId, retryable: false }] } });
+					expect(remove).not.toHaveBeenCalled();
+					reopened = await cleanup("--dry-run", rootA);
+					expect(reopened.getEntries().at(-1)).toMatchObject({ data: { candidateAgentIds: [] } });
+					await assertHistory(current);
+				} else {
+					if (kind === "repair-current-link") {
+						expect(result).toMatchObject({ data: { deletedAgentIds: [], failedAgentIds: [{ agentId }] } });
+						assert(result.type === "custom");
+						expect(cleanupTests.parseCleanupEntryData(result.data)?.failedAgentIds?.[0]).not.toHaveProperty("retryable");
+						expect(remove).not.toHaveBeenCalled();
+						rmSync(current);
+						renameSync(held, current);
+						reopened = await cleanup();
+					}
+					expect(reopened.getEntries().at(-1)).toMatchObject({ data: { deletedAgentIds: [agentId] } });
+					expect(remove).toHaveBeenCalledOnce();
+					expect(remove).toHaveBeenCalledWith(agentId, expect.objectContaining({ cwd }));
+					const selected = await customSelection(rootB, scopeKey);
+					try {
+						expect(await selected.sessionStore.store.agents.get({ agentId })).toBeNull();
+						expect(await selected.sessionStore.store.checkpoints.get({ agentId, blobId: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" })).toBeNull();
+						expect((await selected.sessionStore.store.runEvents.list({ runId: `run-${agentId}` })).items).toEqual([]);
+					} finally { await selected.sessionStore.dispose(); }
+				}
+				expect(getter).not.toHaveBeenCalled();
+				expect(fileHashes(old)).toEqual(oldHashes);
+				await assertHistory(old);
+				await assertHistory(current, "agent-active");
+				await assertHistory(current, "agent-sibling");
+			} finally { await retainedA?.sessionStore.dispose(); }
+		},
+	);
 });
 
 describe("installed SDK root migration with real SQLite", () => {
@@ -385,6 +522,7 @@ describe("installed SDK root migration with real SQLite", () => {
 			expect(rename).toHaveBeenCalledTimes(1);
 			expect(selections.map((selection) => {
 				assert(selection.persistent);
+				assert(selection.identities.domain === "default");
 				return selection.identities.defaultStore.stateRoot;
 			})).toEqual([legacyRoot, legacyRoot]);
 			expect(selections[0]!.resumeAttemptAllowed).toBe(true);
@@ -442,6 +580,7 @@ describe("installed SDK root migration with real SQLite", () => {
 		let firstDisposed = false;
 		try {
 			assert(sibling.persistent);
+			assert(sibling.identities.domain === "default");
 			expect(sibling.identities.defaultStore.stateRoot).toBe(legacyRoot);
 			expect(existsSync(currentRoot)).toBe(false);
 			await first.sessionStore.dispose();
@@ -615,6 +754,7 @@ describe("installed SDK root migration with real SQLite", () => {
 			try {
 				await cleanup;
 				assert(selection.persistent);
+				assert(selection.identities.domain === "default");
 				expect(selection.identities.defaultStore.stateRoot).toBe(legacyRoot);
 				expect(selection.resumeAttemptAllowed).toBe(true);
 				expect(await selection.sessionStore.store.agents.get({ agentId: "agent-active" })).toMatchObject({ cwd });

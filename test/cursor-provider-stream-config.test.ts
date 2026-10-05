@@ -142,76 +142,6 @@ describe("streamCursor prompt and model config", () => {
 		expect(mockedCreate.mock.calls[0][0].local).toMatchObject({ cwd, autoReview: true, sandboxOptions: { enabled: true } });
 	});
 
-	it.each([true, false])("admits project custom subagents only with trusted ownership (%s)", async (trusted) => {
-		const root = mkdtempSync(join(tmpdir(), "pi-cursor-subagents-"));
-		const cwd = join(root, "repo");
-		mkdirSync(join(cwd, ".pi"), { recursive: true });
-		writeFileSync(join(cwd, ".pi", "settings.json"), "{}\n");
-		writeFileSync(
-			join(cwd, ".pi", "cursor-sdk.json"),
-			JSON.stringify({
-				subagents: {
-					reviewer: { description: "Reviews diffs.", prompt: "You review diffs.", model: "gpt-5.5@272k", thinking: "high" },
-					"bad name": { description: "Unusable.", prompt: "Unusable." },
-				},
-			}),
-		);
-		cursorSessionScopeTestUtils.set(cwd, "/tmp/session-subagents.jsonl", "test-session", trusted);
-		mockCreatedAgent({
-			send: vi.fn().mockResolvedValue({
-				id: "run-1",
-				agentId: "agent-1",
-				status: "finished",
-				wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
-				cancel: vi.fn(),
-				supports: () => true,
-				unsupportedReason: () => undefined,
-			}),
-		});
-
-		try {
-			await collectEvents(streamCursor(makeModel("gpt-5.5@1m"), makeContext(), { apiKey: "test-key" }));
-		} finally {
-			rmSync(root, { recursive: true, force: true });
-		}
-
-		if (!trusted) {
-			expect(mockedCreate.mock.calls[0][0]).not.toHaveProperty("agents");
-			return;
-		}
-		expect(mockedCreate.mock.calls[0][0].agents).toEqual({
-			reviewer: {
-				description: "Reviews diffs.",
-				prompt: "You review diffs.",
-				model: {
-					id: "gpt-5.5",
-					params: expect.arrayContaining([
-						{ id: "context", value: "272k" },
-						{ id: "reasoning", value: "high" },
-					]),
-				},
-			},
-		});
-	});
-
-	it("omits agents from Agent.create when no subagents are configured", async () => {
-		mockCreatedAgent({
-			send: vi.fn().mockResolvedValue({
-				id: "run-1",
-				agentId: "agent-1",
-				status: "finished",
-				wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
-				cancel: vi.fn(),
-				supports: () => true,
-				unsupportedReason: () => undefined,
-			}),
-		});
-
-		await collectEvents(streamCursor(makeModel("gpt-5.5@1m"), makeContext(), { apiKey: "test-key" }));
-
-		expect(mockedCreate.mock.calls[0][0]).not.toHaveProperty("agents");
-	});
-
 	it("lets CLI local safety flags override disabled env/config", async () => {
 		process.env.PI_CURSOR_AUTO_REVIEW = "0";
 		process.env.PI_CURSOR_SANDBOX = "0";
@@ -427,17 +357,9 @@ describe("streamCursor prompt and model config", () => {
 		process.env.PI_CURSOR_RUNTIME = "cloud";
 		process.env.PI_CURSOR_CLOUD_ALLOW_LOCAL_STATE = "1";
 		process.env.PI_CURSOR_CLOUD_ACK = "1";
-		const resolveToolResults = vi.fn().mockResolvedValue(undefined);
 		const liveRun = cursorLiveRuns.start({
 			id: "cursor-replay-cloud-boundary",
 			agent: asMockSdkAgent({ agentId: "local-agent", send: vi.fn() }),
-			bridgeRun: {
-				hasPendingPiToolCallId: () => false,
-				hasPendingToolCalls: () => false,
-				onPendingToolCallsChanged: () => () => {},
-				resolveToolResults,
-				cancel: vi.fn(),
-			} as any,
 			promptInputTokens: 0,
 		});
 		cursorLiveRuns.markFinished(liveRun, "local live result");
@@ -446,7 +368,7 @@ describe("streamCursor prompt and model config", () => {
 			const events = await collectEvents(streamCursor(makeModel("gpt-5.5@1m"), makeContext(), { apiKey: "test-key" }));
 
 			expect(getErrorEvent(events).error.errorMessage).toContain("local Cursor live run is pending");
-			expect(resolveToolResults).not.toHaveBeenCalled();
+			expect(liveRun.disposed).toBe(false);
 			expect(mockedCreate).not.toHaveBeenCalled();
 		} finally {
 			await cursorLiveRuns.release(liveRun);

@@ -2,6 +2,10 @@ import type { SDKAgent } from "@cursor/sdk";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { makeAssistantMessage, makeContext, makeModel } from "./helpers/pi-harness.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { Type } from "typebox";
+import { createBridgePiHarness, createTestToolInfo, getCursorPiBridgeMcpUrl } from "./helpers/pi-harness.js";
+import { __testUtils as bridgeTestUtils, type CursorPiBridgeToolRequest } from "../src/cursor-pi-tool-bridge.js";
 import {
 	createCursorLiveRunCoordinator,
 	hasTrailingUserMessagesAfterToolResults,
@@ -11,10 +15,9 @@ import type { CursorNativeToolDisplayItem } from "../src/cursor-native-tool-disp
 import type { CursorPiToolBridgeRun } from "../src/cursor-pi-tool-bridge.js";
 import {
 	cursorLiveRuns,
-	CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV,
+	drainCursorLiveRunTurn,
 	resetCursorNativeReplayIdleDisposeMs,
 	setCursorNativeReplayIdleDisposeMs,
-	drainCursorLiveRunTurn,
 } from "../src/cursor-provider-live-run-drain.js";
 import { __testUtils as cursorSdkProcessGuardTestUtils } from "../src/cursor-sdk-process-error-guard.js";
 
@@ -86,8 +89,10 @@ function makeCoordinator(options: { scopeKey?: string; idleDisposeMs?: number } 
 	return { coordinator, deleteNativeToolDisplay, abandonSessionAgent };
 }
 
+const liveRunsToRelease: CursorLiveRun[] = [];
+
 function startRun(coordinator: ReturnType<typeof makeCoordinator>["coordinator"], options: { id?: string; scopeKey?: string; bridgeRun?: CursorPiToolBridgeRun; sessionBridgeRun?: CursorPiToolBridgeRun } = {}): CursorLiveRun {
-	return coordinator.start({
+	const run = coordinator.start({
 		id: options.id ?? "cursor-replay-1",
 		agent: makeAgent(),
 		bridgeRun: options.bridgeRun,
@@ -95,6 +100,8 @@ function startRun(coordinator: ReturnType<typeof makeCoordinator>["coordinator"]
 		sessionAgentScopeKey: options.scopeKey,
 		promptInputTokens: 12,
 	});
+	if (coordinator === cursorLiveRuns) liveRunsToRelease.push(run);
+	return run;
 }
 
 function replayIdFromToolCallId(toolCallId: string): string | undefined {
@@ -102,64 +109,75 @@ function replayIdFromToolCallId(toolCallId: string): string | undefined {
 }
 
 describe("cursor live run coordinator", () => {
-	afterEach(() => {
+	afterEach(async () => {
+		for (const run of liveRunsToRelease.splice(0)) await cursorLiveRuns.release(run);
+		resetCursorNativeReplayIdleDisposeMs();
+		vi.unstubAllEnvs();
 		vi.useRealTimers();
+		expect(cursorLiveRuns.count()).toBe(0);
 	});
 
-	it.each(["bridgeRun", "sessionBridgeRun"] as const)("keeps configured idle disposal deferred for pending owned calls on %s", async slot => {
-		const original = process.env[CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV];
-		process.env[CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV] = "25";
+	it.each([
+		[undefined, 300_000],
+		["", 300_000],
+		[" \t", 300_000],
+		["0", 300_000],
+		["-1", 300_000],
+		["+1", 300_000],
+		["1.5", 300_000],
+		[" 1", 300_000],
+		["1 ", 300_000],
+		["1\n", 300_000],
+		["1e3", 300_000],
+		["0x10", 300_000],
+		["NaN", 300_000],
+		["Infinity", 300_000],
+		["2147483648", 300_000],
+		["999999999999999999999", 300_000],
+		["1", 1],
+		["0001", 1],
+		["900000", 900_000],
+		["2147483647", 2_147_483_647],
+	])("disposes an eligible run at the selected deadline for env %j (%i ms)", async (raw, expected) => {
+		vi.stubEnv("PI_CURSOR_LIVE_RUN_IDLE_DISPOSE_MS", raw);
 		resetCursorNativeReplayIdleDisposeMs();
 		vi.useFakeTimers();
-		let pending = true;
-		let changed = () => {};
-		const bridge = makeBridgeRun("bridge-configured");
-		bridge.hasPendingToolCalls = () => pending;
-		bridge.onPendingToolCallsChanged = listener => { changed = listener; return () => {}; };
-		const run = cursorLiveRuns.start({ id: "configured-pending", agent: makeAgent(), promptInputTokens: 0, [slot]: bridge });
-		try {
-			cursorLiveRuns.requestIdleDispose(run);
-			await vi.advanceTimersByTimeAsync(300001);
-			expect(run.disposed).toBe(false);
-			expect(bridge.cancel).not.toHaveBeenCalled();
-			pending = false;
-			changed();
-			await vi.advanceTimersByTimeAsync(24);
-			expect(run.disposed).toBe(false);
-			await vi.advanceTimersByTimeAsync(1);
-			expect(run.disposed).toBe(true);
-		} finally {
-			await cursorLiveRuns.release(run);
-			resetCursorNativeReplayIdleDisposeMs();
-			if (original === undefined) delete process.env[CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV];
-			else process.env[CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV] = original;
-		}
+		const run = startRun(cursorLiveRuns, { scopeKey: "env-window" });
+		const cancel = vi.fn().mockResolvedValue(undefined);
+		cursorLiveRuns.attachSdkRun(run, { cancel });
+		cursorLiveRuns.requestIdleDispose(run);
+		await vi.advanceTimersByTimeAsync(expected - 1);
+		expect(run.disposed).toBe(false);
+		expect(cancel).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(1);
+		expect(run.disposed).toBe(true);
+		expect(cancel).toHaveBeenCalledOnce();
 	});
 
-	it("preserves explicit release of a pending call and test override precedence over environment", async () => {
-		const original = process.env[CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV];
-		process.env[CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV] = "2147483647";
-		setCursorNativeReplayIdleDisposeMs(2);
+	it("preserves override/reset precedence and immediate explicit release despite the maximum environment window", async () => {
+		vi.stubEnv("PI_CURSOR_LIVE_RUN_IDLE_DISPOSE_MS", "900000");
 		vi.useFakeTimers();
-		const eligible = cursorLiveRuns.start({ id: "configured-override", agent: makeAgent(), promptInputTokens: 0 });
-		const bridge = makeBridgeRun("explicit-pending", ["question-call"]);
-		const pending = cursorLiveRuns.start({ id: "configured-explicit", agent: makeAgent(), promptInputTokens: 0, bridgeRun: bridge });
-		try {
-			cursorLiveRuns.requestIdleDispose(eligible);
-			cursorLiveRuns.requestIdleDispose(pending);
-			await vi.advanceTimersByTimeAsync(2);
-			expect(eligible.disposed).toBe(true);
-			expect(pending.disposed).toBe(false);
-			await cursorLiveRuns.release(pending);
-			expect(pending.disposed).toBe(true);
-			expect(bridge.cancel).toHaveBeenCalledOnce();
-		} finally {
-			await cursorLiveRuns.release(eligible);
-			await cursorLiveRuns.release(pending);
-			resetCursorNativeReplayIdleDisposeMs();
-			if (original === undefined) delete process.env[CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV];
-			else process.env[CURSOR_LIVE_RUN_IDLE_DISPOSE_ENV] = original;
-		}
+		setCursorNativeReplayIdleDisposeMs(2);
+		const overridden = startRun(cursorLiveRuns, { id: "override", scopeKey: "override" });
+		cursorLiveRuns.requestIdleDispose(overridden);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(overridden.disposed).toBe(false);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(overridden.disposed).toBe(true);
+		resetCursorNativeReplayIdleDisposeMs();
+		const configured = startRun(cursorLiveRuns, { id: "reset", scopeKey: "reset" });
+		cursorLiveRuns.requestIdleDispose(configured);
+		await vi.advanceTimersByTimeAsync(899_999);
+		expect(configured.disposed).toBe(false);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(configured.disposed).toBe(true);
+		vi.stubEnv("PI_CURSOR_LIVE_RUN_IDLE_DISPOSE_MS", "2147483647");
+		const bridge = makeBridgeRun("explicit-pending", ["question"]);
+		const pending = startRun(cursorLiveRuns, { id: "explicit", scopeKey: "explicit", bridgeRun: bridge });
+		cursorLiveRuns.requestIdleDispose(pending);
+		await cursorLiveRuns.release(pending);
+		expect(pending.disposed).toBe(true);
+		expect(bridge.cancel).toHaveBeenCalledOnce();
 	});
 
 	it("matches context tool results after trailing user messages and ignores disposed runs", async () => {
@@ -210,6 +228,7 @@ describe("cursor live run coordinator", () => {
 			sessionAgentScopeKey: "expired-bridge-drain-scope",
 			promptInputTokens: 1,
 		});
+		liveRunsToRelease.push(run);
 		cursorLiveRuns.queueEvent(run, {
 			type: "bridge-tool",
 			request: {
@@ -324,31 +343,68 @@ describe("cursor live run coordinator", () => {
 		expect(abandonSessionAgent).toHaveBeenCalledWith("scope-1");
 	});
 
-	it.each(["bridgeRun", "sessionBridgeRun"] as const)("defers idle disposal for owned pending calls on %s and restarts the full window after settlement", async (slot) => {
+	it("rearms an already requested full idle window after a lease without another disposal request", async () => {
 		vi.useFakeTimers();
-		const { coordinator } = makeCoordinator({ idleDisposeMs: 300_000 });
-		let pending = true;
+		const { coordinator, abandonSessionAgent } = makeCoordinator({ idleDisposeMs: 300_000 });
+		const run = startRun(coordinator);
+		const cancel = vi.fn().mockResolvedValue(undefined);
+		coordinator.attachSdkRun(run, { cancel });
+		try {
+			coordinator.requestIdleDispose(run);
+			await vi.advanceTimersByTimeAsync(100_000);
+			await coordinator.withRunLease(run, undefined, async () => {
+				await vi.advanceTimersByTimeAsync(600_001);
+				expect(run.disposed).toBe(false);
+				expect(cancel).not.toHaveBeenCalled();
+			});
+			await vi.advanceTimersByTimeAsync(299_999);
+			expect(run.disposed).toBe(false);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(run.disposed).toBe(true);
+			expect(coordinator.count()).toBe(0);
+			expect(cancel).toHaveBeenCalledOnce();
+			expect(abandonSessionAgent).toHaveBeenCalledExactlyOnceWith("scope-1");
+		} finally {
+			await coordinator.release(run);
+		}
+	});
+
+	it.each(["bridgeRun", "sessionBridgeRun"] as const)("defers configured idle disposal on %s until the last owned call settles, then restarts the full window", async (slot) => {
+		vi.stubEnv("PI_CURSOR_LIVE_RUN_IDLE_DISPOSE_MS", "900000");
+		resetCursorNativeReplayIdleDisposeMs();
+		vi.useFakeTimers();
+		const coordinator = cursorLiveRuns;
+		let pending = 2;
 		let notify = () => {};
 		const unsubscribe = vi.fn();
 		const bridge = makeBridgeRun("owned-question");
-		bridge.hasPendingToolCalls = () => pending;
+		bridge.hasPendingToolCalls = () => pending > 0;
 		bridge.onPendingToolCallsChanged = (listener) => { notify = listener; return unsubscribe; };
-		const run = startRun(coordinator, { [slot]: bridge });
+		const run = startRun(coordinator, { [slot]: bridge, scopeKey: "owner" });
 		const sibling = startRun(coordinator, { id: "sibling", scopeKey: "other-scope" });
+		const pendingSibling = startRun(coordinator, {
+			id: "pending-sibling", scopeKey: "pending-scope", bridgeRun: makeBridgeRun("other-bridge", ["other-call"]),
+		});
 		const cancel = vi.fn().mockResolvedValue(undefined);
 		coordinator.attachSdkRun(run, { cancel });
 		coordinator.requestIdleDispose(run);
 		coordinator.requestIdleDispose(sibling);
-		await vi.advanceTimersByTimeAsync(300_001);
+		coordinator.requestIdleDispose(pendingSibling);
+		await vi.advanceTimersByTimeAsync(900_001);
 		expect(run.disposed).toBe(false);
 		expect(sibling.disposed).toBe(true);
 		expect(cancel).not.toHaveBeenCalled();
-		pending = false;
+		pending = 1;
 		notify();
-		await vi.advanceTimersByTimeAsync(299_999);
+		await vi.advanceTimersByTimeAsync(900_001);
+		expect(run.disposed).toBe(false);
+		pending = 0;
+		notify();
+		await vi.advanceTimersByTimeAsync(899_999);
 		expect(run.disposed).toBe(false);
 		await vi.advanceTimersByTimeAsync(1);
 		expect(run.disposed).toBe(true);
+		expect(pendingSibling.disposed).toBe(false);
 		expect(cancel).toHaveBeenCalledOnce();
 		expect(unsubscribe).toHaveBeenCalledOnce();
 	});
@@ -374,14 +430,16 @@ describe("cursor live run coordinator", () => {
 	});
 
 	it("cancels an armed idle timer when a call becomes pending and preserves explicit release", async () => {
+		vi.stubEnv("PI_CURSOR_LIVE_RUN_IDLE_DISPOSE_MS", "5");
+		resetCursorNativeReplayIdleDisposeMs();
 		vi.useFakeTimers();
-		const { coordinator } = makeCoordinator({ idleDisposeMs: 5 });
+		const coordinator = cursorLiveRuns;
 		let pending = false;
 		let notify = () => {};
 		const bridge = makeBridgeRun("owned-question");
 		bridge.hasPendingToolCalls = () => pending;
 		bridge.onPendingToolCallsChanged = (listener) => { notify = listener; return () => {}; };
-		const run = startRun(coordinator, { bridgeRun: bridge });
+		const run = startRun(coordinator, { bridgeRun: bridge, scopeKey: "explicit-release" });
 		coordinator.requestIdleDispose(run);
 		await vi.advanceTimersByTimeAsync(4);
 		pending = true;
@@ -391,6 +449,71 @@ describe("cursor live run coordinator", () => {
 		await coordinator.release(run);
 		expect(run.disposed).toBe(true);
 		expect(bridge.cancel).toHaveBeenCalledOnce();
+	});
+
+	it("keeps emitted slow tool and question bridge work alive until the last matching result settles", async () => {
+		const requests: CursorPiBridgeToolRequest[] = [];
+		const pi = createBridgePiHarness({
+			active: ["slow_tool", "cursor_ask_question"],
+			tools: ["slow_tool", "cursor_ask_question"].map((name) => createTestToolInfo(name, Type.Object({}), name)),
+		});
+		const bridge = bridgeTestUtils.createRegistry(pi, {});
+		const bridgeRun = await bridge.createRun({ onToolRequest: (request) => requests.push(request) });
+		const client = new Client({ name: "pending-idle-regression", version: "1" });
+		const transport = new StreamableHTTPClientTransport(new URL(getCursorPiBridgeMcpUrl(bridgeRun)));
+		const { coordinator, abandonSessionAgent } = makeCoordinator({ idleDisposeMs: 300_000 });
+		const sdkCancel = vi.fn().mockResolvedValue(undefined);
+		let run: CursorLiveRun | undefined;
+		try {
+			await client.connect(transport);
+			vi.useFakeTimers();
+			const calls = ["slow_tool", "cursor_ask_question"].map((name) =>
+				client.callTool({ name: `pi__${name}`, arguments: {} }, { timeout: 3_600_000 }).catch((error: unknown) => error),
+			);
+			await vi.waitFor(() => expect(requests).toHaveLength(2));
+			run = startRun(coordinator, { bridgeRun, sessionBridgeRun: bridgeRun });
+			coordinator.attachSdkRun(run, { cancel: sdkCancel });
+			const ownedRun = run;
+			await coordinator.withRunLease(run, undefined, async () => {
+				for (const request of requests) coordinator.queueEvent(ownedRun, { type: "bridge-tool", request });
+				expect(coordinator.collectBridgeToolBatch(ownedRun)).toEqual(requests);
+				coordinator.requestIdleDispose(ownedRun);
+			});
+			await vi.advanceTimersByTimeAsync(600_000);
+			expect(coordinator.getActiveForScope()?.id).toBe(run.id);
+			expect(sdkCancel).not.toHaveBeenCalled();
+			expect(abandonSessionAgent).not.toHaveBeenCalled();
+
+			const result = (id: string) => ({
+				role: "toolResult" as const, toolCallId: id, toolName: "slow_tool",
+				content: [{ type: "text" as const, text: "same-run answer" }], isError: false, timestamp: 1,
+			});
+			for (const id of ["unrelated-call", requests[0].piToolCallId]) {
+				const resolution = bridgeRun.resolveToolResults([result(id)]);
+				await vi.advanceTimersByTimeAsync(0);
+				await resolution;
+			}
+			await vi.advanceTimersByTimeAsync(600_000);
+			expect(coordinator.getActiveForScope()?.id).toBe(run.id);
+			expect(bridgeRun.hasPendingPiToolCallId(requests[1].piToolCallId)).toBe(true);
+			const resolution = bridgeRun.resolveToolResults([result(requests[1].piToolCallId)]);
+			await vi.advanceTimersByTimeAsync(0);
+			await resolution;
+			for (const call of calls) expect(await call).toMatchObject({ content: [{ type: "text", text: "same-run answer" }] });
+			expect(coordinator.getActiveForScope()?.id).toBe(run.id);
+			await vi.advanceTimersByTimeAsync(299_999);
+			expect(sdkCancel).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(1);
+			expect(coordinator.count()).toBe(0);
+			expect(sdkCancel).toHaveBeenCalledOnce();
+			expect(abandonSessionAgent).toHaveBeenCalledExactlyOnceWith("scope-1");
+		} finally {
+			vi.useRealTimers();
+			if (run) await coordinator.release(run);
+			await client.close();
+			await transport.close();
+			await bridge.disposeAll();
+		}
 	});
 
 	it("releases successful runs idempotently without abandoning pooled session resources", async () => {
@@ -425,7 +548,9 @@ describe("cursor live run coordinator", () => {
 
 	it("releases unsuccessful session-bridge runs idempotently and abandons the session agent", async () => {
 		const { coordinator, deleteNativeToolDisplay, abandonSessionAgent } = makeCoordinator();
-		const sessionBridgeRun = makeBridgeRun("session-bridge");
+		const sessionBridgeRun = makeBridgeRun("session-bridge", ["pending-tool"]);
+		const unsubscribe = vi.fn();
+		sessionBridgeRun.onPendingToolCallsChanged = vi.fn(() => unsubscribe);
 		const run = startRun(coordinator, { bridgeRun: sessionBridgeRun, sessionBridgeRun, scopeKey: "scope-error" });
 		const sdkCancel = vi.fn().mockResolvedValue(undefined);
 		coordinator.attachSdkRun(run, { cancel: sdkCancel });
@@ -440,6 +565,8 @@ describe("cursor live run coordinator", () => {
 		expect(deleteNativeToolDisplay).toHaveBeenCalledOnce();
 		expect(sessionBridgeRun.cancel).toHaveBeenCalledTimes(1);
 		expect(sessionBridgeRun.setOnToolRequest).toHaveBeenCalledWith(undefined);
+		expect(sessionBridgeRun.onPendingToolCallsChanged).toHaveBeenCalledOnce();
+		expect(unsubscribe).toHaveBeenCalledOnce();
 		expect(sessionBridgeRun.dispose).not.toHaveBeenCalled();
 		expect(sdkCancel).toHaveBeenCalledTimes(1);
 		expect(abandonSessionAgent).toHaveBeenCalledOnce();

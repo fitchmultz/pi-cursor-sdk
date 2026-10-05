@@ -24,7 +24,7 @@ describe("model discovery fallback diagnostics", () => {
 	it("falls back and reports discovery failure when Cursor.models.list throws", async () => {
 		const issues: CursorModelFallbackIssue[] = [];
 		mockedList.mockRejectedValueOnce(new Error("network error"));
-		const models = await discoverModels({ onFallback: (issue) => issues.push(issue) });
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY, onFallback: (issue) => issues.push(issue) });
 		expect(models.some((model) => model.id === "composer-2.5")).toBe(true);
 		expect(issues).toEqual([
 			expect.objectContaining({
@@ -41,7 +41,7 @@ describe("model discovery fallback diagnostics", () => {
 	it("preserves structured loader errors in startup fallback diagnostics", async () => {
 		const issues: CursorModelFallbackIssue[] = [];
 		mockedList.mockRejectedValueOnce({ name: "ResolveMessage", code: "ERR_MODULE_NOT_FOUND", message: "Cannot find module '@cursor/sdk' Bearer test-key-123" });
-		await discoverModels({ onFallback: (issue) => issues.push(issue) });
+		await discoverModels({ apiKey: process.env.CURSOR_API_KEY, onFallback: (issue) => issues.push(issue) });
 		expect(issues[0].errorMessage).toContain("ERR_MODULE_NOT_FOUND");
 		expect(issues[0].message).toContain("Cannot find module '@cursor/sdk'");
 		expect(issues[0].message).not.toMatch(/test-key-123|API key|\/login/);
@@ -55,7 +55,7 @@ describe("model discovery fallback diagnostics", () => {
 			),
 		);
 
-		await discoverModels({ onFallback: (issue) => issues.push(issue) });
+		await discoverModels({ apiKey: process.env.CURSOR_API_KEY, onFallback: (issue) => issues.push(issue) });
 
 		expect(issues[0].reason).toBe("discovery-failed");
 		expect(issues[0].message).toContain("Bearer [redacted]");
@@ -77,7 +77,7 @@ describe("model discovery fallback diagnostics", () => {
 	it("falls back and reports empty model list when Cursor.models.list returns empty", async () => {
 		const issues: CursorModelFallbackIssue[] = [];
 		mockedList.mockResolvedValueOnce([]);
-		const models = await discoverModels({ onFallback: (issue) => issues.push(issue) });
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY, onFallback: (issue) => issues.push(issue) });
 		expect(models.some((model) => model.id === "claude-opus-4-8@1m")).toBe(true);
 		expect(issues).toEqual([
 			expect.objectContaining({

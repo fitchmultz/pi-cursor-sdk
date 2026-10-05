@@ -8,6 +8,7 @@ import { makeAssistantMessage, makeContext, makeModel } from "./helpers/pi-harne
 function makeResolvedConfig(runtime: "local" | "cloud"): CursorResolvedSdkConfig {
 	return resolveCursorSdkConfig({
 		env: {},
+		user: { local: { storeRoot: runtime === "local" ? "/captured-root" : "/changed-root" } },
 		builtIn: { runtime, cloud: { contextHandoff: "bootstrap" } },
 	});
 }
@@ -66,5 +67,6 @@ describe("CursorProviderTurnRunner config snapshotting (F3)", () => {
 		const preparedCallArgs = mockPrepareCursorProviderTurn.mock.calls[0]?.[0] as { resolvedConfig: CursorResolvedSdkConfig };
 		expect(preparedCallArgs.resolvedConfig).toBe(localSnapshot);
 		expect(preparedCallArgs.resolvedConfig.runtime.value).toBe("local");
+		expect(preparedCallArgs.resolvedConfig.local.storeRoot.value).toBe("/captured-root");
 	});
 });

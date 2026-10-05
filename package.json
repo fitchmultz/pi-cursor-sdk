@@ -120,7 +120,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "check:compat": "npm run build && npm run verify && node --test test/ci-compatibility.test.mjs test/native-provider.test.mjs test/native-cursor-flow.test.mjs",
+    "check:compat": "npm run build && npm run verify && node --test test/ci-compatibility.test.mjs test/native-provider.test.mjs test/native-cursor-flow.test.mjs test/native-cursor-prompt.test.mjs",
     "build": "node ./scripts/build.mjs",
     "prepare": "node ./scripts/prepare.mjs",
     "typecheck": "npm run typecheck:src && npm run typecheck:tests && npm run typecheck:replay-compile",

@@ -50,9 +50,43 @@ If resync runs but `context.tools` is still stale (e.g. only `read` listed), the
 
 ## Stock/transcript provider contract
 
-`test/cursor-provider-pi-context.test.ts` drives real `ModelRuntime` / `ModelRegistry` requests into `streamCursor`, with only Cursor SDK execution mocked. Run it against each supported host with all Pi peer imports pinned to that host (including nested native imports); a top-level package version alone is not resolution evidence. Cover official Pi 0.87.1, official latest, and current `fitchmultz/pi` main. The exact development Pi cohort is 1.0.3, with host TypeBox 1.3.27.
+`test/cursor-provider-pi-context.test.ts` drives real `ModelRuntime` / `ModelRegistry` requests into `streamCursor`, with only Cursor SDK execution mocked. Run it against each supported host with all Pi peer imports pinned to that host (including nested native imports); a top-level package version alone is not resolution evidence. Cover official Pi 0.87.1, official latest, and current `fitchmultz/pi` main. The direct development Pi packages are 1.0.3; their actual nested resolution is recorded with each check, including host TypeBox 1.3.27.
 
-The test covers bootstrap/incremental prompts, empty-vs-absent request tools, native replay/drain, cloud fresh/bootstrap selection, and actual host prompt serialization for context files and skills. `test/native-cursor-flow.test.mjs` additionally exercises the compiled extension through the real loader and registered Cursor provider, substituting only the external SDK transport/storage. It verifies actual bridge tool execution, replay without file access, persisted usage/lineage, tree, compaction, queued steering, abort and reload/disposal. Explicit `tools` is now an allowlist, not merely an initial active set; use `defaultTools` for a native fixture that allows replay wrappers to activate. It is offline contract evidence. Add live proof only for changed behavior that still needs real-service evidence under the cost policy above; do not rerun unchanged live lanes or infer full live coverage from offline tests.
+The test covers bootstrap/incremental prompts, empty-vs-absent request tools, native replay/drain, cloud fresh/bootstrap selection, and actual host prompt serialization for context files and skills. `test/native-cursor-flow.test.mjs` additionally exercises the compiled extension through the real loader and registered Cursor provider, substituting only the external SDK transport/storage. It verifies actual bridge tool execution, pending-work idle/abort/shutdown/deadline ownership, replay without file access, persisted usage/lineage, tree, compaction, queued steering, abort and reload/disposal. `test/native-cursor-prompt.test.mjs` owns genuine native input, hidden notices, required-budget input, current attachments, custom-only continuation, equivalent conversion, payload/order-changing rejection, and GitHub comment soft guidance across bootstrap/incremental/custom-only sends. Both owners use `test/helpers/native-cursor-harness.mjs` and run in the explicit `check:compat` list and manual official-host compatibility route; the native-platform Vitest job is not execution evidence for these Node test owners. Explicit `tools` is now an allowlist, not merely an initial active set; use `defaultTools` for a native fixture that allows replay wrappers to activate. `test/native-provider.test.mjs` additionally verifies canonical `SessionManager.appendContextEdit()` plus `refreshContext()`, unchanged raw history, and conversation filtering that preserves system instructions, the current tool declaration, and explicit tool removal (the focused native slice from #271). It is offline contract evidence. Add live proof only for changed behavior that still needs real-service evidence under the cost policy above; do not rerun unchanged live lanes or infer full live coverage from offline tests.
+
+## Maintainer-only offline proof retention
+
+Two existing test flags retain raw proof in a **fresh private** directory outside the repository (or a gitignored scratch directory):
+
+- `PI_CURSOR_TEST_EVIDENCE_DIR` retains native SessionManager JSONL with run/metadata/options sidecars, prompt payloads/roles/images, accepted catalog bytes, terminal/late usage facts and byte-preserving journals, and custom-agent resume proof.
+- `PI_CURSOR_BOOTSTRAP_PROOF_DIR` retains installed SDK output-filter captures as `sdk-capture-{plain,ansi}.json`. Run `test/cursor-sdk-output-filter.test.ts` **before** `test/native-cursor-flow.test.mjs`: the latter consumes `sdk-capture-ansi.json` for its receipt/deferred-wait diagnostic checks. Do not invent capture payloads or reuse an old sealed run directory.
+
+The lightweight `test/helpers/raw-test-evidence.mjs` owns only directory/file writes. Payload construction and explicit flag guards stay with each owning test; unset flags perform no evidence I/O. Existing filenames, JSON fields and raw JSONL/journal/Buffer bytes are retained, not converted into a uniform schema. Writes overwrite the same filename within an owned run.
+
+For an installed development checkout, this example builds and runs only the offline owners, with Node 24+ and no inherited credentials/profile/host selectors:
+
+```bash
+NODE24="$(command -v node)" # must resolve to Node 24+
+PROOF="$(mktemp -d "${TMPDIR:-/tmp}/cursor-offline-proof.XXXXXX")"
+chmod 700 "$PROOF"
+mkdir -p "$PROOF/home" "$PROOF/agent" "$PROOF/tmp" "$PROOF/xdg"
+offline() {
+  env -i PATH="$(dirname "$NODE24"):/usr/bin:/bin" \
+    HOME="$PROOF/home" USERPROFILE="$PROOF/home" XDG_CONFIG_HOME="$PROOF/xdg" \
+    PI_CODING_AGENT_DIR="$PROOF/agent" TMPDIR="$PROOF/tmp" \
+    PI_OFFLINE=1 PI_TELEMETRY=0 PI_SKIP_VERSION_CHECK=1 PI_CURSOR_SETTING_SOURCES=none \
+    PI_CURSOR_TEST_EVIDENCE_DIR="$PROOF/sessions" \
+    PI_CURSOR_BOOTSTRAP_PROOF_DIR="$PROOF/bootstrap" "$NODE24" "$@"
+}
+offline scripts/build.mjs
+offline node_modules/vitest/vitest.mjs run test/cursor-sdk-output-filter.test.ts \
+  test/cursor-provider-stream-usage.test.ts test/cursor-provider-replay-live-run.test.ts \
+  test/cursor-session-agent-local-resume.test.ts
+offline --test test/native-provider.test.mjs test/native-cursor-flow.test.mjs \
+  test/native-cursor-prompt.test.mjs
+```
+
+These artifacts may include prompts, tool arguments/results, local paths and private session facts. Never print, commit or publish them; never supply real keys to this offline workflow. Inspect persisted joins and bytes privately, then retain or remove only your owned proof directory. Offline artifacts establish the tested local SDK/native contracts, **not** all-host/backend qualification or paid-service acceptance.
 
 ## Auth: use `auth.json`, not only env
 

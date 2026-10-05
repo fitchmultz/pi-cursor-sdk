@@ -8,8 +8,8 @@ export type CursorFallbackWarningExtensionApi = CursorModelLifecycleExtensionApi
 
 export function registerCursorFallbackIssueWarning(
 	pi: CursorFallbackWarningExtensionApi,
-	issue?: CursorModelFallbackIssue,
 ): (nextIssue: CursorModelFallbackIssue | undefined) => void {
+	let issue: CursorModelFallbackIssue | undefined;
 	const warnedSessionScopeKeys = new Set<string>();
 
 	registerCursorModelLifecycle(pi, (ctx: ExtensionContext) => {

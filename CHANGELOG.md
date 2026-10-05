@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Fixed
+
+- Preserve genuine persisted native user input, the whole pending notice suffix, and current attachments across incremental, budgeted bootstrap and offline Cloud fresh prompts. Custom-only continuation does not resubmit old requests/images; payload/order-changing transforms remain conservative (#229).
+- Preserve requested idle cleanup across drain leases and wait for the last owned pending bridge call before starting the full configured window. Explicit cancellation, compaction, shutdown and bridge deadlines remain independent (#281).
+- Filter only verified bounded SDK bootstrap frames through one byte-preserving process sink, retained through unresolved SDK completion and bridge/replay turns. Request-owned native recovery notices for plugin confinement/parser degradation contain no raw paths; recognized notices escape the retained creation-only mute (#284/#232).
+
+### Changed
+
+- Replace the serialized catalog-auth scheduler with public native API-key auth and accepted-generation publication. Native login/logout/rotation/runtime mutations immediately resync cache/fallback without network; opt-in logged-out hiding affects AVAILABLE picker/list results, not KNOWN CLI identities or login. Effective surviving env/config auth, cancellation, siblings and reload remain guarded (adapted from #300/#301 by @yansigit).
+- Tighten configured agents to one validated own-entry config parser, explicit alias fast precedence, public create/resume options and full content-digest identity while restoring exact no-feature keys. LOCAL ID/inherit-only conversion and restricted summaries are unchanged (follow-up to #208 by Sam Armstrong).
+- Restrict persistent root selection to captured environment > user > default, private native absolute paths and exact current custom-session admission. Root compatibility is separate from pool keys; wrong-domain cleanup is durably non-retryable, while admitted temporarily damaged paths remain retryable. No history migration/deletion is added (follow-up to #236 by @gwatkins-arista).
+- Validate `PI_CURSOR_LIVE_RUN_IDLE_DISPOSE_MS` privately as ASCII decimal `1`–`2147483647` (five-minute default), including rejection of final newlines; retain per-arm selection, last-own-call protection and explicit release (adapted from #283 by @aaalexliu).
+- Qualify #315/#258 shell handling as legacy-alias compatibility, not an observed alias-changing service pair. Installed SDK 1.0.35 contracts execute public shell updates and the ID-less step-before-completed-delta producer; genuinely unmatched/error shell activity remains visible (@yansigit).
+- Extend the existing native provider contract with canonical context-edit and conversation-filtering coverage that preserves system instructions, current tools and explicit removal; retain raw history (#271 native slice only).
+
 ## 0.5.1 - 2026-10-05
 
 ### Added

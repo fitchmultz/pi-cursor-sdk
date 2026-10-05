@@ -1,5 +1,4 @@
 import type { AgentModeOption, AgentOptions, ModelSelection } from "@cursor/sdk";
-import type { CursorCustomSubagentDefinitions } from "./cursor-custom-subagent-definitions.js";
 import { isCursorCloudEnvironmentType, type CursorResolvedSdkConfig } from "./cursor-config.js";
 import {
 	normalizeCursorCloudStartingRef,
@@ -50,7 +49,7 @@ export function buildCursorCloudAgentOptions(options: {
 	agentMode: AgentModeOption;
 	resolvedConfig: CursorResolvedSdkConfig;
 	name?: string;
-	customSubagents?: CursorCustomSubagentDefinitions;
+	agents?: AgentOptions["agents"];
 }): AgentOptions {
 	const { resolvedConfig } = options;
 	const environment = resolvedConfig.cloud.environment.value;
@@ -93,7 +92,7 @@ export function buildCursorCloudAgentOptions(options: {
 		model: options.modelSelection,
 		mode: options.agentMode,
 		...(options.name ? { name: options.name } : {}),
-		...(options.customSubagents ? { agents: options.customSubagents } : {}),
+		...(options.agents && Object.keys(options.agents).length ? { agents: options.agents } : {}),
 		cloud,
 	};
 }

@@ -145,7 +145,7 @@ describe("debug-sdk-events maintainer probe", () => {
 		expect(scrubScriptSensitiveText(sample, leakedKey)).toBe(scrubProviderSensitiveText(sample, leakedKey));
 	});
 
-	it("filters SDK startup noise from stdout while allowing the final summary", async () => {
+	it("retains the script creation-only mute without hiding its final summary", async () => {
 		const terminalWrites: string[] = [];
 		const originalStdoutWrite = process.stdout.write;
 		process.stdout.write = ((
@@ -163,7 +163,7 @@ describe("debug-sdk-events maintainer probe", () => {
 		try {
 			await suppressCursorSdkOutput(async () => {
 				process.stdout.write("managed_skills.example load completed\n");
-				console.log("[hooks] SessionStart trigger matcher is not supported in Cursor");
+				process.stdout.write("[hooks] SessionStart trigger matcher is not supported in Cursor\n");
 			});
 
 			process.stdout.write(`${JSON.stringify({ artifactDir: "/tmp/example", counts: { stream: { assistant: 1 } } })}\n`);

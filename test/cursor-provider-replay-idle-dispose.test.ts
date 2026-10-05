@@ -34,7 +34,6 @@ import {
 	createExtensionTestContext} from "./helpers/cursor-provider-harness.js";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
-import { parseCursorNativeReplayIdleDisposeMs } from "../src/cursor-provider-live-run-drain.js";
 import { estimateCursorPromptMessageTokens } from "../src/context.js";
 import { __testUtils as nativeToolDisplayTestUtils } from "../src/cursor-native-tool-display-state.js";
 import type { Context } from "@earendil-works/pi-ai";
@@ -46,24 +45,6 @@ import { join } from "node:path";
 describe("streamCursor native replay idle dispose", () => {
 	beforeEach(resetCursorProviderTestState);
 
-	it.each([
-		[undefined, 300000],
-		["", 300000],
-		["0", 300000],
-		["-1", 300000],
-		["1.5", 300000],
-		[" 1", 300000],
-		["1 ", 300000],
-		["1e3", 300000],
-		["0x10", 300000],
-		["2147483648", 300000],
-		["999999999999999999999", 300000],
-		["1", 1],
-		["900000", 900000],
-		["2147483647", 2147483647],
-	])("parses idle disposal duration %s as %i ms", (raw, expected) => {
-		expect(parseCursorNativeReplayIdleDisposeMs(raw)).toBe(expected);
-	});
 
 	it("disposes abandoned native replay runs after the idle timeout and abandons the session agent", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";

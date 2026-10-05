@@ -29,6 +29,7 @@ export function createDefaultSystemPromptOptions(cwd: string): NormalizedBuildSy
 	const options = {
 		cwd,
 		selectedTools: ["read", "bash", "edit", "write"],
+		hiddenTools: [],
 		toolSnippets: {},
 		toolGuidelines: {},
 		promptGuidelines: [],

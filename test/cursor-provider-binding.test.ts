@@ -33,7 +33,9 @@ describe("canonical native request provenance", () => {
 			const { manager, measuredId, context } = fixture();
 			if (checkpoint === "compaction") manager.appendCompaction("Short summary.", measuredId, 100000);
 			else manager.appendContextEdit(measuredId, { content: [{ type: "text", text: "Short replacement." }] });
-			expect(resolveCursorRequestProvenance(captureCursorRequestProjection(manager), makeModel(), context(), "normal")).toEqual({ purpose: "normal" });
+			const request = resolveCursorRequestProvenance(captureCursorRequestProjection(manager), makeModel(), context(), "normal");
+			expect(request.purpose).toBe("normal");
+			expect(request.occupancyFloor).toBeUndefined();
 		}
 	});
 
@@ -74,7 +76,7 @@ describe("canonical native request provenance", () => {
 
 describe("provider header receipts and operation membership", () => {
 	async function binding() {
-		const f = fixture(); const pi = createPiHarness(); registerCursorSessionScope(pi); registerCursorNativeToolDisplayState(pi); const register = registerCursorProviderBinding(pi); register([]);
+		const f = fixture(); const pi = createPiHarness(); registerCursorSessionScope(pi); registerCursorNativeToolDisplayState(pi); const register = registerCursorProviderBinding(pi); register([], () => {});
 		const ctx = createExtensionTestContext({ cwd: "/tmp/provenance-owner", sessionManager: { getBranch: () => f.manager.getBranch(), buildSessionProjection: () => f.manager.buildSessionProjection(), getSessionId: () => f.manager.getSessionId(), getSessionFile: () => undefined } });
 		await pi.invokeEventWithContext("session_start", { type: "session_start", reason: "startup" }, ctx);
 		const stream = pi._registered[0]!.config.streamSimple! as ReturnType<typeof createCursorLazyStream>;
@@ -145,13 +147,13 @@ describe("provider header receipts and operation membership", () => {
 			const runtime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, modelsStorePath: join(root, "models.json"), allowModelNetwork: false });
 			runtime.registerProvider("cursor", { api: "cursor-sdk", apiKey: "offline-fixture", baseUrl: "http://127.0.0.1", models: [modelConfig] });
 			const loader = new DefaultResourceLoader({ cwd: root, agentDir, settingsManager, noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true, systemPromptOverride: () => "Offline binding test.", extensionFactories: [pi => {
-				registerCursorSessionScope(pi); registerCursorNativeToolDisplayState(pi); registerCursorProviderBinding(pi)([modelConfig]);
+				registerCursorSessionScope(pi); registerCursorNativeToolDisplayState(pi); registerCursorProviderBinding(pi)([modelConfig], () => {});
 			}] });
 			await loader.reload();
 			({ session } = await createAgentSession({ cwd: root, agentDir, modelRuntime: runtime, model: runtime.getModel("cursor", "test-model")!, resourceLoader: loader, settingsManager, sessionManager: manager, tools: [] }));
 			await session.bindExtensions({});
 			await session.prompt("Ordinary first request");
-			expect(vi.mocked(streamCursor).mock.calls[0]?.[3]).toHaveProperty("request", { purpose: "normal", occupancyFloor: 100000 });
+			expect(vi.mocked(streamCursor).mock.calls[0]?.[3]).toMatchObject({ request: { purpose: "normal", occupancyFloor: 100000 } });
 			vi.mocked(streamCursor).mockClear();
 			vi.mocked(streamCursor).mockImplementationOnce(() => {
 				const stream = createAssistantMessageEventStream(); const message = makeAssistantMessage(); message.stopReason = "error"; message.errorMessage = "terminated";
@@ -162,7 +164,9 @@ describe("provider header receipts and operation membership", () => {
 			for (const call of vi.mocked(streamCursor).mock.calls) expect(call[3]).toHaveProperty("request", { purpose: "compaction" });
 			expect(manager.getBranch().filter(entry => entry.type === "compaction")).toHaveLength(1);
 			await session.prompt("Normal after compaction");
-			expect(vi.mocked(streamCursor).mock.calls.at(-1)?.[3]).toHaveProperty("request", { purpose: "normal" });
+			const normalRequest = vi.mocked(streamCursor).mock.calls.at(-1)?.[3]?.request;
+			expect(normalRequest?.purpose).toBe("normal");
+			expect(normalRequest?.occupancyFloor).toBeUndefined();
 			await session.navigateTree(target, { summarize: true });
 			expect(vi.mocked(streamCursor).mock.calls.at(-1)?.[3]).toHaveProperty("request", { purpose: "tree" });
 			expect(manager.getBranch().filter(entry => entry.type === "branch_summary")).toHaveLength(1);

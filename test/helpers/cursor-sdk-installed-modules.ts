@@ -8,7 +8,13 @@ import { resolveInstalledPackageRoot } from "./installed-package.js";
 
 // Test-only execution of installed SDK factories. No replacement SDK code is
 // shipped; a missing module/loader seam fails the contract rather than guessing.
+let installedFactories: ReturnType<typeof discoverInstalledCursorModules> | undefined;
+
 export async function installedCursorModules() {
+	return (await (installedFactories ??= discoverInstalledCursorModules()))();
+}
+
+async function discoverInstalledCursorModules() {
 	const root = resolveInstalledPackageRoot("@cursor/sdk");
 	const entry = join(root, "dist/esm/index.js");
 	const source = readFileSync(entry, "utf8");
@@ -35,28 +41,37 @@ export async function installedCursorModules() {
 		"@connectrpc/connect": await import(pathToFileURL(require.resolve("@connectrpc/connect")).href),
 		"@bufbuild/protobuf": await import(pathToFileURL(require.resolve("@bufbuild/protobuf")).href),
 	};
-	const cache: Record<string, any> = {};
-	const load = Object.assign((name: string): any => {
-		if (name.startsWith("/")) {
-			const matches = Object.keys(table!).filter((key) => key.endsWith(name));
-			if (matches.length !== 1) throw new Error(`Installed SDK module suffix is ambiguous or absent: ${name}`);
-			name = matches[0]!;
-		}
-		if (!name.startsWith(".")) return externals[name] ?? require(name.replace(/\?.*$/, ""));
-		if (cache[name]) return cache[name];
-		const factory = table![name];
-		if (!factory) throw new Error(`Installed SDK module missing: ${name}`);
-		const module = { exports: {} };
-		cache[name] = module.exports;
-		factory(module, module.exports, load);
-		return cache[name] = module.exports;
-	}, {
-		r: (target: object) => Object.defineProperty(target, "__esModule", { value: true }),
-		d: (target: object, getters: Record<string, () => unknown>) => {
-			for (const [key, get] of Object.entries(getters)) Object.defineProperty(target, key, { enumerable: true, get });
-		},
-		n: (value: any) => value?.__esModule ? () => value.default : () => value,
-		o: (target: object, key: string) => Object.hasOwn(target, key),
-	});
-	return load;
+	// Reuse only unbound installed factories. Every caller gets fresh exports:
+	// logger evaluation captures console methods and color environment state.
+	return () => {
+		const cache: Record<string, any> = {};
+		const load = Object.assign((name: string): any => {
+			if (name.startsWith("/")) {
+				const matches = Object.keys(table!).filter((key) => key.endsWith(name));
+				if (matches.length !== 1) throw new Error(`Installed SDK module suffix is ambiguous or absent: ${name}`);
+				name = matches[0]!;
+			}
+			if (!name.startsWith(".")) return externals[name] ?? require(name.replace(/\?.*$/, ""));
+			if (cache[name]) return cache[name];
+			const factory = table![name];
+			if (!factory) throw new Error(`Installed SDK module missing: ${name}`);
+			const module = { exports: {} };
+			cache[name] = module.exports;
+			factory(module, module.exports, load);
+			return cache[name] = module.exports;
+		}, {
+			r: (target: object) => Object.defineProperty(target, "__esModule", { value: true }),
+			d: (target: object, getters: Record<string, () => unknown>) => {
+				for (const [key, get] of Object.entries(getters)) Object.defineProperty(target, key, { enumerable: true, get });
+			},
+			n: (value: any) => value?.__esModule ? () => value.default : () => value,
+			o: (target: object, key: string) => Object.hasOwn(target, key),
+			factorySource: (name: string): string => {
+				const factory = table![name];
+				if (!factory) throw new Error(`Installed SDK module missing: ${name}`);
+				return factory.toString();
+			},
+		});
+		return load;
+	};
 }

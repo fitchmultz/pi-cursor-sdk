@@ -10,8 +10,6 @@ import {
 	type CursorModelFallbackIssue,
 } from "../src/model-discovery.js";
 import { saveCachedContextWindow, __testUtils as contextWindowCacheTestUtils } from "../src/context-window-cache.js";
-import { loadFreshCachedModels, fingerprintApiKey, saveModelListCache } from "../src/model-list-cache.js";
-import { createCursorModelAuthResync, type CursorCatalogResult } from "../src/cursor-model-auth-resync.js";
 import { FALLBACK_MODEL_ITEMS } from "../src/cursor-fallback-models.generated.js";
 
 vi.mock("node:fs", async (importOriginal) => {
@@ -67,7 +65,7 @@ describe("discoverModels", () => {
 	it("returns generated fallback models when no API key", async () => {
 		delete process.env.CURSOR_API_KEY;
 		const issues: CursorModelFallbackIssue[] = [];
-		const models = await discoverModels({ onFallback: (issue) => issues.push(issue) });
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY, onFallback: (issue) => issues.push(issue) });
 		const modelIds = models.map((model) => model.id);
 		expect(modelIds).toEqual(
 			expect.arrayContaining([
@@ -102,73 +100,10 @@ describe("discoverModels", () => {
 		expect(mockedList).not.toHaveBeenCalled();
 	});
 
-	it("hides only the unauthenticated owner catalog without clearing sibling metadata", async () => {
-		process.env.PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT = "1";
-		register([FALLBACK_MODEL_ITEMS.find(model => model.id === "grok-4.6")!]);
-		const selection = buildCursorModelSelection("grok-4.6", "high", false);
-		const issues: CursorModelFallbackIssue[] = [];
-		expect(await discoverModels({ apiKey: null, onFallback: issue => issues.push(issue) })).toEqual([]);
-		expect(issues[0].reason).toBe("missing-api-key");
-		expect(buildCursorModelSelection("grok-4.6", "high", false)).toEqual(selection);
-		expect(getCursorModelMetadata("grok-4.6")).toBeDefined();
-		expect(mockedList).not.toHaveBeenCalled();
-	});
-
-	it("retains fallback models for authenticated discovery failures when hiding is enabled", async () => {
-		process.env.PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT = "1";
-		vi.mocked(Cursor.models.list).mockRejectedValueOnce(new Error("offline"));
-		const issue = vi.fn();
-		const models = await discoverModels({ apiKey: "present-key", forceRefresh: true, onFallback: issue });
-		expect(models.length).toBeGreaterThan(0);
-		expect(issue).toHaveBeenCalledWith(expect.objectContaining({ reason: "discovery-failed" }));
-	});
-
-	it("uses explicit captured logout auth rather than re-reading a newly configured key", async () => {
-		process.env.CURSOR_API_KEY = "new-key";
-		const issues: CursorModelFallbackIssue[] = [];
-		await discoverModels({ apiKey: null, onFallback: issue => issues.push(issue) });
-		expect(issues[0].reason).toBe("missing-api-key");
-		expect(mockedList).not.toHaveBeenCalled();
-	});
-
-	it("retries live discovery after a forced failure even while its fallback cache is fresh", async () => {
-		process.env.CURSOR_API_KEY = "retry-key";
-		saveModelListCache(fingerprintApiKey("retry-key"), [{ id: "cached-model", displayName: "Cached" }]);
-		const apply = vi.fn<(result: CursorCatalogResult) => void>();
-		const catalog = createCursorModelAuthResync(apply);
-		await catalog.refresh();
-		expect(mockedList).not.toHaveBeenCalled();
-		mockedList.mockRejectedValueOnce(new Error("offline"));
-		await catalog.refresh({ force: true });
-		expect(apply.mock.lastCall?.[0].issue?.reason).toBe("cached-after-error");
-		mockedList.mockResolvedValueOnce([{ id: "live-model", displayName: "Live" }]);
-		await catalog.refresh();
-		expect(mockedList).toHaveBeenCalledTimes(2);
-		expect(apply.mock.lastCall?.[0].models.map(model => model.id)).toEqual(["live-model"]);
-		expect(apply.mock.lastCall?.[0].issue).toBeUndefined();
-		await catalog.refresh();
-		expect(mockedList).toHaveBeenCalledTimes(2);
-	});
-
-	it("does not publish superseded SDK results into metadata or the cache", async () => {
-		let current = true;
-		let finish!: (models: ModelListItem[]) => void;
-		mockedList.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
-		register([FALLBACK_MODEL_ITEMS.find(model => model.id === "grok-4.6")!]);
-		const result = discoverModels({ apiKey: "superseded-key", forceRefresh: true, isCurrent: () => current });
-		await vi.waitFor(() => expect(finish).toBeDefined());
-		current = false;
-		finish([{ id: "stale-only", displayName: "Stale" }]);
-		expect(await result).toEqual([]);
-		expect(getCursorModelMetadata("grok-4.6")).toBeDefined();
-		expect(getCursorModelMetadata("stale-only")).toBeUndefined();
-		expect(loadFreshCachedModels(fingerprintApiKey("superseded-key"))).toBeUndefined();
-	});
-
 	it("returns fallback models and reports missing key when API key is whitespace", async () => {
 		process.env.CURSOR_API_KEY = "   ";
 		const issues: CursorModelFallbackIssue[] = [];
-		const models = await discoverModels({ onFallback: (issue) => issues.push(issue) });
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY, onFallback: (issue) => issues.push(issue) });
 		expect(models.some((model) => model.id === "gpt-5.5@1m")).toBe(true);
 		expect(issues).toEqual([expect.objectContaining({ reason: "missing-api-key" })]);
 		expect(mockedList).not.toHaveBeenCalled();
@@ -183,7 +118,7 @@ describe("discoverModels", () => {
 			"--model", "cursor/final", "--api-key", "last-key",
 		];
 
-		const models = await discoverModels();
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 
 		expect(models.some((model) => model.id === "composer-2.5")).toBe(true);
 		expect(mockedList).not.toHaveBeenCalled();
@@ -200,71 +135,15 @@ describe("discoverModels", () => {
 		expect(models.map((model) => model.id)).toEqual(["composer-2"]);
 	});
 
-	it("uses stored pi auth for model discovery when env and CLI are absent", async () => {
-		writeStoredCursorApiKey("stored-key-123");
-		mockedList.mockResolvedValueOnce([
-			{
-				id: "composer-2",
-				displayName: "Composer 2",
-				variants: [{ params: [], displayName: "Composer 2", isDefault: true }],
-			},
-		]);
-
-		const models = await discoverModels();
-
-		expect(mockedList).toHaveBeenCalledWith({ apiKey: "stored-key-123" });
-		expect(models.map((model) => model.id)).toEqual(["composer-2"]);
+	it("never falls through an explicit missing native key to unrelated default auth or ambient env", async () => {
+		writeStoredCursorApiKey("unrelated-default-key");
+		process.env.CURSOR_API_KEY = "unrelated-ambient-key";
+		const issues: CursorModelFallbackIssue[] = [];
+		const models = await discoverModels({ apiKey: undefined, onFallback: (issue) => issues.push(issue) });
+		expect(models.some((model) => model.id === "composer-2.5")).toBe(true);
+		expect(issues[0].reason).toBe("missing-api-key");
+		expect(mockedList).not.toHaveBeenCalled();
 	});
-
-	it("prefers stored pi auth over CURSOR_API_KEY for model discovery", async () => {
-		writeStoredCursorApiKey("stored-key-123");
-		process.env.CURSOR_API_KEY = "env-key-123";
-		mockedList.mockResolvedValueOnce([
-			{
-				id: "composer-2",
-				displayName: "Composer 2",
-				variants: [{ params: [], displayName: "Composer 2", isDefault: true }],
-			},
-		]);
-
-		await discoverModels();
-
-		expect(mockedList).toHaveBeenCalledWith({ apiKey: "stored-key-123" });
-	});
-
-	it.each(["CURSOR_API_KEY", "$CURSOR_API_KEY", "${CURSOR_API_KEY}", "pi-cursor-sdk-cursor-api-key-placeholder"])(
-		"treats unresolved stored %s auth as missing when env is absent",
-		async (placeholder) => {
-			writeStoredCursorApiKey(placeholder);
-			const issues: CursorModelFallbackIssue[] = [];
-
-			const models = await discoverModels({ onFallback: (issue) => issues.push(issue) });
-
-			expect(models.some((model) => model.id === "composer-2.5")).toBe(true);
-			expect(issues).toEqual([expect.objectContaining({ reason: "missing-api-key" })]);
-			expect(issues[0].message).toContain("/login");
-			expect(mockedList).not.toHaveBeenCalled();
-		},
-	);
-
-	it.each(["CURSOR_API_KEY", "$CURSOR_API_KEY", "${CURSOR_API_KEY}", "pi-cursor-sdk-cursor-api-key-placeholder"])(
-		"resolves stored %s auth through the env var when present",
-		async (placeholder) => {
-			writeStoredCursorApiKey(placeholder);
-			process.env.CURSOR_API_KEY = "env-key-123";
-			mockedList.mockResolvedValueOnce([
-				{
-					id: "composer-2",
-					displayName: "Composer 2",
-					variants: [{ params: [], displayName: "Composer 2", isDefault: true }],
-				},
-			]);
-
-			await discoverModels();
-
-			expect(mockedList).toHaveBeenCalledWith({ apiKey: "env-key-123" });
-		},
-	);
 
 	it("calls Cursor.models.list with API key and sorts by base id", async () => {
 		process.env.CURSOR_API_KEY = "test-key-123";
@@ -280,7 +159,7 @@ describe("discoverModels", () => {
 				variants: [{ params: [], displayName: "Model A", isDefault: true }],
 			},
 		]);
-		const models = await discoverModels();
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 		expect(mockedList).toHaveBeenCalledWith({ apiKey: "test-key-123" });
 		expect(models.map((model) => model.id)).toEqual(["model-a", "model-b"]);
 		expect(models[0].name).toBe("Model A");
@@ -303,7 +182,7 @@ describe("discoverModels", () => {
 			},
 		]);
 
-		const models = await discoverModels();
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 
 		expect(models.map((model) => model.id)).toEqual(["a-model@300k", "a-model@1m", "z-model@long", "z-model@short"]);
 		expect(getCursorModelMetadata("a-model@300k")?.defaultParams).toEqual([{ id: "context", value: "300k" }]);
@@ -334,7 +213,7 @@ describe("discoverModels", () => {
 			},
 		]);
 
-		const models = await discoverModels();
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 
 		expect(models.map((model) => model.id)).toEqual(["gpt-5.5@1m", "gpt-5.5@272k", "gpt-latest@1m", "gpt-latest@272k"]);
 		expect(models[2].name).toBe("GPT-5.5 (gpt-latest) @ 1m");
@@ -369,7 +248,7 @@ describe("discoverModels", () => {
 			},
 		]);
 
-		const models = await discoverModels();
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 
 		expect(models.map((model) => model.id)).toEqual(["model-a", "model-latest", "model-b", "model-stable"]);
 		expect(getCursorModelMetadata("model-shared")).toBeUndefined();
@@ -391,7 +270,7 @@ describe("discoverModels", () => {
 			},
 		]);
 
-		const models = await discoverModels();
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 
 		expect(models.map((model) => model.id)).toEqual(["model-a", "model-a-latest", "model-b"]);
 		expect(getCursorModelMetadata("model-b")?.baseModelId).toBe("model-b");
@@ -408,7 +287,7 @@ describe("discoverModels", () => {
 			},
 		]);
 
-		const models = await discoverModels();
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 
 		expect(models.map((model) => [model.id, model.contextWindow])).toEqual([
 			["gpt-5-mini", 272000],
@@ -444,7 +323,7 @@ describe("discoverModels", () => {
 				],
 			},
 		]);
-		const models = await discoverModels();
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 		expect(models.map((model) => model.id)).toEqual([
 			"gpt-5.4@272k",
 			"gpt-5.4@272k:fast",
@@ -526,7 +405,7 @@ describe("discoverModels", () => {
 				],
 			},
 		]);
-		const models = await discoverModels();
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 		expect(models.map((model) => model.id)).toEqual(["gpt-5.3-codex", "gpt-5.3-codex:fast", "gpt-5.3-codex:slow"]);
 		expect(getCursorModelMetadata("gpt-5.3-codex")?.defaultParams).toEqual([
 			{ id: "reasoning", value: "high" },
@@ -553,7 +432,7 @@ describe("discoverModels", () => {
 				},
 			]);
 
-			const models = await discoverModels();
+			const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 
 			expect(models.map((model) => [model.id, model.contextWindow])).toEqual([
 				["composer-2", 200000],
@@ -578,7 +457,7 @@ describe("discoverModels", () => {
 			})),
 		);
 
-		const models = await discoverModels();
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 
 		expect(models).toHaveLength(catalogSize);
 		expect(models.find(({ id }) => id === "synthetic-model-0")?.contextWindow).toBe(654000);
@@ -604,7 +483,7 @@ describe("discoverModels", () => {
 				},
 			]);
 
-			const models = await discoverModels();
+			const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 
 			expect(models.map((model) => [model.id, model.contextWindow])).toEqual([
 				["gpt-5.5@1m", 950000],
@@ -667,7 +546,7 @@ describe("discoverModels", () => {
 				},
 			]);
 
-			const models = await discoverModels();
+			const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 
 			expect(models.map((model) => [model.id, model.contextWindow])).toEqual([
 				["composer-2", 201000],
@@ -693,7 +572,7 @@ describe("discoverModels", () => {
 				},
 			]);
 
-			const models = await discoverModels();
+			const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 
 			expect(models.find((model) => model.id === "composer-2")?.contextWindow).toBe(200000);
 		} finally {
@@ -710,7 +589,7 @@ describe("discoverModels", () => {
 				variants: [{ params: [], displayName: "Gemini 3.1 Pro", isDefault: true }],
 			},
 		]);
-		const models = await discoverModels();
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 		expect(models[0].reasoning).toBe(false);
 		expect(models[0].thinkingLevelMap).toBeUndefined();
 	});
@@ -744,7 +623,7 @@ describe("discoverModels", () => {
 				],
 			},
 		]);
-		const models = await discoverModels();
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 		expect(models[0].thinkingLevelMap).toEqual({
 			off: "none",
 			minimal: "minimal",
@@ -778,7 +657,7 @@ describe("discoverModels", () => {
 				],
 			},
 		]);
-		const models = await discoverModels();
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 		expect(models[0].thinkingLevelMap).toEqual({
 			off: "false",
 			minimal: null,
@@ -825,7 +704,7 @@ describe("discoverModels", () => {
 				],
 			},
 		]);
-		const models = await discoverModels();
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 		expect(models.map((model) => model.id)).toEqual(["claude-opus-4-7@300k", "claude-opus-4-7@1m"]);
 		expect(models[0].contextWindow).toBe(300000);
 		expect(models[1].contextWindow).toBe(1000000);
@@ -850,7 +729,7 @@ describe("discoverModels", () => {
 			},
 		]);
 
-		const models = await discoverModels();
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 
 		expect(models[0].input).toEqual(["text", "image"]);
 	});
@@ -872,7 +751,7 @@ describe("discoverModels", () => {
 			},
 		]);
 
-		const models = await discoverModels();
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 
 		expect(models[0].thinkingLevelMap).toEqual({
 			off: null,
@@ -912,7 +791,7 @@ describe("discoverModels", () => {
 			},
 		]);
 
-		const models = await discoverModels();
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 
 		expect(models[0].thinkingLevelMap).toEqual({
 			off: "false",
@@ -939,7 +818,7 @@ describe("discoverModels", () => {
 	it("keeps the fallback snapshot aligned with the current Composer 2.5 catalog shape", async () => {
 		delete process.env.CURSOR_API_KEY;
 
-		const models = await discoverModels();
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 		const modelIds = models.map((model) => model.id);
 
 		expect(modelIds).toEqual(expect.arrayContaining(["composer-2.5", "composer-2-5", "composer-latest"]));
@@ -977,7 +856,7 @@ describe("discoverModels", () => {
 		mockedList.mockResolvedValueOnce([
 			{ id: "raw-id", variants: [{ params: [], displayName: "raw-id", isDefault: true }] } as unknown as ModelListItem,
 		]);
-		const models = await discoverModels();
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 		expect(models[0].name).toBe("raw-id");
 	});
 
@@ -994,7 +873,7 @@ describe("discoverModels", () => {
 				],
 			},
 		]);
-		const models = await discoverModels();
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 		expect(models[0].id).toBe("test-model");
 		expect(buildCursorModelSelection("test-model", "off")).toEqual({
 			id: "test-model",

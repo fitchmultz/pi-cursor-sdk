@@ -25,6 +25,7 @@ import {
 	makeModel,
 } from "./helpers/pi-harness.js";
 import { createTestToolInfo } from "./helpers/tool-fixtures.js";
+import { __testUtils as cleanupTestUtils, CURSOR_SESSION_AGENT_CLEANUP_ENTRY_TYPE } from "../src/cursor-session-agent-cleanup.js";
 
 const modelItems: ModelListItem[] = [
 	{
@@ -756,6 +757,34 @@ describe("Cursor runtime state", () => {
 			PI_CURSOR_TOOL_MANIFEST: "0",
 		});
 		expect(report).toContain("PI_CURSOR_TOOL_MANIFEST: disabled");
+	});
+
+	it.each([
+		["", "No recorded superseded local Cursor SDK agents are cleanup-eligible.", "info", { action: "dry-run" }],
+		["--dry-run", "No recorded superseded local Cursor SDK agents are cleanup-eligible.", "info", { action: "dry-run" }],
+		["--help", "Invalid Cursor local resume cleanup arguments. Usage: /cursor-local-resume-cleanup [--dry-run|--yes]", "error", undefined],
+		["--invalid", "Invalid Cursor local resume cleanup arguments. Usage: /cursor-local-resume-cleanup [--dry-run|--yes]", "error", undefined],
+		["--yes", "No recorded superseded local Cursor SDK agents to delete.", "info", { action: "delete", phase: "result", deletedAgentIds: [] }],
+	] as const)("registered local cleanup %s ignores unrelated invalid runtime config", async (args, message, level, ledger) => {
+		const originalRuntime = process.env.PI_CURSOR_RUNTIME;
+		const deleteAgent = vi.fn();
+		cleanupTestUtils.setSdkOperations({ delete: deleteAgent });
+		process.env.PI_CURSOR_RUNTIME = "invalid-unrelated-runtime";
+		try {
+			const { pi, ctx, commandCtx, commands } = createCursorRuntimeHarness();
+			await commands.get("cursor-local-resume-cleanup")!.handler(args, commandCtx);
+			expect(ctx.ui.notify).toHaveBeenCalledWith(message, level);
+			if (ledger) {
+				expect(pi.appendEntry).toHaveBeenCalledOnce();
+				expect(pi.appendEntry).toHaveBeenCalledWith(CURSOR_SESSION_AGENT_CLEANUP_ENTRY_TYPE,
+					expect.objectContaining({ ...ledger, runtime: "local", candidateAgentIds: [] }));
+			} else expect(pi.appendEntry).not.toHaveBeenCalled();
+			expect(deleteAgent).not.toHaveBeenCalled();
+		} finally {
+			cleanupTestUtils.reset();
+			if (originalRuntime === undefined) delete process.env.PI_CURSOR_RUNTIME;
+			else process.env.PI_CURSOR_RUNTIME = originalRuntime;
+		}
 	});
 
 	it("logs /cursor-tools to stdout when UI is unavailable", async () => {

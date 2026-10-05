@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { join, toNamespacedPath } from "node:path";
@@ -19,7 +19,7 @@ import {
 import { makeAssistantMessage } from "./helpers/pi-harness.js";
 import { cursorSessionScopeKeyForManager, __testUtils as scopeTestUtils } from "../src/cursor-session-scope.js";
 import { installCursorSessionStoreMock } from "./helpers/cursor-session-store.js";
-import { buildCursorCustomWorkspaceRoot, buildCursorSessionStateRoot } from "../src/cursor-session-store.js";
+import { buildCursorSessionStateRoot } from "../src/cursor-session-store.js";
 
 function resumeData(agentId: string, extra: Partial<CursorSessionAgentResumeEntryData> = {}): CursorSessionAgentResumeEntryData {
 	return {
@@ -339,10 +339,10 @@ describe("cursor-session-agent-cleanup", () => {
 		expect(storeMock.stores[0].dispose).toHaveBeenCalledTimes(1);
 	});
 
-	it("retains a changed-base cleanup candidate for retry after restoring its base", async () => {
-		const base = mkdtempSync(join(tmpdir(), "cursor-cleanup-base-"));
+	it("permanently classifies a wrong-domain cleanup candidate without deleting its retained history", async () => {
+		const base = realpathSync(mkdtempSync(join(tmpdir(), "cursor-cleanup-base-")));
 		const previous = join(base, "previous");
-		const storeIdentity = { version: 1 as const, stateRoot: buildCursorSessionStateRoot(buildCursorCustomWorkspaceRoot(previous, cleanupScope.cwd), cleanupScope.scopeKey) };
+		const storeIdentity = { version: 1 as const, stateRoot: buildCursorSessionStateRoot(join(previous, createHash("sha256").update(cleanupScope.cwd).digest("hex").slice(0, 32)), cleanupScope.scopeKey) };
 		const entries = linearEntries([
 			resumeEntry("r1", resumeData("agent-old", { version: 2, storeIdentity })),
 			resumeEntry("r2", resumeData("agent-active", { version: 2, storeIdentity, cleanupCandidates: [{ agentId: "agent-old", storeIdentity }] })),
@@ -356,26 +356,27 @@ describe("cursor-session-agent-cleanup", () => {
 		});
 		const ctx = makeContext(entries);
 		try {
-			vi.stubEnv("PI_CURSOR_SDK_STATE_ROOT", join(base, "current"));
-			await runCursorSessionAgentCleanupCommand({ appendEntry }, "--yes", ctx);
+			await runCursorSessionAgentCleanupCommand({ appendEntry }, "--yes", ctx, join(base, "current"));
 			expect(deleteAgent).not.toHaveBeenCalled();
 			expect(appendEntry).toHaveBeenLastCalledWith(
 				CURSOR_SESSION_AGENT_CLEANUP_ENTRY_TYPE,
 				expect.objectContaining({
-					failedAgentIds: [{ agentId: "agent-old", error: expect.any(String) }],
+					failedAgentIds: [{ agentId: "agent-old", error: expect.any(String), retryable: false }],
 				}),
 			);
-			expect(readCursorSessionAgentCleanupPlan(entries, entries, cleanupScope).candidateAgentIds).toContain("agent-old");
-			vi.stubEnv("PI_CURSOR_SDK_STATE_ROOT", previous);
-			await runCursorSessionAgentCleanupCommand({ appendEntry }, "--yes", ctx);
-			expect(deleteAgent).toHaveBeenCalledExactlyOnceWith("agent-old", expect.objectContaining({ cwd: cleanupScope.cwd }));
+			expect(readCursorSessionAgentCleanupPlan(entries, entries, cleanupScope).candidateAgentIds).not.toContain("agent-old");
+			await runCursorSessionAgentCleanupCommand({ appendEntry }, "--yes", ctx, previous);
+			expect(deleteAgent).not.toHaveBeenCalled();
 		} finally {
 			vi.unstubAllEnvs();
 			rmSync(base, { recursive: true, force: true });
 		}
 	});
 
-	it.each(["current-session", "legacy-session", "workspace", "identityless"] as const)("restores default cleanup ownership after configuring a base: %s", async (kind) => {
+	it.each([
+		...(["current-session", "legacy-session", "workspace", "identityless"] as const).flatMap(kind =>
+			[false, true].map(wrongDomainFirst => ({ kind, wrongDomainFirst }))),
+	])("preserves default cleanup ownership for $kind; prior wrong-domain classification=$wrongDomainFirst", async ({ kind, wrongDomainFirst }) => {
 		const base = mkdtempSync(join(tmpdir(), "cursor-cleanup-default-"));
 		const cwd = cleanupScope.cwd;
 		const slug = cwd.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
@@ -409,22 +410,27 @@ describe("cursor-session-agent-cleanup", () => {
 		});
 		const ctx = makeContext(entries);
 		try {
-			vi.stubEnv("PI_CURSOR_SDK_STATE_ROOT", base);
+			if (wrongDomainFirst) {
+				await runCursorSessionAgentCleanupCommand({ appendEntry }, "--yes", ctx, base);
+				expect(getter).not.toHaveBeenCalled();
+				expect(stores.openSqliteStore).not.toHaveBeenCalled();
+				expect(deleteAgent).not.toHaveBeenCalled();
+				expect(appendEntry).toHaveBeenLastCalledWith(
+					CURSOR_SESSION_AGENT_CLEANUP_ENTRY_TYPE,
+					expect.objectContaining({
+						failedAgentIds: [{ agentId: "agent-old", error: expect.any(String), retryable: false }],
+					}),
+				);
+			}
 			await runCursorSessionAgentCleanupCommand({ appendEntry }, "--yes", ctx);
-			expect(getter).not.toHaveBeenCalled();
-			expect(stores.openSqliteStore).not.toHaveBeenCalled();
-			expect(deleteAgent).not.toHaveBeenCalled();
-			expect(appendEntry).toHaveBeenLastCalledWith(
-				CURSOR_SESSION_AGENT_CLEANUP_ENTRY_TYPE,
-				expect.objectContaining({
-					failedAgentIds: [{ agentId: "agent-old", error: expect.any(String) }],
-				}),
-			);
-			expect(readCursorSessionAgentCleanupPlan(entries, entries, cleanupScope).candidateAgentIds).toContain("agent-old");
-			vi.stubEnv("PI_CURSOR_SDK_STATE_ROOT", undefined);
-			await runCursorSessionAgentCleanupCommand({ appendEntry }, "--yes", ctx);
-			expect(deleteAgent).toHaveBeenCalledExactlyOnceWith("agent-old", expect.objectContaining({ cwd }));
-			expect(stores.openedOptions[0].stateRoot).toBe(toNamespacedPath(storeIdentity?.stateRoot ?? defaultRoot));
+			if (wrongDomainFirst) {
+				expect(getter).not.toHaveBeenCalled();
+				expect(stores.openSqliteStore).not.toHaveBeenCalled();
+				expect(deleteAgent).not.toHaveBeenCalled();
+			} else {
+				expect(deleteAgent).toHaveBeenCalledExactlyOnceWith("agent-old", expect.objectContaining({ cwd }));
+				expect(stores.openedOptions[0].stateRoot).toBe(toNamespacedPath(storeIdentity?.stateRoot ?? defaultRoot));
+			}
 			expect(readCursorSessionAgentCleanupPlan(entries, entries, cleanupScope).candidateAgentIds).not.toContain("agent-old");
 		} finally {
 			vi.unstubAllEnvs();

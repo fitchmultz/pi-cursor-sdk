@@ -72,6 +72,18 @@ export function isCanonicalConfiguredSessionStoreIdentity(cwd: string, scopeKey:
 	return identity.stateRoot === buildCursorSessionStateRoot(buildCursorCustomWorkspaceRoot(base, cwd), scopeKey);
 }
 
+/** Pure retry classification; restoring the default must still pass ordinary identity admission. */
+export function isCanonicalDefaultSessionStoreIdentity(cwd: string, scopeKey: string, identity: CursorSessionStoreIdentity | undefined): boolean {
+	if (!identity || identity.version !== 1 || !isAbsolute(identity.stateRoot)) return false;
+	const prefix = defaultWorkspacePrefix(cwd);
+	const { current, legacy } = workspaceHashes(cwd);
+	return [current, legacy].some((hash) => {
+		if (!hash) return false;
+		const root = join(prefix, hash);
+		return identity.stateRoot === root || identity.stateRoot === buildCursorSessionStateRoot(root, scopeKey);
+	});
+}
+
 function workspacePathKey(cwd: string, root: string): string {
 	return JSON.stringify([cwd, root]);
 }
@@ -217,12 +229,16 @@ function workspaceHashes(cwd: string): { current: string; legacy: string | undef
 	}
 }
 
+function defaultWorkspacePrefix(cwd: string): string {
+	const slug = cwd.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
+	return join(homedir(), ".cursor", "projects", slug, "sdk-agent-store");
+}
+
 function assertSafeWorkspaceLayout(cwd: string): void {
 	// ponytail: SDK 1.0.35 has no public read-only root resolver; use one when exposed.
 	// This pure layout is contract-verified against its factory and public getter;
 	// guard it before that getter can rename MD5 history through an owned link.
-	const slug = cwd.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
-	const prefix = join(homedir(), ".cursor", "projects", slug, "sdk-agent-store");
+	const prefix = defaultWorkspacePrefix(cwd);
 	const { current, legacy } = workspaceHashes(cwd);
 	for (const hash of [current, legacy]) {
 		if (hash) assertSafeStorePath(join(prefix, hash), prefix, "local store");

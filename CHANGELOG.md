@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- Retain canonical default-store cleanup candidates across configured-root changes, and refuse legacy identityless cleanup under a custom root until the default is restored.
 - Give compatibility build, verification and native contracts separate bounded phases; stop timed-out POSIX command descendants before deleting their isolated workspace. Keep individual test deadlines unchanged.
 
 - Keep Cursor SDK and bridge imports in Pi’s static extension graph so compiled-Bun launchers can resolve them; initialize the native parser vendor path before the SDK loads.

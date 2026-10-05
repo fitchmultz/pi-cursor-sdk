@@ -1,9 +1,12 @@
 import { createServer } from "node:http";
 import { createServer as createHttp2Server, type ServerHttp2Session } from "node:http2";
 import { once } from "node:events";
-import { Empty, MethodKind } from "@bufbuild/protobuf";
+import { createRequire } from "node:module";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { installedCursorModules } from "./helpers/cursor-sdk-installed-modules.js";
+import { resolveInstalledPackageRoot } from "./helpers/installed-package.js";
 import { classifyCursorConnectError } from "../src/cursor-provider-errors.js";
 import { installCursorSdkProcessErrorGuard } from "../src/cursor-sdk-process-error-guard.js";
 
@@ -12,6 +15,12 @@ afterEach(() => vi.unstubAllGlobals());
 describe("installed SDK vendored Node transport", () => {
 	it.each(["1.1", "2"] as const)("performs credential-free loopback HTTP/%s RPC and retains abort provenance", async (httpVersion) => {
 		const modules = await installedCursorModules();
+		const sdkRequire = createRequire(join(resolveInstalledPackageRoot("@cursor/sdk"), "dist/esm/index.js"));
+		const protobuf = await import(pathToFileURL(sdkRequire.resolve("@bufbuild/protobuf")).href);
+		const connect = await import(pathToFileURL(sdkRequire.resolve("@connectrpc/connect")).href);
+		const { Empty, MethodKind } = modules("@bufbuild/protobuf");
+		expect(Empty).toBe(protobuf.Empty);
+		expect(modules("@connectrpc/connect").ConnectError).toBe(connect.ConnectError);
 		const { createSafeConnectTransport } = modules("./src/agent/safe-connect-transport.ts");
 		const delays: number[] = [];
 		const timeout = globalThis.setTimeout;
@@ -58,10 +67,6 @@ describe("installed SDK vendored Node transport", () => {
 				guard.suppressAbortErrors();
 				process.emit("uncaughtException", error);
 				expect(listener).not.toHaveBeenCalled();
-				// Same observed cause chain with SDK stall provenance is a retryable
-				// network failure, never a user's cancellation.
-				error.stack += "\nSDK stall signal: reportStall"; // Synthetic signal, not an observed SDK frame.
-				expect(classifyCursorConnectError(error)).toEqual({ kind: "network", source: "cursor-sdk-stack" });
 			} finally {
 				process.off("uncaughtException", listener);
 				guard.dispose();

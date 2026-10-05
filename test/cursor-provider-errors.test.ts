@@ -1,5 +1,6 @@
 import { AuthenticationError, IntegrationNotConnectedError } from "@cursor/sdk";
 import { describe, expect, it } from "vitest";
+import { makeCursorSdkStallAbortWrapperConnectError } from "./helpers/cursor-sdk-stall-error.js";
 import {
 	classifyCursorConnectError,
 	isCursorSdkConnectionStalledError,
@@ -62,36 +63,6 @@ function makeCursorSdkHttp2EnhanceYourCalmConnectError(): Error & {
 		"ConnectError: [internal] Stream closed with error code NGHTTP2_ENHANCE_YOUR_CALM\n" +
 		"    at file:///repo/node_modules/@connectrpc/connect/dist/esm/connect-error.js:71:20\n" +
 		"    at file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:19228";
-	return error;
-}
-
-function makeCursorSdkStallAbortWrapperConnectError(): Error & { rawMessage: string; code: number; cause: Error } {
-	const cause = Object.assign(new Error("[canceled] This operation was aborted"), {
-		name: "ConnectError",
-		rawMessage: "This operation was aborted",
-		code: 1,
-		cause: new DOMException("This operation was aborted", "AbortError"),
-	});
-	cause.stack =
-		"ConnectError: [canceled] This operation was aborted\n" +
-		"    at ConnectError.from (file:///repo/node_modules/@connectrpc/connect/dist/esm/connect-error.js:69:24)\n" +
-		"    at i (file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:809)\n" +
-		"    at Object.reject (file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:13538)\n" +
-		"    at AbortSignal.l (file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:13744)";
-	const error = new Error("[unknown] [canceled] This operation was aborted") as Error & {
-		rawMessage: string;
-		code: number;
-		cause: Error;
-	};
-	error.name = "ConnectError";
-	error.rawMessage = "[canceled] This operation was aborted";
-	error.code = 2;
-	error.cause = cause;
-	error.stack =
-		"ConnectError: [unknown] [canceled] This operation was aborted\n" +
-		"    at o.from (/repo/node_modules/@cursor/sdk/dist/esm/index.js:1:273661)\n" +
-		"    at file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:19228\n" +
-		"SDK stall signal: reportStall";
 	return error;
 }
 
@@ -394,7 +365,7 @@ describe("cursor-provider-errors", () => {
 		expect(message).not.toContain("NGHTTP2_ENHANCE_YOUR_CALM");
 	});
 
-	it("classifies Cursor SDK stall abort wrappers as retryable network failures", () => {
+	it("classifies the captured default-depth Cursor SDK stall abort wrapper as a retryable network failure", () => {
 		const error = makeCursorSdkStallAbortWrapperConnectError();
 		const classification = classifyCursorConnectError(error);
 		const message = sanitizeCursorProviderError(error, "test-key");
@@ -402,6 +373,20 @@ describe("cursor-provider-errors", () => {
 		expect(classification).toEqual({ kind: "network", source: "cursor-sdk-stack" });
 		expect(message).toContain("Network error");
 		expect(message).not.toContain("operation was aborted");
+	});
+
+	it.each([2, "unknown"] as const)("does not classify incomplete wrapped abort causes as cancellation (outer code %s)", (code) => {
+		for (const cause of [
+			{ name: "ConnectError", code: 1 },
+			{ name: "ConnectError", code: 14, cause: { name: "AbortError" } },
+		]) {
+			const error = Object.assign(new Error("[unknown] [canceled] This operation was aborted"), {
+				name: "ConnectError", code, rawMessage: "[canceled] This operation was aborted", cause,
+				stack: "ConnectError: [unknown] [canceled] This operation was aborted\n" +
+					"    at file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:19228",
+			});
+			expect(classifyCursorConnectError(error)).toBeUndefined();
+		}
 	});
 
 	it.each([

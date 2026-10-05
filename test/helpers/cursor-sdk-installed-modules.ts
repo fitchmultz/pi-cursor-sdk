@@ -32,8 +32,8 @@ export async function installedCursorModules() {
 	}
 	const require = createRequire(entry);
 	const externals: Record<string, unknown> = {
-		"@connectrpc/connect": await import("@connectrpc/connect"),
-		"@bufbuild/protobuf": await import("@bufbuild/protobuf"),
+		"@connectrpc/connect": await import(pathToFileURL(require.resolve("@connectrpc/connect")).href),
+		"@bufbuild/protobuf": await import(pathToFileURL(require.resolve("@bufbuild/protobuf")).href),
 	};
 	const cache: Record<string, any> = {};
 	const load = Object.assign((name: string): any => {

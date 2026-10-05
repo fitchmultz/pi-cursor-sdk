@@ -1,0 +1,34 @@
+{
+  "provenance": {
+    "sdkVersion": "1.0.35",
+    "nodeVersion": "24.21.0",
+    "platform": "macOS arm64",
+    "stackTraceLimit": 10,
+    "capture": "Actual installed detector timer/onStall/context-cancel through credential-free HTTP/1.1 unary loopback; not public LocalAgent/backend/unhandled-process proof",
+    "sourceRawFile": "raw-1.1-unary-stall.json",
+    "sourceRawSha256": "cd3095b4a3f33f03f254308262cfead712a1037d01564eefe9627dfd019e5184",
+    "normalization": "Repository prefix only: /Users/mitchfultz/Projects/worktrees/pi-cursor-sdk/backlog-sdk-upgrade -> /repo; scratch probe path unchanged"
+  },
+  "chain": [
+    {
+      "name": "ConnectError",
+      "message": "[unknown] [canceled] This operation was aborted",
+      "rawMessage": "[canceled] This operation was aborted",
+      "code": 2,
+      "stack": "ConnectError: [unknown] [canceled] This operation was aborted\n    at o.from (/repo/node_modules/@cursor/sdk/dist/esm/index.js:1:273661)\n    at file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:19228\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async Object.unary (file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:21058)\n    at async file:///private/tmp/pi-cursor-sdk35-stall-stack-depth-proof/probe.mjs:64:15"
+    },
+    {
+      "name": "ConnectError",
+      "message": "[canceled] This operation was aborted",
+      "rawMessage": "This operation was aborted",
+      "code": 1,
+      "stack": "ConnectError: [canceled] This operation was aborted\n    at ConnectError.from (/repo/node_modules/@connectrpc/connect/dist/cjs/connect-error.js:72:24)\n    at i (file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:809)\n    at Object.reject (file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:13538)\n    at AbortSignal.l (file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:13744)\n    at [nodejs.internal.kHybridDispatch] (node:internal/event_target:848:20)\n    at AbortSignal.dispatchEvent (node:internal/event_target:789:26)\n    at runAbort (node:internal/abort_controller:554:10)\n    at abortSignal (node:internal/abort_controller:518:3)\n    at AbortController.abort (node:internal/abort_controller:573:5)\n    at AbortSignal.o (file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:28787)"
+    },
+    {
+      "name": "AbortError",
+      "message": "This operation was aborted",
+      "code": 20,
+      "stack": "AbortError: This operation was aborted\n    at new DOMException (node:internal/per_context/domexception:76:18)\n    at AbortController.abort (node:internal/abort_controller:572:18)\n    at Object.abort (/repo/node_modules/@cursor/sdk/dist/esm/index.js:1:305505)\n    at /repo/node_modules/@cursor/sdk/dist/esm/index.js:1:306025\n    at Rs.onStall (/repo/node_modules/@cursor/sdk/dist/esm/689.js:1:111645)\n    at Rs.reportStall (/repo/node_modules/@cursor/sdk/dist/esm/689.js:1:94437)\n    at Rs.onStallDetected (/repo/node_modules/@cursor/sdk/dist/esm/689.js:1:92834)\n    at Timeout.e [as _onTimeout] (/repo/node_modules/@cursor/sdk/dist/esm/689.js:1:89769)\n    at listOnTimeout (node:internal/timers:685:17)\n    at process.processTimers (node:internal/timers:618:7)"
+    }
+  ]
+}

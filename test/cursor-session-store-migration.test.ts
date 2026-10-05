@@ -199,7 +199,8 @@ describe("installed SDK root migration with real SQLite", () => {
 		const inspect = vi.spyOn(fs, "lstatSync");
 		const rename = vi.spyOn(fs, "renameSync");
 		syncBuiltinESMExports();
-		const first = await openCursorSessionStoreForScope({ cwd, scopeKey: "fileless", persistent: false });
+		let first: Awaited<ReturnType<typeof openCursorSessionStoreForScope>> | undefined =
+			await openCursorSessionStoreForScope({ cwd, scopeKey: "fileless", persistent: false });
 		let second: Awaited<ReturnType<typeof openCursorSessionStoreForScope>> | undefined;
 		try {
 			second = await openCursorSessionStoreForScope({ cwd, scopeKey: "fileless", persistent: false });
@@ -217,15 +218,17 @@ describe("installed SDK root migration with real SQLite", () => {
 			await persistent.sessionStore.dispose();
 			expect(getter).toHaveBeenCalledOnce();
 			await first.sessionStore.dispose();
+			first = undefined;
 			expect(existsSync(firstRoot)).toBe(false);
 			expect(existsSync(secondRoot)).toBe(true);
 			await second.sessionStore.dispose();
+			second = undefined;
 			expect(existsSync(secondRoot)).toBe(false);
 			expect(fileHashes(outside)).toEqual(before);
 			expect(readdirSync(outside)).toEqual([createHash("md5").update(cwd).digest("hex")]);
 			await assertHistory(history);
 		} finally {
-			await first.sessionStore.dispose();
+			await first?.sessionStore.dispose();
 			await second?.sessionStore.dispose();
 		}
 	});

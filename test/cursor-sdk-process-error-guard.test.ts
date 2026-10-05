@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { isUnauthenticatedConnectError } from "../src/cursor-provider-errors.js";
 import { readInstalledPackageDistText } from "./helpers/installed-package.js";
+import { makeCursorSdkStallAbortWrapperConnectError } from "./helpers/cursor-sdk-stall-error.js";
 import {
 	__testUtils,
 	installCursorSdkProcessErrorGuard,
@@ -15,8 +16,8 @@ import {
 const emitProcessEvent = (event: string | symbol, ...args: unknown[]): boolean =>
 	(process.emit as (event: string | symbol, ...args: unknown[]) => boolean).call(process, event, ...args);
 
-// Synthetic .35 inputs use retained transport frames or installed write/stall
-// source locations, with normalized repo prefixes; the stall annotation is synthetic.
+// Other synthetic .35 inputs use retained transport frames or installed write/stall
+// locations; the shared stall wrapper uses the actual default-depth offline capture.
 function makeCursorSdkAbortConnectError(): Error & { rawMessage: string; code: number; cause: DOMException } {
 	const error = new Error("[canceled] This operation was aborted") as Error & {
 		rawMessage: string;
@@ -162,36 +163,6 @@ function makeCursorSdkHttp2EnhanceYourCalmConnectError(): Error & {
 		"ConnectError: [internal] Stream closed with error code NGHTTP2_ENHANCE_YOUR_CALM\n" +
 		"    at file:///repo/node_modules/@connectrpc/connect/dist/esm/connect-error.js:71:20\n" +
 		"    at file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:19228";
-	return error;
-}
-
-function makeCursorSdkStallAbortWrapperConnectError(): Error & { rawMessage: string; code: number; cause: Error } {
-	const cause = Object.assign(new Error("[canceled] This operation was aborted"), {
-		name: "ConnectError",
-		rawMessage: "This operation was aborted",
-		code: 1,
-		cause: new DOMException("This operation was aborted", "AbortError"),
-	});
-	cause.stack =
-		"ConnectError: [canceled] This operation was aborted\n" +
-		"    at ConnectError.from (file:///repo/node_modules/@connectrpc/connect/dist/esm/connect-error.js:69:24)\n" +
-		"    at i (file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:809)\n" +
-		"    at Object.reject (file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:13538)\n" +
-		"    at AbortSignal.l (file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:13744)";
-	const error = new Error("[unknown] [canceled] This operation was aborted") as Error & {
-		rawMessage: string;
-		code: number;
-		cause: Error;
-	};
-	error.name = "ConnectError";
-	error.rawMessage = "[canceled] This operation was aborted";
-	error.code = 2;
-	error.cause = cause;
-	error.stack =
-		"ConnectError: [unknown] [canceled] This operation was aborted\n" +
-		"    at o.from (/repo/node_modules/@cursor/sdk/dist/esm/index.js:1:273661)\n" +
-		"    at file:///repo/node_modules/@cursor/sdk/dist/esm/769.js:1:19228\n" +
-		"SDK stall signal: reportStall";
 	return error;
 }
 

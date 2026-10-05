@@ -8,6 +8,8 @@ Implemented design target. This file describes the intended Cursor model UX and 
 
 Current implementation notes:
 
+- Cursor footer status is visible by default. `PI_CURSOR_FOOTER=0` clears the Cursor status on the next status refresh; provider runtime, mode, and transport validation remain active.
+
 - Provider contexts support official Pi 0.87.1/latest and current `fitchmultz/pi` main, including transcript-only hosts. `cursor-pi-context.ts` directly imports Pi 0.87.1's required public replay helpers. Current instructions and tools are replayed natively, system deltas are fingerprinted, and system messages are excluded from Cursor conversation formatting and trailing-result scans. Fresh cloud context preserves current instructions while excluding history. Native replay uses the request tool snapshot (including empty); the pi bridge retains its separate registry-owned surface. XML prompt sections are sanitized/deduplicated alongside the stock format.
 
 - Cursor context variants use `base@context` pi model IDs.

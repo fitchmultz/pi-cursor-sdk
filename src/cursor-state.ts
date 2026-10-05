@@ -24,6 +24,7 @@ import {
 	DEFAULT_CURSOR_SETTING_SOURCES,
 	resolveCursorSettingSources,
 } from "./cursor-setting-sources.js";
+import { parseEnvBoolean } from "./cursor-env-boolean.js";
 import { isCursorModel } from "./cursor-model.js";
 import { registerCursorModelLifecycle } from "./cursor-model-lifecycle.js";
 import { asRecord } from "./cursor-record-utils.js";
@@ -58,6 +59,8 @@ export {
 	getCursorCliConfig,
 	getCursorSessionConfig,
 } from "./cursor-runtime-state.js";
+
+export const CURSOR_FOOTER_ENV = "PI_CURSOR_FOOTER";
 
 const FAST_ENTRY_TYPE = "cursor-fast-state";
 const MODE_ENTRY_TYPE = "cursor-mode-state";
@@ -250,7 +253,7 @@ export function getCursorProviderAgentModeOrThrow(scopeKey?: string): AgentModeO
 type CursorStatusContext = Pick<ExtensionContext, "cwd"> & Partial<Pick<ExtensionContext, "isProjectTrusted" | "sessionManager">>;
 
 function updateCursorStatus(ctx: CursorStatusContext & Pick<ExtensionContext, "model" | "ui">, model = ctx.model): void {
-	if (!model || !isCursorModel(model)) {
+	if (!model || !isCursorModel(model) || !parseEnvBoolean(process.env[CURSOR_FOOTER_ENV], true)) {
 		ctx.ui.setStatus("cursor", undefined);
 		return;
 	}

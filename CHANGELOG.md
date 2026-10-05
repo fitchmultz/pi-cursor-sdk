@@ -10,6 +10,8 @@
 
 ### Changed
 
+- Add `PI_CURSOR_LIVE_RUN_IDLE_DISPOSE_MS` to configure eligible local replay idle cleanup, preserving owned pending-call protection and immediate explicit release (adapted from #283 by @aaalexliu).
+
 - `cursor_ask_question` now requires `PI_CURSOR_ASK_QUESTION=1`; Cursor proceeds with a stated assumption by default.
 
 - Upgrade the exact Cursor SDK dependency to 1.0.35. Preserve recorded local resume and cleanup ownership across its MD5-to-SHA256 workspace-root migration, without merging stores; share atomic same-cwd ownership from first root derivation through admission and store disposal.

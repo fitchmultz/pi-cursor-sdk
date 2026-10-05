@@ -20,6 +20,7 @@ import {
 	cursorSessionStoreIdentitiesEqual,
 	openCursorSessionStore,
 	openCursorSessionStoreForScope,
+	resolveCursorStoreRootBase,
 	type CursorSessionStoreIdentity,
 	type OpenCursorSessionStore,
 } from "./cursor-session-store.js";
@@ -136,6 +137,7 @@ interface SessionCursorAgentCreateParams {
 	onBridgeToolRequest?: (request: CursorPiBridgeToolRequest) => void;
 	debugRecorder?: CursorSdkEventDebugRecorder;
 	localResume?: boolean;
+	storeRootBase?: string;
 	forceCreate?: boolean;
 	createAgent?: CursorSdkModule["Agent"]["create"];
 	resumeAgent?: CursorSdkModule["Agent"]["resume"];
@@ -231,7 +233,8 @@ function buildBridgePoolKeySuffix(registeredBridge: CursorPiToolBridge | undefin
 }
 
 function buildSessionAgentPoolKey(scopeKey: string, params: SessionCursorAgentCreateParams): string {
-	return [
+	const base = resolveCursorStoreRootBase(params.cwd, params.storeRootBase);
+	const key = [
 		scopeKey,
 		params.cwd,
 		buildModelPoolKey(params.modelSelection),
@@ -246,6 +249,7 @@ function buildSessionAgentPoolKey(scopeKey: string, params: SessionCursorAgentCr
 		buildPoolKeyFingerprint(params.apiKey),
 		buildBridgePoolKeySuffix("bridge" in params ? params.bridge : getRegisteredCursorPiToolBridge()),
 	].join("\0");
+	return base ? `${key}\0store-root:${base}` : key;
 }
 
 async function disposePoolEntry(entry: SessionCursorAgentPoolEntry, options?: { deadTransport?: boolean }): Promise<void> {
@@ -491,6 +495,7 @@ async function createSessionAgentEntry(
 			cwd: params.cwd,
 			scopeKey,
 			persistent: persistentStore,
+			storeRootBase: params.storeRootBase,
 			resume: resumeHandle ? { identity: resumeHandle.storeIdentity, agentId: resumeHandle.agentId } : undefined,
 		});
 		sessionStore = storeSelection.sessionStore;

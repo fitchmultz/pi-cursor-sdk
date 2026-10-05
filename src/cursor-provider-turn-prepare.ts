@@ -288,6 +288,7 @@ async function prepareCursorLocalProviderTurn(
 			localSafety,
 			...(customSubagents ? { customSubagents } : {}),
 			localResume: resolvedConfig.local.resume.value,
+			storeRootBase: resolvedConfig.local.storeRoot.value,
 			useHttp1ForAgent,
 			debugRecorder: sdkEventDebug,
 			onBridgeToolRequest: (request: CursorPiBridgeToolRequest) => {

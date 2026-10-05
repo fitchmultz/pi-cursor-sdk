@@ -18,7 +18,7 @@ import {
 import { makeAssistantMessage } from "./helpers/pi-harness.js";
 import { cursorSessionScopeKeyForManager, __testUtils as scopeTestUtils } from "../src/cursor-session-scope.js";
 import { installCursorSessionStoreMock } from "./helpers/cursor-session-store.js";
-import { buildCursorSessionStateRoot } from "../src/cursor-session-store.js";
+import { buildCursorCustomWorkspaceRoot, buildCursorSessionStateRoot } from "../src/cursor-session-store.js";
 
 function resumeData(agentId: string, extra: Partial<CursorSessionAgentResumeEntryData> = {}): CursorSessionAgentResumeEntryData {
 	return {
@@ -336,6 +336,37 @@ describe("cursor-session-agent-cleanup", () => {
 			store: storeMock.stores[0],
 		});
 		expect(storeMock.stores[0].dispose).toHaveBeenCalledTimes(1);
+	});
+
+	it("retains a changed-base cleanup candidate for retry after restoring its base", async () => {
+		const base = mkdtempSync(join(tmpdir(), "cursor-cleanup-base-"));
+		const previous = join(base, "previous");
+		const storeIdentity = { version: 1 as const, stateRoot: buildCursorSessionStateRoot(buildCursorCustomWorkspaceRoot(previous, cleanupScope.cwd), cleanupScope.scopeKey) };
+		const entries = linearEntries([
+			resumeEntry("r1", resumeData("agent-old", { version: 2, storeIdentity })),
+			resumeEntry("r2", resumeData("agent-active", { version: 2, storeIdentity, cleanupCandidates: [{ agentId: "agent-old", storeIdentity }] })),
+		]);
+		const deleteAgent = vi.fn().mockResolvedValue(undefined);
+		cleanupTestUtils.setSdkOperations({ delete: deleteAgent });
+		const appendEntry = vi.fn((_type: string, value?: unknown) => {
+			const data = cleanupTestUtils.parseCleanupEntryData(value);
+			if (!data) throw new Error("Invalid cleanup test entry");
+			entries.push(cleanupEntry(`cleanup-${entries.length}`, data, entries.at(-1)?.id));
+		});
+		const ctx = makeContext(entries);
+		try {
+			vi.stubEnv("PI_CURSOR_SDK_STATE_ROOT", join(base, "current"));
+			await runCursorSessionAgentCleanupCommand({ appendEntry }, "--yes", ctx);
+			expect(deleteAgent).not.toHaveBeenCalled();
+			expect(appendEntry).toHaveBeenLastCalledWith(CURSOR_SESSION_AGENT_CLEANUP_ENTRY_TYPE, expect.objectContaining({ failedAgentIds: [{ agentId: "agent-old", error: expect.any(String) }] }));
+			expect(readCursorSessionAgentCleanupPlan(entries, entries, cleanupScope).candidateAgentIds).toContain("agent-old");
+			vi.stubEnv("PI_CURSOR_SDK_STATE_ROOT", previous);
+			await runCursorSessionAgentCleanupCommand({ appendEntry }, "--yes", ctx);
+			expect(deleteAgent).toHaveBeenCalledExactlyOnceWith("agent-old", expect.objectContaining({ cwd: cleanupScope.cwd }));
+		} finally {
+			vi.unstubAllEnvs();
+			rmSync(base, { recursive: true, force: true });
+		}
 	});
 
 	it("rejects a recorded store root outside the current session identities before SDK delete", async () => {

@@ -7,6 +7,7 @@
 ### Added
 
 - Support trusted config-defined Cursor custom subagents with independent model selections and session pool invalidation (adapted from #208 by Sam Armstrong). Local SDK subagents retain only model IDs.
+- Allow owned per-cwd/session persistent local stores beneath a configured `local.storeRoot` or `PI_CURSOR_SDK_STATE_ROOT`, preserving default SDK migration when unset (adapted from #236 by @gwatkins-arista).
 
 ### Fixed
 

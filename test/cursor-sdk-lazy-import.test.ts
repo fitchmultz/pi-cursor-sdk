@@ -56,11 +56,17 @@ function isCursorSdkSpecifier(specifier: string): boolean {
 	return specifier === "@cursor/sdk" || specifier.startsWith("@cursor/sdk/");
 }
 
+function isAllowedCursorSdkStaticImport(relativePath: string, specifier: string): boolean {
+	// Compiled Bun Pi omits bare deps reached only via runtime dynamic import (#228).
+	return relativePath.endsWith("src/cursor-sdk-runtime.ts") && specifier === "@cursor/sdk";
+}
+
+function isAllowedBridgeRunStaticImport(relativePath: string): boolean {
+	return relativePath.endsWith("src/cursor-pi-tool-bridge-server.ts");
+}
+
 function isAllowedCursorSdkDynamicImport(relativePath: string, specifier: string): boolean {
-	return (
-		(relativePath.endsWith("src/cursor-sdk-runtime.ts") && specifier === "@cursor/sdk")
-		|| (relativePath.endsWith("src/cursor-session-store.ts") && specifier === "@cursor/sdk/sqlite")
-	);
+	return relativePath.endsWith("src/cursor-session-store.ts") && specifier === "@cursor/sdk/sqlite";
 }
 
 function isMcpRuntimeSpecifier(specifier: string): boolean {
@@ -85,13 +91,13 @@ function collectRuntimeSdkEdges(paths: string[] = sourceFiles(join(process.cwd()
 		const visit = (node: ts.Node): void => {
 			if (ts.isImportDeclaration(node) && importHasRuntimeBindings(node, false)) {
 				const specifier = moduleText(node);
-				if (specifier && isCursorSdkSpecifier(specifier)) {
+				if (specifier && isCursorSdkSpecifier(specifier) && !isAllowedCursorSdkStaticImport(relativePath, specifier)) {
 					offenders.push(`${relativePath}:${source.getLineAndCharacterOfPosition(node.getStart()).line + 1}: runtime import ${specifier}`);
 				}
 				if (specifier && isMcpRuntimeSpecifier(specifier) && !isAllowedMcpRuntimeImport(relativePath, specifier)) {
 					offenders.push(`${relativePath}:${source.getLineAndCharacterOfPosition(node.getStart()).line + 1}: runtime import ${specifier}`);
 				}
-				if (specifier === "./cursor-pi-tool-bridge-run.js") {
+				if (specifier === "./cursor-pi-tool-bridge-run.js" && !isAllowedBridgeRunStaticImport(relativePath)) {
 					offenders.push(`${relativePath}:${source.getLineAndCharacterOfPosition(node.getStart()).line + 1}: runtime import bridge run implementation`);
 				}
 			}
@@ -425,8 +431,23 @@ describe("Cursor SDK lazy runtime imports", () => {
 		vi.resetModules();
 	});
 
-	it("keeps heavy SDK value imports behind lazy runtime boundaries", () => {
+	it("limits heavy SDK value imports to Pi packaging entrypoints", () => {
 		expect(collectRuntimeSdkEdges()).toEqual([]);
+	});
+
+	it("requires static @cursor/sdk and bridge-run imports for compiled Bun Pi packaging (#228)", () => {
+		const runtime = readFileSync(join(process.cwd(), "src/cursor-sdk-runtime.ts"), "utf-8")
+			.split("\n")
+			.filter((line) => !line.trimStart().startsWith("//") && !line.trimStart().startsWith("*"))
+			.join("\n");
+		const bridgeServer = readFileSync(join(process.cwd(), "src/cursor-pi-tool-bridge-server.ts"), "utf-8")
+			.split("\n")
+			.filter((line) => !line.trimStart().startsWith("//"))
+			.join("\n");
+		expect(runtime).toMatch(/import \* as CursorSdk from ["']@cursor\/sdk["']/);
+		expect(runtime).not.toMatch(/\bimport\(\s*["']@cursor\/sdk["']\s*\)/);
+		expect(bridgeServer).toMatch(/import \{ CursorPiToolBridgeRunImpl \} from ["']\.\/cursor-pi-tool-bridge-run\.js["']/);
+		expect(bridgeServer).not.toMatch(/\bimport\(\s*["']\.\/cursor-pi-tool-bridge-run\.js["']\s*\)/);
 	});
 
 	it("rejects static SDK subpaths and template SDK imports outside the runtime loaders", () => {
@@ -655,7 +676,7 @@ describe("Cursor SDK lazy runtime imports", () => {
 		expect(findings).toContain("unresolved relative dynamic import ./missing.js");
 	});
 
-	it("serves a warm model catalog without evaluating @cursor/sdk", async () => {
+	it("serves a warm model catalog from cache without calling Cursor.models.list", async () => {
 		tmpAgentDir = mkdtempSync(join(tmpdir(), "pi-cursor-sdk-lazy-import-"));
 		process.env = { ...originalEnv, PI_CODING_AGENT_DIR: tmpAgentDir, CURSOR_API_KEY: "warm-cache-key" };
 		const model: ModelListItem = {
@@ -664,14 +685,19 @@ describe("Cursor SDK lazy runtime imports", () => {
 			variants: [{ params: [], displayName: "Composer 2", isDefault: true }],
 		};
 		expect(saveModelListCache(fingerprintApiKey("warm-cache-key"), [model])).toBe(true);
-		vi.doMock("@cursor/sdk", () => {
-			throw new Error("@cursor/sdk should not be evaluated on a warm cached discovery path");
+		const list = vi.fn(() => {
+			throw new Error("Cursor.models.list should not run on a warm cached discovery path");
+		});
+		vi.doMock("@cursor/sdk", async () => {
+			const actual = await vi.importActual<typeof import("@cursor/sdk")>("@cursor/sdk");
+			return { ...actual, Cursor: { ...actual.Cursor, models: { ...actual.Cursor.models, list } } };
 		});
 
 		const { discoverModels } = await import("../src/model-discovery.js");
 		const models = await discoverModels();
 
 		expect(models.map((entry) => entry.id)).toEqual(["composer-2"]);
+		expect(list).not.toHaveBeenCalled();
 	});
 
 	it("loads the installed SDK checkpoint store without the old root sqlite dependency", async () => {

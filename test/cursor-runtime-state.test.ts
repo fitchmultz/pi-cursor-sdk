@@ -1,3 +1,5 @@
+// Install the external SDK transport mock before the static provider dependency graph evaluates.
+import "./helpers/cursor-provider-harness.js";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -6,6 +8,7 @@ import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-a
 import { CURSOR_HTTP1_ENV } from "../src/cursor-config.js";
 import {
 	__testUtils,
+	CURSOR_FOOTER_ENV,
 	getCursorCliConfig,
 	getCursorSessionConfig,
 	registerCursorRuntimeControls,
@@ -25,6 +28,7 @@ import {
 } from "./helpers/pi-harness.js";
 import {
 	collectEvents,
+	getErrorEvent,
 	mockCreatedAgent,
 	mockedCreate,
 	resetCursorProviderTestState,
@@ -40,6 +44,7 @@ const RUNTIME_ENV_NAMES = [
 	"PI_CURSOR_CLOUD_SKIP_REVIEWER_REQUEST",
 	"PI_CURSOR_CLOUD_ACK",
 	CURSOR_HTTP1_ENV,
+	CURSOR_FOOTER_ENV,
 ] as const;
 
 function createCursorRuntimeHarness(options: {
@@ -133,6 +138,41 @@ describe("Cursor cloud runtime state", () => {
 		originalEnv.clear();
 		rmSync(tmpAgentDir, { recursive: true, force: true });
 		vi.clearAllMocks();
+	});
+
+	it.each(["0", "false", "off", "none", "no", "disabled", " OFF "])("clears an existing footer when PI_CURSOR_FOOTER=%s", async value => {
+		const harness = createCursorRuntimeHarness();
+		await harness.pi.invokeEventWithContext("session_start", { type: "session_start", reason: "startup" }, harness.ctx);
+		expect(harness.ctx.ui.setStatus).toHaveBeenLastCalledWith("cursor", "cursor:local · fast:off");
+		process.env[CURSOR_FOOTER_ENV] = value;
+		await harness.pi.invokeEventWithContext("session_tree", { type: "session_tree", oldLeafId: null, newLeafId: null }, harness.ctx);
+		expect(harness.ctx.ui.setStatus).toHaveBeenLastCalledWith("cursor", undefined);
+		process.env[CURSOR_FOOTER_ENV] = "1";
+		await harness.pi.invokeEventWithContext("session_tree", { type: "session_tree", oldLeafId: null, newLeafId: null }, harness.ctx);
+		expect(harness.ctx.ui.setStatus).toHaveBeenLastCalledWith("cursor", "cursor:local · fast:off");
+	});
+
+	it.each([undefined, "", "unknown", "1", "true", "on", "yes", "enabled"])("keeps the default footer visible for PI_CURSOR_FOOTER=%s", async value => {
+		if (value !== undefined) process.env[CURSOR_FOOTER_ENV] = value;
+		const harness = createCursorRuntimeHarness({ cursorRuntimeFlag: "cloud" });
+		await harness.pi.invokeEventWithContext("session_start", { type: "session_start", reason: "startup" }, harness.ctx);
+		expect(harness.ctx.ui.setStatus).toHaveBeenLastCalledWith("cursor", "cursor:cloud · fast:n/a");
+	});
+
+	it("rejects an invalid runtime before SDK creation with the footer hidden", async () => {
+		await resetCursorProviderTestState();
+		process.env[CURSOR_FOOTER_ENV] = "0";
+		process.env.PI_CURSOR_RUNTIME = "remote";
+		const harness = createCursorRuntimeHarness();
+		await harness.pi.invokeEventWithContext("session_start", { type: "session_start", reason: "startup" }, harness.ctx);
+		expect(harness.ctx.ui.setStatus).toHaveBeenLastCalledWith("cursor", undefined);
+		registerCursorNativeToolDisplayState(harness.pi);
+		const model = makeModel("gpt-5.5@1m");
+		const context = { messages: [{ role: "user" as const, content: "hello", timestamp: 1 }] };
+		const ownership = captureProviderTestOwnership(model, context, undefined, harness.pi);
+		const events = await collectEvents(streamCursor(model, context, { apiKey: "offline-key" }, ownership));
+		expect(getErrorEvent(events).error.errorMessage).toContain("Invalid PI_CURSOR_RUNTIME");
+		expect(mockedCreate).not.toHaveBeenCalled();
 	});
 
 	it("shows cloud runtime status from CLI and environment selection", async () => {

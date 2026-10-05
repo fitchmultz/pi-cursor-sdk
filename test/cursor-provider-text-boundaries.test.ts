@@ -1,3 +1,5 @@
+// Install the external SDK transport mock before the static provider dependency graph evaluates.
+import "./helpers/cursor-provider-harness.js";
 import { readFileSync } from "node:fs";
 import type { SendOptions } from "@cursor/sdk";
 import { AgentSession } from "@earendil-works/pi-coding-agent";

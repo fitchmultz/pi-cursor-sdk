@@ -60,6 +60,8 @@ function makeBridgeRun(id: string, pendingPiToolCallIds: string[] = []): CursorP
 		takeQueuedToolRequests: vi.fn(() => []),
 		resolveToolResults: vi.fn().mockResolvedValue(undefined),
 		resolveToolResultsFromContext: vi.fn().mockResolvedValue(undefined),
+		hasPendingToolCalls: () => pending.size > 0,
+		onPendingToolCallsChanged: () => () => {},
 		hasPendingPiToolCallId: vi.fn((piToolCallId: string) => pending.has(piToolCallId)),
 		isBridgeMcpToolCall: vi.fn(() => false),
 		setOnToolRequest: vi.fn(),
@@ -261,6 +263,75 @@ describe("cursor live run coordinator", () => {
 		await vi.waitFor(() => expect(coordinator.count()).toBe(0));
 		expect(sdkCancel).toHaveBeenCalledTimes(1);
 		expect(abandonSessionAgent).toHaveBeenCalledWith("scope-1");
+	});
+
+	it.each(["bridgeRun", "sessionBridgeRun"] as const)("defers idle disposal for owned pending calls on %s and restarts the full window after settlement", async (slot) => {
+		vi.useFakeTimers();
+		const { coordinator } = makeCoordinator({ idleDisposeMs: 300_000 });
+		let pending = true;
+		let notify = () => {};
+		const unsubscribe = vi.fn();
+		const bridge = makeBridgeRun("owned-question");
+		bridge.hasPendingToolCalls = () => pending;
+		bridge.onPendingToolCallsChanged = (listener) => { notify = listener; return unsubscribe; };
+		const run = startRun(coordinator, { [slot]: bridge });
+		const sibling = startRun(coordinator, { id: "sibling", scopeKey: "other-scope" });
+		const cancel = vi.fn().mockResolvedValue(undefined);
+		coordinator.attachSdkRun(run, { cancel });
+		coordinator.requestIdleDispose(run);
+		coordinator.requestIdleDispose(sibling);
+		await vi.advanceTimersByTimeAsync(300_001);
+		expect(run.disposed).toBe(false);
+		expect(sibling.disposed).toBe(true);
+		expect(cancel).not.toHaveBeenCalled();
+		pending = false;
+		notify();
+		await vi.advanceTimersByTimeAsync(299_999);
+		expect(run.disposed).toBe(false);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(run.disposed).toBe(true);
+		expect(cancel).toHaveBeenCalledOnce();
+		expect(unsubscribe).toHaveBeenCalledOnce();
+	});
+
+	it("deduplicates identical bridge slots, rechecks silent pending state, and tolerates unsubscribe failures", async () => {
+		vi.useFakeTimers();
+		const { coordinator } = makeCoordinator({ idleDisposeMs: 5 });
+		let pending = false;
+		const unsubscribe = vi.fn(() => { throw new Error("detach failed"); });
+		const bridge = makeBridgeRun("same-bridge");
+		bridge.hasPendingToolCalls = () => pending;
+		bridge.onPendingToolCallsChanged = vi.fn(() => unsubscribe);
+		const run = startRun(coordinator, { bridgeRun: bridge, sessionBridgeRun: bridge });
+		coordinator.requestIdleDispose(run);
+		pending = true;
+		await vi.advanceTimersByTimeAsync(10);
+		expect(run.disposed).toBe(false);
+		expect(bridge.onPendingToolCallsChanged).toHaveBeenCalledOnce();
+		await coordinator.release(run);
+		expect(unsubscribe).toHaveBeenCalledOnce();
+		expect(bridge.cancel).toHaveBeenCalledOnce();
+		expect(coordinator.count()).toBe(0);
+	});
+
+	it("cancels an armed idle timer when a call becomes pending and preserves explicit release", async () => {
+		vi.useFakeTimers();
+		const { coordinator } = makeCoordinator({ idleDisposeMs: 5 });
+		let pending = false;
+		let notify = () => {};
+		const bridge = makeBridgeRun("owned-question");
+		bridge.hasPendingToolCalls = () => pending;
+		bridge.onPendingToolCallsChanged = (listener) => { notify = listener; return () => {}; };
+		const run = startRun(coordinator, { bridgeRun: bridge });
+		coordinator.requestIdleDispose(run);
+		await vi.advanceTimersByTimeAsync(4);
+		pending = true;
+		notify();
+		await vi.advanceTimersByTimeAsync(30);
+		expect(run.disposed).toBe(false);
+		await coordinator.release(run);
+		expect(run.disposed).toBe(true);
+		expect(bridge.cancel).toHaveBeenCalledOnce();
 	});
 
 	it("releases successful runs idempotently without abandoning pooled session resources", async () => {

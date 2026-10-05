@@ -2,9 +2,17 @@
 
 ## Unreleased
 
+### Fixed
+
+- Keep Cursor SDK and bridge imports in Pi’s static extension graph so compiled-Bun launchers can resolve them; initialize the native parser vendor path before the SDK loads.
+- Preserve network classification through real SDK UNAVAILABLE error wrappers while keeping bounded, scrubbed cause provenance.
+- Protect owned pending pi bridge calls, including human questions, from live-run idle disposal. Restart the normal cleanup window after the last pending call settles; explicit cancellation and shutdown still release the run.
+
 ### Changed
 
+- Add default-visible `PI_CURSOR_FOOTER`; set it to `0` to hide Cursor runtime/fast/mode/transport status without changing provider behavior.
 - `cursor_ask_question` now requires `PI_CURSOR_ASK_QUESTION=1`; Cursor proceeds with a stated assumption by default.
+- Add opt-in `PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT` while keeping provider login. Recheck catalog auth at session start or explicit refresh with owned warning state, retry after discovery failures, and discard superseded/shutdown results (adapted from #300/#301 by @yansigit). `/login` and `/logout` still require explicit refresh for immediate catalog changes.
 
 - Upgrade the exact Cursor SDK dependency to 1.0.35. Preserve recorded local resume and cleanup ownership across its MD5-to-SHA256 workspace-root migration, without merging stores; share atomic same-cwd ownership from first root derivation through admission and store disposal.
 - Add fail-closed rejection of links/non-directories inside SDK/extension-owned store layouts before migration, opening, or temporary removal; higher user-managed ancestor links remain supported as in 0.5.0. Malformed recorded identities fall back or become non-retryable cleanup candidates without unbounded path traversal.

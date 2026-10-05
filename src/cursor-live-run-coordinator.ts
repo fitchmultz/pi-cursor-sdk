@@ -153,6 +153,7 @@ interface CursorLiveRunPrivateState {
 	waiters: Set<ProgressWaiter>;
 	idleDisposeTimer?: ReturnType<typeof setTimeout>;
 	idleDisposeRequested: boolean;
+	pendingCallUnsubscribers?: Array<() => void>;
 	leased: boolean;
 	leaseQueue: LeaseWaiter[];
 	releasing?: Promise<void>;
@@ -313,6 +314,12 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 				leased: false,
 				leaseQueue: [],
 			});
+			const state = getPrivateState(run);
+			state.pendingCallUnsubscribers = [...new Set([run.bridgeRun, run.sessionBridgeRun])].flatMap((bridge) =>
+				bridge ? [bridge.onPendingToolCallsChanged(() => {
+					if (state.idleDisposeRequested || state.idleDisposeTimer) coordinator.requestIdleDispose(run);
+				})] : [],
+			);
 			pendingRuns.set(run.id, run);
 			pendingRunIdsByScopeKey.set(sessionAgentScopeKey, run.id);
 			return run;
@@ -492,9 +499,14 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 			const state = getPrivateState(run);
 			clearIdleDisposeTimer(run);
 			state.idleDisposeRequested = true;
-			if (state.leased || state.leaseQueue.length > 0) return;
+			if (state.leased || state.leaseQueue.length > 0 ||
+				[run.bridgeRun, run.sessionBridgeRun].some((bridge) => bridge?.hasPendingToolCalls())) return;
 			state.idleDisposeRequested = false;
 			state.idleDisposeTimer = setTimeout(() => {
+				if ([run.bridgeRun, run.sessionBridgeRun].some((bridge) => bridge?.hasPendingToolCalls())) {
+					coordinator.requestIdleDispose(run);
+					return;
+				}
 				void coordinator.release(run).catch(() => {
 					// Idle dispose must not leave release failures as unhandled rejections.
 				});
@@ -509,6 +521,12 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 				if (run.disposed) return;
 				const abandoned = !isSuccessfulCursorLiveRun(run);
 				run.disposed = true;
+				for (const unsubscribe of state.pendingCallUnsubscribers ?? []) {
+					try { unsubscribe(); } catch {
+						// Cleanup continues even if an observer cannot detach.
+					}
+				}
+				state.pendingCallUnsubscribers = [];
 				unregister(run);
 				clearIdleDisposeTimer(run);
 				state.idleDisposeRequested = false;

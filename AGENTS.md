@@ -7,6 +7,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 ## Repository map
 
 - `src/index.ts` registers the pi extension, provider, fallback warnings, Cursor runtime controls, native replay wrappers, question tool, and pi tool bridge hooks.
+- `src/cursor-model-auth-resync.ts` owns serialized registration-local catalog discovery, captured runtime-auth fingerprints, retry, supersession and shutdown guards. It checks on session_start or explicit refresh; Pi login/logout do not themselves emit that event.
 - `src/model-discovery.ts` discovers Cursor models, builds pi model metadata, stores per-model metadata, and defines fallback models.
 - `shared/cursor-model-selection-identities.mjs` owns canonical selectable model/context/fast identities and context-window key normalization shared by runtime discovery and the snapshot generator; its `.d.mts` file owns the TypeScript contract.
 - `src/cursor-provider.ts` is a thin `streamCursor()` wrapper that delegates turn execution to the turn runner.

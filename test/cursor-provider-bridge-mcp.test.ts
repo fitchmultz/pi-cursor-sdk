@@ -33,6 +33,8 @@ import {
 	asMockCursorRun,
 	getPiToolsMcpUrlFromAgentCreateOptions,
 } from "./helpers/cursor-provider-harness.js";
+import { registerCursorQuestionTool } from "../src/cursor-question-tool.js";
+import { createExtensionTestContext } from "./helpers/pi-harness.js";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
 import { estimateCursorPromptMessageTokens } from "../src/context.js";
@@ -520,7 +522,61 @@ describe("streamCursor bridge MCP", () => {
 		expect(hasEventType(events, "toolcall_start")).toBe(false);
 	});
 
-	it("rejects pending bridge MCP waits, clears live runs on idle disposal, and abandons the session agent", async () => {
+	it("answers a real question after five minutes and continues the same SDK run", async () => {
+		process.env.PI_CURSOR_ASK_QUESTION = "1";
+		cursorProviderTestUtils.setCursorNativeReplayIdleDisposeMs(300_000);
+		const pi = createPiHarness();
+		registerCursorQuestionTool(pi);
+		const question = pi._tools.find((tool) => tool.name === "cursor_ask_question")!;
+		registerBridgeForProviderTest({ active: [question.name], tools: [createTestToolInfo(question.name, question.parameters, question.description)] });
+		let finishRun = (_result: { id: string; status: "finished"; result: string }) => {};
+		const cancel = vi.fn();
+		const wait = vi.fn(() => new Promise<{ id: string; status: "finished"; result: string }>((resolve) => { finishRun = resolve; }));
+		const send = vi.fn().mockResolvedValue(asMockCursorRun({ id: "run-question", agentId: "agent-question", status: "running", wait, cancel,
+			supports: () => true, unsupportedReason: () => undefined }));
+		mockCreatedAgent({ agentId: "agent-question", send, [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined) });
+		const first = collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		await vi.waitFor(() => expect(send).toHaveBeenCalledOnce());
+		const { client, transport } = await connectMcpClient(getPiToolsMcpUrlFromAgentCreateOptions(getCreatedAgentOptions()));
+		try {
+			vi.useFakeTimers();
+			const mcp = client.callTool({ name: "pi__cursor_ask_question", arguments: { question: "Pick one", options: ["Yes", "No"], allowCustom: false } }, { timeout: 600_000 });
+			void mcp.catch(() => {}); // Baseline causal probes can reject before the assertion fails.
+			let firstEvents: Awaited<typeof first> | undefined;
+			void first.then((events) => { firstEvents = events; });
+			await vi.waitFor(() => expect(firstEvents).toBeDefined());
+			const firstDone = getDoneEvent(firstEvents!);
+			const call = firstDone.message.content.find(isToolCallBlock)!;
+			let answer = (_value: string) => {};
+			const ctx = createExtensionTestContext({ hasUI: true });
+			ctx.ui.select = vi.fn(() => new Promise<string>((resolve) => { answer = resolve; }));
+			const result = question.execute(call.id, call.arguments, undefined, undefined, ctx);
+			expect(ctx.ui.select).toHaveBeenCalledOnce();
+			await vi.advanceTimersByTimeAsync(300_001);
+			expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(1);
+			expect(cancel).not.toHaveBeenCalled();
+			vi.useRealTimers();
+			answer("Yes");
+			const response = await result;
+			const context = makeContext();
+			context.messages.push(firstDone.message, { role: "toolResult", toolCallId: call.id, toolName: question.name,
+				content: response.content, isError: false, timestamp: 2 });
+			const resumed = collectEvents(streamCursor(makeModel(), context, { apiKey: "test-key" }));
+			await expect(mcp).resolves.toMatchObject({ content: [{ type: "text", text: "User answered: Yes" }] });
+			finishRun({ id: "run-question", status: "finished", result: "Answer accepted" });
+			expect(getDoneEvent(await resumed).reason).toBe("stop");
+			expect(send).toHaveBeenCalledOnce();
+			expect(mockedCreate).toHaveBeenCalledOnce();
+			expect(cancel).not.toHaveBeenCalled();
+		} finally {
+			vi.useRealTimers();
+			await cursorProviderTestUtils.releaseAllPendingCursorLiveRunsForTests();
+			await client.close().catch(() => undefined);
+			await transport.close().catch(() => undefined);
+		}
+	});
+
+	it("protects pending bridge MCP waits until explicit release and still abandons the session agent", async () => {
 		process.env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS = "1";
 		cursorProviderTestUtils.setCursorNativeReplayIdleDisposeMs(1);
 		registerBridgeForProviderTest({
@@ -556,7 +612,11 @@ describe("streamCursor bridge MCP", () => {
 			expect(firstDone.reason).toBe("toolUse");
 			expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(1);
 
-			await vi.waitFor(() => expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0));
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(1);
+			expect(mockDispose).not.toHaveBeenCalled();
+			await cursorProviderTestUtils.releaseAllPendingCursorLiveRunsForTests();
+			expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
 			const error = await callErrorPromise;
 			expect(error).toBeInstanceOf(Error);
 				expect((error as Error).message).toMatch(/disposed|cancelled|released|MCP error/i);

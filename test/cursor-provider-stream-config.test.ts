@@ -363,6 +363,8 @@ describe("streamCursor prompt and model config", () => {
 			agent: asMockSdkAgent({ agentId: "local-agent", send: vi.fn() }),
 			bridgeRun: {
 				hasPendingPiToolCallId: () => false,
+				hasPendingToolCalls: () => false,
+				onPendingToolCallsChanged: () => () => {},
 				resolveToolResults,
 				cancel: vi.fn(),
 			} as any,

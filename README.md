@@ -124,7 +124,7 @@ Then, inside pi:
 4. Paste your Cursor SDK API key.
 5. The key is saved in pi's native `~/.pi/agent/auth.json`.
 
-If pi started without a key, fallback Cursor models still register so `/login` is reachable. After `/login`, fallback model runs can use the stored key, and `/cursor-refresh-models` refreshes the full live Cursor model catalog discovered from the Cursor SDK without restarting pi.
+If pi started without a key, fallback Cursor models still register so `/login` is reachable. Set `PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT=1` to hide extension-discovered Cursor models when neither stored Cursor auth nor `CURSOR_API_KEY` exists. The default remains off; provider login remains available. Pi gives the registered extension catalog precedence over `models.json` additions, so those additions are also hidden. Authentication errors with a present key still use the fallback catalog. After `/login`, fallback model runs can use the stored key, and `/cursor-refresh-models` refreshes the full live Cursor model catalog discovered from the Cursor SDK without restarting pi.
 
 Note: if `/login` shows `Cursor ✓ key in models.json` but you have not saved a Cursor key and `CURSOR_API_KEY` is unset, that status is a pi auth-status limitation. A real Cursor SDK API key is still required for Cursor runs.
 
@@ -141,11 +141,13 @@ One-shot setup:
 pi --api-key "your-key" --model cursor/grok-4.6 --cursor-no-fast -p "Say ok only."
 ```
 
-Startup discovery intentionally does not parse Pi CLI arguments. It uses the stored `cursor` key in `~/.pi/agent/auth.json`, then `CURSOR_API_KEY`; without either, the bundled fallback catalog registers. Provider turns still receive Pi's resolved `--api-key`. `/cursor-refresh-models` and `/cursor-cloud` mutations ask Pi's ModelRegistry for provider `cursor`, so command-time auth follows Pi's provider-scoped resolution and is normalized through `CURSOR_API_KEY` placeholders before reaching the Cursor SDK.
+Catalog discovery checks stored/env auth again at the next `session_start` (for example, a new session) and on `/cursor-refresh-models`. Pi's `/login` and `/logout` do not emit `session_start`; run `/cursor-refresh-models` to update catalog visibility immediately afterward. Failed live discovery remains retryable at the next check. Auth changes invalidate the disk cache, and a completed refresh cannot update a sibling or shut-down registration.
+
+Startup discovery intentionally does not parse Pi CLI arguments. It uses the stored `cursor` key in `~/.pi/agent/auth.json`, then `CURSOR_API_KEY`; without either, the bundled fallback catalog registers unless `PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT` is enabled. Provider turns still receive Pi's resolved `--api-key`. `/cursor-refresh-models` and `/cursor-cloud` mutations ask Pi's ModelRegistry for provider `cursor`, so command-time auth follows Pi's provider-scoped resolution and is normalized through `CURSOR_API_KEY` placeholders before reaching the Cursor SDK.
 
 ### Model catalog cache
 
-To avoid a live `Cursor.models.list` network round-trip on every pi startup, the discovered catalog is cached on disk at `~/.pi/agent/cursor-sdk-model-list.json` (written `0600`, keyed by an API-key fingerprint — the key itself is never stored). Warm startups within the cache TTL skip the network call and avoid loading `@cursor/sdk` until a Cursor turn needs it; `/cursor-refresh-models` always bypasses the cache and refreshes the live catalog. If a refresh fails, a previously cached catalog is preferred over the generic bundled fallback.
+To avoid a live `Cursor.models.list` network round-trip on every pi startup, the discovered catalog is cached on disk at `~/.pi/agent/cursor-sdk-model-list.json` (written `0600`, keyed by an API-key fingerprint — the key itself is never stored). Warm startups within the cache TTL skip the model-list network call; the SDK remains in the static extension graph for compiled-Bun loading. `/cursor-refresh-models` always bypasses the cache and refreshes the live catalog. If a refresh fails, a previously cached catalog is preferred over the generic bundled fallback.
 
 ```bash
 # Cache lifetime in milliseconds (default 86400000 = 24h).
@@ -256,7 +258,7 @@ The `:fast` and `:slow` aliases are available only for Cursor models whose catal
 
 Composer 2 and Composer 2.5 can default to fast. Use `--cursor-no-fast` or a `:slow` virtual alias for a one-shot no-fast Composer run. In print mode (`-p`), `--cursor-no-fast` is silent and does not write `~/.pi/agent/cursor-sdk.json`.
 
-In interactive mode, the footer shows Cursor status only while a Cursor model is active. Fast-capable models show fast state explicitly, and fast and plan mode share one Cursor status value so they do not overwrite each other:
+In interactive mode, the footer shows Cursor status only while a Cursor model is active. Set `PI_CURSOR_FOOTER=0` to hide this status; it is visible by default. This controls display only: runtime, mode, and transport selection and validation are unchanged. Fast-capable models show fast state explicitly, and fast and plan mode share one Cursor status value so they do not overwrite each other:
 
 ```text
 cursor:local · fast:n/a
@@ -497,6 +499,8 @@ Overlapping built-in pi tools (`read`, `bash`, `write`, `edit`, `grep`, `find`, 
 
 Cursor-native tool replay is separate from the bridge. Replay cards are display-only recorded Cursor SDK activity. They never re-run Cursor-side commands, reapply Cursor edits, call MCP servers, or mutate pi state. See [Cursor native tool replay](docs/cursor-native-tool-replay.md).
 
+Footer display control: `PI_CURSOR_FOOTER=0` hides the Cursor status without hiding Pi's model or usage footer. Like other boolean controls, it accepts `0`, `false`, `off`, `none`, `no`, and `disabled` to hide; `1`, `true`, `on`, `yes`, and `enabled` to show (case-insensitive). Unset, blank, or unrecognized values keep the default visible status.
+
 Bridge controls:
 
 ```bash
@@ -535,6 +539,8 @@ PI_CURSOR_PI_TOOL_BRIDGE_DEBUG=1 pi --model cursor/grok-4.6
 On bootstrap sends, a compact **callable tool surfaces** block is injected into the Cursor prompt by default. It reminds the model that Cursor host/configured MCP tools are controlled by Cursor, while pi tool toggles only affect pi tools/bridge exposure; when bridge tools are exposed, it lists the current `pi__*` names. Disable with `PI_CURSOR_TOOL_MANIFEST=0`.
 
 `PI_CURSOR_ASK_QUESTION=1` enables only `cursor_ask_question`, leaving the rest of the pi bridge available; it is off by default. `PI_CURSOR_PI_TOOL_BRIDGE=0` is the supported rollback flag and disables the bridge entirely. Both flags treat `false`, `off`, `none`, `no`, and `disabled` as off; `1`, `true`, `on`, `yes`, and `enabled` as on. `PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1` opts in to exposing overlapping pi tool names that Cursor already has native equivalents for. The installed Cursor SDK uses a 60-second MCP protocol default with no public per-server timeout option. pi-cursor-sdk overrides that seam in two directions by default: MCP `callTool` requests are extended to 3600 seconds for long-running local MCP tools (including the pi bridge and configured Cursor MCP servers), and known MCP initialize/listTools requests on first send are shortened to 10 seconds so unavailable configured MCP servers fail fast instead of blocking for a full minute. Unknown Cursor SDK MCP protocol timeout stacks keep the SDK default instead of being shortened. Override tool-call timeouts with `PI_CURSOR_MCP_TOOL_TIMEOUT_MS` or `PI_CURSOR_MCP_TOOL_TIMEOUT_SECONDS`, and first-send initialize/listTools timeouts with `PI_CURSOR_MCP_CONNECT_TIMEOUT_MS` or `PI_CURSOR_MCP_CONNECT_TIMEOUT_SECONDS`. Bridged calls also have a local fail-closed deadline that defaults to the effective MCP tool timeout; lower it with `PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS` when a lost pi result should fail sooner. On expiry, the bridge rejects and removes the pending call and aborts active pi execution when available. The bridge's `listTools` handler returns its snapshot synchronously, so a Cursor UI label such as `GetMcpTools` does not by itself identify a `listTools` deadlock; the durable bridge waiter is `CallTool` awaiting its matching pi result.
+
+Pending pi bridge calls keep their owning local Cursor live run active, including while a question awaits human input. After the last owned call settles, the normal idle cleanup window restarts. A pending call in another session does not delay cleanup, and explicit abort/shutdown still cancel pending work.
 
 `PI_CURSOR_HTTP_1_1=true` maps to the Cursor SDK `Cursor.configure({ local: { useHttp1ForAgent: true } })` compatibility mode for corporate VPN/proxy environments where HTTP/2 streams fail. In interactive sessions, `/cursor-http on`, `/cursor-http off`, and `/cursor-http toggle` set the branch-scoped session preference and save the user default as `local.useHttp1ForAgent` in `~/.pi/agent/cursor-sdk.json`; `/cursor-http` with no argument reports the effective state. Precedence is session command/history, explicit `PI_CURSOR_HTTP_1_1`, user config, then the built-in unset default; project config is ignored for this user-level compatibility choice. Unset performs no SDK configuration, preserving the existing default path. Session shutdown clears extension-owned SDK transport state before module reload. Changing the effective setting splits the local agent pool so an agent created under another transport is not reused. When enabled, the local Cursor footer shows `http1` (for example `cursor:local · fast:on · http1`); cloud status never does. This affects Cursor SDK local-agent backend streams only; it does not configure HTTP proxies, TLS certificates, or HTTP/3. SDK 1.0.35 vendors its patched Node ConnectRPC client; its HTTP/2 default ping interval is 59 seconds and idle connection timeout is 29 seconds. Those are connection settings, not a model-turn deadline or a promise of service recovery.
 
@@ -639,7 +645,7 @@ That does not mean the model cannot think. It means the Cursor SDK does not expo
 
 ### I do not see `cursor:local` / `cursor:cloud` or `plan` in the footer
 
-The Cursor footer appears only while a Cursor model is active. Fast-capable local models show `cursor:local · fast:on` or `cursor:local · fast:off`; Cursor models without a fast parameter show `cursor:local · fast:n/a`. Cloud runtime shows `cursor:cloud · fast:n/a`. Cursor SDK mode is the default `agent` mode when `plan` is absent. When both are active, pi shows one combined Cursor status such as `cursor:local · fast:on · plan` or `cursor:cloud · fast:n/a · plan`.
+The Cursor footer appears only while a Cursor model is active and `PI_CURSOR_FOOTER` is enabled (the default). Remove `PI_CURSOR_FOOTER=0` or set it to `1` to restore the status. Fast-capable local models show `cursor:local · fast:on` or `cursor:local · fast:off`; Cursor models without a fast parameter show `cursor:local · fast:n/a`. Cloud runtime shows `cursor:cloud · fast:n/a`. Cursor SDK mode is the default `agent` mode when `plan` is absent. When both are active, pi shows one combined Cursor status such as `cursor:local · fast:on · plan` or `cursor:cloud · fast:n/a · plan`.
 
 ### My Cursor app settings or rules do not seem to apply
 

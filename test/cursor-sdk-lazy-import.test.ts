@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, toNamespacedPath } from "node:path";
 import ts from "@typescript/typescript6";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fingerprintApiKey, saveModelListCache } from "../src/model-list-cache.js";
@@ -700,14 +700,21 @@ describe("Cursor SDK lazy runtime imports", () => {
 		expect(list).not.toHaveBeenCalled();
 	});
 
-	it("loads the installed SDK checkpoint store without the old root sqlite dependency", async () => {
+	it("returns null for a missing agent checkpoint using installed SDK SQLite under an owned temporary root", async () => {
 		tmpAgentDir = mkdtempSync(join(tmpdir(), "pi-cursor-sdk-checkpoint-contract-"));
+		const stateRoot = toNamespacedPath(join(tmpAgentDir, "state"));
 		const { loadCursorSdk } = await import("../src/cursor-sdk-runtime.js");
 		const { createAgentPlatform } = await loadCursorSdk();
+		const { SqliteLocalAgentStore } = await import("@cursor/sdk/sqlite");
+		const localStore = await SqliteLocalAgentStore.open({ workspaceRef: tmpAgentDir, stateRoot });
 
-		const platform = await createAgentPlatform({ workspaceRef: tmpAgentDir, scopedWorkspaceRef: tmpAgentDir });
-		const checkpoint = await platform.checkpointStore.loadLatest("pi-cursor-sdk-checkpoint-contract-test");
-
-		expect(checkpoint).toBeNull();
+		try {
+			const platform = await createAgentPlatform({ workspaceRef: tmpAgentDir, scopedWorkspaceRef: tmpAgentDir, localStore });
+			const checkpoint = await platform.checkpointStore.loadLatest("pi-cursor-sdk-checkpoint-contract-test");
+			expect(checkpoint).toBeNull();
+			expect(statSync(join(stateRoot, "index.db")).isFile()).toBe(true);
+		} finally {
+			await localStore.dispose();
+		}
 	});
 });

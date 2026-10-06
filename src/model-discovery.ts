@@ -409,7 +409,7 @@ export async function discoverModels(options: DiscoverModelsOptions = {}): Promi
 	try {
 		const { Cursor } = await loadCursorSdk();
 		options.signal?.throwIfAborted();
-		// SDK 1.0.35 CursorRequestOptions has no caller signal. A late response
+		// SDK 1.0.36 CursorRequestOptions has no caller signal. A late response
 		// still cannot publish outside the native generation that requested it.
 		const models = await Cursor.models.list({ apiKey });
 		options.signal?.throwIfAborted();

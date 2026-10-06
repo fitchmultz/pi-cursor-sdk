@@ -323,7 +323,7 @@ The script writes timestamped artifacts under `--out` (default `/tmp/pi-cursor-s
 
 Stdout prints artifact paths and summary counts only. Raw payloads stay on disk and may contain local paths, project text, tool args/results, or secrets — do not commit or share them.
 
-Hard repo rule: Cursor SDK behavior claims must come from the installed `@cursor/sdk` package and/or https://cursor.com/docs/sdk/typescript, not from memory or ad-hoc probes alone. Current validation targets Node 24+, exact `@cursor/sdk@1.0.35`, official Pi 0.87.1/latest, and current `fitchmultz/pi` main.
+Hard repo rule: Cursor SDK behavior claims must come from the installed `@cursor/sdk` package and/or https://cursor.com/docs/sdk/typescript, not from memory or ad-hoc probes alone. Current validation targets Node 24+, exact `@cursor/sdk@1.0.36`, official Pi 0.87.1/latest, and current `fitchmultz/pi` main.
 
 ## Pi provider SDK event capture
 

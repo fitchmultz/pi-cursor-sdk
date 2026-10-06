@@ -71,7 +71,7 @@ Pass criteria:
 
 - `node --version` reports Node 24+.
 - `pi --version` reports official Pi 0.87.1 or the selected official-latest/current-`fitchmultz/pi` compatibility target.
-- `npm ls` shows exact `@cursor/sdk@1.0.35`; development `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` 1.0.3 with matching lockfile-resolved transitives, nested host TypeBox 1.3.27 and root validation TypeBox 1.3.35; and the bundled bridge runtime closure `@modelcontextprotocol/server@2.3.1`, `@modelcontextprotocol/hono@2.0.2`, `hono@4.13.13`, and `@hono/node-server@2.1.3`.
+- `npm ls` shows exact `@cursor/sdk@1.0.36`; development `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` 1.0.3 with matching lockfile-resolved transitives, nested host TypeBox 1.3.27 and root validation TypeBox 1.3.35; and the bundled bridge runtime closure `@modelcontextprotocol/server@2.3.1`, `@modelcontextprotocol/hono@2.0.2`, `hono@4.13.13`, and `@hono/node-server@2.1.3`.
 - `cursor/grok-4.6` appears in the model list.
 - No Cursor key or auth token is printed.
 - If neither `~/.pi/agent/auth.json` cursor auth nor `CURSOR_API_KEY` is available, stop and report the live smoke as blocked.
@@ -136,7 +136,7 @@ Pass criteria:
 
 ## 4. Focused visual card/color rendering check
 
-This is a visual debug menu for changed card/color behavior requiring new live evidence. Select only the relevant category below, or reuse a batched existing platform suite; do not execute the entire list by default. It requires offscreen TUI visual inspection, not only JSONL or code review. Use Node 24+, official Pi 0.87.1 or another current compatibility target, exact `@cursor/sdk@1.0.35`, a fresh temporary session dir, Cursor SDK `plan` mode, native replay enabled, and the checked-in visual runner. The runner resolves `pi` by directly walking the parent `PATH`, uses `process.execPath` for Node, and prepends that Node directory for both prereq checks and tmux launches so `#!/usr/bin/env node` shims use the validated Node. The default matrix is native replay only: native replay registration is forced on, settings sources are `none`, the pi bridge is off, overlapping built-in pi tools are not exposed, and inherited Cursor SDK event-debug artifact env is cleared. With `--event-debug`, debug capture writes to a deterministic directory under `VISUAL_DIR`.
+This is a visual debug menu for changed card/color behavior requiring new live evidence. Select only the relevant category below, or reuse a batched existing platform suite; do not execute the entire list by default. It requires offscreen TUI visual inspection, not only JSONL or code review. Use Node 24+, official Pi 0.87.1 or another current compatibility target, exact `@cursor/sdk@1.0.36`, a fresh temporary session dir, Cursor SDK `plan` mode, native replay enabled, and the checked-in visual runner. The runner resolves `pi` by directly walking the parent `PATH`, uses `process.execPath` for Node, and prepends that Node directory for both prereq checks and tmux launches so `#!/usr/bin/env node` shims use the validated Node. The default matrix is native replay only: native replay registration is forced on, settings sources are `none`, the pi bridge is off, overlapping built-in pi tools are not exposed, and inherited Cursor SDK event-debug artifact env is cleared. With `--event-debug`, debug capture writes to a deterministic directory under `VISUAL_DIR`.
 
 ```bash
 VISUAL_DIR="$(mktemp -d /tmp/pi-cursor-sdk-1016-visual.XXXXXX)"

@@ -97,6 +97,11 @@ pi --approve -e . --model cursor/grok-4.6
 
 After editing `src/`, run `npm run build` before the next `pi -e .` run, or pi loads the previous build.
 
+The build bundles local extension modules into a CommonJS `dist/index.js` for Pi's Jiti loader
+to reduce startup file I/O and preserve its host-module mapping.
+Pi host peers and runtime dependencies, including the asset-bearing Cursor SDK, remain external.
+TypeScript compilation and bundling finish in staging before replacing the working build.
+
 ## Configure your Cursor SDK API key
 
 `pi-cursor-sdk` passes an explicit API key to the Cursor SDK. It does **not** reuse Cursor Agent CLI login, Cursor Desktop login, or Cursor subscription/OAuth state shown by `agent status`.

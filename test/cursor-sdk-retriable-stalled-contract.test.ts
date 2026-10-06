@@ -81,7 +81,7 @@ describe("installed Cursor SDK RetriableError connection-stalled contract", () =
 			expect({ name: error.name, kind: error.kind, message: error.message, code: error.code, displayInfo: error.displayInfo }).toEqual(branch.error);
 			expect(error.cause).toBe(cause);
 			expect(error.requestId).toBe("offline-request");
-			expect(error.stack).toContain("@cursor/sdk/dist/esm/");
+			expect(error.stack).toMatch(/@cursor[\\/]sdk[\\/]dist[\\/]esm[\\/]/);
 			expect(isCursorSdkConnectionStalledError(error)).toBe(true);
 			const sanitized = sanitizeCursorProviderError(error, "test-key");
 			expect(sanitized.toLowerCase()).toContain("network error");

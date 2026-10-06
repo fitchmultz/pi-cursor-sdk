@@ -56,6 +56,8 @@ The test covers bootstrap/incremental prompts, empty-vs-absent request tools, na
 
 ## Maintainer-only offline proof retention
 
+Native SQLite fixtures should open the public `SqliteLocalAgentStore` from `@cursor/sdk/sqlite` with an explicit `stateRoot` under their temporary directory, pass it as `localStore` to `createAgentPlatform`, and await `dispose()` in `finally` before removing that directory. `scopedWorkspaceRef` filters agents; it does not relocate storage. Assert the owned `index.db` exists to guard isolation. A fresh missing-agent `checkpointStore.loadLatest()` returning `null` checks the lookup boundary, not per-agent checkpoint database I/O; see `test/cursor-sdk-lazy-import.test.ts`.
+
 Two existing test flags retain raw proof in a **fresh private** directory outside the repository (or a gitignored scratch directory):
 
 - `PI_CURSOR_TEST_EVIDENCE_DIR` retains native SessionManager JSONL with run/metadata/options sidecars, prompt payloads/roles/images, accepted catalog bytes, terminal/late usage facts and byte-preserving journals, and custom-agent resume proof.

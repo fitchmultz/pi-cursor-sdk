@@ -381,7 +381,7 @@ cursor/claude-opus-4-8@1m
 Each variant must:
 
 - have an entry in the extension metadata map that points back to the same Cursor base model ID,
-- include the selected Cursor `context` param when calling `Agent.create()`,
+- include the selected Cursor `context` param when calling `Agent.create()`, except for the Grok 4.7 catalog-default compatibility rule below,
 - set pi `contextWindow` from that context value,
 - share the same `thinkingLevelMap` as the base model unless Cursor reports otherwise.
 
@@ -389,6 +389,19 @@ Reason:
 
 - pi context display and overflow logic must match the actual Cursor context.
 - pi has no generic provider-parameter system that can change `contextWindow` while keeping the same model ID.
+
+### Grok 4.7 Default-context Compatibility
+
+Grok 4.7 selections (including unambiguous SDK aliases and `:fast` / `:slow` variants) omit only an outgoing `context` equal to the base catalog's default-variant context.
+The baseline comes from `isDefault`, falling back to the first variant, before applying the selected context or speed override.
+If the catalog supplies no default context, no context is omitted.
+Non-default contexts and all effort and fast values remain explicit, including catalog-default effort and speed.
+Selected context metadata, native `contextWindow`, and catalog params are not changed, and other models keep their complete selections.
+
+Retained LOCAL evidence with SDK 1.0.35 covered all 16 combinations of `256k` / `500k`, `low` / `medium` / `high` / `xhigh`, and fast on/off: all explicit `256k` selections succeeded and all explicit `500k` selections were rejected.
+Separate SDK 1.0.35 checks succeeded with context omitted at medium and high effort with `fast=true`.
+An unmodified SDK 1.0.36 build reproduced the rejection for explicit `context=500k`, `reasoning_effort=medium`, and `fast=true`.
+The revised context-only builder is verified offline; this is not a successful live matrix on SDK 1.0.36 or Cloud qualification.
 
 ## SDK-native Custom Agent Definitions
 

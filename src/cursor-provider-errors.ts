@@ -168,7 +168,7 @@ function isCursorSdkStallAbortNetworkError(code: unknown, evidence: string, stac
 }
 
 /**
- * @cursor/sdk@1.0.35 throws internal RetriableError (name/kind "RetriableError") with message
+ * @cursor/sdk@1.0.36 throws internal RetriableError (name/kind "RetriableError") with message
  * "Connection stalled" or "Connection stalled repeatedly" after fetchWithRetry exhausts stalls.
  * The ConnectError is only the cause; the top-level error is not a ConnectError.
  */
@@ -229,7 +229,7 @@ export function classifyCursorConnectError(error: unknown): CursorConnectErrorCl
 
 	const directAbort = (code === 1 || code === "canceled") &&
 		(causeName === "AbortError" || /AbortError/.test(stack));
-	// The vendored 1.0.35 transport wraps a canceled ConnectError as Unknown.
+	// The vendored 1.0.36 transport wraps a canceled ConnectError as Unknown.
 	// Require the observed canceled -> AbortError cause chain, not generic text.
 	const wrappedAbort = (code === 2 || code === "unknown") &&
 		causeName === "ConnectError" &&

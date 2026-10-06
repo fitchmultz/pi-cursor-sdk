@@ -194,7 +194,7 @@ function workspaceHashes(cwd: string): { current: string; legacy: string | undef
 }
 
 function assertSafeWorkspaceLayout(cwd: string): void {
-	// ponytail: SDK 1.0.35 has no public read-only root resolver; use one when exposed.
+	// ponytail: SDK 1.0.36 has no public read-only root resolver; use one when exposed.
 	// This pure layout is contract-verified against its factory and public getter;
 	// guard it before that getter can rename MD5 history through an owned link.
 	const slug = cwd.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "");

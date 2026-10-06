@@ -10,11 +10,12 @@
 
 ### Changed
 
+- Upgrade the exact unbundled Cursor SDK and all five optional platform pins to 1.0.36. Requalify installed stall/retry, MCP, transport, bootstrap output, custom-agent conversion, SQLite and usage contracts offline; retain the authenticated 1.0.35 fallback catalog provenance. This does not establish fixes for open service/reporter issues.
 - Replace the serialized catalog-auth scheduler with public native API-key auth and accepted-generation publication. Native login/logout/rotation/runtime mutations immediately resync cache/fallback without network; opt-in logged-out hiding affects AVAILABLE picker/list results, not KNOWN CLI identities or login. Effective surviving env/config auth, cancellation, siblings and reload remain guarded (adapted from #300/#301 by @yansigit).
 - Tighten configured agents to one validated own-entry config parser, explicit alias fast precedence, public create/resume options and full content-digest identity while restoring exact no-feature keys. LOCAL ID/inherit-only conversion and restricted summaries are unchanged (follow-up to #208 by Sam Armstrong).
 - Restrict persistent root selection to captured environment > user > default, private native absolute paths and exact current custom-session admission. Root compatibility is separate from pool keys; wrong-domain cleanup is durably non-retryable, while admitted temporarily damaged paths remain retryable. No history migration/deletion is added (follow-up to #236 by @gwatkins-arista).
 - Validate `PI_CURSOR_LIVE_RUN_IDLE_DISPOSE_MS` privately as ASCII decimal `1`–`2147483647` (five-minute default), including rejection of final newlines; retain per-arm selection, last-own-call protection and explicit release (adapted from #283 by @aaalexliu).
-- Qualify #315/#258 shell handling as legacy-alias compatibility, not an observed alias-changing service pair. Installed SDK 1.0.35 contracts execute public shell updates and the ID-less step-before-completed-delta producer; genuinely unmatched/error shell activity remains visible (@yansigit).
+- Qualify #315/#258 shell handling as legacy-alias compatibility, not an observed alias-changing service pair. Installed SDK 1.0.36 contracts execute public shell updates and the ID-less step-before-completed-delta producer; genuinely unmatched/error shell activity remains visible (@yansigit).
 - Extend the existing native provider contract with canonical context-edit and conversation-filtering coverage that preserves system instructions, current tools and explicit removal; retain raw history (#271 native slice only).
 
 ## 0.5.1 - 2026-10-05

@@ -178,7 +178,7 @@ test("actual extension loader composes native Cursor auth and rejects a late ins
   process.env.PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT = "1";
   delete process.env.CURSOR_API_KEY;
   let catalogCalls = 0, enter, release, gate, transportSignal;
-  // SDK 1.0.35's installed listCloudModels reads the HTTP /v1/models items
+  // SDK 1.0.36's installed listCloudModels reads the HTTP /v1/models items
   // array. Only that external transport is stubbed, never Pi or registration.
   globalThis.fetch = async (url, options) => {
     assert.equal(new URL(String(url)).pathname, "/v1/models", "only catalog transport is authorized");
@@ -251,7 +251,7 @@ test("actual extension loader composes native Cursor auth and rejects a late ins
     const controller = new AbortController();
     const pending = runtime.refresh({ providers: ["cursor"], allowNetwork: true, force: true, signal: controller.signal });
     await entered;
-    assert.equal(transportSignal, undefined, "SDK 1.0.35 catalog transport has no caller-abort option");
+    assert.equal(transportSignal, undefined, "SDK 1.0.36 catalog transport has no caller-abort option");
     controller.abort();
     assert.equal((await pending).aborted, true);
     release();

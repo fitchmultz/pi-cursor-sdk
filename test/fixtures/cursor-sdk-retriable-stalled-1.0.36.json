@@ -1,0 +1,72 @@
+{
+  "provenance": {
+    "sdkPackage": "@cursor/sdk",
+    "sdkVersion": "1.0.36",
+    "verified": "2026-10-05T23:34:05.491Z",
+    "sourceFile": "node_modules/@cursor/sdk/dist/esm/867.js",
+    "sourceSha256": "ed47eb4564639b7e404cd861ccc3b948322ece9d2d5aabb43c60648e34363755",
+    "method": "Executed installed stall factory and its installed retry helpers offline; undefined, zero, one and two transport retries. No Agent/send or backend call. VM coordinates are harness-relative, not original bundle coordinates."
+  },
+  "branches": [
+    {
+      "transportErrorRetries": null,
+      "error": {
+        "name": "RetriableError",
+        "kind": "RetriableError",
+        "message": "Connection stalled",
+        "code": "connection_stalled",
+        "displayInfo": {
+          "title": "Connection stalled",
+          "detail": "The connection stalled. Please try again.",
+          "isRetryable": true,
+          "connectCode": 1
+        }
+      }
+    },
+    {
+      "transportErrorRetries": 0,
+      "error": {
+        "name": "RetriableError",
+        "kind": "RetriableError",
+        "message": "Connection stalled",
+        "code": "connection_stalled",
+        "displayInfo": {
+          "title": "Connection stalled",
+          "detail": "The connection stalled. Please try again.",
+          "isRetryable": true,
+          "connectCode": 1
+        }
+      }
+    },
+    {
+      "transportErrorRetries": 1,
+      "error": {
+        "name": "RetriableError",
+        "kind": "RetriableError",
+        "message": "Connection stalled repeatedly",
+        "code": "connection_stalled",
+        "displayInfo": {
+          "title": "Connection stalled",
+          "detail": "The connection stalled 2 times. Please check your network connection and try again.",
+          "isRetryable": true,
+          "connectCode": 1
+        }
+      }
+    },
+    {
+      "transportErrorRetries": 2,
+      "error": {
+        "name": "RetriableError",
+        "kind": "RetriableError",
+        "message": "Connection stalled repeatedly",
+        "code": "connection_stalled",
+        "displayInfo": {
+          "title": "Connection stalled",
+          "detail": "The connection stalled 3 times. Please check your network connection and try again.",
+          "isRetryable": true,
+          "connectCode": 1
+        }
+      }
+    }
+  ]
+}

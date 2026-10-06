@@ -1,19 +1,20 @@
 #!/usr/bin/env node
 /**
  * Purpose: Produce the compiled runtime files that the Pi extension manifest loads.
- * Responsibilities: Run TypeScript emit into a staging directory, then atomically swap it
- * into dist/ so a failed TypeScript emit never destroys a previously working dist.
+ * Responsibilities: Emit TypeScript and bundle the extension's local module graph in staging,
+ * then publish dist/ so a failed compile or bundle never destroys a previously working build.
  * Usage: `npm run build`; also invoked by scripts/prepare.mjs during install lifecycles.
  * Invariants/Assumptions: `node_modules` provides `typescript`; deleting `dist/` is safe generated output.
  */
 
 import { execFile as execFileCallback } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readdir, rename, rm } from "node:fs/promises";
+import { readdir, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
+import { build } from "esbuild";
 
 const execFile = promisify(execFileCallback);
 const RM_OPTIONS = { force: true, maxRetries: 5, recursive: true, retryDelay: 100 };
@@ -71,6 +72,26 @@ async function compileToStaging(cwd, stagingDir) {
 		);
 		if (stdout) process.stdout.write(stdout);
 		if (stderr) process.stderr.write(stderr);
+		// Pi's loader otherwise opens and evaluates hundreds of local modules per agent.
+		// Keep host peers and the SDK external: Pi owns peer identity, and the SDK owns native assets.
+		const bundle = await build({
+			entryPoints: [join(stagingDir, "index.js")],
+			outfile: join(stagingDir, "index.js"),
+			bundle: true,
+			packages: "external",
+			platform: "node",
+			// CommonJS keeps host imports inside Jiti's require mapping instead of native ESM.
+			format: "cjs",
+			target: "node22",
+			keepNames: true,
+			minifySyntax: true,
+			minifyWhitespace: true,
+			define: { "import.meta.url": "__cursorModuleUrl" },
+			banner: { js: 'var __cursorModuleUrl = require("node:url").pathToFileURL(__filename).href;' },
+			write: false,
+			allowOverwrite: true,
+		});
+		await writeFile(join(stagingDir, "index.js"), bundle.outputFiles[0].contents);
 	} catch (error) {
 		if (error?.stdout) process.stdout.write(error.stdout);
 		if (error?.stderr) process.stderr.write(error.stderr);

@@ -1,5 +1,5 @@
 import { execFile as execFileCallback, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -48,6 +48,60 @@ afterAll(() => {
 });
 
 describe("build.mjs staging swap", () => {
+	it("bundles local modules into the manifest entry without changing their exports", async () => {
+		const dir = makeFixture();
+		fixtures.push(dir);
+
+		expect((await runBuild(dir, { TSC_STUB_MODULE_GRAPH: "1" })).code).toBe(0);
+
+		const entry = join(dir, "dist", "index.js");
+		expect(readFileSync(entry, "utf8")).not.toContain("from './helper.js'");
+		const { stdout } = await execFile(process.execPath, [
+			"--input-type=module", "-e", `console.log((await import(${JSON.stringify(pathToFileURL(entry).href)})).built)`,
+		]);
+		expect(stdout.trim()).toBe("true");
+	});
+
+	it("keeps Pi host peers and the asset-bearing Cursor SDK external", async () => {
+		const dir = makeFixture();
+		fixtures.push(dir);
+
+		expect((await runBuild(dir, { TSC_STUB_EXTERNALS: "1" })).code).toBe(0);
+		const entry = readFileSync(join(dir, "dist", "index.js"), "utf8");
+		expect(entry).toContain("@cursor/sdk");
+		expect(entry).toContain("@earendil-works/pi-ai");
+	});
+
+	it("preserves the emitted module URL used to locate Cursor's native assets", async () => {
+		const dir = makeFixture();
+		fixtures.push(dir);
+		expect((await runBuild(dir, { TSC_STUB_MODULE_URL: "1" })).code).toBe(0);
+
+		const entry = pathToFileURL(realpathSync(join(dir, "dist", "index.js"))).href;
+		const { stdout } = await execFile(process.execPath, [
+			"--input-type=module", "-e", `console.log((await import(${JSON.stringify(entry)})).moduleUrl)`,
+		]);
+		expect(stdout.trim()).toBe(entry);
+	});
+
+	it("resolves bundled host imports to Pi's own module instance", async () => {
+		const dir = makeFixture();
+		fixtures.push(dir);
+		expect((await runBuild(dir, { TSC_STUB_HOST_IDENTITY: "1" })).code).toBe(0);
+		const extension = join(dir, "identity.ts");
+		writeFileSync(extension, [
+			'import { getAgentDir } from "@earendil-works/pi-coding-agent";',
+			'import { getAgentDir as bundled } from "./dist/index.js";',
+			'export default function () { if (getAgentDir !== bundled) throw new Error("host module identity split"); }',
+		].join("\n"));
+		const cli = fileURLToPath(new URL("../node_modules/.bin/pi", import.meta.url));
+		await execFile(process.execPath, [cli, "--no-extensions", "--no-skills", "--offline", "-e", extension, "--help"], {
+			cwd: dir,
+			env: { ...process.env, PI_CODING_AGENT_DIR: join(dir, "agent") },
+			timeout: 30_000,
+		});
+	}, 35_000);
+
 	it("preserves the previous dist and cleans staging when the compile fails", async () => {
 		const dir = makeFixture();
 		fixtures.push(dir);

@@ -16,9 +16,9 @@ jobs:
   resolve:
     permissions:
       contents: read
-    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@73b8b787a9b9ec87cf826a749cef16af8da9855c # main
+    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@91aed05534d17221ffd5d4f59650e1f48b46919f # main
     with:
-      automation-ref: 73b8b787a9b9ec87cf826a749cef16af8da9855c # main
+      automation-ref: 91aed05534d17221ffd5d4f59650e1f48b46919f # main
       official-version: ${{ inputs.official-version }}
       fork-ref: ${{ inputs.fork-ref }}
 

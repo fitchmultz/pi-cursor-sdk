@@ -70,7 +70,7 @@ function npmPack(args: string[], cwd: string): string {
 
 describe("package metadata cutover baselines", () => {
 	it("keeps package, lockfile, and changelog release versions aligned", () => {
-		const changelogVersion = readFileSync(join(process.cwd(), "CHANGELOG.md"), "utf8").match(/^## (\S+) /m)?.[1];
+		const changelogVersion = readFileSync(join(process.cwd(), "CHANGELOG.md"), "utf8").match(/^## (\d+\.\d+\.\d+)(?:\s|$)/m)?.[1];
 
 		expect(packageLock.version).toBe(packageJson.version);
 		expect(packageLock.packages[""]?.version).toBe(packageJson.version);

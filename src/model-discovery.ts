@@ -54,6 +54,7 @@ export interface CursorModelMetadata {
 	selectionModelId: string;
 	displayName: string;
 	defaultParams: ModelParameterValue[];
+	catalogDefaultContext?: string;
 	context?: string;
 	contextWindow: number;
 	supportsFast: boolean;
@@ -225,6 +226,7 @@ function toMetadata(
 		selectionModelId,
 		displayName: item.displayName || item.id,
 		defaultParams: cloneParams(defaultParams),
+		catalogDefaultContext: getParamValue(getDefaultParams(item), "context"),
 		...(context ? { context } : {}),
 		contextWindow: getContextWindow(contextWindowCache, contextWindowKeys, context, item.id),
 		supportsFast: getParameter(item, "fast") !== undefined,
@@ -348,6 +350,13 @@ export function buildCursorModelSelection(
 
 	if (metadata.supportsFast && fastEnabled !== undefined) {
 		setParam(params, "fast", fastEnabled ? "true" : "false");
+	}
+
+	// Grok 4.7 rejects its explicit catalog-default context. Keep the selected
+	// variant's metadata intact and leave effort, fast and other contexts explicit.
+	if (metadata.baseModelId === "grok-4.7" && metadata.catalogDefaultContext !== undefined &&
+		getParamValue(params, "context") === metadata.catalogDefaultContext) {
+		deleteParam(params, "context");
 	}
 
 	return params.length > 0 ? { id: metadata.selectionModelId, params } : { id: metadata.selectionModelId };

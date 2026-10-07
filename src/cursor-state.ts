@@ -1,7 +1,7 @@
 import type { AgentModeOption } from "@cursor/sdk";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import {
-	buildCursorToolManifestText,
+	CURSOR_HOST_TOOL_MANIFEST_SUMMARY,
 	CURSOR_TOOL_MANIFEST_ENV,
 	resolveCursorToolManifestEnabled,
 } from "./cursor-tool-manifest.js";
@@ -17,8 +17,10 @@ import {
 import {
 	buildCursorPiToolBridgeSnapshot,
 	CURSOR_PI_TOOL_BRIDGE_ENV,
+	resolveCursorPiToolBridgeBuiltinsEnabled,
 	resolveCursorPiToolBridgeEnabled,
 } from "./cursor-pi-tool-bridge-snapshot.js";
+import { CURSOR_PI_TOOL_BRIDGE_DEBUG_ENV } from "./cursor-pi-tool-bridge-diagnostics.js";
 import {
 	CURSOR_SETTING_SOURCES_ENV,
 	DEFAULT_CURSOR_SETTING_SOURCES,
@@ -388,7 +390,7 @@ export function formatCursorToolsDebugReport(
 	const bridgeEnabled = resolveCursorPiToolBridgeEnabled(env);
 	const manifestEnabled = resolveCursorToolManifestEnabled(env);
 	const lines = [
-		"Cursor tool surfaces (current session):",
+		"Cursor tool surfaces (current registry snapshot; not a live run):",
 		`${CURSOR_PI_TOOL_BRIDGE_ENV}: ${bridgeEnabled ? "enabled" : "disabled"}`,
 		`${CURSOR_TOOL_MANIFEST_ENV}: ${manifestEnabled ? "enabled" : "disabled"}`,
 		`${CURSOR_SETTING_SOURCES_ENV}: ${formatEffectiveCursorSettingSourcesLabel(env[CURSOR_SETTING_SOURCES_ENV])}`,
@@ -397,13 +399,31 @@ export function formatCursorToolsDebugReport(
 	let bridgeSnapshot;
 	if (bridgeEnabled) {
 		try {
-			bridgeSnapshot = buildCursorPiToolBridgeSnapshot(pi);
+			bridgeSnapshot = buildCursorPiToolBridgeSnapshot(pi, {
+				exposeOverlappingBuiltins: resolveCursorPiToolBridgeBuiltinsEnabled(env),
+			});
 		} catch {
 			lines.push("Pi bridge snapshot: unavailable (extension tool APIs required).");
 		}
 	}
 
-	lines.push(buildCursorToolManifestText({ bridgeSnapshot, piBridgeEnabled: bridgeEnabled }));
+	lines.push(
+		`Cursor host/MCP: ${CURSOR_HOST_TOOL_MANIFEST_SUMMARY}; configured MCP depends on Cursor settings.`,
+		"Pi tool toggles affect pi tools/bridge exposure only; they do not disable Cursor host/configured MCP tools.",
+	);
+	if (!bridgeEnabled) {
+		lines.push("Pi bridge: disabled (PI_CURSOR_PI_TOOL_BRIDGE=0).");
+	} else if (bridgeSnapshot) {
+		const names = bridgeSnapshot.tools.map((tool) => tool.mcpToolName).sort();
+		lines.push(`Pi bridge exposure eligibility: ${names.length ? names.join(", ") : "no eligible pi__* tools"}.`);
+	}
+	lines.push(
+		"This snapshot does not prove a run's endpoint attachment, MCP initialization, catalog fetch, or tool calls.",
+		`For per-run observations, enable ${CURSOR_PI_TOOL_BRIDGE_DEBUG_ENV}=1 before the turn.`,
+		"run_created/tools_exposed record exposure only; mcp_initialized records a validated notifications/initialized receipt; mcp_tools_list records catalog-handler output (toolCount), not client/model consumption or ongoing connection health.",
+		"request_queued/resolved/rejected record actual bridge call handling; absent receipts do not diagnose why a client/model made no request.",
+		"Not callable: cursor-replay-* IDs, pi history names, transcript labels.",
+	);
 	return lines.join("\n");
 }
 
@@ -496,7 +516,7 @@ export function registerCursorRuntimeControls(pi: CursorRuntimeControlsExtension
 	});
 
 	pi.registerCommand("cursor-tools", {
-		description: "Show live Cursor tool surfaces for this session (maintainer debug)",
+		description: "Show current-registry Cursor tool exposure eligibility (maintainer debug)",
 		handler: async (_args, ctx) => {
 			emitCursorToolsDebugReport(pi, ctx);
 		},

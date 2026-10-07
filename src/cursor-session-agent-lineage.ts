@@ -29,6 +29,7 @@ interface CursorSessionAgentLineageState {
 	sessionId?: string;
 	sessionFile?: string;
 	scopeKey?: string;
+	runtimeScopeKey?: string;
 	cwd?: string;
 	recordedAgentIds: Set<string>;
 }
@@ -82,7 +83,7 @@ function readRecordedAgentIds(entries: readonly SessionEntry[], sessionId: strin
 export function recordCursorSessionAgentLineage(agentId: string, turnScopeKey?: string): void {
 	const sessionState = turnScopeKey === undefined
 		? state
-		: statesByScope.get(turnScopeKey) ?? (state.scopeKey === turnScopeKey ? state : undefined);
+		: statesByScope.get(turnScopeKey) ?? ((state.runtimeScopeKey ?? state.scopeKey) === turnScopeKey ? state : undefined);
 	if (!sessionState) return;
 	const { appendEntry, sessionId, sessionFile, scopeKey, cwd } = sessionState;
 	if (!appendEntry || !sessionId || !scopeKey || !cwd) return;
@@ -115,22 +116,25 @@ export function registerCursorSessionAgentLineage(pi: CursorSessionAgentLineageE
 	pi.on("session_start", (_event, ctx) => {
 		state = sessionState;
 		const record = sessionState;
-		if (record.scopeKey && statesByScope.get(record.scopeKey) === record) statesByScope.delete(record.scopeKey);
+		if (record.runtimeScopeKey && statesByScope.get(record.runtimeScopeKey) === record) statesByScope.delete(record.runtimeScopeKey);
 		record.appendEntry = pi.appendEntry;
 		record.sessionId = ctx.sessionManager.getSessionId();
 		record.sessionFile = ctx.sessionManager.getSessionFile() ?? undefined;
-		record.scopeKey = getCursorSessionScopeSnapshot(pi).scopeKey;
-		statesByScope.set(record.scopeKey, record);
+		const scope = getCursorSessionScopeSnapshot(pi);
+		record.runtimeScopeKey = scope.scopeKey;
+		record.scopeKey = scope.persistentScopeKey ?? scope.scopeKey;
+		statesByScope.set(scope.scopeKey, record);
 		record.cwd = ctx.cwd;
 		record.recordedAgentIds = readRecordedAgentIds(ctx.sessionManager.getEntries(), record.sessionId);
 	});
 	pi.on("session_shutdown", () => {
 		const state = sessionState;
-		if (state.scopeKey && statesByScope.get(state.scopeKey) === state) statesByScope.delete(state.scopeKey);
+		if (state.runtimeScopeKey && statesByScope.get(state.runtimeScopeKey) === state) statesByScope.delete(state.runtimeScopeKey);
 		state.appendEntry = undefined;
 		state.sessionId = undefined;
 		state.sessionFile = undefined;
 		state.scopeKey = undefined;
+		state.runtimeScopeKey = undefined;
 		state.cwd = undefined;
 		state.recordedAgentIds = new Set();
 	});
@@ -142,6 +146,7 @@ function resetStateForTests(): void {
 	state.sessionId = undefined;
 	state.sessionFile = undefined;
 	state.scopeKey = undefined;
+	state.runtimeScopeKey = undefined;
 	state.cwd = undefined;
 	state.recordedAgentIds = new Set();
 }

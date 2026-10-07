@@ -4,6 +4,7 @@ export const NATIVE_COMPATIBILITY_TEST_FILES = Object.freeze([
   "test/ci-compatibility.test.mjs",
   "test/native-provider.test.mjs",
   "test/native-cursor-flow.test.mjs",
+  "test/native-cursor-ownership.test.mjs",
   "test/native-cursor-prompt.test.mjs",
 ]);
 

@@ -727,10 +727,17 @@ describe("Cursor runtime state", () => {
 
 			expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("PI_CURSOR_PI_TOOL_BRIDGE: enabled"), "info");
 			expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("PI_CURSOR_SETTING_SOURCES: none (effective: none)"), "info");
-			expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Callable tool surfaces this run:"), "info");
+			expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("current registry snapshot; not a live run"), "info");
 			expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("pi__custom_bridge_tool"), "info");
 			expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Cursor host/MCP"), "info");
 			expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Pi tool toggles affect pi tools/bridge exposure only"), "info");
+			const report = vi.mocked(ctx.ui.notify).mock.calls[0][0];
+			expect(report).toContain("Pi bridge exposure eligibility: pi__custom_bridge_tool");
+			expect(report).toContain("does not prove a run's endpoint attachment, MCP initialization, catalog fetch, or tool calls");
+			expect(report).toContain("mcp_initialized records a validated notifications/initialized receipt");
+			expect(report).toContain("mcp_tools_list records catalog-handler output (toolCount), not client/model consumption");
+			expect(report).toContain("request_queued/resolved/rejected record actual bridge call handling");
+			expect(report).not.toContain("Callable tool surfaces this run:");
 		} finally {
 			if (originalBridgeEnv === undefined) delete process.env.PI_CURSOR_PI_TOOL_BRIDGE;
 			else process.env.PI_CURSOR_PI_TOOL_BRIDGE = originalBridgeEnv;
@@ -748,7 +755,17 @@ describe("Cursor runtime state", () => {
 		expect(report).toContain("PI_CURSOR_PI_TOOL_BRIDGE: disabled");
 		expect(report).toContain("Pi bridge: disabled (PI_CURSOR_PI_TOOL_BRIDGE=0).");
 		expect(report).toContain("PI_CURSOR_SETTING_SOURCES: project (effective: project)");
-		expect(report).toContain("Callable tool surfaces this run:");
+		expect(report).not.toContain("Callable tool surfaces this run:");
+	});
+
+	it("honors builtin exposure configuration in the registry snapshot", () => {
+		const pi = createPiHarness({
+			activeTools: ["read"],
+			initialTools: [createTestToolInfo("read")],
+		});
+		expect(formatCursorToolsDebugReport(pi, {})).toContain("Pi bridge exposure eligibility: no eligible pi__* tools.");
+		expect(formatCursorToolsDebugReport(pi, { PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" }))
+			.toContain("Pi bridge exposure eligibility: pi__read.");
 	});
 
 	it("formatCursorToolsDebugReport notes disabled manifest", () => {
@@ -795,8 +812,8 @@ describe("Cursor runtime state", () => {
 			registerCursorRuntimeControls(pi);
 			await pi.runCommand("cursor-tools", "", { hasUI: false });
 
-			expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Cursor tool surfaces (current session):"));
-			expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Callable tool surfaces this run:"));
+			expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Cursor tool surfaces (current registry snapshot; not a live run):"));
+			expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("does not prove a run's endpoint attachment"));
 		} finally {
 			consoleSpy.mockRestore();
 		}

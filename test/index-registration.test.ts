@@ -29,7 +29,7 @@ vi.mock("../src/cursor-provider.js", () => ({
 import extensionFactory from "../src/index.js";
 import { discoverModels } from "../src/model-discovery.js";
 import { acquireSessionCursorAgent, __testUtils as sessionAgentTestUtils } from "../src/cursor-session-agent.js";
-import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
+import { getCursorSessionScopeSnapshot, __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
 import { streamCursor } from "../src/cursor-provider.js";
 import { buildCursorPiToolBridgeSnapshot } from "../src/cursor-pi-tool-bridge.js";
 import {
@@ -169,7 +169,7 @@ describe("extension registration and discovery", () => {
 		);
 		expect(pi.registerCommand).toHaveBeenCalledWith(
 			"cursor-tools",
-			expect.objectContaining({ description: expect.stringContaining("Show live Cursor tool surfaces") }),
+			expect.objectContaining({ description: expect.stringContaining("Show current-registry Cursor tool exposure eligibility") }),
 		);
 		expect(pi.registerCommand).toHaveBeenCalledWith(
 			"cursor-http",
@@ -638,10 +638,10 @@ describe("extension registration and discovery", () => {
 		mockedDiscover.mockResolvedValueOnce([]);
 		const pi = createExtensionPi();
 		await extensionFactory(pi);
-		await pi.runSessionStart({ sessionManager: { getSessionFile: vi.fn(() => "/tmp/sessions/refresh-config.jsonl") } });
-		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/refresh-config.jsonl");
+		await pi.runSessionStart({ cwd: "/tmp/project", sessionManager: { getSessionFile: vi.fn(() => "/tmp/sessions/refresh-config.jsonl") } });
 		const reload = vi.fn().mockResolvedValue(undefined);
 		await acquireSessionCursorAgent({
+			scope: getCursorSessionScopeSnapshot(pi),
 			apiKey: "test-key",
 			agentMode: "agent",
 			cwd: "/tmp/project",

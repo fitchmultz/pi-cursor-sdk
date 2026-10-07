@@ -207,6 +207,14 @@ test("actual extension loader composes native Cursor auth and rejects a late ins
   const settingsManager = SettingsManager.inMemory({ defaultTools: [], compaction: { enabled: false }, retry: { enabled: false } });
   const manager = SessionManager.create(root, join(root, "sessions"));
   manager.appendMessage({ role: "user", content: "Offline catalog selection fixture; do not send.", timestamp: 1 });
+  // Pi 0.87.1 persists new sessions only after an assistant message.
+  // Seed completed fixture data without sending to any model.
+  manager.appendMessage({
+    role: "assistant", content: [{ type: "text", text: "Offline catalog selection fixture completed." }],
+    api: "neutral-fixture", provider: "neutral-fixture", model: "neutral", stopReason: "stop", timestamp: 2,
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+  });
   const loader = new DefaultResourceLoader({
     cwd: root, agentDir, settingsManager,
     noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,

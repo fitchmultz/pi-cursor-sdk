@@ -676,34 +676,6 @@ for (const operation of ["ordinary", "bugreport"]) {
   });
 }
 
-test("independent concurrent streams retain owned persisted lineage and sibling isolation", { timeout: 60000 }, async (t) => {
-  await concurrentFixture(t, async ({ create }) => {
-    const a = await create("concurrent-A");
-    const b = await create("concurrent-B");
-    assert.notEqual(a.session.modelRuntime, b.session.modelRuntime, "SDK defaults create independent runtimes");
-    state.heldCwds.add(a.cwd);
-    const before = state.sends.length;
-    const runningA = a.session.prompt("A held during B");
-    while (state.sends.length === before) await delay(1, undefined, { signal: t.signal });
-    await b.session.prompt("B overlaps A");
-    assert.equal(b.session.messages.at(-1).stopReason, "stop");
-    await a.session.abort();
-    await runningA;
-    state.heldCwds.delete(a.cwd);
-    const beforeB = await readFile(b.manager.getSessionFile());
-    for (let index = 0; index < 10; index++) await a.session.prompt(`A bounded request ${index}`);
-    await a.session.prompt("/cursor-refresh-models");
-    assert.deepEqual(await readFile(b.manager.getSessionFile()), beforeB, "A's repeated turns and refresh leave B's persisted session byte-identical");
-    for (const owner of [a, b]) {
-      const reopened = SessionManager.open(owner.manager.getSessionFile());
-      const entries = reopened.getEntries().filter((entry) => entry.type === "custom" && entry.customType === "cursor-sdk-agent-lineage");
-      assert.ok(entries.length > 0);
-      assert.ok(entries.every((entry) => entry.data.scopeKey === owner.manager.getSessionFile() && entry.data.cwd === owner.cwd));
-      await retainNativeEvidence(owner === a ? "native-concurrent-owner" : "native-concurrent-sibling", owner.manager, owner.cwd);
-    }
-  });
-});
-
 test("catalog refresh awaiting auth cannot replace a sibling's native registration", { timeout: 60000 }, async (t) => {
   await concurrentFixture(t, async ({ create }) => {
     const a = await create("refresh-A");

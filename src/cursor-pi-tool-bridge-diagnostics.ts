@@ -49,6 +49,17 @@ interface CursorPiToolBridgeRunDisposedDiagnostic extends CursorPiToolBridgeLife
 	event: "run_disposed";
 }
 
+interface CursorPiToolBridgeMcpInitializedDiagnostic {
+	event: "mcp_initialized";
+	runId: string;
+}
+
+interface CursorPiToolBridgeMcpToolsListDiagnostic {
+	event: "mcp_tools_list";
+	runId: string;
+	toolCount: number;
+}
+
 export interface CursorPiToolBridgeRequestDiagnosticFields {
 	runId: string;
 	bridgeCallId: string;
@@ -79,6 +90,8 @@ export type CursorPiToolBridgeDiagnosticEvent =
 	| CursorPiToolBridgeToolsExposedDiagnostic
 	| CursorPiToolBridgeRunCancelledDiagnostic
 	| CursorPiToolBridgeRunDisposedDiagnostic
+	| CursorPiToolBridgeMcpInitializedDiagnostic
+	| CursorPiToolBridgeMcpToolsListDiagnostic
 	| CursorPiToolBridgeRequestQueuedDiagnostic
 	| CursorPiToolBridgeRequestResolvedDiagnostic
 	| CursorPiToolBridgeRequestRejectedDiagnostic;
@@ -89,6 +102,10 @@ function assertNeverDiagnosticEvent(_event: never): never {
 
 export function serializeCursorPiToolBridgeDiagnostic(event: CursorPiToolBridgeDiagnosticEvent): Record<string, unknown> {
 	switch (event.event) {
+		case "mcp_initialized":
+			return { event: event.event, runId: event.runId };
+		case "mcp_tools_list":
+			return { event: event.event, runId: event.runId, toolCount: event.toolCount };
 		case "run_created":
 			return {
 				event: event.event,

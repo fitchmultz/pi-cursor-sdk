@@ -18,6 +18,7 @@ import { buildCursorSessionStateRoot, openCursorSessionStoreForScope, __testUtil
 import { runCursorSessionAgentCleanupCommand, __testUtils as cleanupTests } from "../src/cursor-session-agent-cleanup.js";
 import { CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE, __testUtils as resumeTests } from "../src/cursor-session-agent-resume.js";
 import { cursorSessionScopeKeyForManager } from "../src/cursor-session-scope.js";
+import { acquireSessionCursorAgent, disposeSessionCursorAgent } from "../src/cursor-session-agent.js";
 import { installedCursorModules } from "./helpers/cursor-sdk-installed-modules.js";
 
 let home: string;
@@ -723,6 +724,48 @@ describe("installed SDK root migration with real SQLite", () => {
 		}
 		expect(fileHashes(outside)).toEqual(before);
 		await assertHistory(outsideHistory);
+	});
+
+	it.each(["complete", "reject"] as const)("a reopened cleanup ledger requires successful runtime disposal before deleting its handle (%s)", async disposal => {
+		const manager = SessionManager.create(cwd, join(home, "pi-sessions"));
+		manager.appendMessage({ role: "user", content: "saved branch", timestamp: 1 });
+		const scopeKey = cursorSessionScopeKeyForManager(manager);
+		const sessionRoot = buildCursorSessionStateRoot(currentRoot, scopeKey);
+		await seed(sessionRoot);
+		await seed(sessionRoot, "agent-active");
+		recordCleanupCandidate(manager, sessionRoot);
+		const lease = await acquireSessionCursorAgent({
+			apiKey: "offline-fixture-only", agentMode: "agent", cwd, modelSelection: { id: "fixture" },
+			scope: { cwd, scopeKey, persistentScopeKey: scopeKey, sessionFile: manager.getSessionFile(), sessionId: manager.getSessionId(),
+				sessionName: undefined, projectTrusted: false, generation: 0 },
+			// The installed SDK's public resume without model/API key is offline.
+			createAgent: options => Agent.resume(agentId, { local: options.local, tools: [] }),
+		});
+		const reopened = SessionManager.open(manager.getSessionFile()!);
+		const pi = { appendEntry: (type: string, data: unknown) => { reopened.appendCustomEntry(type, data); } };
+		const ctx = { cwd, sessionManager: reopened, ui: { notify: vi.fn() } };
+		const remove = vi.fn((id: string, options?: { cwd?: string; store?: import("@cursor/sdk").LocalAgentStore }) => Agent.delete(id, options));
+		cleanupTests.setSdkOperations({ delete: remove });
+		const failedDisposal = disposal === "reject" ? vi.spyOn(lease.agent, Symbol.asyncDispose).mockRejectedValueOnce(new Error("disposal failed")) : undefined;
+		try {
+			await runCursorSessionAgentCleanupCommand(pi, "--yes", ctx);
+			expect(remove).not.toHaveBeenCalled();
+			expect(reopened.getEntries().at(-1)).toMatchObject({ data: {
+				deletedAgentIds: [], failedAgentIds: [{ agentId, error: "Cursor local agent is still owned by an active runtime" }],
+			} });
+			expect(await lease.store.agents.get({ agentId })).toMatchObject({ agentId, cwd });
+			expect(await lease.store.runs.get({ agentId, runId: `run-${agentId}` })).toMatchObject({ result: "retained answer" });
+		} finally { await disposeSessionCursorAgent(lease.scopeKey); }
+		await runCursorSessionAgentCleanupCommand(pi, "--yes", ctx);
+		if (failedDisposal) {
+			expect(remove).not.toHaveBeenCalled();
+			failedDisposal.mockRestore();
+			await lease.agent[Symbol.asyncDispose]();
+		} else {
+			expect(remove).toHaveBeenCalledOnce();
+			expect(SessionManager.open(manager.getSessionFile()!).getEntries().at(-1)).toMatchObject({ data: { deletedAgentIds: [agentId] } });
+		}
+		await assertHistory(sessionRoot, "agent-active");
 	});
 
 	it.each(["ordinary", "concurrent-first", "delete-failure"] as const)(

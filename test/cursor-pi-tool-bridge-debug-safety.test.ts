@@ -18,7 +18,7 @@ async function waitForQueuedRequest(run: CursorPiToolBridgeRun) {
 }
 
 describe("cursor pi tool bridge debug safety", () => {
-	it("settles bridge calls when raw debug recording throws", async () => {
+	it("completes initialization, catalog fetch, and bridge calls when diagnostic and raw recording throw", async () => {
 		const registry = __testUtils.createRegistry(
 			createBridgePiHarness({ active: ["read"], tools: [createTestToolInfo("read", Type.Object({}))] }),
 			{ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" },
@@ -26,7 +26,7 @@ describe("cursor pi tool bridge debug safety", () => {
 		const recordBridgeRaw = vi.fn(() => { throw new Error("debug failed"); });
 		const debugRecorder: CursorSdkEventDebugRecorder = {
 			recordLiveRunEvent: vi.fn(),
-			recordBridgeDiagnostic: vi.fn(),
+			recordBridgeDiagnostic: vi.fn(() => { throw new Error("diagnostic failed"); }),
 			recordBridgeRaw,
 			recordDisplayDecision: vi.fn(),
 			recordCoordinatorEvent: vi.fn(),
@@ -35,10 +35,14 @@ describe("cursor pi tool bridge debug safety", () => {
 			finalize: vi.fn(),
 		};
 		const run = await registry.createRun({ debugRecorder });
-		const client = new Client({ name: "pi-cursor-sdk-test", version: "1.0.0" });
+		const client = new Client(
+			{ name: "pi-cursor-sdk-test", version: "1.0.0" },
+			{ versionNegotiation: { mode: "legacy" } },
+		);
 		const transport = new StreamableHTTPClientTransport(new URL(getCursorPiBridgeMcpUrl(run)));
 		await client.connect(transport);
 		try {
+			expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(["pi__read"]);
 			const callPromise = client.callTool({ name: "pi__read", arguments: { path: "README.md" } });
 			const request = await waitForQueuedRequest(run);
 			await run.resolveToolResultsFromContext({

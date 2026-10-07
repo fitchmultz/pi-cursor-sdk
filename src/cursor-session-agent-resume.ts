@@ -60,6 +60,7 @@ interface PendingCursorSessionAgentResumeHandle {
 
 interface CursorSessionResumeState {
 	appendEntry?: ExtensionAPI["appendEntry"];
+	runtimeScopeKey?: string;
 	scopeKey: string;
 	sessionFile?: string;
 	sessionId?: string;
@@ -355,7 +356,7 @@ function restoreFromBranch(branch: readonly SessionEntry[], allEntries: readonly
 
 export function getMatchingCursorSessionAgentResumeHandle(poolKey: string, scopeKey?: string): CursorSessionAgentResumeEntryData | undefined {
 	const state = getResumeState(scopeKey);
-	if (scopeKey !== undefined && state.scopeKey !== scopeKey) return undefined;
+	if (scopeKey !== undefined && (state.runtimeScopeKey ?? state.scopeKey) !== scopeKey) return undefined;
 	const handle = state.activeHandle;
 	if (!handle || !isCursorLocalAgentId(handle.agentId)) return undefined;
 	if (handle.poolKey !== poolKey) return undefined;
@@ -373,7 +374,7 @@ export function getMatchingCursorSessionAgentResumeHandle(poolKey: string, scope
 
 export function persistCursorSessionAgentResumeHandle(input: PendingCursorSessionAgentResumeHandle, scopeKey?: string): void {
 	const state = getResumeState(scopeKey);
-	if (scopeKey !== undefined && state.scopeKey !== scopeKey) return;
+	if (scopeKey !== undefined && (state.runtimeScopeKey ?? state.scopeKey) !== scopeKey) return;
 	if (!isCursorLocalAgentId(input.agentId)) return;
 	state.pendingHandle = {
 		runtime: input.runtime,
@@ -427,8 +428,9 @@ interface CursorSessionAgentResumeExtensionApi {
 }
 
 export function registerCursorSessionAgentResume(pi: CursorSessionAgentResumeExtensionApi): void {
+	const scope = getCursorSessionScopeSnapshot(pi);
 	const sessionState: CursorSessionResumeState = {
-		appendEntry: pi.appendEntry, scopeKey: getCursorSessionScopeSnapshot(pi).scopeKey,
+		appendEntry: pi.appendEntry, scopeKey: scope.persistentScopeKey ?? scope.scopeKey,
 		cwd: process.cwd(), branchPathHash: EMPTY_BRANCH_HASH,
 		compactionGeneration: 0, unownedUserEntryIds: new Set(),
 	};
@@ -439,9 +441,12 @@ export function registerCursorSessionAgentResume(pi: CursorSessionAgentResumeExt
 		restoreFromBranch(branch, entries.length > 0 ? entries : branch, state);
 	};
 	pi.on("session_start", (_event, ctx) => {
-		if (statesByScope.get(state.scopeKey) === state) statesByScope.delete(state.scopeKey);
-		state.scopeKey = getCursorSessionScopeSnapshot(pi).scopeKey;
-		statesByScope.set(state.scopeKey, state);
+		const key = state.runtimeScopeKey ?? state.scopeKey;
+		if (statesByScope.get(key) === state) statesByScope.delete(key);
+		const scope = getCursorSessionScopeSnapshot(pi);
+		state.runtimeScopeKey = scope.scopeKey;
+		state.scopeKey = scope.persistentScopeKey ?? scope.scopeKey;
+		statesByScope.set(scope.scopeKey, state);
 		lastBoundState = state;
 		state.sessionFile = ctx.sessionManager.getSessionFile?.() ?? undefined;
 		state.sessionId = ctx.sessionManager.getSessionId?.() ?? undefined;
@@ -482,7 +487,8 @@ export function registerCursorSessionAgentResume(pi: CursorSessionAgentResumeExt
 		state.branchPathHash = hashBranchStep(state.branchPathHash, event.compactionEntry);
 	});
 	pi.on("session_shutdown", () => {
-		if (statesByScope.get(state.scopeKey) === state) statesByScope.delete(state.scopeKey);
+		const key = state.runtimeScopeKey ?? state.scopeKey;
+		if (statesByScope.get(key) === state) statesByScope.delete(key);
 		state.appendEntry = undefined;
 		state.pendingHandle = undefined;
 	});
@@ -496,6 +502,7 @@ function resetStateForTests(): void {
 	const state = lastBoundState;
 	state.appendEntry = undefined;
 	state.scopeKey = getCursorSessionScopeKey();
+	state.runtimeScopeKey = undefined;
 	state.sessionFile = undefined;
 	state.sessionId = undefined;
 	state.cwd = process.cwd();

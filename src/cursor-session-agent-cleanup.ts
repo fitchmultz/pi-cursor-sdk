@@ -5,6 +5,7 @@ import { fsyncExistingRegularFile } from "./cursor-durable-fs.js";
 import { scrubSensitiveText } from "./cursor-sensitive-text.js";
 import { loadCursorSdk } from "./cursor-sdk-runtime.js";
 import { cursorSessionScopeKeyForManager } from "./cursor-session-scope.js";
+import { claimCursorLocalAgent } from "./cursor-local-agent-ownership.js";
 import {
 	CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE,
 	isCursorLocalAgentId,
@@ -323,7 +324,11 @@ export async function runCursorSessionAgentCleanupCommand(pi: LocalResumeCleanup
 						openedStore = await openCursorSessionStore(ctx.cwd, identity, identities.workspaceRoot, identities.storeRoot);
 						openedStores.set(identity.stateRoot, openedStore);
 					}
-					await operations.delete(agentId, { cwd: ctx.cwd, store: openedStore.store });
+					const release = claimCursorLocalAgent(identity, agentId);
+					if (!release) throw new Error("Cursor local agent is still owned by an active runtime");
+					try {
+						await operations.delete(agentId, { cwd: ctx.cwd, store: openedStore.store });
+					} finally { release(); }
 					deletedAgentIds.push(agentId);
 				} catch (error) {
 					failedAgentIds.push({

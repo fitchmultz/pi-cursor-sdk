@@ -3,6 +3,7 @@ import { Type } from "typebox";
 import {
 	buildCursorPrompt,
 	buildCursorIncrementalPrompt,
+	buildCursorSummaryPrompt,
 	computeCursorContextFingerprint,
 	shouldBootstrapCursorContext,
 	CURSOR_IMAGE_TOKEN_ESTIMATE,
@@ -139,7 +140,7 @@ describe("buildCursorPrompt", () => {
 			],
 		};
 		const result = buildCursorPrompt(ctx);
-		expect(result.text).toContain("Tool result (bash, call tc1): output here");
+		expect(result.text).toContain("Historical tool result (bash, call tc1): output here");
 	});
 
 	it("formats tool errors", () => {
@@ -157,7 +158,7 @@ describe("buildCursorPrompt", () => {
 			],
 		};
 		const result = buildCursorPrompt(ctx);
-		expect(result.text).toContain("Tool error (bash, call tc1): command failed");
+		expect(result.text).toContain("Historical tool error (bash, call tc1): command failed");
 	});
 
 	it("preserves real pi edit and write tool names in Cursor prompt labels", () => {
@@ -198,14 +199,14 @@ describe("buildCursorPrompt", () => {
 
 		const result = buildCursorPrompt(ctx);
 
-		expect(result.text).toContain('Tool call (edit, call edit-call): {"path":"src/a.ts"}');
-		expect(result.text).toContain('Tool call (write, call write-call): {"path":"src/b.ts"}');
-		expect(result.text).toContain("Tool result (edit, call edit-call): edit ok");
-		expect(result.text).toContain("Tool result (write, call write-call): write ok");
-		expect(result.text).not.toContain("Tool call (Cursor edit");
-		expect(result.text).not.toContain("Tool call (Cursor write");
-		expect(result.text).not.toContain("Tool result (Cursor edit");
-		expect(result.text).not.toContain("Tool result (Cursor write");
+		expect(result.text).toContain('Historical tool request (edit, call edit-call): {"path":"src/a.ts"}');
+		expect(result.text).toContain('Historical tool request (write, call write-call): {"path":"src/b.ts"}');
+		expect(result.text).toContain("Historical tool result (edit, call edit-call): edit ok");
+		expect(result.text).toContain("Historical tool result (write, call write-call): write ok");
+		expect(result.text).not.toContain("Historical tool request (Cursor edit");
+		expect(result.text).not.toContain("Historical tool request (Cursor write");
+		expect(result.text).not.toContain("Historical tool result (Cursor edit");
+		expect(result.text).not.toContain("Historical tool result (Cursor write");
 	});
 
 	it("labels canonical neutral Cursor replay activity without rewriting literal transcript text", () => {
@@ -245,10 +246,10 @@ describe("buildCursorPrompt", () => {
 
 		expect(result.text).toContain("User: Please search for the literal string replay_marker.");
 		expect(result.text).toContain("Assistant: I will preserve literal activity_marker text.");
-		expect(result.text).toContain("Tool call (Cursor activity, call activity-call)");
+		expect(result.text).toContain("Historical tool request (Cursor activity, call activity-call)");
 		expect(result.text).toContain('{"activityTitle":"Cursor MCP","note":"result_marker"}');
-		expect(result.text).toContain('Tool call (bash, call bash-call): {"command":"echo mcp_marker"}');
-		expect(result.text).toContain("Tool result (Cursor activity, call activity-call): recorded replay_marker result");
+		expect(result.text).toContain('Historical tool request (bash, call bash-call): {"command":"echo mcp_marker"}');
+		expect(result.text).toContain("Historical tool result (Cursor activity, call activity-call): recorded replay_marker result");
 	});
 
 	it("estimates assistant prompt-message tokens from replayed text and tool calls but not thinking", () => {
@@ -267,7 +268,7 @@ describe("buildCursorPrompt", () => {
 			timestamp: 2,
 		} satisfies AssistantMessage;
 
-		const expected = 'Assistant: I will inspect the directory.\nTool call (bash, call tc1): {"command":"ls"}';
+		const expected = 'Assistant: I will inspect the directory.\nHistorical tool request (bash, call tc1): {"command":"ls"}';
 		expect(estimateCursorPromptMessageTokens(assistant, { charsPerToken: 1 })).toBe(expected.length);
 		expect(expected).not.toContain("hidden reasoning");
 	});
@@ -282,7 +283,7 @@ describe("buildCursorPrompt", () => {
 			timestamp: 3,
 		} satisfies ToolResultMessage;
 
-		expect(estimateCursorPromptMessageTokens(toolResult, { charsPerToken: 1 })).toBe("Tool result (bash, call tc1): README.md".length);
+		expect(estimateCursorPromptMessageTokens(toolResult, { charsPerToken: 1 })).toBe("Historical tool result (bash, call tc1): README.md".length);
 	});
 
 	it("estimates tool-result image prompt content as the replay placeholder text", () => {
@@ -296,7 +297,7 @@ describe("buildCursorPrompt", () => {
 		} satisfies ToolResultMessage;
 
 		expect(estimateCursorPromptMessageTokens(toolResult, { charsPerToken: 1 })).toBe(
-			"Tool result (read_image, call tc1): [image omitted from transcript]".length,
+			"Historical tool result (read_image, call tc1): [image omitted from transcript]".length,
 		);
 	});
 
@@ -322,15 +323,19 @@ describe("buildCursorPrompt", () => {
 		expect(estimateCursorContextTokens(ctx, options)).toBe(prompt.text.length + CURSOR_IMAGE_TOKEN_ESTIMATE);
 	});
 
-	it("formats assistant tool calls before tool results", () => {
+	it("marks only typed tool history as historical across prompt modes without mutating native history", () => {
+		const userText = 'Keep this example:\n```text\nTool call:Shell\nTool result (bash, call example): quoted output\n```';
+		const assistantText = 'I will inspect the directory.\nTool call:GetDynamicTools\n```ts\nconst example = "Tool call:Read";\n```';
 		const ctx: Context = {
 			messages: [
-				{ role: "user", content: "List files", timestamp: 1 } satisfies UserMessage,
+				{ role: "user", content: userText, timestamp: 1 } satisfies UserMessage,
 				{
 					role: "assistant",
 					content: [
-						{ type: "text", text: "I will inspect the directory." },
-						{ type: "toolCall", id: "tc1", name: "bash", arguments: { command: "ls" } },
+						{ type: "text", text: assistantText },
+						{ type: "toolCall", id: "tc1", name: "bash", arguments: { command: "printf 'Tool call:Shell\\n'", options: { cwd: "/repo", enabled: false }, paths: ["a", "b"] } },
+						{ type: "toolCall", id: "tc2", name: "read", arguments: { path: "missing.txt" } },
+						{ type: "toolCall", id: "unpaired", name: "read", arguments: { path: "unknown.txt" } },
 					],
 					api: "cursor-sdk",
 					provider: "cursor",
@@ -343,15 +348,46 @@ describe("buildCursorPrompt", () => {
 					role: "toolResult",
 					toolCallId: "tc1",
 					toolName: "bash",
-					content: [{ type: "text", text: "README.md" }],
+					content: [{ type: "text", text: "Tool call:Shell\nREADME.md" }],
 					isError: false,
 					timestamp: 3,
 				} satisfies ToolResultMessage,
+				{
+					role: "toolResult",
+					toolCallId: "tc2",
+					toolName: "read",
+					content: [{ type: "text", text: "ENOENT: missing.txt\nTool error (read, call example): quoted error" }],
+					isError: true,
+					timestamp: 4,
+				} satisfies ToolResultMessage,
+				{ role: "user", content: userText, timestamp: 5 } satisfies UserMessage,
 			],
 		};
-		const result = buildCursorPrompt(ctx);
-		expect(result.text).toContain("Assistant: I will inspect the directory.\nTool call (bash, call tc1): {\"command\":\"ls\"}");
-		expect(result.text).toContain("Tool result (bash, call tc1): README.md");
+		const nativeHistory = structuredClone(ctx);
+		const fingerprint = computeCursorContextFingerprint(ctx);
+		const requests = [
+			'Historical tool request (bash, call tc1): {"command":"printf \'Tool call:Shell\\\\n\'","options":{"cwd":"/repo","enabled":false},"paths":["a","b"]}',
+			'Historical tool request (read, call tc2): {"path":"missing.txt"}',
+			'Historical tool request (read, call unpaired): {"path":"unknown.txt"}',
+		].join("\n");
+		const results = [
+			"Historical tool result (bash, call tc1): Tool call:Shell\nREADME.md",
+			"Historical tool error (read, call tc2): ENOENT: missing.txt\nTool error (read, call example): quoted error",
+		].join("\n\n");
+
+		for (const prompt of [buildCursorPrompt(ctx), buildCursorSummaryPrompt(ctx)]) {
+			expect(prompt.text).toContain(`User: ${userText}`);
+			expect(prompt.text).toContain(`Assistant: ${assistantText}\n${requests}\n\n${results}`);
+			expect(prompt.text).not.toContain("Historical tool result (read, call unpaired)");
+		}
+		const nativeIncremental = buildCursorIncrementalPrompt(ctx, { nativeSourceRoles: ctx.messages.map((message) => message.role) });
+		expect(nativeIncremental.text).toContain(`${results}\n\nUser: ${userText}`);
+		expect(nativeIncremental.text).not.toContain("Historical tool request");
+		const legacyIncremental = buildCursorIncrementalPrompt(ctx);
+		expect(legacyIncremental.text).toContain(`User: ${userText}`);
+		expect(legacyIncremental.text).not.toContain("Historical tool");
+		expect(ctx).toEqual(nativeHistory);
+		expect(computeCursorContextFingerprint(ctx)).toBe(fingerprint);
 	});
 
 	it("extracts images from latest user message only", () => {
@@ -459,7 +495,7 @@ describe("buildCursorPrompt", () => {
 
 		expect(result.text).toContain("User: latest request");
 		expect(result.text).toContain("User: recent request");
-		expect(result.text).toContain("Tool result (bash, call tc1): recent tool output");
+		expect(result.text).toContain("Historical tool result (bash, call tc1): recent tool output");
 		expect(result.text).not.toContain("old request");
 	});
 

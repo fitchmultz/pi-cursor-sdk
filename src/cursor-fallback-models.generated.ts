@@ -1,6 +1,6 @@
 import type { ModelListItem } from "@cursor/sdk";
 
-// Generated with @cursor/sdk@1.0.36 from 45 Cursor models.
+// Generated with @cursor/sdk@1.0.37 from 46 Cursor models.
 // Refresh with: npm run refresh:cursor-snapshots -- --write
 // Do not add secrets; this file stores public model metadata only.
 export const FALLBACK_MODEL_ITEMS = [
@@ -910,6 +910,407 @@ export const FALLBACK_MODEL_ITEMS = [
 				],
 				displayName: "Claude Haiku 4.5",
 				isDefault: true
+			}
+		]
+	},
+	{
+		id: "claude-haiku-5-5",
+		displayName: "Claude Haiku 5.5",
+		parameters: [
+			{
+				id: "thinking",
+				displayName: "Thinking",
+				values: [
+					{
+						value: "false"
+					},
+					{
+						value: "true"
+					}
+				]
+			},
+			{
+				id: "context",
+				displayName: "Context",
+				values: [
+					{
+						value: "300k",
+						displayName: "300K"
+					},
+					{
+						value: "1m",
+						displayName: "1M"
+					}
+				]
+			},
+			{
+				id: "reasoning_effort",
+				displayName: "Effort",
+				values: [
+					{
+						value: "low",
+						displayName: "Low"
+					},
+					{
+						value: "medium",
+						displayName: "Medium"
+					},
+					{
+						value: "high",
+						displayName: "High"
+					},
+					{
+						value: "xhigh",
+						displayName: "Extra High"
+					},
+					{
+						value: "max",
+						displayName: "Max"
+					}
+				]
+			}
+		],
+		variants: [
+			{
+				params: [
+					{
+						id: "thinking",
+						value: "false"
+					},
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "reasoning_effort",
+						value: "low"
+					}
+				],
+				displayName: "Claude Haiku 5.5  Low No Thinking"
+			},
+			{
+				params: [
+					{
+						id: "thinking",
+						value: "false"
+					},
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "reasoning_effort",
+						value: "medium"
+					}
+				],
+				displayName: "Claude Haiku 5.5  Medium No Thinking"
+			},
+			{
+				params: [
+					{
+						id: "thinking",
+						value: "false"
+					},
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "reasoning_effort",
+						value: "high"
+					}
+				],
+				displayName: "Claude Haiku 5.5  High No Thinking"
+			},
+			{
+				params: [
+					{
+						id: "thinking",
+						value: "false"
+					},
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "reasoning_effort",
+						value: "xhigh"
+					}
+				],
+				displayName: "Claude Haiku 5.5  Extra High No Thinking"
+			},
+			{
+				params: [
+					{
+						id: "thinking",
+						value: "false"
+					},
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "reasoning_effort",
+						value: "max"
+					}
+				],
+				displayName: "Claude Haiku 5.5  Max No Thinking"
+			},
+			{
+				params: [
+					{
+						id: "thinking",
+						value: "false"
+					},
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "low"
+					}
+				],
+				displayName: "Claude Haiku 5.5 1M Low No Thinking"
+			},
+			{
+				params: [
+					{
+						id: "thinking",
+						value: "false"
+					},
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "medium"
+					}
+				],
+				displayName: "Claude Haiku 5.5 1M Medium No Thinking"
+			},
+			{
+				params: [
+					{
+						id: "thinking",
+						value: "false"
+					},
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "high"
+					}
+				],
+				displayName: "Claude Haiku 5.5 1M High No Thinking"
+			},
+			{
+				params: [
+					{
+						id: "thinking",
+						value: "false"
+					},
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "xhigh"
+					}
+				],
+				displayName: "Claude Haiku 5.5 1M Extra High No Thinking"
+			},
+			{
+				params: [
+					{
+						id: "thinking",
+						value: "false"
+					},
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "max"
+					}
+				],
+				displayName: "Claude Haiku 5.5 1M Max No Thinking"
+			},
+			{
+				params: [
+					{
+						id: "thinking",
+						value: "true"
+					},
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "reasoning_effort",
+						value: "low"
+					}
+				],
+				displayName: "Claude Haiku 5.5  Low"
+			},
+			{
+				params: [
+					{
+						id: "thinking",
+						value: "true"
+					},
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "reasoning_effort",
+						value: "medium"
+					}
+				],
+				displayName: "Claude Haiku 5.5  Medium"
+			},
+			{
+				params: [
+					{
+						id: "thinking",
+						value: "true"
+					},
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "reasoning_effort",
+						value: "high"
+					}
+				],
+				displayName: "Claude Haiku 5.5  High"
+			},
+			{
+				params: [
+					{
+						id: "thinking",
+						value: "true"
+					},
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "reasoning_effort",
+						value: "xhigh"
+					}
+				],
+				displayName: "Claude Haiku 5.5  Extra High"
+			},
+			{
+				params: [
+					{
+						id: "thinking",
+						value: "true"
+					},
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "reasoning_effort",
+						value: "max"
+					}
+				],
+				displayName: "Claude Haiku 5.5  Max"
+			},
+			{
+				params: [
+					{
+						id: "thinking",
+						value: "true"
+					},
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "low"
+					}
+				],
+				displayName: "Claude Haiku 5.5 1M Low"
+			},
+			{
+				params: [
+					{
+						id: "thinking",
+						value: "true"
+					},
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "medium"
+					}
+				],
+				displayName: "Claude Haiku 5.5 1M Medium"
+			},
+			{
+				params: [
+					{
+						id: "thinking",
+						value: "true"
+					},
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "high"
+					}
+				],
+				displayName: "Claude Haiku 5.5 1M High",
+				isDefault: true
+			},
+			{
+				params: [
+					{
+						id: "thinking",
+						value: "true"
+					},
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "xhigh"
+					}
+				],
+				displayName: "Claude Haiku 5.5 1M Extra High"
+			},
+			{
+				params: [
+					{
+						id: "thinking",
+						value: "true"
+					},
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "max"
+					}
+				],
+				displayName: "Claude Haiku 5.5 1M Max"
 			}
 		]
 	},

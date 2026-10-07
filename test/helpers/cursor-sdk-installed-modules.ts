@@ -10,6 +10,47 @@ import { resolveInstalledPackageRoot } from "./installed-package.js";
 // shipped; a missing module/loader seam fails the contract rather than guessing.
 let installedFactories: ReturnType<typeof discoverInstalledCursorModules> | undefined;
 
+export function installedCursorModuleDeclarations(source: string) {
+	const ast = ts.createSourceFile("installed-module.js", `({${source}})`, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+	const statement = ast.statements[0];
+	if (!statement || !ts.isExpressionStatement(statement) || !ts.isParenthesizedExpression(statement.expression) ||
+		!ts.isObjectLiteralExpression(statement.expression.expression)) throw new Error("Installed module factory changed");
+	const factory = statement.expression.expression.properties[0];
+	if (!factory || !ts.isMethodDeclaration(factory) || !factory.body) throw new Error("Installed module factory body changed");
+	const declarations = new Map<string, ts.FunctionDeclaration | ts.ClassDeclaration>();
+	for (const node of factory.body.statements) {
+		if ((ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) && node.name) declarations.set(node.name.text, node);
+	}
+	return {
+		declarations,
+		execute<T>(declaration: ts.FunctionDeclaration | ts.ClassDeclaration): T {
+			const selected = new Set<string>();
+			const snippets: string[] = [];
+			function include(node: ts.FunctionDeclaration | ts.ClassDeclaration) {
+				const name = node.name!.text;
+				if (selected.has(name)) return;
+				selected.add(name);
+				function references(child: ts.Node) {
+					const expression = ts.isCallExpression(child) || ts.isNewExpression(child) ||
+						(ts.isExpressionWithTypeArguments(child) && ts.isHeritageClause(child.parent)) ? child.expression : undefined;
+					if (expression && ts.isIdentifier(expression)) {
+						const dependency = declarations.get(expression.text);
+						if (dependency) include(dependency);
+					}
+					ts.forEachChild(child, references);
+				}
+				references(node);
+				snippets.push(node.getText(ast));
+			}
+			include(declaration);
+			// Only the installed declarations run; VM coordinates are harness-relative.
+			return runInThisContext(`(() => { ${snippets.join("\n")}; return ${declaration.name!.text}; })()`, {
+				filename: join(resolveInstalledPackageRoot("@cursor/sdk"), "dist/esm/index.js"),
+			}) as T;
+		},
+	};
+}
+
 export async function installedCursorModules() {
 	return (await (installedFactories ??= discoverInstalledCursorModules()))();
 }

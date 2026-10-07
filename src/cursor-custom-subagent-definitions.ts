@@ -17,5 +17,5 @@ export function buildCursorCustomSubagentDefinitions(config: CursorCustomSubagen
 	}]));
 }
 
-// ponytail: SDK 1.0.36 LOCAL conversion keeps only model ID/inherit; it drops params.
+// ponytail: SDK 1.0.37 LOCAL conversion keeps only model ID/inherit; it drops params.
 // Upgrade this claim only after the installed public converter preserves them.

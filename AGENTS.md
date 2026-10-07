@@ -89,7 +89,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `src/cursor-tool-transcript.ts` owns the raw `unknown toolCall -> transcript/display` façade; `src/cursor-transcript-tool-specs.ts`, `src/cursor-transcript-utils.ts`, and `src/cursor-transcript-tool-formatters.ts` implement spec dispatch and formatting.
 - `src/cursor-mcp-timeout-override.ts` owns Cursor SDK MCP timeout overrides: 3600s default for `callTool`, 10s default for verified initialize/listTools paths on first send, and SDK-default behavior for unknown MCP protocol stacks.
 - `src/cursor-config.ts` owns Cursor SDK config loading, parsing, source precedence, safety-cap resolution, cloud environment selection, and legacy fast-default config persistence.
-- `src/cursor-custom-subagent-definitions.ts` maps validated named config to public SDK agents with independent catalog selection; SDK 1.0.36 LOCAL conversion is ID/inherit-only, while Cloud retains params. Ordinary turn acquisition hashes nonempty resolved definitions; summaries remain definition-free.
+- `src/cursor-custom-subagent-definitions.ts` maps validated named config to public SDK agents with independent catalog selection; SDK 1.0.37 LOCAL conversion is ID/inherit-only, while Cloud retains params. Ordinary turn acquisition hashes nonempty resolved definitions; summaries remain definition-free.
 - `src/cursor-cloud-options.ts` owns cloud SDK option mapping and fail-closed preflight.
 - `src/cursor-cloud-local-state.ts` owns canonical cloud starting-ref normalization, hermetic Git probes, remote identity/refspec validation, and reasoned local-state inspection.
 - `src/cursor-cloud-lifecycle.ts` owns session-branch cloud lifecycle ledger entries and explicit `/cursor-cloud` list/archive/delete command behavior.
@@ -148,7 +148,7 @@ There is no lint or format script in `package.json` at this time.
 - Keep provider runtime code side-effect-light. Do not write secrets, and do not let cache or discovery failures break response streaming unless the run cannot proceed safely.
 - Add or update tests for behavior changes in `src/`. Prefer focused unit tests over live Cursor calls.
 - If dependency versions change, update `package-lock.json` with npm. Do not manually edit generated dependency output.
-- The bridge runtime closure is bundled and pinned to `@modelcontextprotocol/server@2.3.1`, `@modelcontextprotocol/hono@2.0.2`, `hono@4.13.13`, and `@hono/node-server@2.1.3`. `@cursor/sdk@1.0.36` remains an exact unbundled dependency.
+- The bridge runtime closure is bundled and pinned to `@modelcontextprotocol/server@2.3.1`, `@modelcontextprotocol/hono@2.0.2`, `hono@4.13.13`, and `@hono/node-server@2.1.3`. `@cursor/sdk@1.0.37` remains an exact unbundled dependency.
 - Do not commit `dist/`, `coverage/`, `.env*`, `.pi/`, or package tarballs.
 
 ## Validation and done criteria

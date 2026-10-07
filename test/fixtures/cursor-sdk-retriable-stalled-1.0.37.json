@@ -1,11 +1,11 @@
 {
   "provenance": {
     "sdkPackage": "@cursor/sdk",
-    "sdkVersion": "1.0.36",
-    "verified": "2026-10-05T23:34:05.491Z",
-    "sourceFile": "node_modules/@cursor/sdk/dist/esm/867.js",
-    "sourceSha256": "ed47eb4564639b7e404cd861ccc3b948322ece9d2d5aabb43c60648e34363755",
-    "method": "Executed installed stall factory and its installed retry helpers offline; undefined, zero, one and two transport retries. No Agent/send or backend call. VM coordinates are harness-relative, not original bundle coordinates."
+    "sdkVersion": "1.0.37",
+    "verified": "2026-10-07T21:27:12.137Z",
+    "sourceFile": "node_modules/@cursor/sdk/dist/esm/464.js",
+    "sourceSha256": "9a2b82bc20c3e890e0fe98483d761d8bdbe667a1b933444b69e8e53f29b206c6",
+    "method": "Executed installed local-executor stall factory and its installed retry helpers/private error classes via installedCursorModuleDeclarations; undefined, zero, one and two transport retries. No Agent/send or backend call. VM coordinates are harness-relative, not original bundle coordinates."
   },
   "branches": [
     {

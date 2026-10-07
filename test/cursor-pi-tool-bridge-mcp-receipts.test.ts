@@ -34,7 +34,7 @@ describe("installed MCP server initialization and catalog diagnostic receipts", 
 		const run = await registry.createRun();
 		const otherRun = await registry.createRun();
 		const url = getCursorPiBridgeMcpUrl(run);
-		// Cursor SDK 1.0.36's bundled MCP client uses the legacy initialize/initialized handshake.
+		// The Cursor SDK's bundled MCP client uses the legacy initialize/initialized handshake.
 		const client = new Client(
 			{ name: "private-client-name", version: "private-client-version" },
 			{ versionNegotiation: { mode: "legacy" } },

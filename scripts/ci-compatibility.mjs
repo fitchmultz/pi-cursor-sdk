@@ -82,7 +82,6 @@ function run(command, args, cwd = source, capture = false, commandEnv = env) {
     encoding: "utf8",
     shell: process.platform === "win32" && command === "npm",
     stdio: capture ? "pipe" : "inherit",
-    timeout: 180_000,
     maxBuffer: 8 * 1024 * 1024,
   });
   if (result.error) throw result.error;

@@ -1,10 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { OPENAI_CODEX_MODELS } from "@earendil-works/pi-ai/providers/openai-codex.models";
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 import { FALLBACK_MODEL_ITEMS } from "../src/cursor-fallback-models.generated.js";
 
 const require = createRequire(import.meta.url);
@@ -75,6 +76,30 @@ describe("package metadata cutover baselines", () => {
 		expect(packageLock.version).toBe(packageJson.version);
 		expect(packageLock.packages[""]?.version).toBe(packageJson.version);
 		expect(changelogVersion).toBe(packageJson.version);
+	});
+
+	it("pairs all shared CI/release workflows and automation checkouts at one immutable revision", () => {
+		type Invocation = { uses?: string; with?: Record<string, string> };
+		const workflowDir = join(process.cwd(), ".github", "workflows");
+		const refs: Array<string | undefined> = [];
+		for (const file of readdirSync(workflowDir).filter((file) => /\.ya?ml$/.test(file))) {
+			const workflow = parse(readFileSync(join(workflowDir, file), "utf8")) as {
+				jobs: Record<string, Invocation & { steps?: Invocation[] }>;
+			};
+			for (const job of Object.values(workflow.jobs)) {
+				for (const invocation of [job, ...(job.steps ?? [])]) {
+					if (invocation.uses?.startsWith("fitchmultz/.github/")) {
+						refs.push(invocation.uses.split("@")[1]);
+						expect(invocation.with?.["automation-ref"], `${file}: shared workflow needs automation-ref`).toBeDefined();
+					}
+					if (invocation.with?.["automation-ref"] !== undefined) refs.push(invocation.with["automation-ref"]);
+					if (invocation.with?.repository === "fitchmultz/.github") refs.push(invocation.with.ref);
+				}
+			}
+		}
+		expect(refs.length).toBeGreaterThan(0);
+		for (const ref of refs) expect(ref).toMatch(/^[a-f0-9]{40}$/);
+		expect(new Set(refs).size, `Mixed shared automation revisions: ${[...new Set(refs)].join(", ")}`).toBe(1);
 	});
 
 	it("pins Cursor SDK exactly", () => {

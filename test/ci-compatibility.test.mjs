@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import childProcess, { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,15 +43,40 @@ test("default compatibility gate rejects uncommitted artifacts before installati
 const { qualifySelectedHost, runCompatibilityCommand } =
   await import("../scripts/ci-compatibility-phases.mjs");
 
-test("qualification gives build, verify and native contracts independent commands", () => {
-  const calls = [];
-  qualifySelectedHost((command, args) => calls.push([command, args]));
-  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-  const campaign = calls.map(([command, args]) =>
-    [command === process.execPath ? "node" : command, ...args].join(" "),
-  ).join(" && ");
-  assert.equal(campaign, packageJson.scripts["check:compat"],
-    "phased qualification must retain every command and native contract in check:compat");
+test("qualification gives build, verify and native contracts independent commands", (t) => {
+  const spawn = t.mock.method(childProcess, "spawnSync", () => ({ status: 0 }));
+  syncBuiltinESMExports();
+  try {
+    qualifySelectedHost((command, args) => runCompatibilityCommand(command, args, {}));
+    const calls = spawn.mock.calls.map(call => call.arguments);
+    assert.equal(calls[1][2].timeout, 360_000, "aggregate verify needs its own finite budget");
+    assert.deepEqual(calls.map(([, , options]) => options.timeout), [180_000, 360_000, 180_000]);
+    const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    const campaign = calls.map(([command, args]) =>
+      [command === process.execPath ? "node" : command, ...args].join(" "),
+    ).join(" && ");
+    assert.equal(campaign, packageJson.scripts["check:compat"],
+      "phased qualification must retain every command and native contract in check:compat");
+
+    for (const [command, args] of [
+      ["npm.cmd", ["run", "verify"]],
+      ["npm", ["verify"]],
+      ["npm", ["run", "verify:other"]],
+      ["npm", ["run", "verify", "--silent"]],
+    ]) {
+      runCompatibilityCommand(command, args, {});
+      assert.equal(spawn.mock.calls.at(-1).arguments[2].timeout, 180_000,
+        `${command} ${args.join(" ")} must use the ordinary budget`);
+    }
+    for (const timeout of [0, 600_000]) {
+      runCompatibilityCommand("npm", ["run", "verify"], { timeout });
+      assert.equal(spawn.mock.calls.at(-1).arguments[2].timeout, timeout,
+        "explicit caller budgets must take precedence");
+    }
+  } finally {
+    spawn.mock.restore();
+    syncBuiltinESMExports();
+  }
 });
 
 for (const failingPhase of [0, 1, 2]) {

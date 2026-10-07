@@ -6,7 +6,7 @@ This workflow is the canonical repo path for verifying Cursor SDK tool replay th
 
 Use it when changed replay-card behavior needs new visual proof not covered by offline rendering contracts or valid retained evidence. Text logs and JSONL are not enough for visual-parity claims: keep PNGs for the exact prompt, and before/after PNGs for a rendering comparison. Reuse a valid retained baseline instead of paying to recreate it.
 
-Current validation baseline: Node 24+, exact `@cursor/sdk@1.0.36`, official Pi 0.87.1/latest and current `fitchmultz/pi` main. Development Pi packages `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` are exact 1.0.3, with host TypeBox 1.3.27. Optional published Pi and TypeBox peer dependencies use `"*"` ranges per Pi guidance.
+Current validation baseline: Node 24+, exact `@cursor/sdk@1.0.36`, official Pi 0.87.1/latest and current `fitchmultz/pi` main. Development Pi packages `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` are exact locked 1.0.4 snapshots, with host TypeBox 1.3.27. These locked development snapshots are not qualification targets; resolve latest stable official Pi and current `fitchmultz/pi` main once per workflow run. Optional published Pi and TypeBox peer dependencies use `"*"` ranges per Pi guidance.
 
 ## Cursor SDK 1.0.17 / pi 0.79.0 cutover visual record
 

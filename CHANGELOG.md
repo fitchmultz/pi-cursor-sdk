@@ -1,6 +1,20 @@
 # Changelog
 
-## 0.5.1
+## 0.5.2
+
+### Fixed
+
+- Pair all shared CI/release workflow invocations, automation inputs, and checkouts at one reviewed revision. The shared fork producer now uses the fork's canonical artifact-set API; the existing host consumer reads the receipt's relative tarball paths and verifies their hashes. Preserve once-resolved latest official/fork targets, offline platform jobs, and manual npm approval.
+- Carry forward the Grok 4.7 selection fix from #344 (mirroring #343 by @LucasAIBuilder): omit only an outgoing `context` equal to the base catalog's default-variant context, including unambiguous aliases and fast/slow variants. Keep model metadata, non-default contexts, effort, and speed explicit; omit nothing when no catalog default context exists. The reporter describes an SDK 1.0.36 LOCAL reject/pass pair; that report is not qualification of this release candidate or Cloud behavior.
+
+### Changed
+
+- Align locked development Pi snapshots and their resolved transitives to 1.0.4. These reproducible build inputs are not qualification targets; Node 24+, official Pi 0.87.1+, and optional wildcard Pi/TypeBox peers remain unchanged.
+- Include the unpublished 0.5.1 backlog changes below: exact unbundled SDK/platform 1.0.36, static source/compiled-loader graph, native prompt/image and usage ownership, pending bridge-call protection, shell correlation, bounded diagnostics, trusted SDK-native subagents, and persistent LOCAL store roots with migration/cleanup guards. Preserve Pi's native footer, full question UI opt-in (`PI_CURSOR_ASK_QUESTION=1`, off by default), ordinary explicit Cloud capability, and the documented limits. This is not another SDK upgrade or evidence that all open reporter/service issues are fixed.
+
+## 0.5.1 (unpublished source history)
+
+These changes are carried into 0.5.2; this section does not record a successful npm publication. Historical candidate evidence remains bound to its original source, version, and run.
 
 ### Added
 

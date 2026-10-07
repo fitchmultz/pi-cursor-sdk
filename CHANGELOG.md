@@ -2,8 +2,14 @@
 
 ## Unreleased
 
+### Changed
+
+- Upgrade the exact unbundled Cursor SDK and five optional platform pins to 1.0.37. Keep the SDK 1.0.36 catalog capture from 2026-10-06 and private hook canary attributed to their historical version.
+- Refresh the fallback catalog from the authenticated SDK 1.0.37 catalog-only observation on 2026-10-07: 46 models, adding Claude Haiku 5.5 (`claude-haiku-5-5`) with 20 thinking/context/effort variants while preserving all 45 prior model records. The 33 bundled checkpoint-derived entries remain unchanged; no Agent/model turn or Cloud run was performed.
+
 ### Fixed
 
+- Map boolean `thinking` combined with either `effort` or `reasoning_effort` through native thinking controls. Haiku 5.5 now exposes all five catalog-supported enabled effort levels at both `@300k` and `@1m`; `off` sends `thinking=false` without the effort parameter. Verified offline against the captured SDK 1.0.37 catalog; no Agent/model turn or Cloud run was performed.
 - Select the declared TypeScript 7 entrypoint explicitly for all typechecks, matching the build and avoiding npm `tsc` shim collisions.
 - Separate SessionManager-owned runtime scopes from unchanged durable identities. A same-file sibling's reload/tree/shutdown no longer closes another manager's pool or pending bridge run; process-local claims exclude live handles from resume and cleanup (#282 reproduced trigger, not the original reporter's full qualification).
 - Label structured tool history as historical request/result/error without declaring unmatched requests completed. Preserve prose, IDs, arguments, errors and raw history; do not synthesize tool calls, strip narration or automatically resend effects (#257 mitigation).
@@ -12,6 +18,8 @@
 
 ### Verification and limits
 
+- Document SDK 1.0.37's new public `computerUse` output through the existing bounded generic Cursor activity/summary fallback, without dedicated action/screenshot presentation or a new public local execution option.
+- Record SDK 1.0.37's vendored HTTP/2 ping/response-iteration and local retry-classification source changes. Public controls, bearer/lease/reload mechanisms, LOCAL ID/inherit-only custom agents and inspected storage layouts remain unchanged; internal definition-only MCP setters are not supported options. These source comparisons do not resolve the original #247 authentication cause, #339 signal sender, #173 rtk behavior, #233 Windows loader or #206 readiness reports.
 - Exercise real public installed-SDK first-send linking through a blocked key-exchange boundary, with a request-time missing-module negative control. Native SDK-substituted session tests remain separate; neither proves authenticated inference or every embedded loader.
 - Clarify inspected SDK hook/parser/authentication mechanisms and remaining reporter-only unknowns (#173, #339, #247, #233). Public commit/PR attribution controls remain absent (#302); no SDK-internal patch or paid test campaign is added.
 

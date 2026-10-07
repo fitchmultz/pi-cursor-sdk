@@ -640,7 +640,7 @@ describe("Cursor SDK lazy runtime imports", () => {
 				status: "error",
 				error: { message: expect.stringContaining("SDK_CONTRACT_NETWORK_BLOCKED") },
 			});
-			// Installed 1.0.36 reaches this exchange before authenticated inference.
+			// The installed SDK reaches this exchange before authenticated inference.
 			expect(evidence.blocked).toEqual([{
 				api: "fetch", afterCreate: true, url: "https://api2.cursor.sh/auth/exchange_user_api_key",
 			}]);

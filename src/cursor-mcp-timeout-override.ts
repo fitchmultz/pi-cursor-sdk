@@ -91,7 +91,7 @@ export function isCursorSdkMcpToolTimeoutStack(stack: string | undefined): boole
 
 export function isCursorSdkMcpConnectTimeoutStack(stack: string | undefined): boolean {
 	if (!stack || !isCursorSdkMcpProtocolTimeoutStack(stack)) return false;
-	// SDK 1.0.36 minifies the Client class name; the protocol method and SDK
+	// The SDK minifies the Client class name; the protocol method and SDK
 	// frame, not that constructor's spelling, establish this timeout purpose.
 	return /^\s*at (?:[\w$]+\.)?(?:connect|listTools|getTools)\s*\(.*(?:node_modules[/\\]@cursor[/\\]sdk|@cursor\/sdk\/dist)/m.test(stack);
 }

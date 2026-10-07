@@ -75,6 +75,8 @@ describe("discoverModels", () => {
 				"claude-opus-4-8@300k",
 				"claude-sonnet-4-6@1m",
 				"claude-sonnet-4-6@200k",
+				"claude-haiku-5-5@300k",
+				"claude-haiku-5-5@1m",
 				"composer-2.5",
 				"composer-2-5",
 				"composer-latest",
@@ -98,6 +100,49 @@ describe("discoverModels", () => {
 		expect(issues[0].message).toContain("/cursor-refresh-models");
 		expect(issues[0].message).not.toContain("will fail until pi is restarted");
 		expect(mockedList).not.toHaveBeenCalled();
+
+		for (const context of ["300k", "1m"]) {
+			const modelId = `claude-haiku-5-5@${context}`;
+			expect(models.find(({ id }) => id === modelId)).toMatchObject({
+				reasoning: true,
+				contextWindow: context === "300k" ? 300000 : 1000000,
+				thinkingLevelMap: {
+					off: "false",
+					minimal: null,
+					low: "low",
+					medium: "medium",
+					high: "high",
+					xhigh: "xhigh",
+					max: "max",
+				},
+			});
+			const defaultParams = [
+				{ id: "thinking", value: "true" },
+				{ id: "context", value: context },
+				{ id: "reasoning_effort", value: "high" },
+			];
+			expect(getCursorModelMetadata(modelId)).toMatchObject({ catalogDefaultContext: "1m", defaultParams });
+			expect(buildCursorModelSelection(modelId, "minimal", true)).toEqual({
+				id: "claude-haiku-5-5",
+				params: defaultParams,
+			});
+			expect(buildCursorModelSelection(modelId, "xhigh")).toEqual({
+				id: "claude-haiku-5-5",
+				params: [
+					{ id: "thinking", value: "true" },
+					{ id: "context", value: context },
+					{ id: "reasoning_effort", value: "xhigh" },
+				],
+			});
+			expect(buildCursorModelSelection(modelId, "off")).toEqual({
+				id: "claude-haiku-5-5",
+				params: [
+					{ id: "thinking", value: "false" },
+					{ id: "context", value: context },
+				],
+			});
+			expect(getCursorModelMetadata(modelId)?.defaultParams).toEqual(defaultParams);
+		}
 	});
 
 	it("returns fallback models and reports missing key when API key is whitespace", async () => {
@@ -768,7 +813,7 @@ describe("discoverModels", () => {
 		});
 	});
 
-	it("maps boolean thinking plus effort to thinking=true with effort and off to thinking=false without effort", async () => {
+	it.each(["effort", "reasoning_effort"])("maps boolean thinking plus %s to enabled effort levels and off without effort", async (effortId) => {
 		process.env.CURSOR_API_KEY = "test-key-123";
 		mockedList.mockResolvedValueOnce([
 			{
@@ -776,13 +821,13 @@ describe("discoverModels", () => {
 				displayName: "Claude Like",
 				parameters: [
 					{ id: "thinking", displayName: "Thinking", values: [{ value: "false" }, { value: "true" }] },
-					{ id: "effort", displayName: "Effort", values: [{ value: "low" }, { value: "medium" }, { value: "high" }] },
+					{ id: effortId, displayName: "Effort", values: [{ value: "low" }, { value: "medium" }, { value: "high" }, { value: "xhigh" }, { value: "max" }] },
 				],
 				variants: [
 					{
 						params: [
 							{ id: "thinking", value: "true" },
-							{ id: "effort", value: "medium" },
+							{ id: effortId, value: "medium" },
 						],
 						displayName: "Claude Like",
 						isDefault: true,
@@ -799,15 +844,21 @@ describe("discoverModels", () => {
 			low: "low",
 			medium: "medium",
 			high: "high",
-			xhigh: null,
-			max: null,
+			xhigh: "xhigh",
+			max: "max",
 		});
-		expect(buildCursorModelSelection("claude-like", "high")).toEqual({
+		for (const level of ["low", "medium", "high", "xhigh", "max"] as const) {
+			expect(buildCursorModelSelection("claude-like", level)).toEqual({
+				id: "claude-like",
+				params: [
+					{ id: "thinking", value: "true" },
+					{ id: effortId, value: level },
+				],
+			});
+		}
+		expect(buildCursorModelSelection("claude-like", "minimal")).toEqual({
 			id: "claude-like",
-			params: [
-				{ id: "thinking", value: "true" },
-				{ id: "effort", value: "high" },
-			],
+			params: [{ id: "thinking", value: "true" }, { id: effortId, value: "medium" }],
 		});
 		expect(buildCursorModelSelection("claude-like", "off")).toEqual({
 			id: "claude-like",

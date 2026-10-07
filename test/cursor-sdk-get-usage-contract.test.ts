@@ -1,7 +1,9 @@
+import { EventEmitter } from "node:events";
+import ts from "@typescript/typescript6";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentUsage } from "@cursor/sdk";
 import { loadCursorSdk } from "../src/cursor-sdk-runtime.js";
-import { readInstalledPackageDistText } from "./helpers/installed-package.js";
+import { installedCursorModuleDeclarations, installedCursorModules } from "./helpers/cursor-sdk-installed-modules.js";
 
 afterEach(() => vi.unstubAllGlobals());
 describe("installed Cursor SDK getUsage contract", () => {
@@ -38,9 +40,51 @@ describe("installed Cursor SDK getUsage contract", () => {
 		const { Agent } = await loadCursorSdk();
 		await expect(Agent.getUsage("agent-local-contract", { runId: "run-client-label" })).rejects.toThrow("backend never receives it");
 	});
-	it("attaches a no-op error listener before local shell snapshot writes", () => {
-		expect(readInstalledPackageDistText("@cursor/sdk")).toMatch(
-			/function (\w+)\(e\)\{e\?\.on\("error",\(\(\)=>\{\}\)\)\}function \w+\(e,t\)\{e&&\(\1\(e\),e\.write\(t\),e\.end\(\)\)\}/,
-		);
+	it("attaches a no-op error listener before local shell snapshot writes and end", async () => {
+		const modules = await installedCursorModules();
+		const { declarations, execute } = installedCursorModuleDeclarations(modules.factorySource("../shell-exec/dist/index.js"));
+		const writers = [...declarations.values()].filter((node) => {
+			if (!ts.isFunctionDeclaration(node) || node.parameters.length !== 2) return false;
+			const stream = node.parameters[0]!.name.getText();
+			const methods = new Set<string>();
+			function visit(child: ts.Node) {
+				if (ts.isCallExpression(child) && ts.isPropertyAccessExpression(child.expression) &&
+					ts.isIdentifier(child.expression.expression) && child.expression.expression.text === stream) {
+					methods.add(child.expression.name.text);
+				}
+				ts.forEachChild(child, visit);
+			}
+			visit(node);
+			return methods.has("write") && methods.has("end");
+		});
+		expect(writers).toHaveLength(1);
+		const write = execute<(stream: EventEmitter & { write(text: string): void; end(): void } | null | undefined, text: string) => void>(writers[0]!);
+		const calls: string[] = [];
+		const stream = Object.assign(new EventEmitter(), {
+			write(this: EventEmitter, text: string) {
+				calls.push(text);
+				this.emit("error", new Error("offline write error"));
+			},
+			end(this: EventEmitter) {
+				calls.push("end");
+				this.emit("error", new Error("offline end error"));
+			},
+		});
+		const on = vi.spyOn(stream, "on");
+		expect(() => write(stream, "shell snapshot")).not.toThrow();
+		expect(calls).toEqual(["shell snapshot", "end"]);
+		expect(on).toHaveBeenCalledExactlyOnceWith("error", expect.any(Function));
+		const listener = stream.listeners("error")[0]!;
+		expect(listener(new Error("offline listener error"))).toBeUndefined();
+		const listenerAst = ts.createSourceFile("listener.js", `(${listener.toString()})`, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+		const statement = listenerAst.statements[0];
+		if (!statement || !ts.isExpressionStatement(statement) || !ts.isParenthesizedExpression(statement.expression)) {
+			throw new Error("Installed shell error listener changed");
+		}
+		const callback = statement.expression.expression;
+		if (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) throw new Error("Installed shell error listener changed");
+		expect(ts.isBlock(callback.body) && callback.body.statements.length === 0).toBe(true);
+		expect(() => write(undefined, "unused")).not.toThrow();
+		expect(() => write(null, "unused")).not.toThrow();
 	});
 });

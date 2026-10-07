@@ -115,9 +115,9 @@ function mapComparableLevel(
 
 function getThinkingLevelMap(item: ModelListItem): ThinkingLevelMap | undefined {
 	const reasoningParameter = getParameter(item, "reasoning");
-	const effortParameter = getParameter(item, "effort");
+	const effortParameter = getParameter(item, "effort") ?? getParameter(item, "reasoning_effort");
 	const thinkingParameter = getParameter(item, "thinking");
-	const valueParameter = effortParameter ?? reasoningParameter ?? thinkingParameter ?? getParameter(item, "reasoning_effort");
+	const valueParameter = effortParameter ?? reasoningParameter ?? thinkingParameter;
 	if (!valueParameter) return undefined;
 
 	if (valueParameter.id === "thinking" && hasBooleanValues(valueParameter)) {
@@ -306,11 +306,12 @@ function applyThinkingLevel(
 ): void {
 	const mapped = metadata.thinkingLevelMap?.[level];
 	if (mapped === undefined || mapped === null) return;
+	const effortId = metadata.parameterIds.effort ? "effort" : metadata.parameterIds.reasoning_effort ? "reasoning_effort" : undefined;
 
 	if (level === "off") {
 		if (metadata.parameterIds.thinking && mapped === "false") {
 			setParam(params, "thinking", mapped);
-			deleteParam(params, "effort");
+			if (effortId) deleteParam(params, effortId);
 			return;
 		}
 		if (metadata.parameterIds.reasoning) {
@@ -319,9 +320,9 @@ function applyThinkingLevel(
 		return;
 	}
 
-	if (metadata.parameterIds.effort) {
+	if (effortId) {
 		if (metadata.parameterIds.thinking) setParam(params, "thinking", "true");
-		setParam(params, "effort", mapped);
+		setParam(params, effortId, mapped);
 		return;
 	}
 
@@ -332,8 +333,6 @@ function applyThinkingLevel(
 
 	if (metadata.parameterIds.thinking) {
 		setParam(params, "thinking", mapped);
-	} else if (metadata.parameterIds.reasoning_effort) {
-		setParam(params, "reasoning_effort", mapped);
 	}
 }
 
@@ -418,7 +417,7 @@ export async function discoverModels(options: DiscoverModelsOptions = {}): Promi
 	try {
 		const { Cursor } = await loadCursorSdk();
 		options.signal?.throwIfAborted();
-		// SDK 1.0.36 CursorRequestOptions has no caller signal. A late response
+		// SDK 1.0.37 CursorRequestOptions has no caller signal. A late response
 		// still cannot publish outside the native generation that requested it.
 		const models = await Cursor.models.list({ apiKey });
 		options.signal?.throwIfAborted();

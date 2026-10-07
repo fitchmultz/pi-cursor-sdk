@@ -181,9 +181,9 @@
   },
   "devDependencies": {
     "@connectrpc/connect": "2.2.0",
-    "@earendil-works/pi-ai": "1.0.4",
-    "@earendil-works/pi-coding-agent": "1.0.4",
-    "@earendil-works/pi-tui": "1.0.4",
+    "@earendil-works/pi-ai": "1.1.0",
+    "@earendil-works/pi-coding-agent": "1.1.0",
+    "@earendil-works/pi-tui": "1.1.0",
     "@modelcontextprotocol/client": "2.3.1",
     "@types/node": "24.19.1",
     "@typescript/typescript6": "6.0.2",

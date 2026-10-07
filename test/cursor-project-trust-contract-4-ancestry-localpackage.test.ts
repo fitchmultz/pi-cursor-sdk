@@ -57,7 +57,7 @@ describe("non-interactive project trust CLI/provider contract", () => {
 
 	afterAll(() => {
 		if (fixtureRoot) rmSync(fixtureRoot, { recursive: true, force: true });
-	});
+	}, PROJECT_TRUST_FIXTURE_SETUP_TIMEOUT_MS);
 
 	it.each([
 		["print", false],

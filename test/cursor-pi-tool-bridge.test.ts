@@ -516,7 +516,14 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 				{ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" },
 			);
 			const run = await registry.createRun();
-			await run.dispose();
+			const { client, transport } = await connectClient(getCursorPiBridgeMcpUrl(run));
+			try {
+				await client.listTools();
+			} finally {
+				await client.close();
+				await transport.close();
+				await run.dispose();
+			}
 
 			expect(diagnostics.records()).toEqual([]);
 		} finally {

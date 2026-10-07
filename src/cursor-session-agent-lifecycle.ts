@@ -7,7 +7,7 @@ import type {
 	SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { clearCursorSdkHttp1 } from "./cursor-http1.js";
-import { cursorSessionScopeKeyForManager, hasLiveCursorSessions, onCursorSessionScopeKeyChange } from "./cursor-session-scope.js";
+import { cursorRuntimeSessionScopeKeyForManager, hasLiveCursorSessions, onCursorSessionScopeKeyChange } from "./cursor-session-scope.js";
 import {
 	disposeSessionCursorAgent,
 	invalidateSessionAgent,
@@ -25,7 +25,7 @@ export interface CursorSessionAgentLifecycleExtensionApi {
 
 export function registerCursorSessionAgentLifecycle(pi: CursorSessionAgentLifecycleExtensionApi): void {
 	let scopeKey: string | undefined;
-	pi.on("session_start", (_event, ctx) => { scopeKey = cursorSessionScopeKeyForManager(ctx.sessionManager); });
+	pi.on("session_start", (_event, ctx) => { scopeKey = cursorRuntimeSessionScopeKeyForManager(ctx.sessionManager); });
 	onCursorSessionScopeKeyChange(pi, async (previousScopeKey) => {
 		await disposeSessionCursorAgent(previousScopeKey);
 	});

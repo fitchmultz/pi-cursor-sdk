@@ -1,10 +1,103 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, toNamespacedPath } from "node:path";
 import ts from "@typescript/typescript6";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fingerprintApiKey, saveModelListCache } from "../src/model-list-cache.js";
 import type { ModelListItem } from "@cursor/sdk";
+import { resolveInstalledPackageRoot } from "./helpers/installed-package.js";
+
+// Public Node APIs only: no SDK substitution, bundle IDs, or private factory execution.
+const firstSendProbe = `
+import { registerHooks, syncBuiltinESMExports } from "node:module";
+import net from "node:net";
+import tls from "node:tls";
+import http from "node:http";
+import https from "node:https";
+import http2 from "node:http2";
+import dns from "node:dns";
+import dgram from "node:dgram";
+import childProcess from "node:child_process";
+import workers from "node:worker_threads";
+import { fileURLToPath } from "node:url";
+import { relative, isAbsolute, sep } from "node:path";
+const [sdkUrl, sdkRoot, denyLazyImport] = process.argv.slice(1);
+const evidence = { created: false, sent: false, disposed: false, blocked: [], denied: false };
+const networkError = "SDK_CONTRACT_NETWORK_BLOCKED";
+const block = (api) => (...args) => {
+	evidence.blocked.push({ api, afterCreate: evidence.created, url: api === "fetch" ? String(args[0]) : undefined });
+	throw new Error(networkError);
+};
+// Guard before SDK evaluation, including named builtin imports and socket fallbacks.
+net.Socket.prototype.connect = block("socket");
+net.connect = net.createConnection = block("net");
+tls.connect = block("tls");
+http.request = http.get = block("http");
+https.request = https.get = block("https");
+http2.connect = block("http2");
+globalThis.fetch = block("fetch");
+dgram.createSocket = block("dgram");
+dgram.Socket.prototype.send = dgram.Socket.prototype.connect = block("dgram");
+for (const target of [dns, dns.promises, dns.Resolver.prototype, dns.promises.Resolver.prototype]) {
+	for (const name of Object.getOwnPropertyNames(target)) {
+		if (name === "lookup" || name === "lookupService" || name.startsWith("resolve") || name === "reverse") {
+			target[name] = block("dns");
+		}
+	}
+}
+// No subprocess, worker, or native-addon escape to an unguarded network stack.
+const denyEscape = () => { throw new Error("SDK_CONTRACT_PROCESS_BLOCKED"); };
+for (const name of ["spawn", "spawnSync", "exec", "execSync", "execFile", "execFileSync", "fork"]) {
+	childProcess[name] = denyEscape;
+}
+workers.Worker = denyEscape;
+process.dlopen = denyEscape;
+syncBuiltinESMExports();
+let agent, run, hook;
+const watchdog = setTimeout(() => process.exit(124), 10_000);
+try {
+	const { Agent, JsonlLocalAgentStore } = await import(sdkUrl);
+	agent = await Agent.create({
+		model: { id: "offline-contract" }, tools: [],
+		local: { cwd: process.cwd(), settingSources: [], enableAgentRetries: false,
+			store: new JsonlLocalAgentStore(process.cwd() + "/store") },
+	});
+	evidence.created = true;
+	if (denyLazyImport === "true") {
+		hook = registerHooks({ resolve(specifier, context, nextResolve) {
+			const result = nextResolve(specifier, context);
+			if (result.url.startsWith("file:")) {
+				const path = relative(sdkRoot, fileURLToPath(result.url));
+				if (path && path !== ".." && !path.startsWith(".." + sep) && !isAbsolute(path)) {
+					evidence.denied = true;
+					throw Object.assign(new Error("SDK_CONTRACT_LAZY_MODULE_MISSING"), { code: "ERR_MODULE_NOT_FOUND" });
+				}
+			}
+			return result;
+		} });
+	}
+	run = await agent.send("Credential-free first-send import contract");
+	evidence.sent = true;
+	evidence.outcome = await run.wait();
+} catch (error) {
+	evidence.failure = { name: error.name, message: error.message };
+} finally {
+	hook?.deregister();
+	try {
+		if (run?.status === "running") await run.cancel();
+		if (agent) {
+			await agent[Symbol.asyncDispose]();
+			evidence.disposed = true;
+		}
+	} catch (error) {
+		evidence.cleanupError = error.message;
+		process.exitCode = 1;
+	}
+	clearTimeout(watchdog);
+	console.log("SDK_FIRST_SEND_CONTRACT=" + JSON.stringify(evidence));
+}
+`;
 
 function sourceFiles(dir: string): string[] {
 	return readdirSync(dir).flatMap((entry) => {
@@ -509,6 +602,50 @@ describe("Cursor SDK lazy runtime imports", () => {
 	it("keeps native loaders away from Pi host peers", () => {
 		expect(collectUnsafeHostPeerLoads()).toEqual([]);
 	});
+
+	it.each([false, true])("exercises real installed SDK first-send linking offline (deny lazy module: %s)", (denyLazyImport) => {
+		tmpAgentDir = realpathSync(mkdtempSync(join(tmpdir(), "pi-cursor-sdk-first-send-")));
+		const sdkRoot = resolveInstalledPackageRoot("@cursor/sdk");
+		const env: NodeJS.ProcessEnv = {
+			HOME: tmpAgentDir, USERPROFILE: tmpAgentDir,
+			APPDATA: tmpAgentDir, LOCALAPPDATA: tmpAgentDir,
+			XDG_CONFIG_HOME: tmpAgentDir, XDG_DATA_HOME: tmpAgentDir, XDG_CACHE_HOME: tmpAgentDir,
+			TMPDIR: tmpAgentDir, TMP: tmpAgentDir, TEMP: tmpAgentDir, PATH: "",
+		};
+		// Windows needs its OS directory, not the caller's credentials, PATH, or NODE_OPTIONS.
+		if (process.platform === "win32") env.SystemRoot = process.env.SystemRoot;
+		const child = spawnSync(process.execPath, [
+			"--input-type=module", "--eval", firstSendProbe,
+			import.meta.resolve("@cursor/sdk"), sdkRoot, String(denyLazyImport),
+		], {
+			cwd: tmpAgentDir, env, encoding: "utf8", timeout: 15_000, killSignal: "SIGKILL",
+			maxBuffer: 256 * 1024,
+		});
+		expect(child.error, child.stderr).toBeUndefined();
+		expect(child.status, child.stderr).toBe(0);
+		const receipt = child.stdout.split(/\r?\n/).find((line) => line.startsWith("SDK_FIRST_SEND_CONTRACT="));
+		expect(receipt, child.stdout).toBeDefined();
+		const evidence = JSON.parse(receipt!.slice("SDK_FIRST_SEND_CONTRACT=".length));
+		expect(evidence).toMatchObject({ created: true, disposed: true, denied: denyLazyImport });
+		expect(evidence.cleanupError).toBeUndefined();
+		if (denyLazyImport) {
+			// A request-time graph failure cannot pass by reaching an unrelated blocked catalog call.
+			expect(evidence.sent).toBe(false);
+			expect(evidence.blocked).toEqual([]);
+			expect(evidence.failure.message).toContain("SDK_CONTRACT_LAZY_MODULE_MISSING");
+		} else {
+			expect(evidence.failure).toBeUndefined();
+			expect(evidence.sent).toBe(true);
+			expect(evidence.outcome).toMatchObject({
+				status: "error",
+				error: { message: expect.stringContaining("SDK_CONTRACT_NETWORK_BLOCKED") },
+			});
+			// Installed 1.0.36 reaches this exchange before authenticated inference.
+			expect(evidence.blocked).toEqual([{
+				api: "fetch", afterCreate: true, url: "https://api2.cursor.sh/auth/exchange_user_api_key",
+			}]);
+		}
+	}, 20_000);
 
 	it("allows type-only import-equals for both Node module spellings", () => {
 		tmpAgentDir = mkdtempSync(join(tmpdir(), "pi-cursor-sdk-type-import-equals-"));

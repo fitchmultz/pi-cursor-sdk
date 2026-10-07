@@ -43,6 +43,10 @@ export function createDefaultSystemPromptOptions(cwd: string): NormalizedBuildSy
 }
 
 function createMinimalSessionManager(cwd: string, overrides: Partial<ExtensionContext["sessionManager"]> = {}): ExtensionContext["sessionManager"] {
+	// Native contexts retain the manager object across events and commands.
+	if (overrides.getCwd && overrides.buildSessionProjection && overrides.getTree) {
+		return overrides as ExtensionContext["sessionManager"];
+	}
 	const canonical = SessionManager.inMemory(cwd);
 	// Return-type checking supports the official and fork fixture superset.
 	const sessionManager = {
@@ -139,10 +143,7 @@ function createMinimalExtensionContextInternal(overrides: ExtensionContextOverri
 			...base.ui,
 			...overrides.ui,
 		},
-		sessionManager: {
-			...base.sessionManager,
-			...overrides.sessionManager,
-		},
+		sessionManager: base.sessionManager,
 	};
 }
 
@@ -165,10 +166,7 @@ function createMinimalExtensionCommandContextInternal(
 			...base.ui,
 			...overrides.ui,
 		},
-		sessionManager: {
-			...base.sessionManager,
-			...overrides.sessionManager,
-		},
+		sessionManager: base.sessionManager,
 	};
 }
 

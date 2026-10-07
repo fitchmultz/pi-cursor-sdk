@@ -56,9 +56,9 @@ export async function concurrentFixture(t, run) {
     assert.equal(url.hostname, "127.0.0.1", "offline native fixture must not access external services");
     return originalFetch(input, options);
   };
-  async function create(name, { tool, runtime, manager: inheritedManager, bind = true, preferences = [], flags = {}, compaction = {}, beforeExtensions = [], afterExtensions = [] } = {}) {
-    const cwd = join(root, name);
-    await mkdir(cwd);
+  async function create(name, { cwd: inheritedCwd, tool, toolDescription, systemPrompt, model: inheritedModel, runtime, manager: inheritedManager, bind = true, preferences = [], flags = {}, compaction = {}, beforeExtensions = [], afterExtensions = [] } = {}) {
+    const cwd = inheritedCwd ?? join(root, name);
+    await mkdir(cwd, { recursive: true });
     const settingsManager = SettingsManager.inMemory({
       defaultTools: ["fixture_bridge"], compaction: { enabled: false, keepRecentTokens: 1, ...compaction }, retry: { enabled: false },
     });
@@ -66,7 +66,7 @@ export async function concurrentFixture(t, run) {
       cwd, agentDir: process.env.PI_CODING_AGENT_DIR, settingsManager,
       noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
       additionalExtensionPaths: [...beforeExtensions, fileURLToPath(new URL("../../", import.meta.url)), ...afterExtensions],
-      systemPromptOverride: () => `OWNER_${name}`,
+      systemPromptOverride: () => systemPrompt ?? `OWNER_${name}`,
     });
     await loader.reload();
     assert.deepEqual(loader.getExtensions().errors, []);
@@ -75,7 +75,8 @@ export async function concurrentFixture(t, run) {
     const { session } = await createAgentSession({
       cwd, resourceLoader: loader, settingsManager, sessionManager: manager,
       ...(runtime ? { modelRuntime: runtime } : {}),
-      customTools: [{ name: "fixture_bridge", label: "Fixture bridge", description: `Owned by ${name}`,
+      ...(inheritedModel ? { model: inheritedModel } : {}),
+      customTools: [{ name: "fixture_bridge", label: "Fixture bridge", description: toolDescription ?? `Owned by ${name}`,
         parameters: Type.Object({ value: Type.String() }),
         execute: tool ?? (async () => ({ content: [{ type: "text", text: name }], details: {} })),
       }],
@@ -85,7 +86,7 @@ export async function concurrentFixture(t, run) {
     if (bind) await session.bindExtensions({ mode: "rpc", onError: (error) => errors.push(error) });
     const model = session.modelRuntime.getModel("cursor", "fixture");
     assert.ok(model);
-    await session.setModel(model);
+    if (session.model?.provider !== model.provider || session.model?.id !== model.id) await session.setModel(model);
     return { session, manager, cwd };
   }
   try {
@@ -132,7 +133,7 @@ export async function retainNativeEvidence(label, manager, cwd) {
     sends: state.sends.filter(send => state.created.some(agent => agent.agentId === send.agentId && agent.options.local?.cwd === cwd))
       .map(send => ({ agentId: send.agentId, runId: send.runId, cancelled: state.cancelled.includes(send.runId) })),
     agents: state.created.filter(agent => agent.options.local?.cwd === cwd).map(agent => ({
-      agentId: agent.agentId, disposed: state.disposed.includes(agent.agentId),
+      agentId: agent.agentId, disposed: agent.disposed,
       mode: agent.options.mode, tools: agent.options.tools,
       settingSources: agent.options.local.settingSources,
       storeRoot: agent.options.local.store?.stateRoot,

@@ -120,13 +120,13 @@
     "node": ">=24"
   },
   "scripts": {
-    "check:compat": "npm run build && npm run verify && node --test test/ci-compatibility.test.mjs test/native-provider.test.mjs test/native-cursor-flow.test.mjs test/native-cursor-prompt.test.mjs",
+    "check:compat": "npm run build && npm run verify && node --test test/ci-compatibility.test.mjs test/native-provider.test.mjs test/native-cursor-flow.test.mjs test/native-cursor-ownership.test.mjs test/native-cursor-prompt.test.mjs",
     "build": "node ./scripts/build.mjs",
     "prepare": "node ./scripts/prepare.mjs",
     "typecheck": "npm run typecheck:src && npm run typecheck:tests && npm run typecheck:replay-compile",
-    "typecheck:src": "tsc --noEmit",
-    "typecheck:tests": "tsc -p tsconfig.test.json --noEmit",
-    "typecheck:replay-compile": "tsc --noEmit -p test/tsconfig.json",
+    "typecheck:src": "node ./node_modules/typescript/bin/tsc --noEmit",
+    "typecheck:tests": "node ./node_modules/typescript/bin/tsc -p tsconfig.test.json --noEmit",
+    "typecheck:replay-compile": "node ./node_modules/typescript/bin/tsc --noEmit -p test/tsconfig.json",
     "verify": "npm run check:platform-smoke && npm run typecheck && npm test",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -14,6 +14,7 @@ export const state = globalThis[Symbol.for("pi-cursor-native-fixture")] ??= {
   usageByCwd: new Map(),
   cloudMutations: [],
   outputByCwd: new Map(), waitOutputByCwd: new Map(),
+  resumed: [],
 };
 export const Cursor = {
   configure(options) { state.configured.push(options); },
@@ -50,12 +51,18 @@ export const Agent = {
     await state.cloudMutationWait?.release.promise;
   },
   messages: { list: async () => [] },
+  resume: async (agentId, options) => {
+    assertStoredAgent(agentId, options);
+    state.resumed.push({ agentId, options });
+    return Agent.create({ ...options, agentId });
+  },
   create: async (options) => {
     const index = state.created.length + 1;
-    const agentId = options.cloud
+    const agentId = options.agentId ?? (options.cloud
       ? `bc-00000000-0000-0000-0000-${index.toString(16).padStart(12, "0")}`
-      : `agent-fixture-${index}`;
-    state.created.push({ agentId, options });
+      : `agent-fixture-${index}`);
+    const entry = { agentId, options, disposed: false };
+    state.created.push(entry);
     const runs = [];
     return {
       agentId,
@@ -68,7 +75,7 @@ export const Agent = {
         const usage = runs.reduce((sum, run) => Object.fromEntries(Object.keys(bill).map(key => [key, sum[key] + run.usage[key]])), Object.fromEntries(Object.keys(bill).map(key => [key, 0])));
         return { usage, runs };
       },
-      [Symbol.asyncDispose]: async () => { state.disposed.push(agentId); },
+      [Symbol.asyncDispose]: async () => { entry.disposed = true; state.disposed.push(agentId); },
       send: async (message, sendOptions) => {
         // Diagnostic transport controls, not a real SDK/backend timing claim.
         for (const { stream, bytes } of state.outputByCwd.get(options.local?.cwd) ?? []) process[stream].write(bytes);
@@ -154,3 +161,9 @@ export const Agent = {
     };
   },
 };
+
+function assertStoredAgent(agentId, options) {
+  if (!state.created.some(entry => entry.agentId === agentId &&
+    entry.options.local?.store?.stateRoot === options.local?.store?.stateRoot &&
+    entry.options.local?.cwd === options.local?.cwd)) throw new Error("offline agent not in selected store");
+}

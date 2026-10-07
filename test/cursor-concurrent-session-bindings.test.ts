@@ -49,7 +49,7 @@ describe("owned session snapshots and cleanup", () => {
 		const b = binding();
 		await start(b, scopeB);
 		await b.invokeEvent("session_info_changed", { type: "session_info_changed", name: "Renamed child" });
-		expect(snapshot).toMatchObject({ cwd: scopeA.cwd, scopeKey: scopeA.file, sessionId: scopeA.id, sessionName: scopeA.name });
+		expect(snapshot).toMatchObject({ cwd: scopeA.cwd, persistentScopeKey: scopeA.file, sessionId: scopeA.id, sessionName: scopeA.name });
 		expect(Object.isFrozen(snapshot)).toBe(true);
 		expect(getCursorSessionScopeSnapshot(a)).toEqual(snapshot);
 		expect(getCursorSessionScopeSnapshot(b).sessionName).toBe("Renamed child");
@@ -105,7 +105,7 @@ describe("owned session snapshots and cleanup", () => {
 	it("flushes each pending resume handle only to its own journal", async () => {
 		const a = binding(); await start(a); const b = binding(); await start(b, scopeB);
 		for (const [pi, scope] of [[a, scopeA], [b, scopeB]] as const) {
-			persistCursorSessionAgentResumeHandle({ runtime: "local", agentId: `agent-${scope.id}`, poolKey: scope.id, sendState: { bootstrapped: true, contextFingerprint: "test", incrementalSendCount: 0 }, storeIdentity: { version: 1, stateRoot: `/tmp/${scope.id}` } }, scope.file);
+			persistCursorSessionAgentResumeHandle({ runtime: "local", agentId: `agent-${scope.id}`, poolKey: scope.id, sendState: { bootstrapped: true, contextFingerprint: "test", incrementalSendCount: 0 }, storeIdentity: { version: 1, stateRoot: `/tmp/${scope.id}` } }, getCursorSessionScopeSnapshot(pi).scopeKey);
 			await pi.runTurnEnd();
 			expect(pi.appendEntry).toHaveBeenCalledWith("cursor-sdk-agent-resume", expect.objectContaining({ scopeKey: scope.file, sessionId: scope.id, agentId: `agent-${scope.id}` }));
 		}

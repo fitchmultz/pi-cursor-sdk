@@ -274,9 +274,16 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 			sessionIdGenerator: randomUUID,
 		});
 
-		server.setRequestHandler("tools/list", async () => ({
-			tools: this.snapshot.tools.map(snapshotToolToMcpTool),
-		}));
+		// ponytail: server-side receipts only, not SDK/model consumption or ongoing
+		// connection health; upgrade when Cursor exposes public MCP lifecycle callbacks.
+		server.oninitialized = () => {
+			this.emitDiagnostic({ event: "mcp_initialized", runId: this.id });
+		};
+		server.setRequestHandler("tools/list", async () => {
+			const tools = this.snapshot.tools.map(snapshotToolToMcpTool);
+			this.emitDiagnostic({ event: "mcp_tools_list", runId: this.id, toolCount: tools.length });
+			return { tools };
+		});
 		server.setRequestHandler("tools/call", async (request, context) => {
 			return this.enqueueToolRequest(
 				request.params.name,

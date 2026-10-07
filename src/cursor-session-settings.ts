@@ -1,7 +1,7 @@
 import type { AgentModeOption } from "@cursor/sdk";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { CursorExplicitSdkConfig, CursorRuntime } from "./cursor-config.js";
-import { cursorSessionScopeKeyForManager, getCursorSessionProjectTrusted } from "./cursor-session-scope.js";
+import { cursorRuntimeSessionScopeKeyForManager, getCursorSessionProjectTrusted } from "./cursor-session-scope.js";
 
 export type CursorCliModeState =
 	| { kind: "unset" }
@@ -45,7 +45,7 @@ export function getCursorSessionSettings(scopeKey?: string) {
 
 export function cursorSettingsScopeForContext(ctx: Partial<Pick<ExtensionContext, "sessionManager">>): string | undefined {
 	const manager = ctx.sessionManager;
-	return manager ? cursorSessionScopeKeyForManager(manager) : undefined;
+	return manager ? cursorRuntimeSessionScopeKeyForManager(manager) : undefined;
 }
 
 export function registerCursorSessionSettings(pi: Pick<ExtensionAPI, "on">): void {
@@ -53,7 +53,7 @@ export function registerCursorSessionSettings(pi: Pick<ExtensionAPI, "on">): voi
 	let cli = createCliSettings();
 	pi.on("session_start", (_event, ctx) => {
 		if (scopeKey) settings.delete(scopeKey);
-		scopeKey = cursorSessionScopeKeyForManager(ctx.sessionManager);
+		scopeKey = cursorRuntimeSessionScopeKeyForManager(ctx.sessionManager);
 		legacySettings = getCursorSessionSettings(scopeKey);
 		// Reload creates a new ExtensionAPI but retains the same public manager.
 		// Keep the run's one-shot CLI consumption without retaining dead managers.

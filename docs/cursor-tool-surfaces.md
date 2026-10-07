@@ -19,7 +19,22 @@ Pi CLI tool toggles apply at the pi tool-registry boundary. `--no-tools`, `--too
 - **MCP `listTools`** (and pi's MCP catalog when present) lists **MCP servers only** — for example `pi_tools` with `pi__cursor_ask_question`. It does **not** enumerate Cursor SDK host tools such as `Read` or `Shell`.
 - **Bootstrap prompts** include a short **Cursor SDK tool boundary** block plus a compact **callable tool surfaces** manifest by default (disable manifest with `PI_CURSOR_TOOL_MANIFEST=0`). The manifest reminds the model that Cursor host/configured MCP tools are controlled by Cursor, while pi tool toggles only affect pi tools/bridge exposure; when bridge tools are exposed, it lists the current `pi__*` names. MCP `listTools` entries for bridged pi tools point back to the bootstrap prompt instead of repeating the full contract.
 - **Incremental prompts** omit the full boundary block but keep a short tail guard (including an explicit shell `cd` hint); the session agent retains prior bootstrap context. They also omit invariant Pi system instructions; a changed system prompt forces bootstrap with the new section.
-- **In-session debug:** `/cursor-tools` prints bridge enablement, manifest enablement, effective `PI_CURSOR_SETTING_SOURCES`, and the current callable-surface snapshot.
+- **In-session debug:** `/cursor-tools` prints bridge/manifest enablement, effective `PI_CURSOR_SETTING_SOURCES`, and current-registry exposure eligibility, including the builtin-exposure setting. It is not a live-run catalog or health check.
+
+## Diagnosing advertised but unused bridge tools
+
+Enable `PI_CURSOR_PI_TOOL_BRIDGE_DEBUG=1` before the turn. The existing scrubbed stderr records correlate observations by safe run ID:
+
+| Record | What it establishes |
+| --- | --- |
+| `run_created` / `tools_exposed` | Run exposure and pi↔MCP name mapping, not connection |
+| `mcp_initialized` | Server receipt of validated `notifications/initialized` |
+| `mcp_tools_list` | Catalog-handler output after request validation, with `toolCount` |
+| `request_queued` / `request_resolved` / `request_rejected` | Actual bridge call handling |
+
+Initialization/catalog receipts are server observations, not Cursor-client identity, response delivery, model consumption or ongoing health. Absence does not explain why no request occurred. `/cursor-tools` reflects the registry now, not an earlier run's captured surface; exposure alone is not invocation proof. These diagnostics do not enumerate Cursor-configured MCP connections. Do not share logs where tool names are sensitive; endpoint credentials and raw args/results are excluded.
+
+For an advertised-but-unused `pi__subagent`, first identify the active provider/version (especially with multiple Cursor providers installed), then compare the run's exposure, initialization/catalog and call records with persisted pi `toolCall`/`toolResult` rows. Bash-spawned Pi is not evidence of bridged `subagent` execution. The original Windows/two-provider report remains open in [#206](https://github.com/fitchmultz/pi-cursor-sdk/issues/206).
 
 ## Pi bridge vs Cursor native
 

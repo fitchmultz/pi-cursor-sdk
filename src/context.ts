@@ -128,7 +128,7 @@ function formatContentBlocks(content: string | { type: string; text?: string; da
 
 function formatToolCall(toolCall: ToolCall): string {
 	const args = JSON.stringify(toolCall.arguments) ?? "";
-	return `Tool call (${getCursorReplayPromptLabel(toolCall.name)}, call ${toolCall.id}): ${args}`;
+	return `Historical tool request (${getCursorReplayPromptLabel(toolCall.name)}, call ${toolCall.id}): ${args}`;
 }
 
 function sanitizeSystemPromptForCursor(systemPrompt: string): string {
@@ -177,7 +177,7 @@ function formatMessage(msg: Message): string | undefined {
 		}
 		case "toolResult": {
 			const text = formatContentBlocks(msg.content);
-			const label = msg.isError ? "Tool error" : "Tool result";
+			const label = msg.isError ? "Historical tool error" : "Historical tool result";
 			return `${label} (${getCursorReplayPromptLabel(msg.toolName)}, call ${msg.toolCallId}): ${text}`;
 		}
 	}

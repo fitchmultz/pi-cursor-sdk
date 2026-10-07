@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Select the declared TypeScript 7 entrypoint explicitly for all typechecks, matching the build and avoiding npm `tsc` shim collisions.
+- Separate SessionManager-owned runtime scopes from unchanged durable identities. A same-file sibling's reload/tree/shutdown no longer closes another manager's pool or pending bridge run; process-local claims exclude live handles from resume and cleanup (#282 reproduced trigger, not the original reporter's full qualification).
+- Label structured tool history as historical request/result/error without declaring unmatched requests completed. Preserve prose, IDs, arguments, errors and raw history; do not synthesize tool calls, strip narration or automatically resend effects (#257 mitigation).
+- Make `/cursor-tools` report current-registry exposure eligibility, not live-run connectivity. Add opt-in validated initialization and catalog-handler output receipts with explicit client/model/health ceilings (#206 diagnostics, not Windows reporter qualification).
+- Update development-only transitive `source-map-js` to 1.2.2 for its event-loop denial-of-service fix.
+
+### Verification and limits
+
+- Exercise real public installed-SDK first-send linking through a blocked key-exchange boundary, with a request-time missing-module negative control. Native SDK-substituted session tests remain separate; neither proves authenticated inference or every embedded loader.
+- Clarify inspected SDK hook/parser/authentication mechanisms and remaining reporter-only unknowns (#173, #339, #247, #233). Public commit/PR attribution controls remain absent (#302); no SDK-internal patch or paid test campaign is added.
+
 ## 0.5.2
 
 ### Fixed

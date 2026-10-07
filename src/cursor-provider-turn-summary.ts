@@ -40,7 +40,7 @@ export async function prepareCursorSummaryProviderTurn(
 		configureCursorSdkHttp1(sdk, resolvedConfig.local.useHttp1ForAgent);
 		restoreCursorSdkOutputFilter = installCursorSdkOutputFilter();
 		sessionStore = (await openCursorSessionStoreForScope({
-			cwd, scopeKey: params.scope.scopeKey, persistent: false,
+			cwd, scopeKey: params.scope.persistentScopeKey ?? params.scope.scopeKey, persistent: false,
 		})).sessionStore;
 		throwIfAborted();
 		agent = await suppressCursorSdkOutput(() => sdk.Agent.create({

@@ -702,7 +702,7 @@ describe("cursor-session-agent", () => {
 			},
 		});
 		const first = await acquireSessionCursorAgent(params);
-		expect(first.scopeKey).toBe(`${cursorSessionScopeTestUtils.EPHEMERAL_SESSION_SCOPE_PREFIX}ephemeral-a`);
+		expect(first.poolKey.split("\0")[0]).toBe(`${cursorSessionScopeTestUtils.EPHEMERAL_SESSION_SCOPE_PREFIX}ephemeral-a`);
 
 		await pi.runSessionShutdown({ reason: "new" });
 		await pi.runSessionStart({
@@ -714,7 +714,7 @@ describe("cursor-session-agent", () => {
 		});
 		const second = await acquireSessionCursorAgent(params);
 
-		expect(second.scopeKey).toBe(`${cursorSessionScopeTestUtils.EPHEMERAL_SESSION_SCOPE_PREFIX}ephemeral-b`);
+		expect(second.poolKey.split("\0")[0]).toBe(`${cursorSessionScopeTestUtils.EPHEMERAL_SESSION_SCOPE_PREFIX}ephemeral-b`);
 		expect(first.agent).not.toBe(second.agent);
 		expect(createAgent).toHaveBeenCalledTimes(2);
 		expect(mockDispose).toHaveBeenCalledTimes(1);
@@ -764,9 +764,9 @@ describe("cursor-session-agent", () => {
 		});
 		const resumed = await acquireSessionCursorAgent(params);
 
-		expect(first.scopeKey).toBe("/tmp/sessions/session-a.jsonl");
-		expect(second.scopeKey).toBe("/tmp/sessions/session-b.jsonl");
-		expect(resumed.scopeKey).toBe("/tmp/sessions/session-a.jsonl");
+		expect(first.poolKey.split("\0")[0]).toBe("/tmp/sessions/session-a.jsonl");
+		expect(second.poolKey.split("\0")[0]).toBe("/tmp/sessions/session-b.jsonl");
+		expect(resumed.poolKey.split("\0")[0]).toBe("/tmp/sessions/session-a.jsonl");
 		expect(resumed.agent).not.toBe(first.agent);
 		expect(createAgent).toHaveBeenCalledTimes(3);
 		expect(mockDispose).toHaveBeenCalledTimes(2);

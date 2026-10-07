@@ -16,8 +16,11 @@ export function qualifySelectedHost(run) {
 
 /** Own POSIX descendants so a timed-out npm cannot outlive isolated-root cleanup. */
 export function runCompatibilityCommand(command, args, options) {
+  const defaultTimeout = command === "npm" && args.length === 2 && args[0] === "run" && args[1] === "verify"
+    ? 360_000 : 180_000;
   const result = spawnSync(command, args, {
     ...options,
+    timeout: options.timeout ?? defaultTimeout,
     detached: process.platform !== "win32",
     killSignal: "SIGKILL",
   });

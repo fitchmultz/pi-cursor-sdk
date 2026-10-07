@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.3 - 2026-10-07
 
 ### Changed
 
@@ -14,6 +14,9 @@
 - Separate SessionManager-owned runtime scopes from unchanged durable identities. A same-file sibling's reload/tree/shutdown no longer closes another manager's pool or pending bridge run; process-local claims exclude live handles from resume and cleanup (#282 reproduced trigger, not the original reporter's full qualification).
 - Label structured tool history as historical request/result/error without declaring unmatched requests completed. Preserve prose, IDs, arguments, errors and raw history; do not synthesize tool calls, strip narration or automatically resend effects (#257 mitigation).
 - Make `/cursor-tools` report current-registry exposure eligibility, not live-run connectivity. Add opt-in validated initialization and catalog-handler output receipts with explicit client/model/health ceilings (#206 diagnostics, not Windows reporter qualification).
+
+### Security
+
 - Update development-only transitive `source-map-js` to 1.2.2 for its event-loop denial-of-service fix.
 
 ### Verification and limits

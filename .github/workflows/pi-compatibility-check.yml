@@ -16,9 +16,9 @@ jobs:
   resolve:
     permissions:
       contents: read
-    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@9b08d65d70a01c74c4e01477ccf9473e86be33ee # main
+    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@11d531f79564b555ebf75348d7275eaf0cb6d825 # main
     with:
-      automation-ref: 9b08d65d70a01c74c4e01477ccf9473e86be33ee # main
+      automation-ref: 11d531f79564b555ebf75348d7275eaf0cb6d825 # main
       official-version: ${{ inputs.official-version }}
       fork-ref: ${{ inputs.fork-ref }}
 
@@ -49,7 +49,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: fitchmultz/.github
-          ref: 9b08d65d70a01c74c4e01477ccf9473e86be33ee # main
+          ref: 11d531f79564b555ebf75348d7275eaf0cb6d825 # main
           path: automation
           persist-credentials: false
       - run: npm ci --ignore-scripts --no-audit --no-fund
@@ -59,7 +59,7 @@ jobs:
           FORK_REF: ${{ needs.resolve.outputs.fork-ref }}
           PI_COMPAT_EVIDENCE_DIR: ${{ runner.temp }}/cursor-hosts
         run: node scripts/ci-compatibility.mjs --automation automation --official-version "$OFFICIAL_VERSION" --fork-ref "$FORK_REF"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: cursor-hosts
@@ -98,7 +98,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: fitchmultz/.github
-          ref: 9b08d65d70a01c74c4e01477ccf9473e86be33ee # main
+          ref: 11d531f79564b555ebf75348d7275eaf0cb6d825 # main
           path: automation
           persist-credentials: false
       - run: npm ci --no-audit --no-fund
@@ -114,7 +114,7 @@ jobs:
       - run: npm test -- --testTimeout=15000
       - run: npm run typecheck
       - run: npm pack --dry-run
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: cursor-native-host-${{ matrix.os }}

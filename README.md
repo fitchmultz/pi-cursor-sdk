@@ -51,7 +51,7 @@ If pi started without a key, run `/cursor-refresh-models` after `/login` to refr
 ## Requirements
 
 - Node.js 24+
-- pi-cursor-sdk 0.5.2 requires official Pi 0.87.1 or later. The latest stable official Pi and current `fitchmultz/pi` main are required compatibility targets, resolved once per workflow run; locked development Pi packages are reproducible snapshots, not validation targets
+- pi-cursor-sdk 0.5.3 requires official Pi 0.87.1 or later. The latest stable official Pi and current `fitchmultz/pi` main are required compatibility targets, resolved once per workflow run; locked development Pi packages are reproducible snapshots, not validation targets
 - optional Pi and TypeBox peer metadata uses `"*"` ranges per Pi package guidance
 - a Cursor SDK API key saved through `/login`, available as `CURSOR_API_KEY`, or passed with pi's `--api-key`
 
@@ -819,6 +819,8 @@ Follow the [shared release procedure](https://github.com/fitchmultz/.github#auto
 Approve only after checking the exact source commit, version, downloaded candidate tarball and summary against the [release review gate](AGENTS.md#release-review-gate-maintainer) and [cost-conscious verification policy](#maintainer-cost-conscious-verification). Complete the exact-release-diff deep review with zero findings, the documented pre-release catalog check, and any genuinely necessary changed-behavior proof. Approval attests genuine satisfaction of existing requirements; it does not create proof. Authenticated checks remain outside CI; automated Cursor PR reviews remain unchanged, and no routine paid Cloud campaigns or paid retries are added. Automated publication disables npm hooks to publish the checked bytes; existing manual publisher instructions remain valid.
 
 Failed/unpublished candidates can retry daily at 12:17 UTC or via manual dispatch of `npm release` on `main` only while the current source still owns the same version, tag, draft, and candidate assets. Inspect their exact source/run identities first: an authentication repair alone does not authorize publishing an old candidate after `main` advances. When source advances beyond a reserved candidate, use the next unused stable version and fresh qualification; never move its tag, overwrite its draft/assets, or relabel old proof. The [0.5.1 changelog](CHANGELOG.md#051-unpublished-source-history) is unpublished source history carried into 0.5.2, not a successful publication record. Set repository variable `NPM_RELEASE_ENABLED` to anything other than `true` to stop new release plans; cancel pending runs separately when needed. Workflow validation is not evidence of a completed real OIDC publication.
+
+Publication records are independent: on 2026-10-07, npm listed 0.5.2 as published and `latest`, while GitHub's `v0.5.2` release remained a draft bound to source `9820ae7`. Preserve that tag, draft, and candidate assets unchanged. The 0.5.3 source uses a new version and candidate; its preparation is not proof of npm or GitHub publication.
 
 ## Development
 

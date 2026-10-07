@@ -5,7 +5,11 @@ type ToolRenderResult = NonNullable<RegisteredTool["renderResult"]>;
 
 export type HarnessRenderTheme = Parameters<ToolRenderCall>[1];
 export type HarnessRenderContext = Parameters<ToolRenderCall>[2];
-type HarnessRenderContextWithObjectArgs = Omit<HarnessRenderContext, "args"> & { args: object };
+type HarnessRenderContextWithObjectArgs = Omit<HarnessRenderContext, "args"> & {
+	args: object;
+	durationMs: number | undefined;
+	outputPad: number;
+};
 export type HarnessRenderResultOptions = Parameters<ToolRenderResult>[1];
 
 export function createRenderTheme(overrides: Partial<HarnessRenderTheme> = {}): HarnessRenderTheme {
@@ -24,7 +28,7 @@ export function createRenderOptions(overrides: Partial<HarnessRenderResultOption
 	};
 }
 
-export function createRenderContext(overrides: Partial<HarnessRenderContext> & { args?: object } = {}): HarnessRenderContextWithObjectArgs {
+export function createRenderContext(overrides: Partial<HarnessRenderContextWithObjectArgs> = {}): HarnessRenderContextWithObjectArgs {
 	return {
 		args: {},
 		toolCallId: "test-tool-call",
@@ -38,6 +42,8 @@ export function createRenderContext(overrides: Partial<HarnessRenderContext> & {
 		expanded: false,
 		showImages: false,
 		isError: false,
+		durationMs: undefined,
+		outputPad: 1,
 		...overrides,
 	};
 }

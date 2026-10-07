@@ -19,6 +19,7 @@ const trustManagerUrl = pathToFileURL(join(dirname(piCli), "core/trust-manager.j
 const rpcFramingText = "RPC framing: x\u2028y\u2029z \uD83D\uDC08";
 const OS_ENV_KEYS = new Set(["PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TMPDIR", "TMP", "TEMP"]);
 
+// Packed-fixture creation and recursive teardown share this filesystem I/O budget.
 export const PROJECT_TRUST_FIXTURE_SETUP_TIMEOUT_MS = 180_000;
 
 export type PiMode = "print" | "json" | "rpc";

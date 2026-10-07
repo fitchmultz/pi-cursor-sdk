@@ -71,7 +71,7 @@ Pass criteria:
 
 - `node --version` reports Node 24+.
 - `pi --version` reports official Pi 0.87.1 or the selected official-latest/current-`fitchmultz/pi` compatibility target.
-- `npm ls` shows exact `@cursor/sdk@1.0.37`; development `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` 1.0.4 with matching lockfile-resolved transitives, nested host TypeBox 1.3.27 and root validation TypeBox 1.3.36; and the bundled bridge runtime closure `@modelcontextprotocol/server@2.3.1`, `@modelcontextprotocol/hono@2.0.2`, `hono@4.13.13`, and `@hono/node-server@2.1.3`. These locked development snapshots are not qualification targets; resolve latest stable official Pi and current `fitchmultz/pi` main once per workflow run.
+- `npm ls` shows exact `@cursor/sdk@1.0.37`; development `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` 1.1.0 with matching lockfile-resolved Pi cohort, nested host TypeBox 1.3.27 and root validation TypeBox 1.3.36; and the bundled bridge runtime closure `@modelcontextprotocol/server@2.3.1`, `@modelcontextprotocol/hono@2.0.2`, `hono@4.13.13`, and `@hono/node-server@2.1.3`. These locked development snapshots are not qualification targets; resolve latest stable official Pi and current `fitchmultz/pi` main once per workflow run.
 - `cursor/grok-4.6` appears in the model list.
 - No Cursor key or auth token is printed.
 - If neither `~/.pi/agent/auth.json` cursor auth nor `CURSOR_API_KEY` is available, stop and report the live smoke as blocked.

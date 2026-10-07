@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Align locked development Pi snapshots and their resolved Pi cohort to 1.1.0 ([#353](https://github.com/fitchmultz/pi-cursor-sdk/pull/353)). This is development-only maintenance, not a user runtime Pi upgrade or a new npm publication. Node 24+, official Pi 0.87.1+, optional wildcard Pi/TypeBox peers, and exact unbundled Cursor SDK 1.0.37 remain unchanged; published 0.5.3 and historical qualification evidence retain their original source/version attribution.
+
 ## 0.5.3 - 2026-10-07
 
 ### Changed

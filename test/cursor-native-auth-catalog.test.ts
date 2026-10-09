@@ -29,11 +29,11 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
 
-async function fixture(configKey?: string, startSession = true) {
-	const credentials = new InMemoryCredentialStore();
+async function fixture(configKey?: string, startSession = true, credentials = new InMemoryCredentialStore()) {
 	const modelsPath = join(root, "models.json");
-	writeFileSync(modelsPath, JSON.stringify({ providers: configKey ? { cursor: { apiKey: configKey } } : {} }));
-	const runtime = await ModelRuntime.create({ credentials, modelsPath, refreshOnCreate: false, allowModelNetwork: false });
+	if (configKey) writeFileSync(modelsPath, JSON.stringify({ providers: { cursor: { apiKey: configKey } } }));
+	// Keep auth/catalog cases independent of the host's file-backed refresh admission.
+	const runtime = await ModelRuntime.create({ credentials, modelsPath: configKey ? modelsPath : null, refreshOnCreate: false, allowModelNetwork: false });
 	const registry = new ModelRegistry(runtime);
 	const pi = createExtensionRegistrationPi();
 	pi.registerProvider = registry.registerProvider.bind(registry);
@@ -80,9 +80,10 @@ it("real same-session login/rotation/logout updates cached metadata with zero ca
 });
 
 it("publishes the authenticated startup cache before warning about the initial fallback", async () => {
-	const { registry, credentials, pi, notify, runtime } = await fixture(undefined, false);
+	const credentials = new InMemoryCredentialStore();
 	await credentials.modify("cursor", async () => ({ type: "api_key", key: "synthetic-startup" }));
 	saveModelListCache(fingerprintApiKey("synthetic-startup"), [item("startup-cached")]);
+	const { registry, pi, notify, runtime } = await fixture(undefined, false, credentials);
 	try {
 		await pi.runSessionStart({ modelRegistry: registry, hasUI: true, ui: { notify } });
 		expect(runtime.getModels("cursor").map(model => model.id)).toEqual(["startup-cached"]);

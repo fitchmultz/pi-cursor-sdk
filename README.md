@@ -151,7 +151,7 @@ The discovered catalog is cached at `~/.pi/agent/cursor-sdk-model-list.json` (wr
 
 Only an accepted native generation can update the catalog, selection metadata, cache, and fallback warning. An effective no-auth refresh removes only the extension's valid regular-file orphaned catalog. Cancelled, superseded, or shut-down refreshes cannot install late results. SDK 1.0.37 catalog requests have no public caller-abort option, so cancellation rejects their late publication rather than promising to stop the underlying request.
 
-Known host limitation: official Pi 1.0.4 has a demonstrated startup refresh-admission race that can temporarily leave fallback models and an incorrect missing-key warning despite a matching authenticated cache. The shared-owner repair is merged in `fitchmultz/pi` via [#190](https://github.com/fitchmultz/pi/pull/190); this is not an official-host fix. See [#337](https://github.com/fitchmultz/pi-cursor-sdk/pull/337). It is separate from Cursor service authentication failures and the compiled-loader repair.
+Known host limitation: official Pi 1.0.4 and 1.1.0 have a demonstrated startup refresh-admission/readiness race that can temporarily leave fallback models and an incorrect missing-key warning despite a matching authenticated cache. The shared-owner repair is merged in `fitchmultz/pi` via [#190](https://github.com/fitchmultz/pi/pull/190); this is not an official-host fix. See [#337](https://github.com/fitchmultz/pi-cursor-sdk/pull/337). It is separate from Cursor service authentication failures and the compiled-loader repair.
 
 ```bash
 # Cache lifetime in milliseconds (default 86400000 = 24h).

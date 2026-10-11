@@ -1,14 +1,14 @@
 # pi-cursor-sdk
 
-Use Cursor models in [Pi](https://pi.dev) with Cursor's local SDK agent, tools, and settings. This extension adds Cursor to Pi's model picker and keeps Pi's login, sessions, thinking controls, and tool UI available while Cursor runs its agent loop.
+Use Cursor models from [Pi](https://pi.dev)'s terminal UI. `pi-cursor-sdk` runs Cursor's SDK agent loop and connects it to Pi's model picker, sessions, and extension tools.
 
 ![Pi sends prompts through pi-cursor-sdk to a local Cursor SDK agent, which uses Cursor tools and can call active Pi tools through a loopback MCP bridge; replies and activity return to Pi.](.github/readme/cursor-in-pi.png)
 
-*Pi handles your session; Cursor's local agent handles model requests and tools. Model requests still go to Cursor.*
+*The agent runs locally. It sends model requests to Cursor and brings replies and tool activity back into Pi.*
 
 ## Quick start
 
-You need **Node.js 24+**, **Pi 0.87.1+**, and a **Cursor SDK API key**. Cursor Desktop and Agent CLI login are separate from SDK authentication; use a user key from Cursor Dashboard → API Keys or a service-account key from Team settings. Team Admin keys are unsupported.
+You'll need Node.js 24+, Pi 0.87.1+, and a Cursor SDK API key. Get a user key from Cursor Dashboard → API Keys or a service-account key from Team settings. Team Admin keys won't work. Cursor Desktop and Agent CLI login don't supply the SDK key.
 
 ```bash
 pi install npm:pi-cursor-sdk
@@ -21,13 +21,13 @@ Inside Pi:
 2. Run `/cursor-refresh-models` to load the live model catalog.
 3. Ask a question about your project. Use `/model` to choose another Cursor model.
 
-The package installs `@cursor/sdk` for you. You can also [install from GitHub or for one project](docs/reference.md#install).
+The package installs `@cursor/sdk` for you. [GitHub and project-local installs](docs/reference.md#install) are also available.
 
-**Next:** [choose a model](#choose-a-model), [understand the tools](#tools-and-settings), or [configure defaults](docs/reference.md#cursor-local-agent-config-and-safety-controls).
+Start with the controls below, or go to the [configuration reference](docs/reference.md#cursor-local-agent-config-and-safety-controls) to set defaults.
 
 ## Choose a model
 
-Use `/model` interactively, or select a model when starting Pi:
+Use `/model` inside Pi, or choose a model when you start it:
 
 ```bash
 pi --model cursor/grok-4.6
@@ -35,14 +35,9 @@ pi --model cursor/gpt-5.5@1m --thinking medium
 pi --model cursor/grok-4.6:slow
 ```
 
-- `cursor/` selects this provider.
-- `@1m` selects a catalog-supported context window.
-- `--thinking` uses Pi's thinking controls where Cursor exposes a configurable parameter.
-- `:fast` and `:slow` choose a speed preference for models that support Cursor's `fast` parameter.
+The `cursor/` prefix selects this provider. `@1m` chooses a context window listed in Cursor's catalog. `--thinking` adjusts the thinking level when Cursor exposes that control. Models that support Cursor's `fast` parameter also have `:fast` and `:slow` choices.
 
-Model availability and supported controls come from Cursor's catalog. Run `pi --list-models cursor` to see your choices. Startup can show a cached or fallback catalog, so seeing a model does not prove that your API key works.
-
-See the [model and thinking reference](docs/reference.md#choosing-a-model) for aliases, context variants, and parameter mappings.
+Run `pi --list-models cursor` to see what's available. Startup can use a cached or fallback catalog, so seeing a model in the list doesn't mean your key works. See the [model reference](docs/reference.md#choosing-a-model) for the full selection rules.
 
 ## Everyday controls
 
@@ -50,47 +45,46 @@ Run these commands inside Pi:
 
 | Command | What it does |
 | --- | --- |
-| `/cursor-fast` | Toggles and saves a fast preference for the selected model, when supported. Select the unsuffixed model to change its default. |
-| `/cursor-mode plan` | Uses Cursor SDK plan mode for this session; `/cursor-mode agent` switches back. |
+| `/cursor-fast` | Toggles and saves a fast preference when the model supports it. Choose the model without `:fast` or `:slow` to change its default. |
+| `/cursor-mode plan` | Uses Cursor's plan mode for this session. `/cursor-mode agent` switches back. |
 | `/cursor-refresh-models` | Refreshes the live Cursor model catalog. |
-| `/cursor-refresh-config` | Reloads filesystem Cursor config in the current pooled SDK agent. |
+| `/cursor-refresh-config` | Reloads filesystem settings in the current Cursor agent. |
 | `/cursor-http on` | Enables and saves HTTP/1.1/SSE compatibility for local Cursor streams. |
 | `/cursor-usage` | Shows recorded Cursor usage and billing observations for the current branch. |
 
-For a single run, use `--cursor-fast`, `--cursor-no-fast`, or `--cursor-mode plan`. Saved preferences and CLI overrides are explained in the [reference](docs/reference.md#fast-mode).
+For one run, pass `--cursor-fast`, `--cursor-no-fast`, or `--cursor-mode plan`. The [reference](docs/reference.md#fast-mode) explains which overrides win over saved preferences.
 
-The footer shows the selected runtime and fast state, such as `cursor:local · fast:off`; `plan` and `http1` appear when enabled. `PI_CURSOR_FOOTER=0` hides the Cursor status.
+The footer shows status such as `cursor:local · fast:off`, with `plan` or `http1` when enabled. Set `PI_CURSOR_FOOTER=0` to hide the Cursor status.
 
-Cursor SDK plan mode can show Cursor plans and todos. Those cards are display-only and do not control Pi's separate plan-mode extension or todos.
+Cursor's plan and todo cards show what Cursor did. They don't control Pi's separate plan-mode extension or Pi todos.
 
 ## Tools and settings
 
-Local runs have two callable tool surfaces:
+Cursor handles files, shell commands, edits, and its configured MCP servers. Your active Pi extension tools are also available through a local MCP bridge as `pi__*` names. That bridge is on by default. Pi's matching built-ins stay hidden because Cursor already provides them.
 
-- **Cursor tools:** files, shell, edits, and configured Cursor MCP servers. Cursor owns their execution and loads setting sources by default.
-- **Pi tools:** active extension/custom tools exposed through a local loopback MCP bridge as `pi__*` names. The bridge is enabled by default; overlapping Pi built-ins are hidden because Cursor has native equivalents.
+**Pi's `--no-tools`, `--tools`, and `--exclude-tools` only change the Pi tools exposed through the bridge. Cursor's native tools and configured MCP servers remain available.**
 
-**Pi's `--no-tools`, `--tools`, and `--exclude-tools` affect the Pi bridge. They do not disable Cursor's native tools or configured MCP servers.** Local auto-review and sandbox controls are off by default; see [safety controls](docs/reference.md#cursor-local-agent-config-and-safety-controls) before relying on them. Hook enforcement has an [open qualification limit](docs/reference.md#cursor-local-agent-config-and-safety-controls).
+Local runs don't enable Cursor auto-review or sandboxing by default. Read the [safety controls](docs/reference.md#cursor-local-agent-config-and-safety-controls) to turn them on. If you rely on Cursor hooks to change or block commands, check the known hook limits on that page.
 
 ```bash
 # Use Cursor tools without the Pi tool bridge.
 PI_CURSOR_PI_TOOL_BRIDGE=0 pi --model cursor/grok-4.6
 
-# Skip ambient Cursor settings, rules, plugins, and MCP configuration.
+# Skip Cursor settings, rules, plugins, and MCP configuration loaded from disk.
 PI_CURSOR_SETTING_SOURCES=none pi --model cursor/grok-4.6
 ```
 
-Cursor activity cards replay recorded SDK results; they never re-run a shell command or apply an edit again. Some activity, including web search, appears only after the SDK run finishes or may be unavailable to replay.
+Cursor activity cards display recorded SDK results. They never re-run a command or apply an edit again. Some activity, including web search, only appears after the run finishes; the SDK doesn't always provide enough data to show a card.
 
-Read [Tool surfaces](docs/cursor-tool-surfaces.md) for bridge controls, skill activation, optional questions, and MCP diagnostics, or [Native replay](docs/cursor-native-tool-replay.md) for supported activity cards.
+[Tool surfaces](docs/cursor-tool-surfaces.md) explains bridge settings, skill loading, optional questions, and MCP diagnostics. [Native replay](docs/cursor-native-tool-replay.md) lists the supported activity cards.
 
 ## Sessions, images, and usage
 
-Compatible local follow-up turns reuse a Cursor agent. Persisted Pi sessions can resume recorded local agents after a restart; if reattachment fails, the extension starts a new agent from the current Pi transcript and shows a continuity note. [Resume, custom storage, and exact-ID cleanup](docs/reference.md#cursor-local-agent-config-and-safety-controls) have additional safeguards and recovery instructions.
+When you continue a compatible local conversation, the extension keeps the same Cursor agent. It can reconnect to a recorded agent after a Pi restart. If that fails, it starts a new agent from your current Pi transcript and shows a continuity note. See [resume and storage](docs/reference.md#cursor-local-agent-config-and-safety-controls) for the matching rules and cleanup commands.
 
-Images attached to the current user request are sent to Cursor. Earlier images are replaced by transcript placeholders; reattach an image when asking about it again.
+Images attached to your current request go to Cursor. Earlier images become placeholders in the transcript, so reattach an image if you ask about it again.
 
-Pi's default footer and `/stats` track native context usage. Cursor billing is recorded separately:
+Pi's default footer and `/stats` keep their native context accounting. To see Cursor billing separately, use:
 
 ```text
 /cursor-usage
@@ -98,34 +92,31 @@ Pi's default footer and `/stats` track native context usage. Cursor billing is r
 /cursor-usage export cursor-usage.json
 ```
 
-Refresh queries public billing without sending a model prompt. Export creates a new private JSON file; it does not overwrite an existing file. Billing observations can lag or change and are not final invoices. Inspect paths and identifiers before sharing an export. See [usage and journal recovery](docs/reference.md#context-compaction-and-cursor-usage).
+Refresh asks for public billing data without sending a model prompt. Export creates a new private JSON file and won't overwrite an existing file. These observations can lag or change; they aren't final invoices. Check the paths and identifiers before sharing an export. [Usage and journal recovery](docs/reference.md#context-compaction-and-cursor-usage) covers the details.
 
 ## Optional Cursor Cloud
 
-Local is the default. In interactive Pi, `/cursor-runtime cloud` offers a first-use confirmation before remote execution. Cloud can branch, commit, push, and open PRs, and uses Max Mode billing at Cursor API pricing.
+Local is the default. Run `/cursor-runtime cloud` inside Pi to see the first-use confirmation before remote execution. Cloud can branch, commit, push, and open PRs. It uses Max Mode billing at Cursor API pricing.
 
-Cloud starts with fresh context by default, requires a persisted Pi session, and has no local Pi tool bridge or Pi environment forwarding. Cloud agents are retained until you explicitly manage them with `/cursor-cloud list`, `/cursor-cloud archive`, or `/cursor-cloud delete ... --yes`.
+Cloud starts with fresh context by default and needs a persisted Pi session. It has no local Pi tool bridge or Pi environment forwarding. Cloud agents remain in Cursor until you explicitly archive or delete them; `/cursor-cloud list` shows the agents recorded for your session branch.
 
-Read the [Cloud setup, acknowledgement, and cleanup reference](docs/reference.md#cloud-runtime-and-acknowledgement) before starting a remote run.
+Read the [Cloud setup and cleanup guide](docs/reference.md#cloud-runtime-and-acknowledgement) before starting a remote run.
 
-## If something goes wrong
+## Troubleshooting
 
-- **Models appear but a run fails:** run `/login` with a Cursor SDK key, then `/cursor-refresh-models`. Desktop/CLI login is not used. You can also set `CURSOR_API_KEY` in the shell that starts Pi; keep secrets out of config files and logs.
-- **First reply is slow:** Cursor connects to configured MCP servers on first send. Fix or disable a slow server in Cursor settings, or [narrow the setting sources](docs/reference.md#first-cursor-message-is-slow-10-seconds).
-- **Streams fail behind a VPN or proxy:** try `/cursor-http on`. It changes local SDK transport, not proxy or certificate configuration.
-- **A tool is missing or only appears as text:** compare [tool surfaces](docs/cursor-tool-surfaces.md) and [replay troubleshooting](docs/reference.md#tool-calls-appear-as-a-plain-text-list-instead-of-pi-tool-cards).
-- **Startup shows fallback models despite a saved key:** official Pi 1.0.4 and 1.1.0 have a [known startup refresh race](docs/reference.md#model-catalog-cache). The documented repair is in the maintained Pi fork.
+If models appear but a run fails, run `/login` with a Cursor SDK key, then `/cursor-refresh-models`. You can also set `CURSOR_API_KEY` in the shell that starts Pi. Keep keys out of config files and logs.
 
-For other issues, see [Troubleshooting](docs/reference.md#troubleshooting). [Report a bug](https://github.com/fitchmultz/pi-cursor-sdk/issues) with Pi/extension versions, model, flags, exact prompt, and a redacted session. Debug artifacts can contain prompts, tool results, paths, and secrets; inspect them before sharing.
+A slow first reply can come from Cursor connecting to a configured MCP server. Fix or disable that server in Cursor settings, or [narrow the setting sources](docs/reference.md#first-cursor-message-is-slow-10-seconds). For streaming failures behind a VPN or proxy, try `/cursor-http on`; it doesn't configure your proxy or certificates.
 
-## Read more
+If a tool is missing or only appears as text, check [tool surfaces](docs/cursor-tool-surfaces.md) and [replay troubleshooting](docs/reference.md#tool-calls-appear-as-a-plain-text-list-instead-of-pi-tool-cards). Official Pi 1.0.4 and 1.1.0 also have a [startup refresh race](docs/reference.md#model-catalog-cache) that can leave fallback models visible despite a saved key. The documented repair is in the maintained Pi fork.
 
-- [Full reference](docs/reference.md): authentication, installation, models, configuration, Cloud, storage, limits, and troubleshooting.
-- [Development and releases](docs/development.md): offline checks, event capture, compatibility targets, model snapshots, and release procedures.
-- [Model UX design](docs/cursor-model-ux-spec.md): maintainer design notes.
-- [Changelog](CHANGELOG.md): version history.
+There's more in the [troubleshooting reference](docs/reference.md#troubleshooting). When [reporting a bug](https://github.com/fitchmultz/pi-cursor-sdk/issues), include Pi/extension versions, the model, flags, exact prompt, and a redacted session. Debug artifacts can contain prompts, tool results, paths, and secrets. Check them before sharing.
 
-If you need a generic OpenAI-compatible endpoint for other clients, see the [comparison](docs/reference.md#why-use-this-instead-of-an-openai-compatible-cursor-endpoint).
+## Reference and development
+
+The [full reference](docs/reference.md) holds detailed configuration and limits. For checks, model snapshots, and release procedures, see [Development](docs/development.md). Maintainer design notes are in the [model UX spec](docs/cursor-model-ux-spec.md); version history is in the [Changelog](CHANGELOG.md).
+
+If you need an OpenAI-compatible endpoint for other clients, the [comparison](docs/reference.md#why-use-this-instead-of-an-openai-compatible-cursor-endpoint) explains that choice.
 
 ## License
 

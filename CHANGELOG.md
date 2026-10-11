@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Rewrite the README around installation and everyday use, add a diagram of Cursor inside Pi, and move detailed configuration and maintainer procedures into linked reference pages.
 - Align locked development Pi snapshots and their resolved Pi cohort to 1.1.0 ([#353](https://github.com/fitchmultz/pi-cursor-sdk/pull/353)). This is development-only maintenance, not a user runtime Pi upgrade or a new npm publication. Node 24+, official Pi 0.87.1+, optional wildcard Pi/TypeBox peers, and exact unbundled Cursor SDK 1.0.37 remain unchanged; published 0.5.3 and historical qualification evidence retain their original source/version attribution.
 
 ## 0.5.3 - 2026-10-07
@@ -86,7 +87,7 @@ These changes are carried into 0.5.2; this section does not record a successful 
 
 ### Breaking Changes
 
-- Bare `ctx.modelRegistry.complete(...)` and `ctx.modelRegistry.streamSimple(...)` calls are unsupported for Cursor models because they lack native session ownership receipts. Custom compaction and other integrations must use the owning AgentSession's stream path or an independent child AgentSession; bind/refresh/reload does not migrate bare calls. See [embedding migration guidance](README.md#embedded-sessions-report-concurrent-cursor-turns).
+- Bare `ctx.modelRegistry.complete(...)` and `ctx.modelRegistry.streamSimple(...)` calls are unsupported for Cursor models because they lack native session ownership receipts. Custom compaction and other integrations must use the owning AgentSession's stream path or an independent child AgentSession; bind/refresh/reload does not migrate bare calls. See [embedding migration guidance](docs/reference.md#embedded-sessions-report-concurrent-cursor-turns).
 
 ### Changed
 

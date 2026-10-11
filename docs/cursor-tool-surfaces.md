@@ -100,6 +100,6 @@ Example mistake: treating `cursor-replay-…` as a tool to invoke. Replay never 
 
 ## Related docs
 
-- [README — Cursor provider tool contract](../README.md#cursor-provider-tool-contract)
+- [Reference — Cursor provider tool contract](reference.md#cursor-provider-tool-contract)
 - [Cursor native tool replay](./cursor-native-tool-replay.md)
 - [Cursor model UX spec](./cursor-model-ux-spec.md)

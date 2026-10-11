@@ -103,6 +103,8 @@
     "scripts/lib/cursor-sdk-output-filter.d.mts",
     "scripts/lib/ensure-built.mjs",
     "README.md",
+    "docs/reference.md",
+    "docs/development.md",
     "docs/cursor-model-ux-spec.md",
     "docs/cursor-tool-surfaces.md",
     "docs/cursor-live-smoke-checklist.md",

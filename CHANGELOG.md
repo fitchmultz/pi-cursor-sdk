@@ -87,7 +87,7 @@ These changes are carried into 0.5.2; this section does not record a successful 
 
 ### Breaking Changes
 
-- Bare `ctx.modelRegistry.complete(...)` and `ctx.modelRegistry.streamSimple(...)` calls are unsupported for Cursor models because they lack native session ownership receipts. Custom compaction and other integrations must use the owning AgentSession's stream path or an independent child AgentSession; bind/refresh/reload does not migrate bare calls. See [embedding migration guidance](README.md#embedded-sessions-report-concurrent-cursor-turns).
+- Bare `ctx.modelRegistry.complete(...)` and `ctx.modelRegistry.streamSimple(...)` calls are unsupported for Cursor models because they lack native session ownership receipts. Custom compaction and other integrations must use the owning AgentSession's stream path or an independent child AgentSession; bind/refresh/reload does not migrate bare calls. See [embedding migration guidance](docs/reference.md#embedded-sessions-report-concurrent-cursor-turns).
 
 ### Changed
 

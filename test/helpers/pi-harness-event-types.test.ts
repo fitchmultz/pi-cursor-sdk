@@ -1,3 +1,4 @@
+import type { BeforeAgentStartEvent } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import {
 	createEventHarness,
@@ -16,12 +17,14 @@ describe("pi-harness before_agent_start results", () => {
 			return { systemPrompt: `${event.systemPrompt}-second` };
 		});
 
-		const result = await pi.invokeEvent("before_agent_start", {
+		const event = {
 			type: "before_agent_start",
+			messageType: "user",
 			prompt: "hello",
 			systemPrompt: "base",
 			systemPromptOptions: createDefaultSystemPromptOptions("/repo"),
-		});
+		} satisfies BeforeAgentStartEvent & { messageType: "user" };
+		const result = await pi.invokeEvent("before_agent_start", event);
 
 		expect(result?.systemPrompt).toBe("base-first-second");
 	});
@@ -38,12 +41,14 @@ describe("pi-harness before_agent_start results", () => {
 			return { systemPrompt: "after-second" };
 		});
 
-		const result = await pi.invokeEvent("before_agent_start", {
+		const event = {
 			type: "before_agent_start",
+			messageType: "user",
 			prompt: "hello",
 			systemPrompt: "base",
 			systemPromptOptions: createDefaultSystemPromptOptions("/repo"),
-		});
+		} satisfies BeforeAgentStartEvent & { messageType: "user" };
+		const result = await pi.invokeEvent("before_agent_start", event);
 
 		expect(seenPrompts).toEqual(["base", "after-first"]);
 		expect(result?.systemPrompt).toBe("after-second");
@@ -53,12 +58,14 @@ describe("pi-harness before_agent_start results", () => {
 		const pi = createEventHarness();
 		pi.on("before_agent_start", () => undefined);
 
-		const result = await pi.invokeEvent("before_agent_start", {
+		const event = {
 			type: "before_agent_start",
+			messageType: "user",
 			prompt: "hello",
 			systemPrompt: "base",
 			systemPromptOptions: createDefaultSystemPromptOptions("/repo"),
-		});
+		} satisfies BeforeAgentStartEvent & { messageType: "user" };
+		const result = await pi.invokeEvent("before_agent_start", event);
 
 		expect(result).toBeUndefined();
 	});
@@ -78,12 +85,14 @@ describe("pi-harness before_agent_start results", () => {
 		pi.on("before_agent_start", () => ({ message: firstMessage }));
 		pi.on("before_agent_start", () => ({ message: secondMessage }));
 
-		const result = await pi.invokeEvent("before_agent_start", {
+		const event = {
 			type: "before_agent_start",
+			messageType: "user",
 			prompt: "hello",
 			systemPrompt: "base",
 			systemPromptOptions: createDefaultSystemPromptOptions("/repo"),
-		});
+		} satisfies BeforeAgentStartEvent & { messageType: "user" };
+		const result = await pi.invokeEvent("before_agent_start", event);
 
 		expect(result?.messages).toEqual([firstMessage, secondMessage]);
 		expect(result?.systemPrompt).toBeUndefined();

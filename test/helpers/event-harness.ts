@@ -233,16 +233,14 @@ function createHarnessEventApi(): EventHarness {
 		ctxOverrides: ExtensionContextOverrides = {},
 	): Promise<HarnessEventInvokeResult<"before_agent_start">> => {
 		const ctx = createContext(ctxOverrides);
-		return invokeEventWithContext(
-			"before_agent_start",
-			{
-				type: "before_agent_start",
-				prompt: "start",
-				systemPrompt: "",
-				systemPromptOptions: createDefaultSystemPromptOptions(ctx.cwd),
-			} satisfies BeforeAgentStartEvent,
-			ctx,
-		);
+		const event = {
+			type: "before_agent_start",
+			messageType: "user",
+			prompt: "start",
+			systemPrompt: "",
+			systemPromptOptions: createDefaultSystemPromptOptions(ctx.cwd),
+		} satisfies BeforeAgentStartEvent & { messageType: "user" };
+		return invokeEventWithContext("before_agent_start", event, ctx);
 	};
 
 	const runTurnStart = async (ctxOverrides: ExtensionContextOverrides = {}): Promise<void> => {

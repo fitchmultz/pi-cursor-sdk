@@ -13,7 +13,8 @@ const args = process.argv.slice(2);
 if (args.includes("--help") || args.includes("-h")) {
   console.log(`Usage: node scripts/ci-compatibility.mjs --automation PATH [--official-version VERSION] [--fork-ref SHA] [--select-only]
 CI resolves latest stable official Pi and maintained fork main once; supplied identities stay frozen.
---select-only installs the selected official graph for subsequent native platform checks.
+--select-only installs the selected official graph for subsequent native platform checks and keeps
+              its temporary host directory, which node_modules links into.
 
 Manual qualification: node scripts/ci-compatibility.mjs [--working-tree] [--official-only] [--versions 0.87.1,0.99.1,1.0.3]
 Default manual invocation requires a clean checkout and checks official minimum/latest and current fork offline.
@@ -158,7 +159,7 @@ try {
       PI_COMPAT_EXPECTED_PACKAGE_DIR: selected.packageDir, PI_PACKAGE_DIR: selected.packageDir,
       PI_HOST_INDEX: selected.index, PI_HOST_CLI: selected.cli });
     if (args.includes("--select-only")) {
-      console.log(`Selected official Pi ${selected.version} for native platform checks.`);
+      console.log(`Selected official Pi ${selected.version} for native platform checks (host kept at ${root}).`);
     } else {
       qualifySelectedHost(run);
       // Retain latest-SDK emit, but pack the reviewed locked runtime bundle.
@@ -258,5 +259,6 @@ try {
     console.log("Selected compatibility qualification passed offline.");
   }
 } finally {
-  rmSync(root, { recursive: true, force: true });
+  // The selected development graph links into the prepared host, so later native steps need it.
+  if (!args.includes("--select-only")) rmSync(root, { recursive: true, force: true });
 }

@@ -1,18 +1,7 @@
 import { describe, expect, it } from "vitest";
-import {
-	buildCursorPiBridgeMcpToolDescription,
-	getCursorPiBridgeContractText,
-} from "../src/cursor-bridge-contract.js";
+import { buildCursorPiBridgeMcpToolDescription } from "../src/cursor-bridge-contract.js";
 
 describe("cursor bridge contract", () => {
-	it("keeps the full bridge contract available for tests and exports", () => {
-		const text = getCursorPiBridgeContractText();
-		expect(text).toContain("Pi bridge contract:");
-		expect(text).toContain("pi__* names are live Cursor MCP bridge tool names");
-		expect(text).toContain("prefer pi__mcp for MCP work and pi__subagent for delegation");
-		expect(text).toContain("only when the matching pi__ tool is not exposed or unavailable");
-	});
-
 	it("uses a one-line MCP description pointer instead of repeating the full contract", () => {
 		const description = buildCursorPiBridgeMcpToolDescription({
 			piToolDescription: "Ask the user a question.",

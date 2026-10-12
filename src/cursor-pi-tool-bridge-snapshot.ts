@@ -6,7 +6,6 @@ import type {
 } from "./cursor-pi-tool-bridge-types.js";
 import { createMcpToolName, normalizeMcpInputSchema, stableNameHash } from "./cursor-pi-tool-bridge-mcp.js";
 export {
-	CURSOR_PI_TOOL_BRIDGE_BUILTINS_ENV,
 	CURSOR_PI_TOOL_BRIDGE_ENV,
 	resolveCursorPiToolBridgeBuiltinsEnabled,
 	resolveCursorPiToolBridgeEnabled,

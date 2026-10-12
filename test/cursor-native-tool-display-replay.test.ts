@@ -1,16 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { CURSOR_REPLAY_ACTIVITY_TOOL_NAME } from "../src/cursor-tool-presentation-registry.js";
 import {
 	CURSOR_REPLAY_COLLAPSED_PREVIEW_LINES,
 	CURSOR_REPLAY_PREVIEW_MAX_LINE_CHARS,
 	formatCursorReplayDiff,
 	formatCursorReplayFilePreview,
-	renderCursorReplayCall,
 	renderCursorReplayResult,
-	renderNativeLookingCursorReadReplayResult,
 } from "../src/cursor-native-tool-display-replay.js";
-import { LOCAL_READ_PREVIEW_NOTICE } from "../src/cursor-transcript-utils.js";
-import { Text } from "@earendil-works/pi-tui";
 import { createRenderContext, createRenderTheme } from "./helpers/render-fixtures.js";
 
 const theme = createRenderTheme();
@@ -167,83 +162,5 @@ describe("cursor native replay rendering", () => {
 		expect(rendered).toContain("<toolOutput>hello world</toolOutput>");
 		expect(rendered).not.toContain("preamble note");
 		expect(rendered).not.toContain("<muted>hello world</muted>");
-	});
-
-	it("shows local read preview disclaimer in collapsed native read replay results", () => {
-		const result = {
-			content: [{ type: "text" as const, text: `${LOCAL_READ_PREVIEW_NOTICE}\n# Local preview\n` }],
-			details: { localReadPreview: true },
-		};
-		const rendered = renderNativeLookingCursorReadReplayResult(
-			result,
-			{ expanded: false, isPartial: false },
-			theme,
-			createRenderContext({ isError: false, args: { path: "README.md", localReadPreview: true } }),
-			() => new Text("", 0, 0),
-		)
-			.render(120)
-			.join("\n");
-
-		expect(rendered).toContain(LOCAL_READ_PREVIEW_NOTICE);
-		expect(rendered).not.toContain("# Local preview");
-	});
-
-	it("renders collapsed activity summaries from metadata for neutral cursor cards", () => {
-		const rendered = [
-			renderCursorReplayCall(
-				CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-				{ activityTitle: "Cursor diagnostics", activitySummary: "0 diagnostics in src/index.ts" },
-				theme,
-				true,
-			),
-			renderCursorReplayCall(
-				CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-				{ activityTitle: "Cursor todos", activitySummary: "1/2 completed, 1 pending" },
-				theme,
-				true,
-			),
-			renderCursorReplayCall(
-				CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-				{ activityTitle: "Cursor MCP", activitySummary: "git · ## Git Status ✅", toolName: "git" },
-				theme,
-				true,
-			),
-		]
-			.map((component) => component.render(120).join("\n"))
-			.join("\n");
-
-		expect(rendered).toContain("Cursor diagnostics 0 diagnostics in src/index.ts");
-		expect(rendered).toContain("Cursor todos 1/2 completed, 1 pending");
-		expect(rendered).toContain("Cursor MCP git · ## Git Status ✅");
-	});
-
-	it("renders neutral cursor partial calls from activity metadata", () => {
-		const rendered = [
-			renderCursorReplayCall(
-				CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-				{ activityTitle: "Cursor semantic search", activitySummary: "main entrypoint (1 dir)" },
-				theme,
-				true,
-			),
-			renderCursorReplayCall(
-				CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-				{ activityTitle: "Cursor screen recording", activitySummary: ".cursor/recordings/demo.webm · 4.2s" },
-				theme,
-				true,
-			),
-			renderCursorReplayCall(
-				CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-				{ activityTitle: "Cursor delete", activitySummary: ".debug/delete-me.txt" },
-				theme,
-				true,
-			),
-		]
-			.map((component) => component.render(120).join("\n"))
-			.join("\n");
-
-		expect(rendered).toContain("Cursor semantic search main entrypoint (1 dir)");
-		expect(rendered).toContain("Cursor screen recording .cursor/recordings/demo.webm · 4.2s");
-		expect(rendered).toContain("Cursor delete .debug/delete-me.txt");
-		expect(rendered).not.toContain("cursor_");
 	});
 });

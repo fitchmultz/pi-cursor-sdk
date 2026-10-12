@@ -50,16 +50,6 @@ function processListenerCalled(event: "uncaughtException" | "unhandledRejection"
 }
 
 describe("Cursor SDK raw AbortError process guard", () => {
-	it("suppresses a DOMException during a provider turn that declares abort suppression", () => {
-		const guard = installCursorSdkProcessErrorGuard();
-		guard.suppressAbortErrors();
-		try {
-			expect(processListenerCalled("uncaughtException", makeCursorSdkRawAbortDomException())).toBe(false);
-		} finally {
-			guard.dispose();
-		}
-	});
-
 	it("suppresses the unhandledRejection path", () => {
 		const guard = installCursorSdkProcessErrorGuard();
 		guard.suppressAbortErrors();

@@ -26,9 +26,11 @@ describe("Cursor session agent HTTP/1.1 pooling", () => {
 
 	it("clears extension-owned SDK transport after agent disposal on reload", async () => {
 		const configure = vi.fn<(options: CursorConfigureOptions) => void>();
+		const enteredDispose = Promise.withResolvers<void>();
 		let finishDispose: (() => void) | undefined;
 		const dispose = vi.fn(() => new Promise<void>((resolve) => {
 			finishDispose = resolve;
+			enteredDispose.resolve();
 		}));
 		const createAgent = vi.fn().mockResolvedValue({
 			agentId: "agent-http1-reload",
@@ -52,7 +54,8 @@ describe("Cursor session agent HTTP/1.1 pooling", () => {
 		});
 
 		const shutdown = pi.runSessionShutdown({ reason: "reload" });
-		await vi.waitFor(() => expect(dispose).toHaveBeenCalledTimes(1));
+		await enteredDispose.promise;
+		expect(dispose).toHaveBeenCalledTimes(1);
 		expect(configure).toHaveBeenCalledTimes(1);
 		finishDispose?.();
 		await shutdown;
@@ -88,9 +91,11 @@ describe("Cursor session agent HTTP/1.1 pooling", () => {
 	});
 
 	it("disposes the previous transport pool before creating its replacement", async () => {
+		const enteredDispose = Promise.withResolvers<void>();
 		let finishDispose: (() => void) | undefined;
 		const firstDispose = vi.fn(() => new Promise<void>((resolve) => {
 			finishDispose = resolve;
+			enteredDispose.resolve();
 		}));
 		const createAgent = vi.fn().mockImplementation(async () => ({
 			agentId: `agent-${createAgent.mock.calls.length}`,
@@ -109,7 +114,8 @@ describe("Cursor session agent HTTP/1.1 pooling", () => {
 		await acquireSessionCursorAgent({ ...params, useHttp1ForAgent: true });
 
 		const replacement = acquireSessionCursorAgent({ ...params, useHttp1ForAgent: false });
-		await vi.waitFor(() => expect(firstDispose).toHaveBeenCalledTimes(1));
+		await enteredDispose.promise;
+		expect(firstDispose).toHaveBeenCalledTimes(1);
 		expect(createAgent).toHaveBeenCalledTimes(1);
 
 		finishDispose?.();

@@ -55,7 +55,7 @@ const activeWorkspaceRoots = new Map<string, { root: Promise<string>; users: num
 // ponytail: leases protect only extension-owned stores in this process. Other SDK
 // users/processes must stop before upgrade; a cross-process lock belongs in the SDK.
 
-export function hashCursorSessionStoreScope(scopeKey: string): string {
+function hashCursorSessionStoreScope(scopeKey: string): string {
 	return createHash("sha256")
 		.update("pi-cursor-sdk-session-store\0")
 		.update(scopeKey)

@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-	CURSOR_SETTING_SOURCES_ENV,
-	DEFAULT_CURSOR_SETTING_SOURCES,
 	cursorSettingSourcesIncludes,
 	getEffectiveCursorSettingSources,
 	resolveCursorSettingSources,
@@ -9,9 +7,8 @@ import {
 
 describe("resolveCursorSettingSources", () => {
 	it("defaults to all Cursor setting sources when unset", () => {
-		expect(DEFAULT_CURSOR_SETTING_SOURCES).toEqual(["all"]);
-		expect(resolveCursorSettingSources(undefined)).toEqual(DEFAULT_CURSOR_SETTING_SOURCES);
-		expect(resolveCursorSettingSources("")).toEqual(DEFAULT_CURSOR_SETTING_SOURCES);
+		expect(resolveCursorSettingSources(undefined)).toEqual(["all"]);
+		expect(resolveCursorSettingSources("")).toEqual(["all"]);
 	});
 
 	it("maps disable aliases to undefined", () => {
@@ -54,18 +51,14 @@ describe("cursorSettingSourcesIncludes", () => {
 });
 
 describe("getEffectiveCursorSettingSources", () => {
-	it("exports the provider env var name", () => {
-		expect(CURSOR_SETTING_SOURCES_ENV).toBe("PI_CURSOR_SETTING_SOURCES");
-	});
-
 	it("reads from process env by default", () => {
-		const previous = process.env[CURSOR_SETTING_SOURCES_ENV];
+		const previous = process.env.PI_CURSOR_SETTING_SOURCES;
 		try {
-			process.env[CURSOR_SETTING_SOURCES_ENV] = "plugins";
+			process.env.PI_CURSOR_SETTING_SOURCES = "plugins";
 			expect(getEffectiveCursorSettingSources()).toEqual(["plugins"]);
 		} finally {
-			if (previous === undefined) delete process.env[CURSOR_SETTING_SOURCES_ENV];
-			else process.env[CURSOR_SETTING_SOURCES_ENV] = previous;
+			if (previous === undefined) delete process.env.PI_CURSOR_SETTING_SOURCES;
+			else process.env.PI_CURSOR_SETTING_SOURCES = previous;
 		}
 	});
 });

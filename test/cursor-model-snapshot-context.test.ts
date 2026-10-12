@@ -6,7 +6,6 @@ import {
 } from "../shared/cursor-model-selection-identities.mjs";
 import { BUNDLED_CONTEXT_WINDOWS } from "../src/bundled-context-windows.js";
 import { FALLBACK_MODEL_ITEMS } from "../src/cursor-fallback-models.generated.js";
-import { __testUtils as modelDiscoveryTestUtils } from "../src/model-discovery.js";
 
 const models = [
 	{
@@ -23,10 +22,8 @@ const models = [
 ] satisfies ModelListItem[];
 
 describe("Cursor model-selection identities", () => {
-	it("matches runtime registration and canonicalizes default fast aliases", () => {
+	it("canonicalizes default fast aliases and preserves base context keys", () => {
 		const identities = getCursorModelSelectionIdentities(models);
-		const runtimeIds = modelDiscoveryTestUtils.registerModelItems(models).map(({ id }) => id).sort();
-		expect(identities.map(({ piModelId }) => piModelId).sort()).toEqual(runtimeIds);
 		expect(Object.fromEntries(identities.map(({ piModelId, contextWindowKey, baseContextWindowKey }) => [
 			piModelId,
 			{ contextWindowKey, baseContextWindowKey },

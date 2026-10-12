@@ -451,6 +451,5 @@ export async function discoverModels(options: DiscoverModelsOptions = {}): Promi
 }
 
 export const __testUtils = {
-	parseContextWindow,
 	registerModelItems,
 };

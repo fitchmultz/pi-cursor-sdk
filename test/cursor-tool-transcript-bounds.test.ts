@@ -256,17 +256,6 @@ describe("formatCursorToolTranscript bounds and aliases", () => {
 		}
 	});
 
-	it("maps common Cursor aliases to pi-like command names", () => {
-		const transcript = formatCursorToolTranscript({
-			name: "run_terminal_cmd",
-			args: { command: "pwd" },
-			result: { status: "success", value: { stdout: "/tmp\n", stderr: "", exitCode: 0, executionTime: 1 } },
-		});
-
-		expect(transcript).toContain("$ pwd");
-		expect(transcript).toContain("/tmp");
-	});
-
 	it("bounds large Cursor read output", () => {
 		const transcript = formatCursorToolTranscript(
 			{

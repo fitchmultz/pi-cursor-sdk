@@ -8,7 +8,7 @@ import { createExtensionRegistrationPi } from "./helpers/pi-harness.js";
 import extension from "../src/index.js";
 import * as sdkRuntime from "../src/cursor-sdk-runtime.js";
 import { buildCursorModelSelection, getCursorModelMetadata } from "../src/model-discovery.js";
-import { fingerprintApiKey, saveModelListCache, __testUtils as cache } from "../src/model-list-cache.js";
+import { fingerprintApiKey, saveModelListCache } from "../src/model-list-cache.js";
 
 // Only external Cursor catalog data is substituted. Auth, composition,
 // publication and the actual extension factory execute their real owners.
@@ -58,9 +58,9 @@ it("real same-session login/rotation/logout updates cached metadata with zero ca
 	const { runtime, pi, credentials, registry } = await fixture();
 	const load = vi.spyOn(sdkRuntime, "loadCursorSdk");
 	saveModelListCache(fingerprintApiKey("synthetic-login"), [{ ...item("native-cached"), aliases: ["native-alias"], variants: [{ displayName: "default", params: [{ id: "opaque", value: "retained" }] }] }]);
-	const expired = JSON.parse(readFileSync(cache.getCachePath(), "utf8"));
+	const expired = JSON.parse(readFileSync(join(root, "cursor-sdk-model-list.json"), "utf8"));
 	expired.fetchedAt = 1;
-	writeFileSync(cache.getCachePath(), JSON.stringify(expired));
+	writeFileSync(join(root, "cursor-sdk-model-list.json"), JSON.stringify(expired));
 	try {
 		await login(runtime, "synthetic-login");
 		await registry.refresh({ providers: ["cursor"], allowNetwork: false, force: true });
@@ -73,7 +73,7 @@ it("real same-session login/rotation/logout updates cached metadata with zero ca
 		await runtime.logout("cursor");
 		expect(await credentials.read("cursor")).toBeUndefined();
 		expect(await runtime.getAvailable("cursor")).toEqual([]);
-		expect(existsSync(cache.getCachePath())).toBe(false);
+		expect(existsSync(join(root, "cursor-sdk-model-list.json"))).toBe(false);
 		expect(load).not.toHaveBeenCalled();
 		expect(list).not.toHaveBeenCalled();
 	} finally { await pi.runSessionShutdown(); }
@@ -138,7 +138,7 @@ it.each(["ambient", "config", "runtime"] as const)("stored removal preserves sur
 		await login(runtime, "synthetic-stored");
 		if (source === "runtime") await runtime.setRuntimeApiKey("cursor", key);
 		saveModelListCache(fingerprintApiKey(key), [item("surviving-catalog")]);
-		const bytes = readFileSync(cache.getCachePath());
+		const bytes = readFileSync(join(root, "cursor-sdk-model-list.json"));
 		// Native logout also removes runtime overrides. A backing-store removal
 		// does not: refresh must respect the still-effective runtime overlay.
 		if (source === "runtime") {
@@ -147,7 +147,7 @@ it.each(["ambient", "config", "runtime"] as const)("stored removal preserves sur
 		} else await runtime.logout("cursor");
 		expect((await registry.getProviderAuth("cursor"))?.auth.apiKey).toBe(key);
 		expect(runtime.getModels("cursor").map(m => m.id)).toEqual(["surviving-catalog"]);
-		expect(readFileSync(cache.getCachePath())).toEqual(bytes);
+		expect(readFileSync(join(root, "cursor-sdk-model-list.json"))).toEqual(bytes);
 		expect(load).not.toHaveBeenCalled();
 		expect(list).not.toHaveBeenCalled();
 	} finally { await pi.runSessionShutdown(); }
@@ -197,7 +197,7 @@ it.each(["cancel", "rotation", "shutdown"] as const)("%s prevents cancellation-i
 		else if (cause === "shutdown") await pi.runSessionShutdown();
 		else controller.abort();
 		const ids = runtime.getModels("cursor").map(m => m.id);
-		const bytes = readFileSync(cache.getCachePath());
+		const bytes = readFileSync(join(root, "cursor-sdk-model-list.json"));
 		notify.mockClear();
 		release();
 		const result = await pending;
@@ -205,7 +205,7 @@ it.each(["cancel", "rotation", "shutdown"] as const)("%s prevents cancellation-i
 		await new Promise(resolve => setImmediate(resolve));
 		expect(runtime.getModels("cursor").map(m => m.id)).toEqual(ids);
 		expect(getCursorModelMetadata("deliberately-late")).toBeUndefined();
-		expect(readFileSync(cache.getCachePath())).toEqual(bytes);
+		expect(readFileSync(join(root, "cursor-sdk-model-list.json"))).toEqual(bytes);
 		if (cause !== "shutdown") await pi.runTurnStart({ modelRegistry: registry, hasUI: true, ui: { notify } });
 		if (cause !== "rotation") expect(notify).not.toHaveBeenCalled();
 	} finally { await pi.runSessionShutdown(); }
@@ -221,7 +221,7 @@ it("accepted recovery replaces warning state and logout cleanup leaves user-mana
 		notify.mockClear();
 		await pi.runTurnStart({ modelRegistry: registry, hasUI: true, ui: { notify } });
 		expect(notify).not.toHaveBeenCalled();
-		const owned = cache.getCachePath();
+		const owned = join(root, "cursor-sdk-model-list.json");
 		const userFile = join(root, "user-catalog.json");
 		writeFileSync(userFile, readFileSync(owned));
 		rmSync(owned);

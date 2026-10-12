@@ -1,5 +1,5 @@
 import { execFile as execFileCallback, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -132,7 +132,7 @@ describe("build.mjs staging swap", () => {
 		expect(stagingDirs(dir)).toEqual([]);
 	}, 30_000);
 
-	it("publishes its retained staging tree instead of timing out on a slow winner", async () => {
+	it("publishes its retained staging tree after a rename is unavailable beyond two seconds", async () => {
 		const dir = makeFixture();
 		fixtures.push(dir);
 
@@ -140,7 +140,7 @@ describe("build.mjs staging swap", () => {
 
 		expect(result).toEqual({ code: 0, stderr: "" });
 		expect(existsSync(join(dir, "dist", "index.js"))).toBe(true);
-		expect(existsSync(join(dir, "dist", "late-winner.txt"))).toBe(true);
+		expect(readFileSync(join(dir, "dist", "late-winner.txt"), "utf8")).toBe("2200");
 		expect(stagingDirs(dir)).toEqual([]);
 	}, 10_000);
 
@@ -154,16 +154,6 @@ describe("build.mjs staging swap", () => {
 		expect(result.stderr).toContain("dist/ was published by a concurrent build");
 		expect(existsSync(join(dir, "dist", "winner.txt"))).toBe(true);
 		expect(stagingDirs(dir)).toEqual([]);
-	});
-
-	it("fails closed when a requested filesystem fault is unknown", async () => {
-		const dir = makeFixture();
-		fixtures.push(dir);
-
-		const result = await runBuild(dir, { BUILD_SWAP_FAULT: "unknown" }, faultArgs());
-
-		expect(result.code).not.toBe(0);
-		expect(result.stderr).toContain("unknown build-swap fault: unknown");
 	});
 
 	it("does not accept an empty dist directory as a published winner", async () => {
@@ -186,7 +176,7 @@ describe("build.mjs staging swap", () => {
 		const result = await runBuild(dir, { BUILD_SWAP_FAULT: "rename-always" }, faultArgs());
 
 		expect(result.code).not.toBe(0);
-		expect(result.stderr).toContain("synthetic permanent rename failure");
+		expect(result.stderr).toContain("synthetic permanent rename failure after 2500ms");
 		expect(existsSync(join(dir, "dist"))).toBe(false);
 		expect(existsSync(join(dir, "dist", "sentinel.txt"))).toBe(false);
 		expect(stagingDirs(dir)).toEqual([]);

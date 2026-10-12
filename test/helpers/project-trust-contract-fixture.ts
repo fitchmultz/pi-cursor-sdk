@@ -1,21 +1,19 @@
 import { execFile, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { expect } from "vitest";
 import { attachJsonlLineReader } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/rpc/jsonl.js";
 
-// Shared fixture for the four cursor-project-trust-contract-*.test.ts shards.
-// The original single-file suite ran its 24 scenarios sequentially inside one
-// vitest fork because resetCursorProviderTestState mutates provider globals,
-// making in-file concurrency unsafe. The shards split at FILE level (one
-// describe per fork) to parallelize the real-pi spawns while keeping every
-// scenario and assertion verbatim; this module owns the shared fixture.
+// Share only the packed extension within each shard; every CLI run gets a
+// fresh project, HOME and agent directory.
 
 const packageRoot = process.cwd();
-const piCli = resolve("node_modules/@earendil-works/pi-coding-agent/dist/cli.js");
-const trustManagerUrl = pathToFileURL(join(dirname(piCli), "core/trust-manager.js")).href;
+const piPackageRoot = resolve("node_modules/@earendil-works/pi-coding-agent");
+const piPackage = JSON.parse(readFileSync(join(piPackageRoot, "package.json"), "utf8")) as { bin: { pi: string } };
+const piCli = join(piPackageRoot, piPackage.bin.pi);
+const trustManagerUrl = pathToFileURL(join(piPackageRoot, "dist/core/trust-manager.js")).href;
 const rpcFramingText = "RPC framing: x\u2028y\u2029z \uD83D\uDC08";
 const OS_ENV_KEYS = new Set(["PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TMPDIR", "TMP", "TEMP"]);
 
@@ -94,14 +92,13 @@ function createTrustIsolatedFixtureRoot(): string {
 }
 
 function preparePackedProbeExtension(fixtureRoot: string): { packedPackageRoot: string; probeExtensionPath: string } {
-	let packedPackageRoot = "";
-	let probeExtensionPath = "";
 	const packDir = join(fixtureRoot, "pack");
 	const extractDir = join(fixtureRoot, "extract");
 	mkdirSync(packDir);
 	mkdirSync(extractDir);
 	const npmCli = process.env.npm_execpath;
-	const packArgs = ["pack", "--silent", "--pack-destination", packDir];
+	// The probe loads packaged src through Pi's TypeScript loader, not dist.
+	const packArgs = ["pack", "--ignore-scripts", "--silent", "--pack-destination", packDir];
 	const pack = npmCli
 		? spawnSync(process.execPath, [npmCli, ...packArgs], {
 				cwd: packageRoot,
@@ -125,7 +122,9 @@ function preparePackedProbeExtension(fixtureRoot: string): { packedPackageRoot: 
 	});
 	expect(extract.error).toBeUndefined();
 	expect(extract.status, extract.stderr).toBe(0);
-	packedPackageRoot = join(extractDir, "package");
+	const packedPackageRoot = join(extractDir, "package");
+	// Make source-only loading explicit: a stale build cannot satisfy this probe.
+	rmSync(join(packedPackageRoot, "dist"), { recursive: true, force: true });
 	// The tarball intentionally leaves @cursor/sdk unbundled; supply its installed
 	// runtime dependency even though this trust probe never sends a Cursor turn.
 	const cursorScope = join(packedPackageRoot, "node_modules", "@cursor");
@@ -136,7 +135,7 @@ function preparePackedProbeExtension(fixtureRoot: string): { packedPackageRoot: 
 		process.platform === "win32" ? "junction" : "dir",
 	);
 	expect(existsSync(join(packedPackageRoot, "src", "index.ts"))).toBe(true);
-	probeExtensionPath = join(packedPackageRoot, "src", "project-trust-contract-probe.ts");
+	const probeExtensionPath = join(packedPackageRoot, "src", "project-trust-contract-probe.ts");
 	writeFileSync(probeExtensionPath, `
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

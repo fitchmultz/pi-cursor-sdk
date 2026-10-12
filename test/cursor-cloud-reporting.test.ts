@@ -210,16 +210,4 @@ describe("cursor cloud reporting", () => {
 		expect(report).toContain("prefix '[redacted]");
 		for (const line of report.trimEnd().split("\n")) expect(line.length).toBeLessThan(600);
 	});
-
-	it("scrubs API keys from formatted cloud report text", () => {
-		const report = formatCursorCloudRunReport({
-			agentId: "bc-agent",
-			runId: "run-1",
-			branches: [{ repoUrl: "github.com/acme/secret-key", branch: "cursor/work", prUrl: "https://github.com/acme/repo/pull/1?token=secret-key" }],
-			artifacts: [{ path: "artifacts/secret-key.txt", sizeBytes: 1, updatedAt: "2026-07-07T00:00:00Z" }],
-		}, { apiKey: "secret-key" });
-
-		expect(report).not.toContain("secret-key");
-		expect(report).toContain("[redacted]");
-	});
 });

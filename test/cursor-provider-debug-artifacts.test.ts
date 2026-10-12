@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { installCursorProviderVirtualTime } from "./helpers/cursor-provider-virtual-time.js";
 import {
 	resetCursorProviderTestState,
 	makeModel,
@@ -35,6 +36,10 @@ async function setCursorModeForProviderDebugTest(mode: "agent" | "plan", existin
 
 describe("streamCursor debug artifacts", () => {
 	beforeEach(resetCursorProviderTestState);
+	installCursorProviderVirtualTime();
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
 
 		it("captures provider debug artifacts through streamCursor when enabled", async () => {
 			const artifactDir = mkdtempSync(join(tmpdir(), "pi-cursor-provider-debug-"));

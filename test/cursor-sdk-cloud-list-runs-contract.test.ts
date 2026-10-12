@@ -1,32 +1,41 @@
-import { readFileSync, readdirSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
-import { Agent } from "@cursor/sdk";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { loadCursorSdk } from "../src/cursor-sdk-runtime.js";
 
-const require = createRequire(import.meta.url);
-type ListedCloudRun = Awaited<ReturnType<typeof Agent.listRuns>>["items"][number];
-
-function listedRunId(run: ListedCloudRun): string {
-	return run.id;
-}
+afterEach(() => vi.unstubAllGlobals());
 
 describe("installed Cursor SDK cloud listRuns contract", () => {
-	it("returns Run objects with exact IDs for cancel-lane recovery", () => {
-		const sdkDist = dirname(require.resolve("@cursor/sdk"));
-		const declaration = readFileSync(join(sdkDist, "stubs.d.ts"), "utf8");
-		expect(declaration).toMatch(/static listRuns\(agentId: string, options\?: ListRunsOptions\): Promise<ListResult<Run>>/);
+	it("returns callable Run objects with exact IDs and pagination for cancel-lane recovery", async () => {
+		const agentId = "bc-00000000-0000-0000-0000-000000000001";
+		const runId = "run-00000000-0000-0000-0000-000000000001";
+		// Wire fields and routes verified against SDK 1.0.37 cloud-agent/cloud-api-client.
+		const requests: Array<{ method: string; path: string; query: Record<string, string> }> = [];
+		vi.stubGlobal("fetch", async (request: string | URL | Request, init?: RequestInit) => {
+			const url = new URL(request instanceof Request ? request.url : String(request));
+			if (url.pathname === "/auth/exchange_user_api_key") return new Response("", { status: 401 });
+			requests.push({ method: init?.method ?? "GET", path: url.pathname, query: Object.fromEntries(url.searchParams) });
+			if (url.pathname === `/v1/agents/${agentId}/runs`) {
+				return Response.json({
+					items: [{ id: runId, agentId, status: "RUNNING", createdAt: "2026-07-07T00:00:00Z" }],
+					nextCursor: "next-page",
+				});
+			}
+			if (url.pathname === `/v1/agents/${agentId}/runs/${runId}/cancel`) return new Response("", { status: 200 });
+			throw new Error(`Unexpected offline SDK request: ${url.pathname}`);
+		});
 
-		const cloudBundle = readdirSync(sdkDist, { withFileTypes: true })
-			.filter((entry) => entry.isFile() && entry.name.endsWith(".js"))
-			.map((entry) => readFileSync(join(sdkDist, entry.name), "utf8"))
-			.find((source) => source.includes("listCloudRuns"));
-		expect(cloudBundle).toBeDefined();
-		expect(cloudBundle).toMatch(/\.listRuns\(t,\{limit:e\.limit,cursor:e\.cursor\}\)/);
-		expect(cloudBundle).toMatch(/items:\w+\.items\.map\(\(t=>new \w+\(\w+,t\)\)\)/);
-
-		expect(listedRunId({ id: "run-00000000-0000-0000-0000-000000000001" } as ListedCloudRun)).toBe(
-			"run-00000000-0000-0000-0000-000000000001",
-		);
+		const { Agent } = await loadCursorSdk();
+		const result = await Agent.listRuns(agentId, {
+			runtime: "cloud", apiKey: "test-credential-not-real-list-runs", limit: 2, cursor: "current-page",
+		});
+		expect(result.nextCursor).toBe("next-page");
+		expect(result.items).toHaveLength(1);
+		const run = result.items[0]!;
+		expect(run).toMatchObject({ id: runId, agentId, status: "running" });
+		await run.cancel();
+		expect(run.status).toBe("cancelled");
+		expect(requests).toEqual([
+			{ method: "GET", path: `/v1/agents/${agentId}/runs`, query: { limit: "2", cursor: "current-page" } },
+			{ method: "POST", path: `/v1/agents/${agentId}/runs/${runId}/cancel`, query: {} },
+		]);
 	});
 });

@@ -61,32 +61,6 @@ describe("extension native Cursor tool replay", () => {
 		expect(canRenderCursorToolNatively("grep")).toBe(false);
 	});
 
-	it("registers native Cursor tool wrappers with the pi session cwd", async () => {
-		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
-		mockedDiscover.mockResolvedValueOnce([]);
-		const dir = mkdtempSync(join(tmpdir(), "pi-cursor-native-cwd-"));
-		try {
-			writeFileSync(join(dir, "session-file.txt"), "from session cwd\n");
-			const pi = createExtensionPi();
-			await extensionFactory(pi);
-			await pi.runSessionStart({ cwd: dir });
-
-			const readTool = getHarnessRegisteredTool(pi._tools, "read");
-			expect(readTool).toBeDefined();
-			const result = await readTool!.execute(
-				"ordinary-read",
-				{ path: "session-file.txt" },
-				undefined,
-				undefined,
-				createExtensionTestContext({ cwd: dir }),
-			);
-
-			expect(result.content).toEqual([{ type: "text", text: "from session cwd\n" }]);
-		} finally {
-			rmSync(dir, { recursive: true, force: true });
-		}
-	});
-
 	it("updates registered native Cursor tool wrappers to the latest pi session cwd", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		mockedDiscover.mockResolvedValueOnce([]);
@@ -98,6 +72,12 @@ describe("extension native Cursor tool replay", () => {
 			const pi = createExtensionPi();
 			await extensionFactory(pi);
 			await pi.runSessionStart({ cwd: firstDir });
+			const firstRead = getHarnessRegisteredTool(pi._tools, "read");
+			const firstResult = await firstRead.execute(
+				"ordinary-first-read", { path: "session-file.txt" }, undefined, undefined,
+				createExtensionTestContext({ cwd: firstDir }),
+			);
+			expect(firstResult.content).toEqual([{ type: "text", text: "from first cwd\n" }]);
 			await pi.runSessionStart({ cwd: secondDir });
 
 			const readTool = getHarnessRegisteredTool(pi._tools, "read");
@@ -246,30 +226,6 @@ describe("extension native Cursor tool replay", () => {
 		}
 	});
 
-	it("renders neutral cursor partial calls from activity metadata", async () => {
-		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
-		mockedDiscover.mockResolvedValueOnce([]);
-		const pi = createExtensionPi();
-		await extensionFactory(pi);
-		await pi.runSessionStart();
-		const theme = createRenderTheme();
-		const cursorTool = getHarnessRegisteredTool(pi._tools, "cursor");
-
-		const rendered = [
-			cursorTool.renderCall?.({ activityTitle: "Cursor plan", activitySummary: "2 items", totalCount: 2 }, theme, createRenderContext({ isPartial: true }))?.render(120).join("\n"),
-			cursorTool.renderCall?.({ activityTitle: "Cursor todos", activitySummary: "1/2 completed, 1 pending", totalCount: 2 }, theme, createRenderContext({ isPartial: true }))?.render(120).join("\n"),
-			cursorTool.renderCall?.({ activityTitle: "Cursor MCP", activitySummary: "external_search", toolName: "external_search" }, theme, createRenderContext({ isPartial: true }))?.render(120).join("\n"),
-		]
-			.filter((entry): entry is string => Boolean(entry))
-			.join("\n");
-
-		expect(rendered).toContain("Cursor plan 2 items");
-		expect(rendered).toContain("Cursor todos 1/2 completed, 1 pending");
-		expect(rendered).toContain("Cursor MCP external_search");
-		expect(rendered).not.toContain("Cursor activity");
-		expect(rendered).not.toContain("Cursor activity");
-	});
-
 	it("renders Cursor web replay cards summary-only until expanded", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		mockedDiscover.mockResolvedValueOnce([]);
@@ -386,6 +342,7 @@ describe("extension native Cursor tool replay", () => {
 		expect(rendered).toContain("write new.txt");
 		expect(rendered).toContain("write new.txt (1 line)");
 		expect(rendered).not.toContain("write new.txt (2 lines)");
+		expect(rendered).toContain("write new.txt 3 lines, 13 bytes");
 		expect(rendered).toContain("<toolDiffRemoved>-1 old line</toolDiffRemoved>");
 		expect(rendered).toContain("<toolDiffAdded>+1 new line</toolDiffAdded>");
 		expect(rendered).toContain("<toolOutput># Title</toolOutput>");
@@ -548,19 +505,6 @@ describe("extension native Cursor tool replay", () => {
 		expect(canRenderCursorToolNatively("edit")).toBe(false);
 		expect(canRenderCursorToolNatively("write")).toBe(false);
 		expect(pi.registerTool).toHaveBeenCalledTimes(2);
-	});
-
-	it("leaves ordinary pi edit rendering untouched on non-Cursor models", async () => {
-		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
-		mockedDiscover.mockResolvedValueOnce([]);
-		const pi = createExtensionPi();
-		await extensionFactory(pi);
-		await pi.runSessionStart({
-			model: makeHarnessModel("openai-codex", "openai-codex-responses", "gpt-5.5"),
-		});
-
-		const wrappedEdit = pi._tools.find((tool) => tool.name === "edit");
-		expect(wrappedEdit).toBeUndefined();
 		expect(pi._activeToolNames()).toEqual(["read", "bash", "edit", "write"]);
 	});
 

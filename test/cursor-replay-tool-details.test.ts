@@ -22,43 +22,6 @@ function renderReplayResult(details: unknown, text = "ok", isError = false): str
 }
 
 describe("cursor replay tool details contract", () => {
-	it("parses known nativeEdit, nativeWrite, activity, generateImage, and genericFallback detail variants", () => {
-		const edit = parseCursorReplayToolDetails({
-			variant: "nativeEdit",
-			path: "src/a.ts",
-			diffString: "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-old\n+new",
-			linesAdded: 1,
-		});
-		const write = parseCursorReplayToolDetails({
-			variant: "nativeWrite",
-			path: "out.txt",
-			linesCreated: 3,
-		});
-		const activity = parseCursorReplayToolDetails({
-			variant: "activity",
-			sourceToolName: "mcp",
-			title: "Cursor MCP",
-			summary: "git status",
-			expandedText: "line one",
-		});
-		const image = parseCursorReplayToolDetails({
-			variant: "generateImage",
-			imagePath: "/tmp/out.png",
-			summary: "saved /tmp/out.png",
-		});
-		const fallback = parseCursorReplayToolDetails({
-			variant: "genericFallback",
-			sourceToolName: "futureTool",
-			summary: "done",
-		});
-
-		expect(edit).toMatchObject({ variant: "nativeEdit" });
-		expect(write).toMatchObject({ variant: "nativeWrite" });
-		expect(activity).toMatchObject({ variant: "activity", sourceToolName: "mcp", title: "Cursor MCP" });
-		expect(image).toMatchObject({ variant: "generateImage" });
-		expect(fallback).toMatchObject({ variant: "genericFallback", sourceToolName: "futureTool" });
-	});
-
 	it("does not upgrade payloads without current replay variants", () => {
 		expect(parseCursorReplayToolDetails({ path: "src/a.ts" })).toBeUndefined();
 		expect(parseCursorReplayToolDetails({ variant: "activity", title: "Cursor MCP" })).toMatchObject({
@@ -134,46 +97,6 @@ describe("cursor replay tool details contract", () => {
 		expect(image).toMatchObject({ variant: "genericFallback", sourceToolName: "generateImage" });
 	});
 
-	it("renders nativeEdit replay through the typed edit renderer path", () => {
-		const rendered = renderReplayResult({
-			variant: "nativeEdit",
-			path: "src/example.ts",
-			diffString: "--- a/src/example.ts\n+++ b/src/example.ts\n@@ -1 +1 @@\n-old\n+new",
-			linesAdded: 1,
-		});
-		expect(rendered).toContain("edit");
-		expect(rendered).toContain("src/example.ts");
-		expect(rendered).toContain("added 1 line");
-	});
-
-	it("renders nativeWrite replay through the typed write renderer path", () => {
-		const rendered = renderReplayResult({
-			variant: "nativeWrite",
-			path: "notes.txt",
-			linesCreated: 2,
-			expandedText: "hello\nworld",
-		});
-		expect(rendered).toContain("write");
-		expect(rendered).toContain("notes.txt");
-		expect(rendered).toContain("2 lines");
-	});
-
-	it("produces typed generateImage details from the display spec producer", () => {
-		const display = buildCursorPiToolDisplayFromSpec({
-			rawName: "generateImage",
-			name: "generateImage",
-			args: { prompt: "a red circle" },
-			result: { status: "success", value: { filePath: "/tmp/generated.png" }, error: undefined },
-			options: { cwd: "/tmp", maxChars: 4000 },
-		});
-		const details = parseCursorReplayToolDetails(display.result.details);
-		expect(details).toMatchObject({
-			variant: "generateImage",
-			imagePath: "/tmp/generated.png",
-		});
-		expect(details).not.toHaveProperty("title");
-	});
-
 	it("renders generateImage producer details with the current visible title and path", () => {
 		const display = buildCursorPiToolDisplayFromSpec({
 			rawName: "generateImage",
@@ -183,6 +106,9 @@ describe("cursor replay tool details contract", () => {
 			options: { cwd: "/tmp", maxChars: 4000 },
 		});
 		const rendered = renderReplayResult(display.result.details, display.result.content[0]?.text ?? "");
+		const details = parseCursorReplayToolDetails(display.result.details);
+		expect(details).toMatchObject({ variant: "generateImage", imagePath: "/tmp/generated.png" });
+		expect(details).not.toHaveProperty("title");
 		expect(rendered).toContain(`${CURSOR_REPLAY_GENERATE_IMAGE_RESULT_TITLE} generated.png`);
 		expect(rendered).not.toContain("Cursor generateImage");
 	});

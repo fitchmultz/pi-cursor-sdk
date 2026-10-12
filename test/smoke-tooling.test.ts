@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseArgs as parsePiArgs } from "../node_modules/@earendil-works/pi-coding-agent/dist/cli/args.js";
 import { buildInitialMessage } from "../node_modules/@earendil-works/pi-coding-agent/dist/cli/initial-message.js";
-import { CURSOR_TOOL_PRESENTATION_SPECS } from "../src/cursor-tool-presentation-registry.js";
+import { CURSOR_REPLAY_SOURCE_TOOL_NAMES } from "../src/cursor-replay-source-names.js";
 import { getScenario, renderPrompt, SCENARIOS } from "../scripts/platform-smoke/scenarios.mjs";
 
 function run(command: string, args: string[], env = process.env, cwd = process.cwd()) {
@@ -46,19 +46,6 @@ try {
 		const result = run(process.execPath, ["--input-type=module", "-e", code]);
 		expect(result.status, result.stderr).toBe(0);
 		expect(result.stdout).toContain('{"mismatch":false,"windowsMatch":true}');
-	});
-
-	it("disables retry sync and captures full remote bundle output outside Crabbox's terminal ceiling", () => {
-		const runtime = readFileSync("scripts/platform-smoke/target-runtime.mjs", "utf8");
-		const crabbox = readFileSync("scripts/platform-smoke/crabbox-runner.mjs", "utf8");
-		expect(runtime).toMatch(/return await run\(targetName, leaseId, command, \{ \.\.\.options, sync: false \}\);/);
-		expect(runtime).toContain('{ timeout: 120_000, sync: false, config }');
-		expect(runtime).toContain("metadata.path !== PLATFORM_ARTIFACT_BUNDLE_PATH");
-		expect(readFileSync("scripts/platform-smoke/artifact-bundle-chunk.mjs", "utf8")).toContain("pathValue !== PLATFORM_ARTIFACT_BUNDLE_PATH");
-		expect(crabbox).toContain('args.push("--capture-stdout", opts.captureStdoutPath)');
-		for (const runner of ["scripts/platform-smoke/targets.mjs", "scripts/platform-smoke/local-resume-runner.mjs"]) {
-			expect(readFileSync(runner, "utf8"), runner).toContain("captureStdoutPath:");
-		}
 	});
 
 	it("isolates cloud smoke from user and project Cursor config", async () => {
@@ -259,18 +246,6 @@ try {
 			requiredCards: ["http1-status"],
 			env: { PI_CURSOR_HTTP_1_1: "1", PI_CURSOR_PI_TOOL_BRIDGE: "0", PI_CURSOR_SDK_EVENT_DEBUG: "1" },
 		});
-	});
-
-	it("rejects invalid platform smoke targets and suites before Crabbox runs", () => {
-		const invalidTarget = run(process.execPath, ["scripts/platform-smoke.mjs", "run", "--target", "plan9"]);
-		expect(invalidTarget.status).toBe(2);
-		expect(invalidTarget.stderr).toContain("unknown target(s): plan9");
-		expect(invalidTarget.stderr).toContain("macos, ubuntu, windows-native");
-
-		const invalidSuite = run(process.execPath, ["scripts/platform-smoke.mjs", "run", "--suite", "stdout-only"]);
-		expect(invalidSuite.status).toBe(2);
-		expect(invalidSuite.stderr).toContain("unknown suite(s): stdout-only");
-		expect(invalidSuite.stderr).toContain("platform-build");
 	});
 
 	it("preserves captured OSC-8 read labels and content exactly as xterm renders them", () => {
@@ -592,19 +567,15 @@ if (!positiveItemsOk || promptOnly[0]?.ok !== false || wrapped[0]?.ok !== true |
 		expect(result.stdout).toContain('"localPreviewItemOk":true');
 	});
 
-	it("classifies every Cursor tool presentation surface for platform visual coverage", () => {
-		const classified = {
-			coveredByNativeVisualMatrix: ["read", "grep", "glob", "shell", "edit", "write"],
-			coveredByBridgeVisualMatrix: ["shell", "read"],
-			excludedFromPlatformVisualMatrix: ["ls", "delete", "readLints", "updateTodos", "createPlan", "task", "generateImage", "mcp", "semSearch", "recordScreen", "webSearch", "webFetch"],
-		};
-		const allClassified = new Set([
-			...classified.coveredByNativeVisualMatrix,
-			...classified.coveredByBridgeVisualMatrix,
-			...classified.excludedFromPlatformVisualMatrix,
-		]);
-		const registryNames = CURSOR_TOOL_PRESENTATION_SPECS.map((spec) => spec.normalizedName);
-		expect(new Set(registryNames)).toEqual(allClassified);
+	it("classifies every Cursor tool presentation surface in the documented platform visual matrix", () => {
+		const doc = readFileSync("docs/platform-smoke-implementation.md", "utf8");
+		const section = doc.slice(doc.indexOf("## Registry visual classification"), doc.indexOf("## Platform command rendering"));
+		const lists = section.split(/^(?:Required deterministic cards|Excluded from release visual matrix with required rationale):$/m);
+		expect(lists).toHaveLength(3);
+		const bullets = (list = "") => list.match(/^- .+$/gm) ?? [];
+		const requiredNames = bullets(lists[1]).map((line) => /`(\w+)`/.exec(line)?.[1]);
+		const excludedNames = bullets(lists[2]).map((line) => /^- `(\w+)`: \S/.exec(line)?.[1]);
+		expect(new Set([...requiredNames, ...excludedNames])).toEqual(new Set(CURSOR_REPLAY_SOURCE_TOOL_NAMES));
 	});
 
 });

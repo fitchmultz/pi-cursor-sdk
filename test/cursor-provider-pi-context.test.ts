@@ -136,6 +136,7 @@ describe("installed Pi provider context boundary", () => {
 	});
 
 	it("keeps the empty request snapshot distinct from the bridge's registry-owned surface", async () => {
+		process.env.PI_CURSOR_TOOL_MANIFEST = "1";
 		const sdkSend = mockSend();
 		registerBridgeForProviderTest({ active: [tool.name], tools: [createTestToolInfo(tool.name, tool.parameters)] });
 		const { received, send } = await boundary();
@@ -144,7 +145,12 @@ describe("installed Pi provider context boundary", () => {
 		// The bridge intentionally uses pi.getActiveTools/getAllTools, not the
 		// provider replay allowlist (the established stock-Pi contract).
 		expect(mockedCreate.mock.calls[0][0]?.mcpServers?.pi_tools).toBeDefined();
-		expect(sdkSend.mock.calls[0][0].text).toContain("For exposed pi bridge tools");
+		const text = sdkSend.mock.calls[0][0].text;
+		expect(text).toContain("For exposed pi bridge tools");
+		expect(text).toContain("prefer pi__mcp for MCP work and pi__subagent for delegation");
+		expect(text).not.toContain("Use pi__cursor_ask_question");
+		expect(text).toContain("Pi bridge: call exposed pi__* MCP names");
+		expect(text).toContain("pi__audit_tool");
 	});
 
 	it("preserves bridge filters and the callable manifest at the provider boundary", async () => {

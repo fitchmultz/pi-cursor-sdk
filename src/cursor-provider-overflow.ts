@@ -1,5 +1,4 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { CURSOR_PROVIDER } from "./cursor-model.js";
 
 /**
@@ -15,7 +14,7 @@ import { CURSOR_PROVIDER } from "./cursor-model.js";
  *
  * See pi `docs/custom-provider.md` -> "Context Overflow Errors".
  */
-export const CURSOR_OVERFLOW_MARKER = "context_length_exceeded";
+const CURSOR_OVERFLOW_MARKER = "context_length_exceeded";
 
 /**
  * Context-overflow phrases. These overlap pi's own `OVERFLOW_PATTERNS` so the
@@ -43,9 +42,9 @@ const CURSOR_THROTTLE_PATTERN = /too many requests|rate.?limit|throttl|retry.?af
  * Map a finalized Cursor assistant `errorMessage` to pi's overflow form.
  * Returns `undefined` when the message is not a Cursor context-overflow failure.
  *
- * Pure and idempotent so it is safe to call repeatedly and unit-test in isolation.
+ * Idempotent so repeated message delivery does not add another prefix.
  */
-export function normalizeCursorOverflowErrorMessage(errorMessage: string | undefined): string | undefined {
+function normalizeCursorOverflowErrorMessage(errorMessage: string | undefined): string | undefined {
 	const message = errorMessage?.trim();
 	if (!message) return undefined;
 	// Idempotent: never double-prefix an already-normalized message.
@@ -55,24 +54,6 @@ export function normalizeCursorOverflowErrorMessage(errorMessage: string | undef
 		return `${CURSOR_OVERFLOW_MARKER}: ${message}`;
 	}
 	return undefined;
-}
-
-/**
- * Rewrite a finalized assistant message into pi's overflow form when it is a
- * Cursor context-overflow failure. Returns the replacement message (for the
- * `message_end` result) or `undefined` to leave it unchanged.
- *
- * `isCursorProvider` carries the provider scoping decision out of the handler so
- * the full logic is unit-testable without a pi event harness.
- */
-export function rewriteCursorOverflowAssistantMessage(
-	message: AssistantMessage,
-	isCursorProvider: boolean,
-): AssistantMessage | undefined {
-	if (!isCursorProvider || message.stopReason !== "error") return undefined;
-	const rewritten = normalizeCursorOverflowErrorMessage(message.errorMessage);
-	if (!rewritten) return undefined;
-	return { ...message, errorMessage: rewritten };
 }
 
 export type CursorOverflowExtensionApi = Pick<ExtensionAPI, "on">;
@@ -89,8 +70,9 @@ export function registerCursorOverflowNormalization(pi: CursorOverflowExtensionA
 		const message = event.message;
 		if (message.role !== "assistant") return undefined;
 		const isCursorProvider = message.provider === CURSOR_PROVIDER || ctx.model?.provider === CURSOR_PROVIDER;
-		const rewritten = rewriteCursorOverflowAssistantMessage(message, isCursorProvider);
+		if (!isCursorProvider || message.stopReason !== "error") return undefined;
+		const rewritten = normalizeCursorOverflowErrorMessage(message.errorMessage);
 		if (!rewritten) return undefined;
-		return { message: rewritten };
+		return { message: { ...message, errorMessage: rewritten } };
 	});
 }

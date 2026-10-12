@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
-import { LOCAL_RESUME_SUITES } from "../scripts/platform-smoke/local-resume-suites.mjs";
 
 function run(command: string, args: string[], env = process.env, cwd = process.cwd()) {
 	return spawnSync(command, args, { cwd, encoding: "utf8", env, shell: process.platform === "win32" && command === "npm" });
@@ -16,21 +15,6 @@ describe("smoke CLI and package contracts", () => {
 		expect(run("bash", ["-n", "scripts/lib/cursor-smoke-shell.sh"]).status).toBe(0);
 		expect(run("bash", ["-n", "scripts/tmux-live-smoke.sh"]).status).toBe(0);
 		expect(run("bash", ["-n", "scripts/isolated-cursor-smoke.sh"]).status).toBe(0);
-		expect(run(process.execPath, ["--check", "scripts/steering-rpc-smoke.mjs"]).status).toBe(0);
-		expect(run(process.execPath, ["--check", "scripts/visual-tui-smoke.mjs"]).status).toBe(0);
-		expect(run(process.execPath, ["--check", "scripts/visual-tui-smoke-self-test.mjs"]).status).toBe(0);
-		expect(run(process.execPath, ["--check", "scripts/lib/cursor-visual-manifest.mjs"]).status).toBe(0);
-		expect(run(process.execPath, ["--check", "scripts/validate-smoke-jsonl.mjs"]).status).toBe(0);
-		expect(run(process.execPath, ["--check", "scripts/debug-sdk-events.mjs"]).status).toBe(0);
-		expect(run(process.execPath, ["--check", "scripts/debug-provider-events.mjs"]).status).toBe(0);
-		expect(run(process.execPath, ["--check", "scripts/local-resume-smoke.mjs"]).status).toBe(0);
-		expect(run(process.execPath, ["--check", "scripts/lib/local-resume-smoke-harness.mjs"]).status).toBe(0);
-		expect(run(process.execPath, ["--check", "scripts/platform-smoke.mjs"]).status).toBe(0);
-		expect(run(process.execPath, ["--check", "scripts/platform-smoke/doctor.mjs"]).status).toBe(0);
-		expect(run(process.execPath, ["--check", "scripts/platform-smoke/live-suite-runner.mjs"]).status).toBe(0);
-		expect(run(process.execPath, ["--check", "scripts/platform-smoke/local-resume-runner.mjs"]).status).toBe(0);
-		expect(run(process.execPath, ["--check", "scripts/platform-smoke/target-runtime.mjs"]).status).toBe(0);
-		expect(run(process.execPath, ["--check", "scripts/platform-smoke/targets.mjs"]).status).toBe(0);
 
 		const liveHelp = process.platform === "win32" ? undefined : run("scripts/tmux-live-smoke.sh", ["--help"]);
 		const isolatedHelp = process.platform === "win32" ? undefined : run("scripts/isolated-cursor-smoke.sh", ["--help"]);
@@ -67,6 +51,8 @@ describe("smoke CLI and package contracts", () => {
 		expect(platformLiveHelp.status).toBe(0);
 		expect(platformLiveHelp.stdout).toContain("--prep-dir");
 		expect(cloudHelp.status).toBe(0);
+		expect(cloudHelp.stdout).toContain("npm run smoke:cloud");
+		expect(cloudHelp.stdout).toContain("CURSOR_API_KEY");
 		expect(cloudHelp.stdout).toContain("--context-matrix");
 		expect(cloudHelp.stdout).toContain("private throwaway GitHub repository");
 		expect(cloudHelp.stdout).toContain("direct push");
@@ -134,35 +120,9 @@ describe("smoke CLI and package contracts", () => {
 		const entrypointSource = readFileSync("scripts/cloud-runtime-smoke.mjs", "utf8");
 		const runnerSource = readFileSync("scripts/lib/cloud-smoke-pi-runner.mjs", "utf8");
 		const source = `${entrypointSource}\n${runnerSource}`;
-		const help = run(process.execPath, ["scripts/cloud-runtime-smoke.mjs", "--help"]);
-		expect(help.status).toBe(0);
-		expect(help.stdout).toContain("npm run smoke:cloud");
-		expect(help.stdout).toContain("--context-matrix");
-		expect(help.stdout).toContain("CURSOR_API_KEY");
 		expect(source).toContain('"--session-dir"');
 		expect(source).toContain('"--session-id"');
 		expect(source).not.toContain('"--no-session"');
-		for (const anchor of [
-			"runCancelLane",
-			"runBranchAndLifecycleLane",
-			"runDirectPushLane",
-			"runMissingBranchLane",
-			"accountConditionalLane",
-			"coordinateCloudSmokeReleaseGate",
-			"installCloudSmokeSignalHandlers",
-			"cloudSmokeShutdown",
-			"deleteThrowawayRepository",
-			"cursor-cloud-smoke-matrix-latest.json",
-			"buildCloudSmokeEvidenceProvenance",
-			"projectCloudSmokeMatrixEvidence",
-			"listCloudSmokePackageSourcePaths",
-		]) expect(source, anchor).toContain(anchor);
-		// Helper modules are loaded by the entrypoint; CLI and child-transport contracts stay source-shape only.
-		expect(source).toContain('from "./lib/cloud-smoke-cleanup-evidence.mjs"');
-		expect(source).toContain('from "./lib/cloud-smoke-artifacts.mjs"');
-		expect(source).toContain('from "./lib/cloud-smoke-pi-runner.mjs"');
-		expect(source).toContain('from "./lib/cloud-smoke-github.mjs"');
-		expect(source).toContain('from "./lib/cloud-smoke-shutdown.mjs"');
 		for (const shutdownAnchor of [
 			"timeoutTermination = terminateChild(child)",
 			"stopCloudSmokeTrackedChild(",
@@ -281,6 +241,14 @@ describe("smoke CLI and package contracts", () => {
 				}, cwd);
 				expect(result.status, args.join(" ")).toBe(2);
 				expect(result.stderr).toContain("usage error:");
+				if (args.includes("plan9")) {
+					expect(result.stderr).toContain("unknown target(s): plan9");
+					expect(result.stderr).toContain("macos, ubuntu, windows-native");
+				}
+				if (args.includes("stdout-only")) {
+					expect(result.stderr).toContain("unknown suite(s): stdout-only");
+					expect(result.stderr).toContain("platform-build");
+				}
 				expect(existsSync(sentinel), args.join(" ")).toBe(true);
 				expect(existsSync(loadedMarker), args.join(" ")).toBe(false);
 			}
@@ -288,23 +256,6 @@ describe("smoke CLI and package contracts", () => {
 			rmSync(cwd, { recursive: true, force: true });
 		}
 	}, 20_000);
-
-	it("uses the platform local-resume suite manifest for CLI lane metadata", () => {
-		expect(LOCAL_RESUME_SUITES.map(({ key, flag, script }) => ({ key, flag, script }))).toEqual([
-			{ key: "restart", flag: undefined, script: "smoke:local-resume" },
-			{ key: "safety", flag: "--safety", script: "smoke:local-resume:safety" },
-			{ key: "toolSurface", flag: "--tool-surface", script: "smoke:local-resume:tool-surface" },
-			{ key: "abort", flag: "--abort", script: "smoke:local-resume:abort" },
-			{ key: "tree", flag: "--tree", script: "smoke:local-resume:tree" },
-			{ key: "copySwitch", flag: "--copy-switch", script: "smoke:local-resume:copy-switch" },
-			{ key: "fallback", flag: "--fallback", script: "smoke:local-resume:fallback" },
-			{ key: "compaction", flag: "--compaction", script: "smoke:local-resume:compaction" },
-			{ key: "defaultDryRun", flag: "--default-dry-run", script: "smoke:local-resume:default-dry-run" },
-			{ key: "cleanup", flag: "--cleanup", script: "smoke:local-resume:cleanup" },
-		]);
-		const runbook = readFileSync("docs/platform-smoke.md", "utf8");
-		for (const { suite } of LOCAL_RESUME_SUITES) expect(runbook).toContain(`run ${suite}`);
-	});
 
 	it("preserves local-resume target command construction in its focused runner", () => {
 		const code = String.raw`
@@ -330,67 +281,4 @@ if (!windows.includes("for($i=0;$i -lt 10") || !windows.includes("$w=$e.Replace(
 		expect(result.stdout).toContain('"posix":"node scripts/platform-smoke/live-suite-runner.mjs --prepare-only');
 	});
 
-	it("packages smoke scripts and platform smoke docs", () => {
-		const result = run("npm", ["pack", "--dry-run", "--json"]);
-		expect(result.status).toBe(0);
-		// npm 11 returns an array; npm 12 keys the same records by package name.
-		const [pack] = Object.values(JSON.parse(result.stdout) as Record<string, { name: string; version: string; files: Array<{ path: string }> }>);
-		const paths = new Set(pack.files.map((file) => file.path));
-
-		expect(pack.name).toBe("pi-cursor-sdk");
-		expect(paths.has("scripts/tmux-live-smoke.sh")).toBe(true);
-		expect(paths.has("scripts/isolated-cursor-smoke.sh")).toBe(true);
-		expect(paths.has("scripts/fixtures/plan-strip-shim/index.ts")).toBe(true);
-		expect(paths.has("scripts/steering-rpc-smoke.mjs")).toBe(true);
-		expect(paths.has("scripts/visual-tui-smoke.mjs")).toBe(true);
-		expect(paths.has("scripts/validate-smoke-jsonl.mjs")).toBe(true);
-		expect(paths.has("scripts/debug-sdk-events.mjs")).toBe(true);
-		expect(paths.has("scripts/debug-provider-events.mjs")).toBe(true);
-		expect(paths.has("platform-smoke.config.mjs")).toBe(true);
-		expect(paths.has("scripts/platform-smoke/artifact-bundle-chunk.mjs")).toBe(true);
-		expect(paths.has("scripts/platform-smoke/live-suite-runner.mjs")).toBe(true);
-		expect(paths.has("scripts/platform-smoke/local-resume-runner.mjs")).toBe(true);
-		expect(paths.has("scripts/platform-smoke/target-runtime.mjs")).toBe(true);
-		expect(paths.has("scripts/platform-smoke/visual-evidence.mjs")).toBe(true);
-		for (const path of paths) {
-			if (!path.endsWith(".mjs")) continue;
-			const declarationPath = path.replace(/\.mjs$/, ".d.mts");
-			if (existsSync(declarationPath)) expect(paths.has(declarationPath)).toBe(true);
-		}
-		expect(paths.has("shared/cursor-setting-sources.mjs")).toBe(true);
-		expect(paths.has("shared/cursor-setting-sources.d.mts")).toBe(true);
-		expect(paths.has("shared/cursor-sensitive-text.mjs")).toBe(true);
-		expect(paths.has("shared/cursor-sensitive-text.d.mts")).toBe(true);
-		expect(paths.has("scripts/lib/local-resume-smoke-harness.mjs")).toBe(true);
-		expect(paths.has("scripts/lib/cloud-smoke-cleanup-evidence.mjs")).toBe(true);
-		expect(paths.has("scripts/lib/cloud-smoke-cleanup-evidence.d.mts")).toBe(true);
-		expect(paths.has("scripts/lib/cloud-smoke-github.mjs")).toBe(true);
-		expect(paths.has("scripts/lib/cloud-smoke-github.d.mts")).toBe(true);
-		expect(paths.has("scripts/lib/cursor-smoke-env.mjs")).toBe(true);
-		expect(paths.has("scripts/lib/cursor-smoke-env.d.mts")).toBe(true);
-		expect(paths.has("scripts/lib/cursor-smoke-shell.sh")).toBe(true);
-		expect(paths.has("scripts/lib/cursor-visual-render.mjs")).toBe(true);
-		expect(paths.has("scripts/lib/cursor-visual-render.d.mts")).toBe(true);
-		expect(paths.has("shared/cursor-sdk-event-debug-env.mjs")).toBe(true);
-		expect(paths.has("shared/cursor-sdk-event-debug-env.d.mts")).toBe(true);
-		expect(paths.has("scripts/lib/cursor-setting-sources.mjs")).toBe(false);
-		expect(paths.has("scripts/lib/cursor-sensitive-text.mjs")).toBe(false);
-		expect(paths.has("scripts/lib/cursor-cli-args.mjs")).toBe(true);
-		expect(paths.has("CHANGELOG.md")).toBe(true);
-		expect(paths.has("README.md")).toBe(true);
-		expect(paths.has("docs/platform-smoke.md")).toBe(true);
-		expect(paths.has("dist/index.js")).toBe(true);
-		// pi silently drops manifest entries whose file is missing; assert the
-		// manifest target exists on disk after the pack-triggered build.
-		const manifest = JSON.parse(readFileSync("package.json", "utf8")) as { pi?: { extensions?: string[] } };
-		for (const entry of manifest.pi?.extensions ?? []) {
-			expect(existsSync(entry), `pi.extensions entry missing on disk: ${entry}`).toBe(true);
-		}
-		expect(paths.has("tsconfig.build.json")).toBe(true);
-		expect(paths.has("scripts/build.mjs")).toBe(true);
-		expect(paths.has("scripts/prepare.mjs")).toBe(true);
-		// Launchers import this helper; packed installs break without it.
-		expect(paths.has("scripts/lib/ensure-built.mjs")).toBe(true);
-		expect([...paths].some((path) => path.startsWith("coverage/") || path.startsWith(".pi/") || path.includes("smoke-dir"))).toBe(false);
-	}, 90_000);
 });

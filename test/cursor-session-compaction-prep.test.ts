@@ -15,31 +15,9 @@ import { createBridgePiHarness, createTestToolInfo, getCursorPiBridgeMcpUrl } fr
 describe("prepareCursorSessionForCompaction", () => {
 	beforeEach(resetCursorProviderTestState);
 
-	it("disposes the scoped pooled session agent", async () => {
-		const mockDispose = vi.fn().mockResolvedValue(undefined);
-		const createAgent = vi.fn().mockResolvedValue({
-			agentId: "agent-1",
-			[Symbol.asyncDispose]: mockDispose,
-		});
-
-		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/test.jsonl");
-		const scopeKey = "/tmp/sessions/test.jsonl";
-		await acquireSessionCursorAgent({
-			apiKey: "test-key",
-			agentMode: "agent" as const,
-			cwd: "/tmp/project",
-			modelSelection: { id: "composer-2.5" },
-			createAgent,
-		});
-
-		expect(sessionAgentTestUtils.sessionAgentsByScope.has(scopeKey)).toBe(true);
-		await prepareCursorSessionForCompaction(scopeKey);
-		expect(sessionAgentTestUtils.sessionAgentsByScope.has(scopeKey)).toBe(false);
-		expect(mockDispose).toHaveBeenCalledTimes(1);
-	});
-
 	it("releases scoped live runs before disposing the pooled agent", async () => {
-		const mockDispose = vi.fn().mockResolvedValue(undefined);
+		const cleanupOrder: string[] = [];
+		const mockDispose = vi.fn(async () => { cleanupOrder.push("dispose"); });
 		const agent = {
 			agentId: "agent-1",
 			send: vi.fn(),
@@ -53,15 +31,16 @@ describe("prepareCursorSessionForCompaction", () => {
 		const bridge = registerCursorPiToolBridge(createBridgePiHarness({
 			active: ["slow_tool"], tools: [createTestToolInfo("slow_tool", Type.Object({}), "Slow tool")],
 		}));
-		const lease = await acquireSessionCursorAgent({
+		const acquireParams = {
 			apiKey: "test-key",
 			agentMode: "agent" as const,
 			cwd: "/tmp/project",
 			modelSelection: { id: "composer-2.5" },
 			createAgent,
 			bridge,
-			onBridgeToolRequest: request => requests.push(request),
-		});
+			onBridgeToolRequest: (request: import("../src/cursor-pi-tool-bridge.js").CursorPiBridgeToolRequest) => requests.push(request),
+		};
+		const lease = await acquireSessionCursorAgent(acquireParams);
 		const bridgeRun = lease.bridgeRun!;
 		const liveRun = cursorLiveRuns.start({
 			id: "cursor-replay-test",
@@ -71,7 +50,7 @@ describe("prepareCursorSessionForCompaction", () => {
 			sessionAgentScopeKey: scopeKey,
 			promptInputTokens: 0,
 		});
-		const sdkCancel = vi.fn().mockResolvedValue(undefined);
+		const sdkCancel = vi.fn(async () => { cleanupOrder.push("cancel"); });
 		cursorLiveRuns.attachSdkRun(liveRun, { cancel: sdkCancel });
 		const client = new Client({ name: "compaction-pending-bridge", version: "1" });
 		const transport = new StreamableHTTPClientTransport(new URL(getCursorPiBridgeMcpUrl(bridgeRun)));
@@ -90,6 +69,13 @@ describe("prepareCursorSessionForCompaction", () => {
 			expect(sessionAgentTestUtils.sessionAgentsByScope.has(scopeKey)).toBe(false);
 			expect(sdkCancel).toHaveBeenCalledOnce();
 			expect(mockDispose).toHaveBeenCalledTimes(1);
+			expect(cleanupOrder).toEqual(["cancel", "dispose"]);
+
+			await acquireSessionCursorAgent(acquireParams);
+			expect(sessionAgentTestUtils.sessionAgentsByScope.has(scopeKey)).toBe(true);
+			await prepareCursorSessionForCompaction(scopeKey);
+			expect(sessionAgentTestUtils.sessionAgentsByScope.has(scopeKey)).toBe(false);
+			expect(mockDispose).toHaveBeenCalledTimes(2);
 		} finally {
 			await client.close();
 			await transport.close();

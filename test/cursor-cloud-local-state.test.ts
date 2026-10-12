@@ -1,9 +1,8 @@
-import { appendFileSync, chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, copyFileSync, cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { devNull, tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
-	__testUtils,
 	inspectCursorCloudLocalState,
 	normalizeCursorCloudStartingRef,
 	runCursorCloudGit,
@@ -12,14 +11,31 @@ import {
 } from "../src/cursor-cloud-local-state.js";
 import { preflightCursorCloudRuntime } from "../src/cursor-cloud-options.js";
 import { resolveCursorSdkConfig } from "../src/cursor-config.js";
-import { initTrackedGitRepo as initTrackedRepo, runGit as git } from "./helpers/git-repo.js";
+import { initTrackedGitRepo, runGit as git } from "./helpers/git-repo.js";
 
 describe("Cursor cloud local state", () => {
+	const defaultRemote = "https://github.com/example/repo.git";
+	let template: string;
 	let root: string;
 	let cleanHome: string;
 	let cleanXdgConfigHome: string;
 	let previousHome: string | undefined;
 	let previousXdgConfigHome: string | undefined;
+
+	beforeAll(() => {
+		template = mkdtempSync(join(tmpdir(), "pi-cursor-cloud-local-state-template-"));
+		initTrackedGitRepo(template);
+	});
+
+	afterAll(() => {
+		rmSync(template, { recursive: true, force: true });
+	});
+
+	function initTrackedRepo(cwd: string, remoteUrl = defaultRemote): void {
+		// Each case gets independent Git metadata; real Git still owns every probe.
+		cpSync(template, cwd, { recursive: true });
+		if (remoteUrl !== defaultRemote) git(cwd, ["remote", "set-url", "origin", remoteUrl]);
+	}
 
 	beforeEach(() => {
 		root = mkdtempSync(join(tmpdir(), "pi-cursor-cloud-local-state-"));
@@ -71,9 +87,19 @@ describe("Cursor cloud local state", () => {
 		expect(runCursorCloudGit(root, ["cat-file", "blob", oid])?.length).toBe(2 * 1024 * 1024);
 	});
 
-	it("rejects crafted refspecs whose wildcard prefix and suffix overlap", () => {
-		expect(__testUtils.sourceForDestination("+refs/heads/*:ab*bc", "abc")).toBeUndefined();
-		expect(__testUtils.sourceForDestination("+refs/heads/*:ab*bc", "abXbc")).toBe("refs/heads/X");
+	it.each([
+		["overlapping", "+refs/heads/*main:refs/remotes/orig*gin/main", "unknown"],
+		["non-overlapping", "+refs/heads/*main:refs/remotes/ori*gin/main", "contains_head"],
+	] as const)("checks %s wildcard prefix and suffix against the tracking ref", (_label, refspec, comparison) => {
+		initTrackedRepo(root);
+		git(root, ["config", "--replace-all", "remote.origin.fetch", refspec]);
+
+		expect(inspectCursorCloudLocalState(root, { repo: defaultRemote, branch: "main" })).toMatchObject({
+			insideGitRepo: true,
+			dirty: false,
+			comparison,
+			...(comparison === "unknown" ? { reasons: [{ code: "unverified_target" }] } : {}),
+		});
 	});
 
 	it("reports unborn HEAD and dirty state together in one preflight message", () => {
@@ -890,22 +916,15 @@ describe("Cursor cloud local state", () => {
 		);
 	});
 
-	it("fails closed when repository discovery fails in a bare repository", () => {
-		git(root, ["init", "--bare"]);
-		expect(inspectCursorCloudLocalState(root, {}, () => undefined)).toEqual({
+	it.each(["bare", "worktree"])("fails closed when Git is available but cannot discover %s metadata", (kind) => {
+		if (kind === "bare") git(root, ["init", "--bare"]);
+		else mkdirSync(join(root, ".git"));
+		expect(inspectCursorCloudLocalState(root, {}, (cwd, args) =>
+			args[0] === "--version" ? runCursorCloudGit(cwd, args) : undefined)).toEqual({
 			insideGitRepo: "unknown",
 			dirty: "unknown",
 			comparison: "unknown",
 			reasons: [{ code: "repository_detection_failed" }],
-		});
-	});
-
-	it("fails closed when .git metadata exists but repository discovery fails", () => {
-		mkdirSync(join(root, ".git"));
-		expect(inspectCursorCloudLocalState(root, {}, () => undefined)).toMatchObject({
-			insideGitRepo: "unknown",
-			dirty: "unknown",
-			comparison: "unknown",
 		});
 	});
 });

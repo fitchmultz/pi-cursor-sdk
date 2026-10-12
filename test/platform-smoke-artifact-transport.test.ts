@@ -860,12 +860,14 @@ while (Date.now() < end) {
 			expect(readFileSync(outsideSentinel, "utf8")).toBe("outside-writer-sentinel");
 			const compressed = readFileSync(resolve(metadata.path));
 			const offsets: number[] = [];
+			const runOptions: unknown[] = [];
 			const chunkRun = (mutate?: (chunk: { offset: number; total: number; bytes: number; contentBase64: string }) => void) =>
-				async (_target: string, _lease: string, command: string[]) => {
+				async (_target: string, _lease: string, command: string[], options: unknown) => {
 					const option = (name: string) => command[command.indexOf(name) + 1]!;
 					const offset = Number(option("--offset"));
 					const length = Number(option("--length"));
 					offsets.push(offset);
+					runOptions.push(options);
 					const content = compressed.subarray(offset, offset + length);
 					const chunk = { offset, total: compressed.length, bytes: content.length, contentBase64: content.toString("base64") };
 					mutate?.(chunk);
@@ -874,6 +876,7 @@ while (Date.now() < end) {
 			const fetched = await fetchPlatformArtifactBundle("macos", "lease", marker, {}, chunkRun());
 			expect(fetched.ok).toBe(true);
 			expect(offsets).toEqual(Array.from({ length: Math.ceil(compressed.length / (32 * 1024)) }, (_, index) => index * 32 * 1024));
+			expect(runOptions).toEqual(offsets.map(() => ({ timeout: 120_000, sync: false, config: {} })));
 			expect(extractPlatformArtifactBundle(out, fetched.stdout).ok).toBe(process.platform !== "win32");
 			if (process.platform !== "win32") expect(readFileSync(join(out, "artifacts", "terminal.ansi"), "utf8")).toBe(terminal);
 

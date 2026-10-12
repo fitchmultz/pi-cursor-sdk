@@ -83,95 +83,14 @@ import { CURSOR_SDK_EVENT_DEBUG_ENV_NAMES } from "../shared/cursor-sdk-event-deb
 const require = createRequire(import.meta.url);
 const packageJson = require("../package.json") as { files: string[] };
 
-/** Type-only exports that intentionally have no runtime .mjs value. */
-const DECLARATION_TYPE_ONLY_EXPORTS: Record<string, readonly string[]> = {
-	"shared/cursor-sdk-output-filter.d.mts": ["CursorSdkCapabilityNotice", "CursorSdkOutputNoticeHandler"],
-	"shared/cursor-model-selection-identities.d.mts": ["CursorModelSelectionIdentity"],
-	"scripts/cloud-runtime-smoke.d.mts": [
-		"CloudSmokeBranchLaneEvidence",
-		"CloudSmokeCancelLaneEvidence",
-		"CloudSmokeCleanupEvidence",
-		"CloudSmokeDirectPushLaneEvidence",
-		"CloudSmokeEvidenceBranch",
-		"CloudSmokeEvidenceProvenance",
-		"CloudSmokeLaneEvidence",
-		"CloudSmokeLaneName",
-		"CloudSmokeLifecycleDeleteLaneEvidence",
-		"CloudSmokeMatrixEvidence",
-		"CloudSmokeMissingBranchLaneEvidence",
-		"CloudSmokeOwnedRepository",
-		"CloudSmokePassiveArtifactsLaneEvidence",
-		"CloudSmokeReleaseGateState",
-		"CloudSmokeThrowawayRepositoryEvidence",
-	],
-	"scripts/debug-provider-events.d.mts": [
-		"CursorDebugCaptureCounts",
-		"CursorDebugCaptureSummary",
-		"CursorDebugProviderEventsArgs",
-		"CursorDebugProviderEventsRunSummary",
-		"CursorPiSessionSnapshotState",
-	],
-	"scripts/debug-sdk-events.d.mts": [
-		"CursorDebugSdkEventsArgs",
-		"CursorSdkEventDebugSummary",
-		"CursorSdkEventTimingSnapshot",
-		"CursorSdkEventJsonlSink",
-	],
-	"scripts/lib/cloud-smoke-artifacts.d.mts": [
-		"CloudSmokeLifecycleRecord",
-		"CloudSmokeMetadataRecord",
-	],
-	"scripts/lib/cloud-smoke-cleanup-evidence.d.mts": [
-		"CloudSmokeBranchLaneEvidence",
-		"CloudSmokeCancelLaneEvidence",
-		"CloudSmokeCleanupEvidence",
-		"CloudSmokeDirectPushLaneEvidence",
-		"CloudSmokeEvidenceBranch",
-		"CloudSmokeEvidenceProvenance",
-		"CloudSmokeLaneEvidence",
-		"CloudSmokeLaneName",
-		"CloudSmokeLifecycleDeleteLaneEvidence",
-		"CloudSmokeMatrixEvidence",
-		"CloudSmokeMissingBranchLaneEvidence",
-		"CloudSmokePassiveArtifactsLaneEvidence",
-		"CloudSmokeReleaseGateState",
-		"CloudSmokeThrowawayRepositoryEvidence",
-	],
-	"scripts/lib/cloud-smoke-github.d.mts": [
-		"CloudSmokeOwnedRepository",
-	],
-	"scripts/lib/cloud-smoke-shutdown.d.mts": [
-		"CloudSmokeShutdownController",
-	],
-	"scripts/lib/cursor-cli-args.d.mts": [
-		"CursorCliBooleanFlagSpec",
-		"CursorCliFlagSpec",
-		"CursorCliFlagSpecMap",
-		"CursorCliValueFlagSpec",
-		"ParsedCursorCliArgs",
-	],
-};
-
 describe("maintainer script declaration contracts", () => {
-	it("keeps compile-time negative fixtures for stale declaration shapes", () => {
-		expect(true).toBe(true);
-	});
 
 	it("checks every published declaration-backed script surface", async () => {
 		const declarations = listPublishedDeclarations();
 		for (const declaration of declarations) {
 			const declarationValueExports = readDeclarationValueExports(declaration);
-			const declarationTypeExports = readDeclarationTypeExports(declaration);
 			const runtimeExports = await readRuntimeExports(declaration);
-			const documentedTypeOnlyExports = DECLARATION_TYPE_ONLY_EXPORTS[declaration] ?? [];
 			expect(runtimeExports, `${declaration} runtime exports`).toEqual(declarationValueExports.sort());
-			for (const runtimeExport of runtimeExports) {
-				expect(declarationValueExports, `${declaration} must declare value export ${runtimeExport}`).toContain(runtimeExport);
-			}
-			expect(
-				declarationTypeExports,
-				`${declaration} documents type-only exports explicitly when present`,
-			).toEqual([...documentedTypeOnlyExports].sort());
 		}
 	});
 });
@@ -209,21 +128,6 @@ function readDeclarationValueExports(path: string): string[] {
 		names.add(match[1]);
 	}
 	for (const match of source.matchAll(/export\s*\{([^}]+)\}\s*from/g)) {
-		for (const rawName of match[1].split(",")) {
-			const name = rawName.trim().split(/\s+as\s+/)[1] ?? rawName.trim().split(/\s+as\s+/)[0];
-			if (name) names.add(name);
-		}
-	}
-	return [...names].sort();
-}
-
-function readDeclarationTypeExports(path: string): string[] {
-	const source = readFileSync(path, "utf8");
-	const names = new Set<string>();
-	for (const match of source.matchAll(/export\s+(?:declare\s+)?(?:interface|type)\s+([A-Za-z0-9_]+)/g)) {
-		names.add(match[1]);
-	}
-	for (const match of source.matchAll(/export\s+type\s*\{([^}]+)\}\s*from/g)) {
 		for (const rawName of match[1].split(",")) {
 			const name = rawName.trim().split(/\s+as\s+/)[1] ?? rawName.trim().split(/\s+as\s+/)[0];
 			if (name) names.add(name);

@@ -8,12 +8,6 @@ const CURSOR_MCP_TOOL_TIMEOUT_SECONDS_ENV = "PI_CURSOR_MCP_TOOL_TIMEOUT_SECONDS"
 const CURSOR_MCP_CONNECT_TIMEOUT_MS_ENV = "PI_CURSOR_MCP_CONNECT_TIMEOUT_MS";
 const CURSOR_MCP_CONNECT_TIMEOUT_SECONDS_ENV = "PI_CURSOR_MCP_CONNECT_TIMEOUT_SECONDS";
 
-interface CursorMcpToolTimeoutOverrideOptions {
-	timeoutMs?: number;
-	connectTimeoutMs?: number;
-	env?: Record<string, string | undefined>;
-}
-
 interface CursorMcpToolTimeoutOverrideState {
 	installed: boolean;
 	timeoutMs: number;
@@ -61,7 +55,7 @@ function normalizeConnectTimeoutMs(timeoutMs: number): number {
 	);
 }
 
-export function resolveCursorMcpConnectTimeoutMs(
+function resolveCursorMcpConnectTimeoutMs(
 	env: Record<string, string | undefined> = process.env,
 ): number {
 	const explicitMs = parsePositiveNumber(env[CURSOR_MCP_CONNECT_TIMEOUT_MS_ENV]);
@@ -81,7 +75,7 @@ function isCursorSdkMcpProtocolTimeoutStack(stack: string | undefined): boolean 
 	);
 }
 
-export function isCursorSdkMcpToolTimeoutStack(stack: string | undefined): boolean {
+function isCursorSdkMcpToolTimeoutStack(stack: string | undefined): boolean {
 	if (!stack) return false;
 	return (
 		isCursorSdkMcpProtocolTimeoutStack(stack) &&
@@ -89,7 +83,7 @@ export function isCursorSdkMcpToolTimeoutStack(stack: string | undefined): boole
 	);
 }
 
-export function isCursorSdkMcpConnectTimeoutStack(stack: string | undefined): boolean {
+function isCursorSdkMcpConnectTimeoutStack(stack: string | undefined): boolean {
 	if (!stack || !isCursorSdkMcpProtocolTimeoutStack(stack)) return false;
 	// The SDK minifies the Client class name; the protocol method and SDK
 	// frame, not that constructor's spelling, establish this timeout purpose.
@@ -121,15 +115,9 @@ function patchedSetTimeout(
 	return Reflect.apply(delegate, globalThis, [handler, nextDelay, ...args]) as ReturnType<GlobalSetTimeout>;
 }
 
-export function installCursorMcpToolTimeoutOverride(
-	options: CursorMcpToolTimeoutOverrideOptions = {},
-): CursorMcpToolTimeoutOverrideState {
-	installedToolTimeoutMs = normalizeOverrideTimeoutMs(
-		options.timeoutMs ?? resolveCursorMcpToolTimeoutMs(options.env),
-	);
-	installedConnectTimeoutMs = normalizeConnectTimeoutMs(
-		options.connectTimeoutMs ?? resolveCursorMcpConnectTimeoutMs(options.env),
-	);
+export function installCursorMcpToolTimeoutOverride(): CursorMcpToolTimeoutOverrideState {
+	installedToolTimeoutMs = resolveCursorMcpToolTimeoutMs();
+	installedConnectTimeoutMs = resolveCursorMcpConnectTimeoutMs();
 
 	if (!originalSetTimeout) {
 		originalSetTimeout = globalThis.setTimeout;
@@ -152,15 +140,3 @@ export function restoreCursorMcpToolTimeoutOverride(): void {
 	installedToolTimeoutMs = DEFAULT_CURSOR_MCP_TOOL_TIMEOUT_MS;
 	installedConnectTimeoutMs = DEFAULT_CURSOR_MCP_CONNECT_TIMEOUT_MS;
 }
-
-export const cursorMcpToolTimeoutOverrideDefaults = {
-	cursorSdkDefaultTimeoutMs: CURSOR_SDK_MCP_DEFAULT_TIMEOUT_MS,
-	defaultOverrideTimeoutMs: DEFAULT_CURSOR_MCP_TOOL_TIMEOUT_MS,
-	defaultConnectTimeoutMs: DEFAULT_CURSOR_MCP_CONNECT_TIMEOUT_MS,
-	minConnectTimeoutMs: MIN_CURSOR_MCP_CONNECT_TIMEOUT_MS,
-	maxNodeTimerDelayMs: MAX_NODE_TIMER_DELAY_MS,
-	timeoutMsEnv: CURSOR_MCP_TOOL_TIMEOUT_MS_ENV,
-	timeoutSecondsEnv: CURSOR_MCP_TOOL_TIMEOUT_SECONDS_ENV,
-	connectTimeoutMsEnv: CURSOR_MCP_CONNECT_TIMEOUT_MS_ENV,
-	connectTimeoutSecondsEnv: CURSOR_MCP_CONNECT_TIMEOUT_SECONDS_ENV,
-} as const;

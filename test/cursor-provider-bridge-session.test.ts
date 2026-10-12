@@ -1,87 +1,32 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { Context } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	resetCursorProviderTestState,
 	mockedCreate,
-	mockedCreateAgentPlatform,
 	makeModel,
 	makeContext,
-	makeAssistantMessage,
 	collectEvents,
-	collectTextDeltas,
-	collectThinkingDeltas,
-	getEventsOfType,
 	getDoneEvent,
 	getErrorEvent,
-	getTextEndEvent,
-	hasEventType,
 	isToolCallBlock,
-	isCursorToolStreamEvent,
 	getCreatedAgentOptions,
-	createMockAgentPlatform,
 	registerBridgeForProviderTest,
-	registerNativeToolDisplayForTest,
 	connectMcpClient,
 	createBuiltinToolInfo,
 	createTestToolInfo,
-	cursorModelItems,
 	type CursorDeltaHandler,
 	type CursorStepHandler,
-	type RegisteredTool,
 	mockCreatedAgent,
 	asMockSdkAgent,
 	asMockCursorRun,
 	getPiToolsMcpUrlFromAgentCreateOptions,
 } from "./helpers/cursor-provider-harness.js";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";
-import { __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
-import { estimateCursorPromptMessageTokens } from "../src/context.js";
 import { __testUtils as sessionAgentTestUtils } from "../src/cursor-session-agent.js";
-import { __testUtils as cursorPiToolBridgeTestUtils } from "../src/cursor-pi-tool-bridge.js";
-import { __testUtils as nativeToolDisplayTestUtils } from "../src/cursor-native-tool-display-state.js";
 
 describe("streamCursor session agent", () => {
 	beforeEach(resetCursorProviderTestState);
-
-	it("keeps the session agent alive after a successful text-only turn", async () => {
-		const mockDispose = vi.fn().mockResolvedValue(undefined);
-		const mockSend = vi.fn().mockResolvedValue({
-			id: "run-1",
-			agentId: "agent-1",
-			status: "finished",
-			wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
-			cancel: vi.fn(),
-			supports: () => true,
-			unsupportedReason: () => undefined,
-		});
-		mockCreatedAgent({
-			send: mockSend,
-			[Symbol.asyncDispose]: mockDispose,
-		});
-
-		const stream = streamCursor(makeModel(), makeContext(), { apiKey: "test-key" });
-		await collectEvents(stream);
-
-		expect(mockDispose).not.toHaveBeenCalled();
-	});
-
-	it("disposes the session agent after a send error", async () => {
-		const mockDispose = vi.fn().mockResolvedValue(undefined);
-		const mockSend = vi.fn().mockRejectedValue(new Error("boom"));
-		mockCreatedAgent({
-			send: mockSend,
-			[Symbol.asyncDispose]: mockDispose,
-		});
-
-		const stream = streamCursor(makeModel(), makeContext(), { apiKey: "test-key" });
-		await collectEvents(stream);
-
-		expect(mockDispose).toHaveBeenCalledTimes(1);
-	});
 
 	it("recreates the session agent on the next turn after a send error", async () => {
 		const mockDispose = vi.fn().mockResolvedValue(undefined);
@@ -109,6 +54,7 @@ describe("streamCursor session agent", () => {
 
 		const errorEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 		expect(getErrorEvent(errorEvents).reason).toBe("error");
+		expect(mockDispose).toHaveBeenCalledTimes(1);
 
 		const recoveryEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 		expect(getDoneEvent(recoveryEvents).reason).toBe("stop");
@@ -118,6 +64,7 @@ describe("streamCursor session agent", () => {
 	});
 
 	it("reuses the session agent and keeps bridge guidance on follow-up turns", async () => {
+		const mockDispose = vi.fn().mockResolvedValue(undefined);
 		registerBridgeForProviderTest({
 			active: ["mcp", "subagent"],
 			tools: [
@@ -139,11 +86,12 @@ describe("streamCursor session agent", () => {
 		mockCreatedAgent({
 			agentId: "agent-1",
 			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+			[Symbol.asyncDispose]: mockDispose,
 		});
 
 		const firstContext = makeContext();
 		await collectEvents(streamCursor(makeModel(), firstContext, { apiKey: "test-key" }));
+		expect(mockDispose).not.toHaveBeenCalled();
 
 		const followUpContext = makeContext();
 		followUpContext.messages = [
@@ -153,6 +101,7 @@ describe("streamCursor session agent", () => {
 		];
 		await collectEvents(streamCursor(makeModel(), followUpContext, { apiKey: "test-key" }));
 
+		expect(mockDispose).not.toHaveBeenCalled();
 		expect(mockedCreate).toHaveBeenCalledTimes(1);
 		expect(mockSend).toHaveBeenCalledTimes(2);
 		const firstPrompt = mockSend.mock.calls[0]?.[0] as { text?: string };
@@ -243,6 +192,7 @@ describe("streamCursor session agent", () => {
 		}));
 
 		await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		expect(mockDispose).not.toHaveBeenCalled();
 
 		const divergentContext = makeContext();
 		divergentContext.messages = [{ role: "user", content: "Hello edited", timestamp: 1 }];

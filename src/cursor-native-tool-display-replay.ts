@@ -34,14 +34,12 @@ export type {
 } from "./cursor-replay-tool-details.js";
 export {
 	isCursorReplayNativeEditDetails,
-	isCursorReplayGenerateImageDetails,
-	isCursorReplayActivityDetails,
 	isCursorReplayNativeWriteDetails,
 	parseCursorReplayToolDetails,
 } from "./cursor-replay-tool-details.js";
 
 export const CURSOR_REPLAY_COLLAPSED_PREVIEW_LINES = 8;
-export const CURSOR_REPLAY_PREVIEW_MAX_CHARS = 4000;
+const CURSOR_REPLAY_PREVIEW_MAX_CHARS = 4000;
 export const CURSOR_REPLAY_PREVIEW_MAX_LINE_CHARS = 240;
 const CURSOR_REPLAY_HIGHLIGHT_MAX_CHARS = 12000;
 export const cursorReplayToolSchema = Type.Object({}, { additionalProperties: true });
@@ -75,7 +73,7 @@ function buildImageReplayComponent(text: string, imageData: string, mimeType: st
 	};
 }
 
-export function getCursorReplayPath(
+function getCursorReplayPath(
 	args: Record<string, unknown> | undefined,
 	details: Pick<CursorReplayNativeEditDetails, "path"> | Pick<CursorReplayNativeWriteDetails, "path"> | undefined,
 ): string {
@@ -282,7 +280,7 @@ function formatCursorReplayActivityPreview(
 	return stripHeader ? formatCursorReplayPreview(text, theme, maxLines, true) : formatMutedBlock(text, theme);
 }
 
-export function formatCursorReplayPreview(
+function formatCursorReplayPreview(
 	text: string,
 	theme: CursorReplayRenderTheme,
 	maxLines = CURSOR_REPLAY_COLLAPSED_PREVIEW_LINES,
@@ -330,7 +328,7 @@ function getCursorReplayCardTitle(toolName: CursorReplayToolName, args: Record<s
 	return "Cursor activity";
 }
 
-export function renderCursorReplayCall(
+function renderCursorReplayCall(
 	toolName: CursorReplayToolName,
 	args: Record<string, unknown> | undefined,
 	theme: CursorReplayRenderTheme,

@@ -18,7 +18,7 @@ describe("cursor-durable-fs", () => {
 		writeFileSync(path, "hello");
 		const fd = openExistingRegularFileNoFollow(path, 0);
 		try {
-			expect(typeof fd).toBe("number");
+			expect(readFileSync(fd, "utf8")).toBe("hello");
 		} finally {
 			closeSync(fd);
 		}

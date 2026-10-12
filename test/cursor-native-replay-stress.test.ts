@@ -1,18 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Type } from "typebox";
+import { installCursorProviderVirtualTime } from "./helpers/cursor-provider-virtual-time.js";
 import {
 	resetCursorProviderTestState,
-	mockedCreate,
 	makeModel,
 	makeContext,
 	collectEvents,
 	collectThinkingDeltas,
+	getDoneEvent,
+	isToolCallBlock,
 	hasEventType,
 	createNativeToolDisplayPiForTest,
 	type CursorDeltaHandler,
 	mockCreatedAgent,
 	asMockCursorRun,
-	getPiToolsMcpUrlFromAgentCreateOptions,
 } from "./helpers/cursor-provider-harness.js";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
@@ -78,6 +79,8 @@ describe("native replay stress", () => {
 		await resetCursorProviderTestState();
 	});
 
+	installCursorProviderVirtualTime();
+
 	afterEach(async () => {
 		await cursorProviderTestUtils.releaseAllPendingCursorLiveRunsForTests();
 		await cursorProviderTestUtils.resetSessionCursorAgents();
@@ -100,7 +103,12 @@ describe("native replay stress", () => {
 		const context = makeContext();
 		context.tools = pi.getActiveTools().map((name) => ({ name, description: name, parameters: Type.Object({}) }));
 		const events = await collectEvents(streamCursor(CURSOR_MODEL, context, { apiKey: "test-key" }));
+		const done = getDoneEvent(events);
+		expect(done.reason).toBe("toolUse");
 		expect(hasEventType(events, "toolcall_start")).toBe(true);
+		expect(done.message.content.filter(isToolCallBlock)).toMatchObject([
+			{ name: "grep", arguments: { pattern: "sidebar", path: "src" } },
+		]);
 	});
 
 	it("plan strip then turn_start resync replays neutral task activity when context.tools match active tools", async () => {
@@ -119,7 +127,12 @@ describe("native replay stress", () => {
 		const context = makeContext();
 		context.tools = pi.getActiveTools().map((name) => ({ name, description: name, parameters: Type.Object({}) }));
 		const events = await collectEvents(streamCursor(CURSOR_MODEL, context, { apiKey: "test-key" }));
+		const done = getDoneEvent(events);
+		expect(done.reason).toBe("toolUse");
 		expect(hasEventType(events, "toolcall_start")).toBe(true);
+		expect(done.message.content.filter(isToolCallBlock)).toMatchObject([
+			{ name: "cursor", arguments: { activityTitle: "Cursor subagent", activitySummary: "Verify plan-strip resync: $ echo ok" } },
+		]);
 	});
 
 	it("stale context.tools without grep still avoids toolUse (coordinator guard)", async () => {

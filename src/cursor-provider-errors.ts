@@ -258,14 +258,6 @@ export function classifyCursorConnectError(error: unknown): CursorConnectErrorCl
 	return undefined;
 }
 
-export function isCursorSdkAbortConnectError(error: unknown): boolean {
-	return classifyCursorConnectError(error)?.kind === "abort";
-}
-
-export function isUnauthenticatedConnectError(error: unknown): boolean {
-	return classifyCursorConnectError(error)?.kind === "unauthenticated";
-}
-
 function isLikelyNetworkTimeout(message: string): boolean {
 	return (
 		/\b(ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENETUNREACH|EAI_AGAIN|NGHTTP2_ENHANCE_YOUR_CALM|ERR_HTTP2_STREAM_ERROR|ERR_HTTP2_SESSION_ERROR)\b/i.test(

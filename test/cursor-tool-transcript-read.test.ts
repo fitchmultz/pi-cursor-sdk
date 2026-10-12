@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CURSOR_REPLAY_ACTIVITY_TOOL_NAME, isExcludedFromCursorBridgeExposure } from "../src/cursor-tool-presentation-registry.js";
+import { CURSOR_REPLAY_ACTIVITY_TOOL_NAME } from "../src/cursor-tool-presentation-registry.js";
 import {
 	buildCursorPiToolDisplay,
 	formatCursorToolTranscript,
@@ -11,16 +11,6 @@ import {
 
 
 describe("formatCursorToolTranscript read and shell", () => {
-	it("defines shared bridge exclusions for only the neutral Cursor replay activity name", () => {
-		expect(isExcludedFromCursorBridgeExposure("cursor")).toBe(true);
-		expect(isExcludedFromCursorBridgeExposure("oldCursorEdit")).toBe(false);
-		expect(isExcludedFromCursorBridgeExposure("oldCursorWrite")).toBe(false);
-		expect(isExcludedFromCursorBridgeExposure("oldCursorMcp")).toBe(false);
-		expect(isExcludedFromCursorBridgeExposure("bash")).toBe(false);
-		expect(isExcludedFromCursorBridgeExposure("edit")).toBe(false);
-		expect(isExcludedFromCursorBridgeExposure("write")).toBe(false);
-	});
-
 	it("formats Cursor read results as a pi-like read transcript", () => {
 		const transcript = formatCursorToolTranscript({
 			name: "read",

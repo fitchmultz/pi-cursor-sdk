@@ -6,12 +6,6 @@ import {
 	type HarnessEventMap,
 } from "./pi-harness.js";
 
-describe("pi-harness event map types", () => {
-	it("keeps compile-time negative fixtures for invalid harness payloads", () => {
-		expect(true).toBe(true);
-	});
-});
-
 describe("pi-harness before_agent_start results", () => {
 	it("chains systemPrompt edits across multiple handlers", async () => {
 		const pi = createEventHarness();

@@ -1,7 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { delimiter, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { resolveCursorSettingSources as resolveProviderSettingSources } from "../src/cursor-setting-sources.js";
 import {
 	commonBooleanFlag,
 	commonProbeFlags,
@@ -28,8 +27,6 @@ import {
 } from "../scripts/lib/cursor-smoke-env.mjs";
 import { CURSOR_SDK_EVENT_DEBUG_ENV_NAMES as sharedSdkEventDebugEnvNames } from "../shared/cursor-sdk-event-debug-env.mjs";
 import {
-	CURSOR_SETTING_SOURCES_ENV,
-	resolveCursorSettingSources,
 	serializeCursorSettingSources,
 } from "../shared/cursor-setting-sources.mjs";
 import { scrubSensitiveText } from "../shared/cursor-sensitive-text.mjs";
@@ -98,16 +95,6 @@ async function forceCleanupProcess(pid: number | undefined): Promise<void> {
 }
 
 describe("maintainer scripts shared lib", () => {
-	it("keeps shared helpers aligned with provider runtime", () => {
-		expect(CURSOR_SETTING_SOURCES_ENV).toBe("PI_CURSOR_SETTING_SOURCES");
-		for (const raw of [undefined, "", "all", "none", "project,user", "OFF", "0"]) {
-			expect(resolveCursorSettingSources(raw)).toEqual(resolveProviderSettingSources(raw));
-		}
-		const leakedKey = "super-secret-cursor-key-12345";
-		const sample = `Bearer ${leakedKey} http://127.0.0.1:4242/cursor-pi-tool-bridge/abc/mcp`;
-		expect(scrubSensitiveText(sample, leakedKey)).not.toContain(leakedKey);
-		expect(serializeCursorSettingSources(["project", "user"])).toBe("project,user");
-	});
 
 	it("builds sealed smoke env without leaking debug or setting-source state", () => {
 		expect(scriptSdkEventDebugEnvNames).toEqual(sharedSdkEventDebugEnvNames);
@@ -152,14 +139,6 @@ describe("maintainer scripts shared lib", () => {
 		expect(plan.env.PI_CURSOR_NATIVE_TOOL_DISPLAY).toBe("0");
 	});
 
-	it("keeps setting-source parsing aligned with provider runtime", () => {
-		expect(CURSOR_SETTING_SOURCES_ENV).toBe("PI_CURSOR_SETTING_SOURCES");
-		for (const raw of [undefined, "", "all", "none", "project,user", "OFF", "0"]) {
-			expect(resolveCursorSettingSources(raw)).toEqual(resolveProviderSettingSources(raw));
-		}
-		expect(defaultSettingSourcesFromEnv({ PI_CURSOR_SETTING_SOURCES: "none" })).toBeUndefined();
-	});
-
 	it("scrubs secrets and bridge endpoints", () => {
 		const leakedKey = "super-secret-cursor-key-12345";
 		const sample = `Bearer ${leakedKey} http://127.0.0.1:4242/cursor-pi-tool-bridge/abc/mcp`;
@@ -176,23 +155,6 @@ describe("maintainer scripts shared lib", () => {
 		expect(serializeCursorSettingSources([])).toBe("none");
 	});
 
-	it("round-trips setting sources through resolve -> serialize -> resolve", () => {
-		const cases: Array<{ raw?: string; expected: ReturnType<typeof resolveCursorSettingSources> }> = [
-			{ raw: undefined, expected: ["all"] },
-			{ raw: "", expected: ["all"] },
-			{ raw: "all", expected: ["all"] },
-			{ raw: "none", expected: undefined },
-			{ raw: "project,user", expected: ["project", "user"] },
-			{ raw: ",", expected: undefined },
-			{ raw: "  ,  ", expected: undefined },
-		];
-		for (const { raw, expected } of cases) {
-			const resolved = resolveCursorSettingSources(raw);
-			expect(resolved).toEqual(expected);
-			expect(resolveCursorSettingSources(serializeCursorSettingSources(resolved))).toEqual(expected);
-		}
-	});
-
 	it("reads api keys from argv and process env for failure scrubbing", () => {
 		expect(readArgvApiKey(["--api-key", " argv-key "])).toBe("argv-key");
 		expect(readArgvApiKey(["--api-key=inline-key"])).toBe("inline-key");
@@ -204,6 +166,7 @@ describe("maintainer scripts shared lib", () => {
 	});
 
 	it("parses common probe flags and enforces api key requirements", () => {
+		expect(defaultSettingSourcesFromEnv({ PI_CURSOR_SETTING_SOURCES: "none" })).toBeUndefined();
 		const fail = vi.fn((message: string) => {
 			throw new Error(message);
 		});
@@ -271,11 +234,9 @@ describe("maintainer scripts shared lib", () => {
 		expect(dir.startsWith(resolve("/tmp", "pi-cursor-sdk-test-prefix-"))).toBe(true);
 	});
 
-	it("parses JSONL stdout and exposes child shutdown helpers", async () => {
+	it("parses JSONL stdout and selects platform process-tree spawn options", () => {
 		expect(parseJsonLines('{"type":"a"}\n\n{"type":"b"}\n')).toEqual([{ type: "a" }, { type: "b" }]);
 		expect(CHILD_PROCESS_TREE_SPAWN_OPTIONS.detached).toBe(process.platform !== "win32");
-		expect(typeof waitForChildClose).toBe("function");
-		expect(typeof terminateChild).toBe("function");
 	});
 
 	it("allows child EOF cleanup before verified process-tree termination", async () => {
@@ -298,8 +259,8 @@ describe("maintainer scripts shared lib", () => {
 				"--input-type=module",
 				"-e",
 				`import { spawn } from "node:child_process";
-const grandchild = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 60_000)"], { stdio: "ignore" });
-console.log(JSON.stringify({ parentPid: process.pid, grandchildPid: grandchild.pid }));
+const grandchild = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 60_000)"], { stdio: ["ignore", "pipe", "ignore"] });
+grandchild.stdout.once("data", () => console.log(JSON.stringify({ parentPid: process.pid, grandchildPid: grandchild.pid })));
 setInterval(() => {}, 60_000);`,
 			],
 			{ stdio: ["ignore", "pipe", "pipe"], ...CHILD_PROCESS_TREE_SPAWN_OPTIONS },
@@ -310,11 +271,14 @@ setInterval(() => {}, 60_000);`,
 			grandchildPid = pids.grandchildPid;
 			expect(processExists(pids.parentPid)).toBe(true);
 			expect(processExists(pids.grandchildPid)).toBe(true);
-			await terminateChild(parent, { graceMs: 1_000 });
+			await terminateChild(parent, { graceMs: 50 });
 			expect(await waitUntilGone([pids.parentPid, pids.grandchildPid])).toBe(true);
 		} finally {
-			await terminateChild(parent, { graceMs: 500 });
-			await forceCleanupProcess(grandchildPid);
+			try {
+				await terminateChild(parent, { graceMs: 500 });
+			} finally {
+				await forceCleanupProcess(grandchildPid);
+			}
 		}
 	}, 15_000);
 
@@ -325,9 +289,12 @@ setInterval(() => {}, 60_000);`,
 				"--input-type=module",
 				"-e",
 				`import { spawn } from "node:child_process";
-const grandchild = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 60_000)"], { stdio: "ignore", detached: process.platform === "win32" });
-grandchild.unref();
-console.log(JSON.stringify({ parentPid: process.pid, grandchildPid: grandchild.pid }));`,
+const grandchild = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 60_000)"], { stdio: ["ignore", "pipe", "ignore"], detached: process.platform === "win32" });
+grandchild.stdout.once("data", () => {
+  console.log(JSON.stringify({ parentPid: process.pid, grandchildPid: grandchild.pid }));
+  grandchild.stdout.destroy();
+  grandchild.unref();
+});`,
 			],
 			{ stdio: ["ignore", "pipe", "pipe"], ...CHILD_PROCESS_TREE_SPAWN_OPTIONS },
 		);
@@ -339,12 +306,15 @@ console.log(JSON.stringify({ parentPid: process.pid, grandchildPid: grandchild.p
 			expect(processExists(pids.parentPid)).toBe(false);
 			expect(processExists(pids.grandchildPid)).toBe(true);
 
-			await terminateChild(parent, { graceMs: 2_000 });
+			await terminateChild(parent, { graceMs: 50 });
 
 			expect(await waitUntilGone([pids.grandchildPid])).toBe(true);
 		} finally {
-			await terminateChild(parent, { graceMs: 500 });
-			await forceCleanupProcess(grandchildPid);
+			try {
+				await terminateChild(parent, { graceMs: 500 });
+			} finally {
+				await forceCleanupProcess(grandchildPid);
+			}
 		}
 	}, 30_000);
 

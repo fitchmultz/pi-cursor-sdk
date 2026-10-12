@@ -1,17 +1,14 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { ModelListItem } from "@cursor/sdk";
 import {
 	clearModelListCache,
 	fingerprintApiKey,
-	getModelCacheTtlMs,
-	isModelCacheDisabled,
 	loadAnyCachedModelCatalog,
 	loadFreshCachedModels,
 	saveModelListCache,
-	__testUtils,
 } from "../src/model-list-cache.js";
 
 const MODELS: ModelListItem[] = [
@@ -21,21 +18,25 @@ const MODELS: ModelListItem[] = [
 		variants: [{ params: [], displayName: "Composer 2", isDefault: true }],
 	},
 ];
+const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 
 describe("model-list-cache", () => {
 	const originalEnv = process.env;
 	let tmpAgentDir: string;
+	let cachePath: string;
 	const fp = fingerprintApiKey("test-key");
 
 	beforeEach(() => {
 		process.env = { ...originalEnv };
-		delete process.env[__testUtils.DISABLE_ENV_VAR];
-		delete process.env[__testUtils.TTL_ENV_VAR];
+		delete process.env.PI_CURSOR_SDK_DISABLE_MODEL_CACHE;
+		delete process.env.PI_CURSOR_SDK_MODEL_CACHE_TTL_MS;
 		tmpAgentDir = mkdtempSync(join(tmpdir(), "pi-cursor-model-cache-"));
 		process.env.PI_CODING_AGENT_DIR = tmpAgentDir;
+		cachePath = join(tmpAgentDir, "cursor-sdk-model-list.json");
 	});
 
 	afterEach(() => {
+		vi.useRealTimers();
 		rmSync(tmpAgentDir, { recursive: true, force: true });
 		process.env = originalEnv;
 	});
@@ -45,32 +46,26 @@ describe("model-list-cache", () => {
 		saveModelListCache(fp, MODELS);
 		clearModelListCache();
 		expect(loadFreshCachedModels(fp)).toBeUndefined();
-		writeFileSync(__testUtils.getCachePath(), "corrupt");
+		writeFileSync(cachePath, "corrupt");
 		clearModelListCache();
-		expect(readFileSync(__testUtils.getCachePath(), "utf8")).toBe("corrupt");
+		expect(readFileSync(cachePath, "utf8")).toBe("corrupt");
 	});
 
-	it("round-trips a saved catalog for a matching key", () => {
-		saveModelListCache(fp, MODELS);
-		expect(loadFreshCachedModels(fp)).toEqual(MODELS);
-	});
-
-	it("writes the cache file with 0600 permissions and no API key", () => {
+	it("writes a matching catalog with 0600 permissions and no API key", () => {
 		expect(saveModelListCache(fp, MODELS)).toBe(true);
-		const path = __testUtils.getCachePath();
-		if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
-		const raw = readFileSync(path, "utf-8");
+		expect(loadFreshCachedModels(fp)).toEqual(MODELS);
+		if (process.platform !== "win32") expect(statSync(cachePath).mode & 0o777).toBe(0o600);
+		const raw = readFileSync(cachePath, "utf-8");
 		expect(raw).not.toContain("test-key");
 		expect(JSON.parse(raw).keyFingerprint).toBe(fp);
 	});
 
 	it("tightens permissions when rewriting an existing loose cache file", () => {
-		const path = __testUtils.getCachePath();
-		writeFileSync(path, "{}", { mode: 0o644 });
+		writeFileSync(cachePath, "{}", { mode: 0o644 });
 
 		expect(saveModelListCache(fp, MODELS)).toBe(true);
 
-		if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
+		if (process.platform !== "win32") expect(statSync(cachePath).mode & 0o777).toBe(0o600);
 	});
 
 	it("misses when the key fingerprint differs", () => {
@@ -79,14 +74,15 @@ describe("model-list-cache", () => {
 	});
 
 	it("treats entries older than the TTL as a miss but still returns them as stale", () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
 		saveModelListCache(fp, MODELS);
-		const future = Date.now() + __testUtils.DEFAULT_TTL_MS + 1000;
-		expect(loadFreshCachedModels(fp, future)).toBeUndefined();
+		vi.setSystemTime(Date.now() + DEFAULT_TTL_MS + 1);
+		expect(loadFreshCachedModels(fp)).toBeUndefined();
 		expect(loadAnyCachedModelCatalog(fp)?.models).toEqual(MODELS);
 	});
 
 	it("ignores a corrupt cache file", () => {
-		writeFileSync(__testUtils.getCachePath(), "{ not json");
+		writeFileSync(cachePath, "{ not json");
 		expect(loadFreshCachedModels(fp)).toBeUndefined();
 		expect(loadAnyCachedModelCatalog(fp)).toBeUndefined();
 	});
@@ -95,10 +91,10 @@ describe("model-list-cache", () => {
 		["non-finite", "1e309"],
 		["negative", "-1"],
 		["finite Date-invalid", "1e100"],
-		["far-future", `${Date.now() + __testUtils.DEFAULT_TTL_MS + 1}`],
+		["far-future", `${Date.now() + DEFAULT_TTL_MS + 1}`],
 	])("ignores cache files with %s timestamps", (_label, fetchedAt) => {
 		writeFileSync(
-			__testUtils.getCachePath(),
+			cachePath,
 			`{"version":1,"fetchedAt":${fetchedAt},"keyFingerprint":${JSON.stringify(fp)},"models":${JSON.stringify(MODELS)}}`,
 		);
 
@@ -119,7 +115,7 @@ describe("model-list-cache", () => {
 		],
 	])("ignores cache files with invalid model shapes: %s", (_label, model) => {
 		writeFileSync(
-			__testUtils.getCachePath(),
+			cachePath,
 			JSON.stringify({
 				version: 1,
 				fetchedAt: Date.now(),
@@ -132,28 +128,40 @@ describe("model-list-cache", () => {
 		expect(loadAnyCachedModelCatalog(fp)).toBeUndefined();
 	});
 
-	it("disables read and write when the disable env flag is set", () => {
-		process.env[__testUtils.DISABLE_ENV_VAR] = "1";
-		saveModelListCache(fp, MODELS);
+	it.each(["1", "true", "on", "yes", "enabled"])("disables persisted reads and writes with env flag %s", (value) => {
+		process.env.PI_CURSOR_SDK_DISABLE_MODEL_CACHE = value;
+		expect(saveModelListCache(fp, MODELS)).toBe(false);
+		expect(existsSync(cachePath)).toBe(false);
+		delete process.env.PI_CURSOR_SDK_DISABLE_MODEL_CACHE;
+		expect(saveModelListCache(fp, MODELS)).toBe(true);
+		const bytes = readFileSync(cachePath);
+		process.env.PI_CURSOR_SDK_DISABLE_MODEL_CACHE = value;
 		expect(loadFreshCachedModels(fp)).toBeUndefined();
 		expect(loadAnyCachedModelCatalog(fp)).toBeUndefined();
+		expect(saveModelListCache(fp, [])).toBe(false);
+		expect(readFileSync(cachePath)).toEqual(bytes);
 	});
 
 	it("honors a custom TTL from the environment", () => {
-		process.env[__testUtils.TTL_ENV_VAR] = "1000";
-		expect(getModelCacheTtlMs()).toBe(1000);
+		vi.useFakeTimers({ toFake: ["Date"] });
+		process.env.PI_CURSOR_SDK_MODEL_CACHE_TTL_MS = "1000";
 		saveModelListCache(fp, MODELS);
-		expect(loadFreshCachedModels(fp, Date.now() + 2000)).toBeUndefined();
+		const savedAt = Date.now();
+		vi.setSystemTime(savedAt + 1000);
+		expect(loadFreshCachedModels(fp)).toEqual(MODELS);
+		vi.setSystemTime(savedAt + 1001);
+		expect(loadFreshCachedModels(fp)).toBeUndefined();
+		expect(loadAnyCachedModelCatalog(fp)?.models).toEqual(MODELS);
 	});
 
-	it("falls back to the default TTL for invalid env values", () => {
-		process.env[__testUtils.TTL_ENV_VAR] = "not-a-number";
-		expect(getModelCacheTtlMs()).toBe(__testUtils.DEFAULT_TTL_MS);
-	});
-
-	it.each(["1", "true", "on", "yes", "enabled"])("reports disabled state from truthy env flag %s", (value) => {
-		expect(isModelCacheDisabled()).toBe(false);
-		process.env[__testUtils.DISABLE_ENV_VAR] = value;
-		expect(isModelCacheDisabled()).toBe(true);
+	it.each(["not-a-number", "-1"])("falls back to the default TTL for invalid env value %s", (value) => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		process.env.PI_CURSOR_SDK_MODEL_CACHE_TTL_MS = value;
+		saveModelListCache(fp, MODELS);
+		const savedAt = Date.now();
+		vi.setSystemTime(savedAt + DEFAULT_TTL_MS);
+		expect(loadFreshCachedModels(fp)).toEqual(MODELS);
+		vi.setSystemTime(savedAt + DEFAULT_TTL_MS + 1);
+		expect(loadFreshCachedModels(fp)).toBeUndefined();
 	});
 });

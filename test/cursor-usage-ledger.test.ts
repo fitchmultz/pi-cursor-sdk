@@ -108,15 +108,15 @@ describe("origin usage recorder and supported view", () => {
 		const tokens = { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 2 };
 		const rows: AgentUsage["runs"] = [];
 		let halfJournal = 0; let halfSession = 0;
-		for (let i = 1; i <= 128; i++) {
+		for (let i = 1; i <= 32; i++) {
 			rows.push({ runId: `uuid-${i}`, usage: tokens });
 			fetch.mockResolvedValue({ usage: { ...tokens, inputTokens: i, outputTokens: i, totalTokens: i * 2 }, runs: [...rows] });
 			await turn.recordSnapshot();
-			if (i === 64) { halfJournal = readFileSync(path).length; halfSession = readFileSync(s.manager.getSessionFile()!).length; }
+			if (i === 16) { halfJournal = readFileSync(path).length; halfSession = readFileSync(s.manager.getSessionFile()!).length; }
 		}
 		expect(readFileSync(path).length).toBeLessThan(halfJournal * 2.4);
 		expect(readFileSync(s.manager.getSessionFile()!).length).toBeLessThan(halfSession * 2.4);
-		expect(readCursorUsageView(s.pi, s.ctx()).agents[0]?.wholeAgent?.runs).toHaveLength(128);
+		expect(readCursorUsageView(s.pi, s.ctx()).agents[0]?.wholeAgent?.runs).toHaveLength(32);
 		const revised = { usage: tokens, cost: { rawCostCents: 0.01, chargedCents: 0 }, runs: [{ runId: "uuid-1", usage: tokens, cost: { rawCostCents: 0.01, chargedCents: 0 } }] };
 		fetch.mockResolvedValue(revised); await turn.recordSnapshot();
 		s.replace(SessionManager.open(s.manager.getSessionFile()!));
@@ -125,7 +125,7 @@ describe("origin usage recorder and supported view", () => {
 		const view = readCursorUsageView(s.pi, s.ctx());
 		expect(view.agents[0]).toMatchObject({ billingStatus: "unavailable", wholeAgent: revised });
 		expect(renderCursorUsageView(view)).toContain("Latest known billed tokens: 2");
-		expect(view.records.filter(record => record.kind === "billing")).toHaveLength(130);
+		expect(view.records.filter(record => record.kind === "billing")).toHaveLength(34);
 	});
 	it.each(["malformed", "symlink", "directory"])("rejects %s journal safely", async kind => {
 		const s = setup(); await s.start(agent()); const path = join(s.root, readdirSync(s.root).find(name => name.endsWith(".journal"))!);

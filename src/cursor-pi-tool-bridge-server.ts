@@ -16,7 +16,7 @@ import {
 	resolveCursorPiToolBridgeEnabled,
 } from "./cursor-pi-tool-bridge-snapshot.js";
 
-export const LOOPBACK_HOST = "127.0.0.1";
+const LOOPBACK_HOST = "127.0.0.1";
 const HTTP_SERVER_CLOSE_GRACE_MS = 250;
 
 export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {

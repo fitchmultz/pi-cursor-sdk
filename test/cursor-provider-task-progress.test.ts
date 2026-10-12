@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
 	resetCursorProviderTestState,
-	mockedCreate,
 	makeModel,
 	makeContext,
 	collectEvents,
 	collectThinkingDeltas,
+	collectTextDeltas,
 	getDoneEvent,
 	isToolCallBlock,
 	registerNativeToolDisplayForTest,
@@ -16,11 +16,13 @@ import {
 } from "./helpers/cursor-provider-harness.js";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { getFinalAssistantText } from "../src/cursor-run-final-text.js";
+import { installCursorProviderVirtualTime } from "./helpers/cursor-provider-virtual-time.js";
 
-const delayBeforeToolCompletion = () => new Promise((resolve) => setTimeout(resolve, 120));
+const delayBeforeToolCompletion = () => vi.advanceTimersByTimeAsync(120);
 
 describe("streamCursor Cursor task progress", () => {
 	beforeEach(resetCursorProviderTestState);
+	installCursorProviderVirtualTime();
 
 	it("surfaces SDK task descriptions as thinking progress before completion in native replay", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
@@ -75,6 +77,9 @@ describe("streamCursor Cursor task progress", () => {
 		expect(trace).not.toContain("Cursor tool: task started");
 		expect(firstDone.reason).toBe("toolUse");
 		expect(toolCall?.name).toBe("cursor");
+		expect(firstEvents.findIndex((event) => event.type === "thinking_delta" && event.delta.includes("Cursor subagent:"))).toBeLessThan(
+			firstEvents.findIndex((event) => event.type === "toolcall_start"),
+		);
 
 		resolveRun({ id: "run-1", status: "finished", result: "Final answer." });
 		const cursorTool = registeredTools.find((tool) => tool.name === "cursor");
@@ -100,7 +105,9 @@ describe("streamCursor Cursor task progress", () => {
 				timestamp: 2,
 			},
 		];
-		await collectEvents(streamCursor(makeModel(), replayContext, { apiKey: "test-key" }));
+		const finalEvents = await collectEvents(streamCursor(makeModel(), replayContext, { apiKey: "test-key" }));
+		expect(getDoneEvent(finalEvents).reason).toBe("stop");
+		expect(collectTextDeltas(finalEvents)).toBe("Final answer.");
 	});
 
 	it("selects the final answer as the last non-empty text block in multi-part assistant messages", () => {
@@ -162,6 +169,7 @@ describe("streamCursor Cursor task progress", () => {
 		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
 			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "read", args: { path: "README.md" } }, callId: "read-1" } });
 			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "bash", args: { command: "git status" } }, callId: "bash-1" } });
+			await delayBeforeToolCompletion();
 			opts.onDelta({
 				update: {
 					type: "tool-call-completed",
@@ -197,6 +205,7 @@ describe("streamCursor Cursor task progress", () => {
 		expect(trace).not.toContain("Cursor tool: read started");
 		expect(trace).not.toContain("Cursor tool: bash started");
 		expect(trace).toContain("read README.md");
+		expect(trace).toContain("Cursor shell: git status");
 	});
 
 	it("deduplicates repeated partial and started updates for the same task call ID", async () => {
@@ -318,6 +327,7 @@ describe("streamCursor Cursor task progress", () => {
 					callId: "mcp-1",
 				},
 			});
+			await delayBeforeToolCompletion();
 			opts.onDelta({
 				update: {
 					type: "tool-call-completed",
@@ -348,5 +358,6 @@ describe("streamCursor Cursor task progress", () => {
 		expect(trace).not.toContain("Cursor task:");
 		expect(trace).not.toContain("Cursor subagent:");
 		expect(trace).not.toContain("Should not surface as Cursor task progress");
+		expect(trace).toContain("Cursor MCP: external_search");
 	});
 });

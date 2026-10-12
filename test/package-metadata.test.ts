@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, sep } from "node:path";
@@ -146,11 +146,6 @@ describe("package metadata cutover baselines", () => {
 		expect(packageJson.overrides).toBeUndefined();
 	});
 
-	it("removes the obsolete sqlite override", () => {
-		expect(packageJson.overrides?.sqlite3).toBeUndefined();
-		expect(packageJson.overrides?.["better-sqlite3"]).toBeUndefined();
-	});
-
 	it("packs an isolated MCP/Hono closure that beats a hostile host @hono/node-server", () => {
 		const tempRoot = mkdtempSync(join(tmpdir(), "pi-cursor-sdk-hono-bundle-"));
 		try {
@@ -169,25 +164,78 @@ describe("package metadata cutover baselines", () => {
 			expect(packedIdentities.has("@cursor/sdk")).toBe(false);
 			expect(packedIdentities.has("undici")).toBe(false);
 
-			const extractDirName = "extract";
-			const extractDir = join(tempRoot, extractDirName);
-			mkdirSync(extractDir);
-			execFileSync("tar", ["-xzf", tarballName!, "-C", extractDirName], { cwd: tempRoot });
+			const hostRoot = join(tempRoot, "host");
+			const hostNodeModules = join(hostRoot, "node_modules");
+			const packageDir = join(hostNodeModules, "pi-cursor-sdk");
+			mkdirSync(hostNodeModules, { recursive: true });
+			execFileSync("tar", ["-xzf", tarballName!, "-C", "host/node_modules"], { cwd: tempRoot });
+			renameSync(join(hostNodeModules, "package"), packageDir);
+			const paths = new Set(listing.trim().split(/\r?\n/).map((path) => path.replace(/^package\//, "")));
+			expect(paths.has("scripts/tmux-live-smoke.sh")).toBe(true);
+			expect(paths.has("scripts/isolated-cursor-smoke.sh")).toBe(true);
+			expect(paths.has("scripts/fixtures/plan-strip-shim/index.ts")).toBe(true);
+			expect(paths.has("scripts/steering-rpc-smoke.mjs")).toBe(true);
+			expect(paths.has("scripts/visual-tui-smoke.mjs")).toBe(true);
+			expect(paths.has("scripts/validate-smoke-jsonl.mjs")).toBe(true);
+			expect(paths.has("scripts/debug-sdk-events.mjs")).toBe(true);
+			expect(paths.has("scripts/debug-provider-events.mjs")).toBe(true);
+			expect(paths.has("platform-smoke.config.mjs")).toBe(true);
+			expect(paths.has("scripts/platform-smoke/artifact-bundle-chunk.mjs")).toBe(true);
+			expect(paths.has("scripts/platform-smoke/live-suite-runner.mjs")).toBe(true);
+			expect(paths.has("scripts/platform-smoke/local-resume-runner.mjs")).toBe(true);
+			expect(paths.has("scripts/platform-smoke/target-runtime.mjs")).toBe(true);
+			expect(paths.has("scripts/platform-smoke/visual-evidence.mjs")).toBe(true);
+			for (const path of paths) {
+				if (!path.endsWith(".mjs")) continue;
+				const declarationPath = path.replace(/\.mjs$/, ".d.mts");
+				if (existsSync(declarationPath)) expect(paths.has(declarationPath)).toBe(true);
+			}
+			expect(paths.has("shared/cursor-setting-sources.mjs")).toBe(true);
+			expect(paths.has("shared/cursor-setting-sources.d.mts")).toBe(true);
+			expect(paths.has("shared/cursor-sensitive-text.mjs")).toBe(true);
+			expect(paths.has("shared/cursor-sensitive-text.d.mts")).toBe(true);
+			expect(paths.has("scripts/lib/local-resume-smoke-harness.mjs")).toBe(true);
+			expect(paths.has("scripts/lib/cloud-smoke-cleanup-evidence.mjs")).toBe(true);
+			expect(paths.has("scripts/lib/cloud-smoke-cleanup-evidence.d.mts")).toBe(true);
+			expect(paths.has("scripts/lib/cloud-smoke-github.mjs")).toBe(true);
+			expect(paths.has("scripts/lib/cloud-smoke-github.d.mts")).toBe(true);
+			expect(paths.has("scripts/lib/cursor-smoke-env.mjs")).toBe(true);
+			expect(paths.has("scripts/lib/cursor-smoke-env.d.mts")).toBe(true);
+			expect(paths.has("scripts/lib/cursor-smoke-shell.sh")).toBe(true);
+			expect(paths.has("scripts/lib/cursor-visual-render.mjs")).toBe(true);
+			expect(paths.has("scripts/lib/cursor-visual-render.d.mts")).toBe(true);
+			expect(paths.has("shared/cursor-sdk-event-debug-env.mjs")).toBe(true);
+			expect(paths.has("shared/cursor-sdk-event-debug-env.d.mts")).toBe(true);
+			expect(paths.has("scripts/lib/cursor-setting-sources.mjs")).toBe(false);
+			expect(paths.has("scripts/lib/cursor-sensitive-text.mjs")).toBe(false);
+			expect(paths.has("scripts/lib/cursor-cli-args.mjs")).toBe(true);
+			expect(paths.has("CHANGELOG.md")).toBe(true);
+			expect(paths.has("README.md")).toBe(true);
+			expect(paths.has("docs/platform-smoke.md")).toBe(true);
+			expect(paths.has("dist/index.js")).toBe(true);
+			// pi silently drops manifest entries whose file is missing; assert the
+			// manifest target exists inside the actual published tarball.
+			const manifest = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")) as { pi?: { extensions?: string[] } };
+			for (const entry of manifest.pi?.extensions ?? []) {
+				expect(paths.has(entry.replace(/^\.\//, "")), `pi.extensions entry missing from package: ${entry}`).toBe(true);
+			}
+			expect(paths.has("tsconfig.build.json")).toBe(true);
+			expect(paths.has("scripts/build.mjs")).toBe(true);
+			expect(paths.has("scripts/prepare.mjs")).toBe(true);
+			// Launchers import this helper; packed installs break without it.
+			expect(paths.has("scripts/lib/ensure-built.mjs")).toBe(true);
+			expect([...paths].some((path) => path.startsWith("coverage/") || path.startsWith(".pi/") || path.includes("smoke-dir"))).toBe(false);
 
-			const packedPackageJson = JSON.parse(readFileSync(join(extractDir, "package", "package.json"), "utf8")) as {
+			const packedPackageJson = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")) as {
+				name: string;
 				bundledDependencies?: string[];
 				dependencies?: Record<string, string>;
 			};
+			expect(packedPackageJson.name).toBe("pi-cursor-sdk");
 			expect(packedPackageJson.bundledDependencies).toEqual([...BUNDLED_MCP_HONO_CLOSURE]);
 			for (const packageName of BUNDLED_MCP_HONO_CLOSURE) {
 				expect(packedPackageJson.dependencies?.[packageName]).toBe(packageJson.dependencies[packageName]);
 			}
-
-			const hostRoot = join(tempRoot, "host");
-			const hostNodeModules = join(hostRoot, "node_modules");
-			const packageDir = join(hostNodeModules, "pi-cursor-sdk");
-			mkdirSync(packageDir, { recursive: true });
-			cpSync(join(extractDir, "package"), packageDir, { recursive: true });
 
 			const hostileDir = join(hostNodeModules, "@hono", "node-server");
 			mkdirSync(hostileDir, { recursive: true });

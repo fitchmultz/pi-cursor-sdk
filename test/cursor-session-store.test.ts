@@ -6,7 +6,6 @@ import { Agent, createAgentPlatform, type LocalAgentStore } from "@cursor/sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	buildCursorSessionStateRoot,
-	hashCursorSessionStoreScope,
 	openCursorSessionStore,
 	openCursorSessionStoreForScope,
 	__testUtils as storeTestUtils,
@@ -29,58 +28,9 @@ describe("cursor session store identity", () => {
 
 	it("derives a stable session root below the SDK workspace state root", () => {
 		const scopeKey = "/tmp/sessions/example.jsonl";
-		expect(hashCursorSessionStoreScope(scopeKey)).toBe("9983782212ce97faa33c17445f21670d");
 		expect(buildCursorSessionStateRoot("/sdk/workspace", scopeKey)).toBe(
 			join("/sdk/workspace", "pi-sessions", "9983782212ce97faa33c17445f21670d"),
 		);
-	});
-
-	it("separates persisted pi sessions", () => {
-		const first = buildCursorSessionStateRoot("/sdk/workspace", "session-a");
-		const second = buildCursorSessionStateRoot("/sdk/workspace", "session-b");
-
-		expect(first).not.toBe(second);
-	});
-
-	it("never resumes a fileless acquisition from the shared default store", async () => {
-		const workspaceRoot = mkdtempSync(join(tmpdir(), "pi-cursor-fileless-shared-store-"));
-		storeTestUtils.setSdkOperations({
-			getDefaultStateRoot: () => join(workspaceRoot, "sdk-owned"),
-			openSqliteStore: async () => ({
-				dispose: async () => {},
-			}) as unknown as LocalAgentStore & { dispose(): Promise<void> },
-		});
-		try {
-			const selection = await openCursorSessionStoreForScope({
-				cwd: workspaceRoot,
-				scopeKey: "ephemeral",
-				persistent: false,
-				resume: { identity: { version: 1, stateRoot: join(workspaceRoot, "sdk-owned") }, agentId: "previous-agent" },
-			});
-			expect(selection.resumeAttemptAllowed).toBe(false);
-			expect(selection.sessionStore.identity.stateRoot).not.toBe(join(workspaceRoot, "sdk-owned"));
-			await selection.sessionStore.dispose();
-		} finally {
-			storeTestUtils.setSdkOperations(undefined);
-			rmSync(workspaceRoot, { recursive: true, force: true });
-		}
-	});
-
-	it("removes a factory-owned temporary store after graceful disposal", async () => {
-		storeTestUtils.setSdkOperations(undefined);
-		const root = mkdtempSync(join(tmpdir(), "pi-cursor-ephemeral-store-"));
-		const selection = await openCursorSessionStoreForScope({
-			cwd: root,
-			scopeKey: "ephemeral",
-			persistent: false,
-		});
-		const removalRoot = dirname(dirname(selection.sessionStore.identity.stateRoot));
-		expect(existsSync(selection.sessionStore.identity.stateRoot)).toBe(true);
-
-		await selection.sessionStore.dispose();
-
-		expect(existsSync(removalRoot)).toBe(false);
-		rmSync(root, { recursive: true, force: true });
 	});
 
 	it("never grants temporary-removal ownership to a caller-supplied store", async () => {

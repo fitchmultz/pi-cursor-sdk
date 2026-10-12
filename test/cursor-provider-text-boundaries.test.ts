@@ -144,6 +144,7 @@ describe("Cursor completed assistant-message boundaries", () => {
 		installSend([complete(""), text("Working"), complete("Working"), complete("Working"), text(""), text("NO"), text("_MARKER"), complete("NO_MARKER")], "NO_MARKER");
 		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 		expect(collectTextDeltas(events)).toBe("Working\n\nNO_MARKER");
+		expect(getFinalAssistantText(getDoneEvent(events).message)).toBe("NO_MARKER");
 	});
 
 	it("preserves a message boundary across native tool-use and pending-run drain", async () => {
@@ -177,13 +178,6 @@ describe("Cursor completed assistant-message boundaries", () => {
 		expect(collectTextDeltas(events)).toBe("NO_MARKER");
 		expect(getFinalAssistantText(getDoneEvent(events).message)).toBe("NO_MARKER");
 		expect(send).toHaveBeenCalledTimes(1);
-	});
-
-	it("does not duplicate an exact final suffix after unpunctuated progress", async () => {
-		installSend([text("Working"), complete("Working"), text("NO_MARKER"), complete("NO_MARKER")], "NO_MARKER");
-		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
-		expect(collectTextDeltas(events)).toBe("Working\n\nNO_MARKER");
-		expect(getFinalAssistantText(getDoneEvent(events).message)).toBe("NO_MARKER");
 	});
 
 	it.each([false, true])("keeps completed progress on cancellation without a dangling separator (live=%s)", async (live) => {

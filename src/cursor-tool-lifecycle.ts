@@ -86,10 +86,6 @@ function buildCursorToolLifecycleLabelFromVisibility(
 	}
 }
 
-export function buildCursorToolLifecycleLabel(toolCall: unknown, apiKey?: string): string | undefined {
-	return buildCursorToolLifecycleLabelFromVisibility(classifyCursorToolVisibility(toolCall), apiKey);
-}
-
 export function formatCursorToolLifecycleProgressText(toolCall: unknown, apiKey?: string): string | undefined {
 	const visibility = classifyCursorToolVisibility(toolCall);
 	const label = buildCursorToolLifecycleLabelFromVisibility(visibility, apiKey);

@@ -37,33 +37,17 @@ describe("Cursor SDK HTTP/1.1 configuration", () => {
 		expect(sdkConfigTypes).toContain("Pass `null` to clear a previous default.");
 	});
 
-	it.each([
-		[true, "environment"],
-		[false, "user"],
-	] as const)("configures an explicit %s value from %s", (value, source) => {
-		const configure = vi.fn<(options: CursorConfigureOptions) => void>();
-
-		expect(configureCursorSdkHttp1(sdkWithConfigure(configure), setting(value, source))).toBe(value);
-		expect(configure).toHaveBeenCalledWith({
-			local: { useHttp1ForAgent: value },
-		});
-	});
-
-	it("does not configure the SDK when the setting is unset", () => {
-		const configure = vi.fn<(options: CursorConfigureOptions) => void>();
-
-		expect(configureCursorSdkHttp1(sdkWithConfigure(configure), setting(false, "builtin"))).toBeUndefined();
-		expect(configure).not.toHaveBeenCalled();
-	});
-
 	it("uses the documented null clear after an extension-owned explicit value", () => {
 		const configure = vi.fn<(options: CursorConfigureOptions) => void>();
 		const sdk = sdkWithConfigure(configure);
 
-		configureCursorSdkHttp1(sdk, setting(true, "session"));
+		expect(configureCursorSdkHttp1(sdk, setting(true, "session"))).toBe(true);
+		expect(configureCursorSdkHttp1(sdk, setting(false, "user"))).toBe(false);
 		expect(configureCursorSdkHttp1(sdk, setting(false, "builtin"))).toBeUndefined();
-		expect(configure).toHaveBeenLastCalledWith({
-			local: { useHttp1ForAgent: null },
-		});
+		expect(configure.mock.calls).toEqual([
+			[{ local: { useHttp1ForAgent: true } }],
+			[{ local: { useHttp1ForAgent: false } }],
+			[{ local: { useHttp1ForAgent: null } }],
+		]);
 	});
 });

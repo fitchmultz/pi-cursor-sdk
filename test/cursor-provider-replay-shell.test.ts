@@ -1,51 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { Type } from "typebox";
+import { installCursorProviderVirtualTime } from "./helpers/cursor-provider-virtual-time.js";
 import {
 	resetCursorProviderTestState,
-	mockedCreate,
-	mockedCreateAgentPlatform,
 	makeModel,
 	makeContext,
-	makeAssistantMessage,
 	collectEvents,
 	collectTextDeltas,
 	collectThinkingDeltas,
-	getEventsOfType,
 	getDoneEvent,
-	getErrorEvent,
-	getTextEndEvent,
-	hasEventType,
 	isToolCallBlock,
-	isCursorToolStreamEvent,
-	getCreatedAgentOptions,
-	createMockAgentPlatform,
-	registerBridgeForProviderTest,
 	registerNativeToolDisplayForTest,
-	connectMcpClient,
-	createBuiltinToolInfo,
-	createTestToolInfo,
-	cursorModelItems,
 	type CursorDeltaHandler,
-	type CursorStepHandler,
 	type RegisteredTool,
 	mockCreatedAgent,
 	asMockCursorRun,
-	getPiToolsMcpUrlFromAgentCreateOptions,
-	createExtensionTestContext} from "./helpers/cursor-provider-harness.js";
+	createExtensionTestContext,
+} from "./helpers/cursor-provider-harness.js";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";
-import { __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
-import { estimateCursorPromptMessageTokens } from "../src/context.js";
-import { __testUtils as nativeToolDisplayTestUtils } from "../src/cursor-native-tool-display-state.js";
-import type { Context } from "@earendil-works/pi-ai";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 
 describe("streamCursor native replay shell output", () => {
 	beforeEach(resetCursorProviderTestState);
+	installCursorProviderVirtualTime();
 
-it("uses Cursor shell-output-delta as display-only fallback when completed shell output is empty", async () => {
+	it("uses Cursor shell-output-delta as display-only fallback when completed shell output is empty", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		const registeredTools: RegisteredTool[] = [];
 		await registerNativeToolDisplayForTest(registeredTools);
@@ -175,7 +153,7 @@ it("uses Cursor shell-output-delta as display-only fallback when completed shell
 	it("prefers completed shell stdout over Cursor shell-output-delta fallback data", async () => {
 		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
 			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "shell", args: { command: "printf done" } }, callId: "shell-1" } });
-			opts.onDelta({ update: { type: "shell-output-delta", event: { case: "stdout", value: { data: "delta output\n" } } } });
+			opts.onDelta({ update: { type: "shell-output-delta", event: { case: "stdout", value: { data: "\ndelta output\n" } } } });
 			opts.onDelta({
 				update: {
 					type: "tool-call-completed",
@@ -205,7 +183,8 @@ it("uses Cursor shell-output-delta as display-only fallback when completed shell
 		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 		const trace = collectThinkingDeltas(events);
 
-		expect(trace).toContain("Cursor shell stdout: delta output");
+		expect(trace).toContain("Cursor shell stdout: delta output\n");
 		expect(trace).toContain("completed output");
+		expect(trace.match(/delta output/g)).toHaveLength(1);
 	});
 });

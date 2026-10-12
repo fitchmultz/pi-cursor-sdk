@@ -3,9 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, toNamespacedPath } from "node:path";
 import ts from "@typescript/typescript6";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { fingerprintApiKey, saveModelListCache } from "../src/model-list-cache.js";
-import type { ModelListItem } from "@cursor/sdk";
+import { afterEach, describe, expect, it } from "vitest";
 import { resolveInstalledPackageRoot } from "./helpers/installed-package.js";
 
 // Public Node APIs only: no SDK substitution, bundle IDs, or private factory execution.
@@ -113,6 +111,17 @@ function scriptKind(path: string): ts.ScriptKind {
 	return ts.ScriptKind.JS;
 }
 
+// Both architecture scans read the same immutable sources and one-write fixtures.
+const parsedSources = new Map<string, ts.SourceFile>();
+function sourceFile(path: string): ts.SourceFile {
+	let source = parsedSources.get(path);
+	if (!source) {
+		source = ts.createSourceFile(path, readFileSync(path, "utf-8"), ts.ScriptTarget.Latest, true, scriptKind(path));
+		parsedSources.set(path, source);
+	}
+	return source;
+}
+
 function moduleText(node: ts.ImportDeclaration | ts.ExportDeclaration): string | undefined {
 	return node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier) ? node.moduleSpecifier.text : undefined;
 }
@@ -180,7 +189,7 @@ function collectRuntimeSdkEdges(paths: string[] = sourceFiles(join(process.cwd()
 	const offenders: string[] = [];
 	for (const path of paths) {
 		const relativePath = relative(process.cwd(), path).replace(/\\/g, "/");
-		const source = ts.createSourceFile(path, readFileSync(path, "utf-8"), ts.ScriptTarget.Latest, true, scriptKind(path));
+		const source = sourceFile(path);
 		const visit = (node: ts.Node): void => {
 			if (ts.isImportDeclaration(node) && importHasRuntimeBindings(node, false)) {
 				const specifier = moduleText(node);
@@ -330,13 +339,7 @@ function collectUnsafeHostPeerLoads(
 	for (const path of paths) {
 		const isCanonicalNativeModule = resolve(path) === canonicalNativeModulePath;
 		const isJavaScriptSource = /\.[cm]?js$/.test(path);
-		const source = ts.createSourceFile(
-			path,
-			readFileSync(path, "utf-8"),
-			ts.ScriptTarget.Latest,
-			true,
-			scriptKind(path),
-		);
+		const source = sourceFile(path);
 		const nativeRequireNames = new Set<string>();
 		if (isCanonicalNativeModule) {
 			const collectNativeRequireNames = (node: ts.Node): void => {
@@ -513,15 +516,11 @@ function collectUnsafeHostPeerLoads(
 }
 
 describe("Cursor SDK lazy runtime imports", () => {
-	const originalEnv = process.env;
 	let tmpAgentDir: string | undefined;
 
 	afterEach(() => {
 		if (tmpAgentDir) rmSync(tmpAgentDir, { recursive: true, force: true });
 		tmpAgentDir = undefined;
-		process.env = originalEnv;
-		vi.doUnmock("@cursor/sdk");
-		vi.resetModules();
 	});
 
 	it("limits heavy SDK value imports to Pi packaging entrypoints", () => {
@@ -529,18 +528,24 @@ describe("Cursor SDK lazy runtime imports", () => {
 	});
 
 	it("requires static @cursor/sdk and bridge-run imports for compiled Bun Pi packaging (#228)", () => {
-		const runtime = readFileSync(join(process.cwd(), "src/cursor-sdk-runtime.ts"), "utf-8")
-			.split("\n")
-			.filter((line) => !line.trimStart().startsWith("//") && !line.trimStart().startsWith("*"))
-			.join("\n");
-		const bridgeServer = readFileSync(join(process.cwd(), "src/cursor-pi-tool-bridge-server.ts"), "utf-8")
-			.split("\n")
-			.filter((line) => !line.trimStart().startsWith("//"))
-			.join("\n");
-		expect(runtime).toMatch(/import \* as CursorSdk from ["']@cursor\/sdk["']/);
-		expect(runtime).not.toMatch(/\bimport\(\s*["']@cursor\/sdk["']\s*\)/);
-		expect(bridgeServer).toMatch(/import \{ CursorPiToolBridgeRunImpl \} from ["']\.\/cursor-pi-tool-bridge-run\.js["']/);
-		expect(bridgeServer).not.toMatch(/\bimport\(\s*["']\.\/cursor-pi-tool-bridge-run\.js["']\s*\)/);
+		for (const [file, specifier] of [
+			["src/cursor-sdk-runtime.ts", "@cursor/sdk"],
+			["src/cursor-pi-tool-bridge-server.ts", "./cursor-pi-tool-bridge-run.js"],
+		] as const) {
+			const source = sourceFile(join(process.cwd(), file));
+			expect(source.statements.filter(ts.isImportDeclaration).some(node =>
+				moduleText(node) === specifier && importHasRuntimeBindings(node, false)), file).toBe(true);
+			const dynamicImports: string[] = [];
+			function visit(node: ts.Node): void {
+				if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+					const argument = node.arguments[0];
+					if (argument && ts.isStringLiteralLike(argument)) dynamicImports.push(argument.text);
+				}
+				ts.forEachChild(node, visit);
+			}
+			visit(source);
+			expect(dynamicImports, file).not.toContain(specifier);
+		}
 	});
 
 	it("rejects static SDK subpaths and template SDK imports outside the runtime loaders", () => {
@@ -811,30 +816,6 @@ describe("Cursor SDK lazy runtime imports", () => {
 		expect(findings).not.toContain("@earendil-works/pi-empty-ts-export");
 		expect(findings).toContain("non-literal dynamic import");
 		expect(findings).toContain("unresolved relative dynamic import ./missing.js");
-	});
-
-	it("serves a warm model catalog from cache without calling Cursor.models.list", async () => {
-		tmpAgentDir = mkdtempSync(join(tmpdir(), "pi-cursor-sdk-lazy-import-"));
-		process.env = { ...originalEnv, PI_CODING_AGENT_DIR: tmpAgentDir, CURSOR_API_KEY: "warm-cache-key" };
-		const model: ModelListItem = {
-			id: "composer-2",
-			displayName: "Composer 2",
-			variants: [{ params: [], displayName: "Composer 2", isDefault: true }],
-		};
-		expect(saveModelListCache(fingerprintApiKey("warm-cache-key"), [model])).toBe(true);
-		const list = vi.fn(() => {
-			throw new Error("Cursor.models.list should not run on a warm cached discovery path");
-		});
-		vi.doMock("@cursor/sdk", async () => {
-			const actual = await vi.importActual<typeof import("@cursor/sdk")>("@cursor/sdk");
-			return { ...actual, Cursor: { ...actual.Cursor, models: { ...actual.Cursor.models, list } } };
-		});
-
-		const { discoverModels } = await import("../src/model-discovery.js");
-		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY, allowNetwork: false });
-
-		expect(models.map((entry) => entry.id)).toEqual(["composer-2"]);
-		expect(list).not.toHaveBeenCalled();
 	});
 
 	it("returns null for a missing agent checkpoint using installed SDK SQLite under an owned temporary root", async () => {

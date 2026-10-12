@@ -58,16 +58,11 @@ describe("cursor-tool-manifest", () => {
 		expect(text).not.toContain("pi__cursor_ask_question");
 	});
 
-	it("notes disabled bridge", () => {
-		const text = buildCursorToolManifestText({ piBridgeEnabled: false });
-		expect(text).toContain("Pi bridge: disabled");
-		expect(text).not.toContain("SwitchMode");
-	});
-
 	it("distinguishes disabled bridge from empty exposure", () => {
 		const disabled = buildCursorToolManifestText({ piBridgeEnabled: false });
 		const empty = buildCursorToolManifestText({ piBridgeEnabled: true, bridgeSnapshot: { tools: [], mcpToolNameToPiToolName: new Map(), piToolNameToMcpToolName: new Map() } });
-		expect(disabled).toContain("disabled");
+		expect(disabled).toContain("Pi bridge: disabled");
+		expect(disabled).not.toContain("SwitchMode");
 		expect(empty).toContain("no pi__* tools exposed");
 	});
 

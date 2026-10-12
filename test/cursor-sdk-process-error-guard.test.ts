@@ -2,15 +2,11 @@ import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { isUnauthenticatedConnectError } from "../src/cursor-provider-errors.js";
 import { readInstalledPackageDistText } from "./helpers/installed-package.js";
 import { makeCursorSdkStallAbortWrapperConnectError } from "./helpers/cursor-sdk-stall-error.js";
 import {
-	__testUtils,
 	installCursorSdkProcessErrorGuard,
 	installCursorSdkSessionProcessErrorGuard,
-	isCursorSdkAbortConnectError,
-	registerCursorSdkSessionProcessErrorGuard,
 } from "../src/cursor-sdk-process-error-guard.js";
 
 const emitProcessEvent = (event: string | symbol, ...args: unknown[]): boolean =>
@@ -214,25 +210,6 @@ function makeProvenanceFreeNetworkConnectError(): Error & { rawMessage: string; 
 }
 
 describe("Cursor SDK process error guard", () => {
-	it("registers an idempotent session lifecycle guard", () => {
-		const handlers = new Map<string, () => void>();
-		registerCursorSdkSessionProcessErrorGuard({
-			on: ((event: string, handler: () => void) => handlers.set(event, handler)) as never,
-		});
-		const originalEmit = process.emit;
-
-		handlers.get("session_start")?.();
-		expect(__testUtils.activeSessionCount()).toBe(1);
-		expect(process.emit).not.toBe(originalEmit);
-		handlers.get("session_start")?.();
-		expect(__testUtils.activeSessionCount()).toBe(1);
-		handlers.get("session_shutdown")?.();
-		expect(__testUtils.activeSessionCount()).toBe(0);
-		expect(process.emit).toBe(originalEmit);
-		handlers.get("session_shutdown")?.();
-		expect(__testUtils.activeSessionCount()).toBe(0);
-	});
-
 	it("restores process hooks across repeated session guard cycles", () => {
 		const originalEmit = process.emit;
 		const originalUnhandledRejectionListeners = process.rawListeners("unhandledRejection");
@@ -320,6 +297,9 @@ describe("Cursor SDK process error guard", () => {
 
 	it("contains delayed exact SDK failures after the provider-turn guard is disposed in real Node", () => {
 		const result = runNodeProcessErrorProbe(`
+const forwarded = () => { throw new Error("SDK_FAILURE_FORWARDED_TO_PROCESS_LISTENER"); };
+process.on("unhandledRejection", forwarded);
+process.on("uncaughtException", forwarded);
 const sessionGuard = installCursorSdkSessionProcessErrorGuard();
 const turnGuard = installCursorSdkProcessErrorGuard();
 turnGuard.dispose();
@@ -329,12 +309,12 @@ function exactError() {
 	error.stack = "WriteIterableClosedError: WritableIterable is closed\\n    at s.write (/repo/node_modules/@cursor/sdk/dist/esm/689.js:1:1086497)";
 	return error;
 }
-setTimeout(() => Promise.reject(exactError()), 10);
-setTimeout(() => { throw exactError(); }, 20);
-setTimeout(() => {
+setImmediate(() => Promise.reject(exactError()));
+setImmediate(() => { throw exactError(); });
+setImmediate(() => {
 	console.log("survived delayed SDK failures");
 	sessionGuard.dispose();
-}, 40);
+});
 `);
 		expect(result.status, result.stderr).toBe(0);
 		expect(result.stdout).toContain("survived delayed SDK failures");
@@ -355,11 +335,11 @@ Promise.reject(error);`,
 const sessionGuard = installCursorSdkSessionProcessErrorGuard();
 const turnGuard = installCursorSdkProcessErrorGuard();
 turnGuard.dispose();
-setTimeout(() => { ${rejection} }, 10);
-setTimeout(() => {
+setImmediate(() => { ${rejection} });
+setImmediate(() => {
 	console.log("SURVIVED_UNEXPECTEDLY");
 	sessionGuard.dispose();
-}, 40);
+});
 `);
 		expect(result.status).not.toBe(0);
 		expect(result.stderr).toContain(expectedError);
@@ -405,25 +385,6 @@ setTimeout(() => console.log("survived"), 20);
 		expect(result.stdout).toContain("survived");
 	});
 
-	it("suppresses the exact closed-writable error for the session after the provider turn ends", () => {
-		const sessionGuard = installCursorSdkSessionProcessErrorGuard();
-		const turnGuard = installCursorSdkProcessErrorGuard();
-		turnGuard.dispose();
-		let listenerCalled = false;
-		const listener = () => {
-			listenerCalled = true;
-		};
-		process.once("unhandledRejection", listener);
-		try {
-			const emitted = emitProcessEvent("unhandledRejection", makeCursorSdkWriteIterableClosedError(), Promise.resolve());
-			expect(emitted).toBe(true);
-			expect(listenerCalled).toBe(false);
-		} finally {
-			process.removeListener("unhandledRejection", listener);
-			sessionGuard.dispose();
-		}
-	});
-
 	it("does not suppress a closed-writable lookalike without a Cursor SDK stack", () => {
 		const suppression = installCursorSdkSessionProcessErrorGuard();
 		const error = makeCursorSdkWriteIterableClosedError();
@@ -441,17 +402,6 @@ setTimeout(() => console.log("survived"), 20);
 			process.removeListener("uncaughtException", listener);
 			suppression.dispose();
 		}
-	});
-
-	it("matches local Cursor SDK abort ConnectError shape", () => {
-		expect(isCursorSdkAbortConnectError(makeCursorSdkAbortConnectError())).toBe(true);
-		expect(isCursorSdkAbortConnectError(makeCursorSdkStallAbortWrapperConnectError())).toBe(false);
-		expect(isCursorSdkAbortConnectError(new Error("boom"))).toBe(false);
-	});
-
-	it("matches Cursor SDK unauthenticated ConnectError shape", () => {
-		expect(isUnauthenticatedConnectError(makeCursorSdkUnauthenticatedConnectError())).toBe(true);
-		expect(isUnauthenticatedConnectError(new Error("boom"))).toBe(false);
 	});
 
 	it("suppresses matching uncaught exceptions only after abort suppression is enabled", () => {

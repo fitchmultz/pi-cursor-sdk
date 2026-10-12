@@ -40,7 +40,7 @@ export type PiAgentsContextOverlap = "none" | "cursor-user-agents" | "cursor-pro
 /** Pi context filenames that can overlap Cursor project/user ambient rules. */
 const CURSOR_OVERLAPPING_CONTEXT_BASE_NAMES = new Set(["agents.md", "claude.md"]);
 
-export function getAgentsContextFileBaseName(filePath: string): string {
+function getAgentsContextFileBaseName(filePath: string): string {
 	const normalized = normalizeContextPath(filePath);
 	return normalized.slice(normalized.lastIndexOf("/") + 1).toLowerCase();
 }
@@ -56,12 +56,12 @@ function isPiAgentDirContextFilePath(
 }
 
 /** Actual pi agent dir `AGENTS.md` — overlaps Cursor `user` setting source (global agent instructions). */
-export function isPiAgentDirAgentsMdPath(filePath: string, agentDir: string = getAgentDir()): boolean {
+function isPiAgentDirAgentsMdPath(filePath: string, agentDir: string = getAgentDir()): boolean {
 	return isPiAgentDirContextFilePath(filePath, "agents.md", agentDir);
 }
 
 /** Actual pi agent dir `CLAUDE.md` — kept because Cursor user rules use `~/.claude/CLAUDE.md`. */
-export function isPiAgentDirClaudeMdPath(filePath: string, agentDir: string = getAgentDir()): boolean {
+function isPiAgentDirClaudeMdPath(filePath: string, agentDir: string = getAgentDir()): boolean {
 	return isPiAgentDirContextFilePath(filePath, "claude.md", agentDir);
 }
 
@@ -71,7 +71,7 @@ export function isPiAgentDirClaudeMdPath(filePath: string, agentDir: string = ge
  * Only the actual pi agent dir `AGENTS.md` overlaps Cursor `user`; agent-dir `CLAUDE.md` is kept
  * because Cursor user rules use `~/.claude/CLAUDE.md`, not pi's agent dir path.
  */
-export function classifyContextFileOverlap(
+function classifyContextFileOverlap(
 	filePath: string,
 	agentDir: string = getAgentDir(),
 ): PiAgentsContextOverlap {
@@ -82,7 +82,7 @@ export function classifyContextFileOverlap(
 	return "cursor-project-rules";
 }
 
-export function shouldRemovePiAgentsContextFile(
+function shouldRemovePiAgentsContextFile(
 	file: PiAgentsContextFile,
 	settingSources: SettingSource[] | undefined,
 	agentDir?: string,
@@ -97,7 +97,7 @@ export function shouldRemovePiAgentsContextFile(
 	}
 }
 
-export function shouldSuppressPiAgentsContext(
+function shouldSuppressPiAgentsContext(
 	model: ExtensionContext["model"],
 	contextFiles: readonly PiAgentsContextFile[],
 	settingSources: SettingSource[] | undefined,

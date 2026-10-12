@@ -1,66 +1,52 @@
 import { describe, expect, it } from "vitest";
-import { resolveTranscriptToolName } from "../src/cursor-web-tool-activity.js";
-import { classifyCursorWebToolKind, CURSOR_REPLAY_ACTIVITY_TOOL_NAME } from "../src/cursor-tool-presentation-registry.js";
-import { extractWebFetchTarget, extractWebSearchQuery } from "../src/cursor-web-tool-args.js";
+import { CURSOR_REPLAY_ACTIVITY_TOOL_NAME } from "../src/cursor-tool-presentation-registry.js";
 import { buildCursorPiToolDisplay, formatCursorToolTranscript } from "../src/cursor-tool-transcript.js";
 
 describe("cursor web tool activity", () => {
 	it.each([
-		["WebSearch", "webSearch"],
-		["web_search", "webSearch"],
-		["web-search", "webSearch"],
-		["websearch", "webSearch"],
-		["WebFetch", "webFetch"],
-		["web_fetch", "webFetch"],
-		["web-fetch", "webFetch"],
-		["webfetch", "webFetch"],
-	])("classifies host tool name %s as %s", (name, expected) => {
-		expect(classifyCursorWebToolKind(name)).toBe(expected);
-		expect(resolveTranscriptToolName(name, {})).toBe(expected);
+		["WebSearch", "webSearch", "Cursor web search", "web search", { query: "pi mathematics" }, "pi mathematics"],
+		["web_search", "webSearch", "Cursor web search", "web search", { query: "pi mathematics" }, "pi mathematics"],
+		["web-search", "webSearch", "Cursor web search", "web search", { query: "pi mathematics" }, "pi mathematics"],
+		["websearch", "webSearch", "Cursor web search", "web search", { query: "pi mathematics" }, "pi mathematics"],
+		["WebFetch", "webFetch", "Cursor web fetch", "web fetch", { url: "https://example.com/docs" }, "https://example.com/docs"],
+		["web_fetch", "webFetch", "Cursor web fetch", "web fetch", { url: "https://example.com/docs" }, "https://example.com/docs"],
+		["web-fetch", "webFetch", "Cursor web fetch", "web fetch", { url: "https://example.com/docs" }, "https://example.com/docs"],
+		["webfetch", "webFetch", "Cursor web fetch", "web fetch", { url: "https://example.com/docs" }, "https://example.com/docs"],
+	] as const)("displays host tool %s as %s", (name, sourceToolName, title, label, args, summary) => {
+		const toolCall = {
+			name,
+			args,
+			result: { status: "success", value: { content: [{ text: { text: "Example Domain" } }] } },
+		};
+		expect(buildCursorPiToolDisplay(toolCall)).toMatchObject({
+			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
+			args: { ...args, activityTitle: title, activitySummary: summary },
+			result: { details: { variant: "activity", sourceToolName, title, summary } },
+			isError: false,
+		});
+		expect(formatCursorToolTranscript(toolCall)).toBe(`${label} ${summary}\n\nExample Domain\n`);
 	});
 
 	it.each([
-		["WebSearch", "webSearch"],
-		["web_search", "webSearch"],
-		["WebFetch", "webFetch"],
-		["web_fetch", "webFetch"],
-	])("reclassifies MCP toolName %s to %s display", (mcpToolName, expected) => {
-		expect(resolveTranscriptToolName("mcp", { toolName: mcpToolName })).toBe(expected);
-		expect(resolveTranscriptToolName("mcp", { tool_name: mcpToolName })).toBe(expected);
-	});
-
-	it("keeps semSearch separate from web search", () => {
-		expect(classifyCursorWebToolKind("semSearch")).toBeUndefined();
-		expect(resolveTranscriptToolName("semSearch", {})).toBe("semSearch");
-	});
-
-	it("leaves non-web MCP tools on the generic mcp path", () => {
-		expect(resolveTranscriptToolName("mcp", { toolName: "git" })).toBe("mcp");
-	});
-
-	it("reclassifies MCP WebSearch completions to webSearch display", () => {
-		const toolCall = {
-			name: "mcp",
-			args: { toolName: "WebSearch", args: { search_term: "pi mathematics" } },
-			result: {
-				status: "success",
-				value: { content: [{ text: { text: "Example Domain\nhttps://example.com" } }], isError: false },
-			},
-		};
-
-		expect(resolveTranscriptToolName("mcp", toolCall.args)).toBe("webSearch");
-		expect(extractWebSearchQuery(toolCall.args)).toBe("pi mathematics");
-
-		const display = buildCursorPiToolDisplay(toolCall);
-		expect(display).toMatchObject({
-			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-			args: { query: "pi mathematics", activityTitle: "Cursor web search", activitySummary: "pi mathematics" },
-			result: { details: { variant: "activity", sourceToolName: "webSearch", title: "Cursor web search", summary: "pi mathematics" } },
-			isError: false,
-		});
-		expect(display.args).not.toMatchObject({ activityTitle: "Cursor MCP" });
-		expect(formatCursorToolTranscript(toolCall)).toContain("web search pi mathematics");
-		expect(formatCursorToolTranscript(toolCall)).toContain("Example Domain");
+		["WebSearch", "webSearch", "Cursor web search", "web search", { search_term: "pi mathematics" }, { query: "pi mathematics" }, "pi mathematics"],
+		["web_search", "webSearch", "Cursor web search", "web search", { search_term: "pi mathematics" }, { query: "pi mathematics" }, "pi mathematics"],
+		["WebFetch", "webFetch", "Cursor web fetch", "web fetch", { url: "https://example.com/docs" }, { url: "https://example.com/docs" }, "https://example.com/docs"],
+		["web_fetch", "webFetch", "Cursor web fetch", "web fetch", { url: "https://example.com/docs" }, { url: "https://example.com/docs" }, "https://example.com/docs"],
+	] as const)("displays MCP tool %s as %s", (name, sourceToolName, title, label, nestedArgs, displayArgs, summary) => {
+		for (const key of ["toolName", "tool_name"]) {
+			const toolCall = {
+				name: "mcp",
+				args: { [key]: name, args: nestedArgs },
+				result: { status: "success", value: { content: [{ text: { text: "Example Domain" } }] } },
+			};
+			expect(buildCursorPiToolDisplay(toolCall)).toMatchObject({
+				toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
+				args: { ...displayArgs, activityTitle: title, activitySummary: summary },
+				result: { details: { variant: "activity", sourceToolName, title, summary } },
+				isError: false,
+			});
+			expect(formatCursorToolTranscript(toolCall)).toBe(`${label} ${summary}\n\nExample Domain\n`);
+		}
 	});
 
 	it("formats MCP web_search completions as Cursor web search activity", () => {
@@ -77,43 +63,5 @@ describe("cursor web tool activity", () => {
 			result: { details: { variant: "activity", sourceToolName: "webSearch", title: "Cursor web search" } },
 		});
 		expect(formatCursorToolTranscript(toolCall)).toContain("web search typescript sdk");
-	});
-
-	it("formats host WebFetch completions as Cursor web fetch activity", () => {
-		const toolCall = {
-			name: "WebFetch",
-			args: { url: "https://example.com" },
-			result: {
-				status: "success",
-				value: { content: [{ text: { text: "Example Domain" } }], isError: false },
-			},
-		};
-
-		expect(resolveTranscriptToolName("WebFetch", toolCall.args)).toBe("webFetch");
-		expect(extractWebFetchTarget(toolCall.args)).toBe("https://example.com");
-
-		const display = buildCursorPiToolDisplay(toolCall);
-		expect(display).toMatchObject({
-			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-			args: { url: "https://example.com", activityTitle: "Cursor web fetch", activitySummary: "https://example.com" },
-			result: { details: { variant: "activity", sourceToolName: "webFetch", title: "Cursor web fetch" } },
-		});
-		expect(display.args).not.toMatchObject({ activityTitle: "Cursor MCP" });
-	});
-
-	it("formats MCP web_fetch completions as Cursor web fetch activity", () => {
-		const toolCall = {
-			name: "mcp",
-			args: { toolName: "web_fetch", args: { url: "https://example.org/page" } },
-			result: { status: "success", value: { content: [{ text: { text: "Fetched page" } }], isError: false } },
-		};
-
-		const display = buildCursorPiToolDisplay(toolCall);
-		expect(display).toMatchObject({
-			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-			args: { url: "https://example.org/page", activityTitle: "Cursor web fetch", activitySummary: "https://example.org/page" },
-			result: { details: { variant: "activity", sourceToolName: "webFetch", title: "Cursor web fetch" } },
-		});
-		expect(formatCursorToolTranscript(toolCall)).toContain("web fetch https://example.org/page");
 	});
 });

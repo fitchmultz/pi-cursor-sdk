@@ -183,13 +183,14 @@ describe("streamCursor usage accounting", () => {
 			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
 		});
 
-		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		const model = makeModel();
+		const events = await collectEvents(streamCursor(model, makeContext(), { apiKey: "test-key" }));
 		const done = getDoneEvent(events);
 
 		expect(done.message.usage.cacheRead).toBe(0);
 		expect(done.message.usage.cacheWrite).toBe(0);
-		expect(done.message.usage.input).toBeLessThan(1_125_429);
-		expect(done.message.usage.totalTokens).toBeLessThan(1_125_429);
+		expect(done.message.usage.input).toBeLessThan(model.contextWindow);
+		expect(done.message.usage.totalTokens).toBeLessThan(model.contextWindow);
 	});
 
 	it("keeps failed runs with no SDK usage on the current zero-usage error path", async () => {

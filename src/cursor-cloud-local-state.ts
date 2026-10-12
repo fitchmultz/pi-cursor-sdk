@@ -532,5 +532,3 @@ export function inspectCursorCloudLocalState(
 	}
 	return { insideGitRepo: true, dirty: dirty as boolean, comparison: aheadCount > 0 ? "unpushed" : "contains_head" };
 }
-
-export const __testUtils = { sourceForDestination };

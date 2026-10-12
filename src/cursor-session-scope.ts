@@ -12,7 +12,7 @@ interface CursorSessionScopeExtensionApi {
 
 const ANONYMOUS_SESSION_SCOPE_KEY = "__anonymous__";
 const EPHEMERAL_SESSION_SCOPE_PREFIX = "__ephemeral__:";
-export const MAX_CURSOR_SESSION_NAME_LENGTH = 100;
+const MAX_CURSOR_SESSION_NAME_LENGTH = 100;
 
 type CursorSessionScopeChangeHandler = (previousScopeKey: string) => Promise<void> | void;
 
@@ -103,16 +103,8 @@ export function getCursorSessionScopeGeneration(scopeKey: string = getCursorSess
 	return scopeGenerations.get(scopeKey) ?? 0;
 }
 
-export function getCursorSessionCwd(): string {
-	return state.sessionCwd;
-}
-
 export function getCursorSessionProjectTrusted(pi?: object): boolean {
 	return pi ? scopes.get(pi)?.projectTrusted === true : state.projectTrusted;
-}
-
-export function getCursorSessionName(): string | undefined {
-	return state.sessionName;
 }
 
 function normalizeCursorSessionName(name: string | undefined): string | undefined {

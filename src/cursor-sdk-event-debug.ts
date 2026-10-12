@@ -171,7 +171,7 @@ export type DiscardedIncompleteStartedToolCallReason =
 	| "sdk-failure"
 	| "run-drain";
 
-export function hashCursorSdkCallId(callId: string): string {
+function hashCursorSdkCallId(callId: string): string {
 	return createHash("sha256").update(callId).digest("hex").slice(0, 8);
 }
 
@@ -182,7 +182,7 @@ export interface DiscardedIncompleteStartedToolCallRecord {
 	reason: DiscardedIncompleteStartedToolCallReason;
 }
 
-export function serializeDiscardedIncompleteStartedToolCall(record: {
+function serializeDiscardedIncompleteStartedToolCall(record: {
 	toolName: string;
 	callId: string;
 	reason?: DiscardedIncompleteStartedToolCallReason;

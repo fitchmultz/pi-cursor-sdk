@@ -486,6 +486,7 @@ describe("cursor-session-agent local resume", () => {
 			localResume: true,
 			createAgent,
 		});
+		expect(resumeTestUtils.state.pendingHandle).toBeUndefined();
 		lease.commitSend(context, true);
 
 		expect(appendEntry).not.toHaveBeenCalled();

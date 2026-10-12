@@ -29,11 +29,11 @@ function getCachePath(): string {
 	return join(getAgentDir(), MODEL_LIST_CACHE_FILE);
 }
 
-export function isModelCacheDisabled(): boolean {
+function isModelCacheDisabled(): boolean {
 	return parseEnvBoolean(process.env[DISABLE_ENV_VAR], false);
 }
 
-export function getModelCacheTtlMs(): number {
+function getModelCacheTtlMs(): number {
 	const raw = process.env[TTL_ENV_VAR];
 	if (raw === undefined) return DEFAULT_TTL_MS;
 	const parsed = Number.parseInt(raw, 10);
@@ -133,7 +133,8 @@ function readCacheFile(): ModelListCacheFile | undefined {
 
 // Return cached models only when caching is enabled, the key matches, and the
 // entry is within the TTL. Used on the hot startup path to skip the network.
-export function loadFreshCachedModels(keyFingerprint: string, now: number = Date.now()): ModelListItem[] | undefined {
+export function loadFreshCachedModels(keyFingerprint: string): ModelListItem[] | undefined {
+	const now = Date.now();
 	if (isModelCacheDisabled()) return undefined;
 	const ttlMs = getModelCacheTtlMs();
 	if (ttlMs <= 0) return undefined;
@@ -180,10 +181,3 @@ export function clearModelListCache(): void {
 		// Cache cleanup is best-effort; it must not break native logout.
 	}
 }
-
-export const __testUtils = {
-	getCachePath,
-	DEFAULT_TTL_MS,
-	DISABLE_ENV_VAR,
-	TTL_ENV_VAR,
-};

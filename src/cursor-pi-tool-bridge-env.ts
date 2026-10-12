@@ -2,8 +2,8 @@ import { parseEnvBoolean } from "./cursor-env-boolean.js";
 import { resolveCursorMcpToolTimeoutMs } from "./cursor-mcp-timeout-override.js";
 
 export const CURSOR_PI_TOOL_BRIDGE_ENV = "PI_CURSOR_PI_TOOL_BRIDGE";
-export const CURSOR_PI_TOOL_BRIDGE_BUILTINS_ENV = "PI_CURSOR_EXPOSE_BUILTIN_TOOLS";
-export const CURSOR_PI_TOOL_BRIDGE_CALL_TIMEOUT_MS_ENV = "PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS";
+const CURSOR_PI_TOOL_BRIDGE_BUILTINS_ENV = "PI_CURSOR_EXPOSE_BUILTIN_TOOLS";
+const CURSOR_PI_TOOL_BRIDGE_CALL_TIMEOUT_MS_ENV = "PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS";
 
 export function resolveCursorPiToolBridgeEnabled(env: Record<string, string | undefined> = process.env): boolean {
 	return parseEnvBoolean(env[CURSOR_PI_TOOL_BRIDGE_ENV], true);

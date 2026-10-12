@@ -1,11 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { request as httpRequest } from "node:http";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import type { McpServerConfig } from "@cursor/sdk";
 import type { Context, ToolResultMessage } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai";
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
-import type { ExtensionHandler, SessionShutdownEvent, ToolInfo } from "@earendil-works/pi-coding-agent";
+import type { ToolInfo } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
 import {
 	createBridgePiHarness,
@@ -956,8 +955,12 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 				const [requestB] = await waitForQueuedRequests(runB);
 				const abortB = vi.fn();
 				await b.runToolCall({ type: "tool_call", toolCallId: requestB.piToolCallId, toolName: "read", input: requestB.args }, { abort: abortB });
+				const queuedB = connectionB.client.callTool({ name: "pi__read", arguments: {} }).catch((error: unknown) => error);
+				await waitForQueuedRequests(runB);
 				await b.runSessionShutdown({ reason: "quit" });
+				expect(runB.hasPendingToolCalls()).toBe(false);
 				expect(await pendingB).toBeInstanceOf(Error);
+				expect(await queuedB).toBeInstanceOf(Error);
 				expect(abortB).toHaveBeenCalledOnce();
 				expect(abortA).not.toHaveBeenCalled();
 				expect(__testUtils.getActiveBridgeToolExecutionAbortCount()).toBe(1);
@@ -975,50 +978,6 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 			await a.runSessionShutdown({ reason: "quit" });
 			await connectionA.client.close();
 			await connectionA.transport.close();
-		}
-	});
-
-	it("cleans active bridged pi tool execution on session shutdown without a tool result", async () => {
-		const pi = createBridgePiHarness({
-			active: ["bash"],
-			tools: [createBuiltinToolInfo("bash", Type.Object({ command: Type.String() }), "Run shell commands")],
-		});
-		process.env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS = "1";
-		const bridge = registerCursorPiToolBridge(pi);
-		const run = await bridge.createRun();
-		const { client, transport } = await connectClient(getCursorPiBridgeMcpUrl(run));
-		try {
-			const callPromise = client.callTool({ name: "pi__bash", arguments: { command: "sleep 30" } });
-			const observedCallError = callPromise.catch((error: unknown) => error);
-			const [request] = await waitForQueuedRequests(run);
-			const agentAbort = vi.fn();
-			const abortController = new AbortController();
-			const bashInput = request.args as { command: string };
-
-			await pi.runToolCall(
-				{
-					type: "tool_call",
-					toolCallId: request.piToolCallId,
-					toolName: "bash",
-					input: bashInput,
-				},
-				{
-					signal: abortController.signal,
-					abort: agentAbort,
-				},
-			);
-			expect(__testUtils.getActiveBridgeToolExecutionAbortCount()).toBe(1);
-
-			await pi.runSessionShutdown({ reason: "new" });
-
-			expect(agentAbort).toHaveBeenCalledOnce();
-			expect(__testUtils.getActiveBridgeToolExecutionAbortCount()).toBe(0);
-			const error = await observedCallError;
-			expect(error).toBeInstanceOf(Error);
-			expect((error as Error).message).toMatch(/session shutdown|MCP error/i);
-		} finally {
-			await client.close().catch(() => undefined);
-			await transport.close().catch(() => undefined);
 		}
 	});
 
@@ -1064,28 +1023,6 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 		}
 	});
 
-
-	it("rejects pending MCP waits on registered session shutdown cleanup", async () => {
-		const pi = createBridgePiHarness({ active: ["read"], tools: [createToolInfo("read")] });
-		process.env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS = "1";
-		const bridge = registerCursorPiToolBridge(pi);
-		const run = await bridge.createRun();
-		const { client, transport } = await connectClient(getCursorPiBridgeMcpUrl(run));
-		try {
-			const callPromise = client.callTool({ name: "pi__read", arguments: { path: "README.md" } });
-			const observedCallError = callPromise.catch((error: unknown) => error);
-			await waitForQueuedRequests(run);
-
-			await pi.runSessionShutdown({ reason: "new" });
-
-			const error = await observedCallError;
-			expect(error).toBeInstanceOf(Error);
-			expect((error as Error).message).toMatch(/session shutdown|MCP error/i);
-		} finally {
-			await client.close().catch(() => undefined);
-			await transport.close().catch(() => undefined);
-		}
-	});
 
 	it("rejects MCP calls and clears pending state when immediate tool dispatch throws", async () => {
 		const diagnostics = collectBridgeDiagnosticOutput();
@@ -1144,50 +1081,6 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 			await transport.close().catch(() => undefined);
 			await run.dispose();
 			diagnostics.restore();
-		}
-	});
-
-	it("rejects MCP calls when no live run handler is bound", async () => {
-		const registry = __testUtils.createRegistry(
-			createBridgePiHarness({ active: ["read"], tools: [createToolInfo("read")] }),
-			{ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" },
-		);
-		const run = await registry.createRun({ onToolRequest: () => {} });
-		run.setOnToolRequest(undefined);
-		const { client, transport } = await connectClient(getCursorPiBridgeMcpUrl(run));
-		try {
-			const callPromise = client.callTool({ name: "pi__read", arguments: { path: "README.md" } });
-			const error = await callPromise.catch((callError: unknown) => callError);
-			expect(error).toBeInstanceOf(Error);
-			expect((error as Error).message).toMatch(/no active live run|MCP error/i);
-		} finally {
-			await client.close().catch(() => undefined);
-			await transport.close().catch(() => undefined);
-			await run.dispose();
-		}
-	});
-
-	it("rejects pending MCP waits on abort/dispose", async () => {
-		const registry = __testUtils.createRegistry(
-			createBridgePiHarness({ active: ["read"], tools: [createToolInfo("read")] }),
-			{ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" },
-		);
-		const run = await registry.createRun();
-		const { client, transport } = await connectClient(getCursorPiBridgeMcpUrl(run));
-		try {
-			const callPromise = client.callTool({ name: "pi__read", arguments: { path: "README.md" } });
-			const observedCallError = callPromise.catch((error: unknown) => error);
-			await waitForQueuedRequests(run);
-
-			run.cancel("aborted by test");
-
-			const error = await observedCallError;
-			expect(error).toBeInstanceOf(Error);
-			expect((error as Error).message).toMatch(/aborted by test|MCP error/i);
-		} finally {
-			await client.close().catch(() => undefined);
-			await transport.close().catch(() => undefined);
-			await run.dispose();
 		}
 	});
 

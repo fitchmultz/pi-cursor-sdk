@@ -44,11 +44,7 @@ import {
 	updateCursorSdkConfig,
 } from "./cursor-config.js";
 import {
-	consumeCursorLocalForceOverride,
-	CURSOR_RUNTIME_ENTRY_TYPE,
 	formatCursorStatus,
-	getCursorCliConfig,
-	getCursorSessionConfig,
 	registerCursorCloudRuntimeControls,
 	resetCursorRuntimeStateForTests,
 	resolveCursorStatusRuntime,
@@ -57,18 +53,10 @@ import {
 	type CursorRuntimeStateExtensionApi,
 } from "./cursor-runtime-state.js";
 
-export {
-	consumeCursorLocalForceOverride,
-	getCursorCliConfig,
-	getCursorSessionConfig,
-} from "./cursor-runtime-state.js";
-
 export const CURSOR_FOOTER_ENV = "PI_CURSOR_FOOTER";
 
 const FAST_ENTRY_TYPE = "cursor-fast-state";
 const MODE_ENTRY_TYPE = "cursor-mode-state";
-
-export type CursorAgentMode = AgentModeOption;
 
 const DEFAULT_CURSOR_AGENT_MODE: AgentModeOption = "agent";
 
@@ -91,11 +79,11 @@ const authoritativeGlobalFastPreferenceIds = new Set<string>();
 let globalFastPreferences = new Map<string, boolean>();
 const invalidCursorModeNotifiedSessionScopeKeys = new Set<string>();
 
-export function isCursorAgentMode(value: unknown): value is AgentModeOption {
+function isCursorAgentMode(value: unknown): value is AgentModeOption {
 	return value === "agent" || value === "plan";
 }
 
-export function parseCursorAgentMode(raw: unknown): AgentModeOption | undefined {
+function parseCursorAgentMode(raw: unknown): AgentModeOption | undefined {
 	if (typeof raw !== "string") return undefined;
 	const mode = raw.trim();
 	return isCursorAgentMode(mode) ? mode : undefined;
@@ -115,17 +103,13 @@ function isCursorModeEntryData(value: unknown): value is CursorModeEntryData {
 	return isCursorAgentMode(asRecord(value)?.mode);
 }
 
-function getConfigPath(): string {
-	return getCursorSdkUserConfigPath();
-}
-
 function loadGlobalFastPreferences(): Map<string, boolean> {
 	return cursorFastDefaultsFromConfig(loadCursorSdkUserConfig());
 }
 
 function saveGlobalFastPreference(modelId: string, fast: boolean): void {
 	updateCursorSdkConfig(
-		getConfigPath(),
+		getCursorSdkUserConfigPath(),
 		(current) => {
 			const fastDefaults = { ...asRecord(current.fastDefaults), [modelId]: fast };
 			return {
@@ -141,7 +125,7 @@ function saveGlobalFastPreference(modelId: string, fast: boolean): void {
 
 function saveGlobalCursorHttp1Enabled(enabled: boolean): void {
 	updateCursorSdkConfig(
-		getConfigPath(),
+		getCursorSdkUserConfigPath(),
 		(current) => mergeCursorSdkConfigForUpdate(current, {
 			local: { useHttp1ForAgent: enabled },
 		}),
@@ -227,15 +211,15 @@ function formatInvalidCursorMode(raw: string): string {
 	return `Invalid --cursor-mode "${raw}". Use "agent" or "plan".`;
 }
 
-export type CursorAgentModeResolution =
+type CursorAgentModeResolution =
 	| { kind: "valid"; mode: AgentModeOption }
 	| { kind: "invalid"; raw: string; message: string };
 
-export function getStoredCursorAgentMode(scopeKey?: string): AgentModeOption {
+function getStoredCursorAgentMode(scopeKey?: string): AgentModeOption {
 	return getCursorSessionSettings(scopeKey).mode ?? DEFAULT_CURSOR_AGENT_MODE;
 }
 
-export function resolveCursorAgentMode(scopeKey?: string): CursorAgentModeResolution {
+function resolveCursorAgentMode(scopeKey?: string): CursorAgentModeResolution {
 	const cliCursorModeState = getCursorSessionSettings(scopeKey).cli.mode;
 	switch (cliCursorModeState.kind) {
 		case "valid":
@@ -383,10 +367,10 @@ function formatEffectiveCursorSettingSourcesLabel(raw: string | undefined = proc
 	return `${rawLabel} (effective: ${effectiveLabel})`;
 }
 
-export function formatCursorToolsDebugReport(
+function formatCursorToolsDebugReport(
 	pi: Pick<ExtensionAPI, "getActiveTools" | "getAllTools">,
-	env: Record<string, string | undefined> = process.env,
 ): string {
+	const env = process.env;
 	const bridgeEnabled = resolveCursorPiToolBridgeEnabled(env);
 	const manifestEnabled = resolveCursorToolManifestEnabled(env);
 	const lines = [
@@ -689,16 +673,5 @@ function resetCursorModeStateForTests(): void {
 }
 
 export const __testUtils = {
-	FAST_ENTRY_TYPE,
-	MODE_ENTRY_TYPE,
-	CURSOR_HTTP1_ENTRY_TYPE,
-	RUNTIME_ENTRY_TYPE: CURSOR_RUNTIME_ENTRY_TYPE,
-	DEFAULT_CURSOR_AGENT_MODE,
-	getConfigPath,
-	loadGlobalFastPreferences,
-	get sessionFastPreferences() { return getCursorSessionSettings().fast; },
-	getSessionCursorAgentMode: () => getCursorSessionSettings().mode,
-	getCliCursorAgentMode: () => { const mode = getCursorSessionSettings().cli.mode; return mode.kind === "valid" ? mode.mode : undefined; },
-	getCliCursorModeState: () => getCursorSessionSettings().cli.mode,
 	resetCursorModeStateForTests,
 };

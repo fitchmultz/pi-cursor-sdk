@@ -1,49 +1,28 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { Type } from "typebox";
+import { installCursorProviderVirtualTime } from "./helpers/cursor-provider-virtual-time.js";
 import {
 	resetCursorProviderTestState,
-	mockedCreate,
-	mockedCreateAgentPlatform,
 	makeModel,
 	makeContext,
-	makeAssistantMessage,
 	collectEvents,
-	collectTextDeltas,
-	collectThinkingDeltas,
-	getEventsOfType,
 	getDoneEvent,
 	getErrorEvent,
-	getTextEndEvent,
-	hasEventType,
 	isToolCallBlock,
-	isCursorToolStreamEvent,
-	getCreatedAgentOptions,
-	createMockAgentPlatform,
-	registerBridgeForProviderTest,
 	registerNativeToolDisplayForTest,
-	connectMcpClient,
-	createBuiltinToolInfo,
-	createTestToolInfo,
-	cursorModelItems,
 	type CursorDeltaHandler,
-	type CursorStepHandler,
 	type RegisteredTool,
 	mockCreatedAgent,
 	asMockCursorRun,
-	getPiToolsMcpUrlFromAgentCreateOptions,
-	createExtensionTestContext} from "./helpers/cursor-provider-harness.js";
+	createExtensionTestContext,
+} from "./helpers/cursor-provider-harness.js";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
-import { estimateCursorPromptMessageTokens } from "../src/context.js";
 import { __testUtils as nativeToolDisplayTestUtils } from "../src/cursor-native-tool-display-state.js";
-import type { Context } from "@earendil-works/pi-ai";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 
 describe("streamCursor native replay idle dispose", () => {
 	beforeEach(resetCursorProviderTestState);
+	installCursorProviderVirtualTime();
 
 
 	it("disposes abandoned native replay runs after the idle timeout and abandons the session agent", async () => {
@@ -90,7 +69,8 @@ describe("streamCursor native replay idle dispose", () => {
 		expect(nativeToolDisplayTestUtils.nativeToolResultCount()).toBe(1);
 		expect(mockDispose).not.toHaveBeenCalled();
 
-		await vi.waitFor(() => expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0));
+		await vi.advanceTimersByTimeAsync(1);
+		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
 		expect(nativeToolDisplayTestUtils.nativeToolResultCount()).toBe(0);
 		expect(mockDispose).toHaveBeenCalledTimes(1);
 	});
@@ -119,7 +99,6 @@ describe("streamCursor native replay idle dispose", () => {
 			}),
 			[Symbol.asyncDispose]: mockDispose,
 		});
-		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 		try {
 			const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 			expect(getDoneEvent(events).reason).toBe("toolUse");
@@ -134,7 +113,6 @@ describe("streamCursor native replay idle dispose", () => {
 			expect(mockDispose).toHaveBeenCalledTimes(1);
 		} finally {
 			await cursorProviderTestUtils.releaseAllPendingCursorLiveRunsForTests();
-			vi.useRealTimers();
 		}
 	});
 

@@ -161,8 +161,6 @@ export async function connectMcpClient(url: string) {
 	return { client, transport };
 }
 
-export const delayBeforeToolCompletion = () => new Promise((resolve) => setTimeout(resolve, 120));
-
 export async function collectEvents(stream: ReturnType<typeof streamCursor>): Promise<AssistantMessageEvent[]> {
 	return collectAssistantEvents(stream);
 }

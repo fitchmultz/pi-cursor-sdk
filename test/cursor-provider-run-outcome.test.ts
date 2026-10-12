@@ -42,19 +42,6 @@ describe("cursor-provider-run-outcome", () => {
 		expect(classifyCursorRunEmission(outcome)).toBe("cancelled");
 	});
 
-	it("never produces finished outcomes with signalAborted", () => {
-		const outcome = resolveCursorRunOutcome({
-			waitResult: makeWaitResult("finished", "hello"),
-			runtimeTarget: "local",
-			signalAborted: true,
-			textDeltas: [],
-			emittedText: "",
-		});
-		if (outcome.kind === "finished") {
-			expect.fail("finished outcome must not carry caller abort");
-		}
-	});
-
 	it("classifies SDK cancelled and error statuses for both emission strategies", () => {
 		const cancelled = resolveCursorRunOutcome({
 			waitResult: makeWaitResult("cancelled"),

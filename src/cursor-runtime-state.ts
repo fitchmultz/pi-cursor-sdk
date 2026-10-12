@@ -39,9 +39,9 @@ import { getResolvedSessionCursorHttp1Enabled } from "./cursor-http1.js";
 import { getCursorSessionScopeSnapshot } from "./cursor-session-scope.js";
 import { cursorSettingsScopeForContext, getCursorSessionSettings } from "./cursor-session-settings.js";
 
-export const CURSOR_RUNTIME_ENTRY_TYPE = "cursor-runtime-state";
+const CURSOR_RUNTIME_ENTRY_TYPE = "cursor-runtime-state";
 
-export const CURSOR_CLOUD_ACK_DISCLOSURE = [
+const CURSOR_CLOUD_ACK_DISCLOSURE = [
 	"Cursor Cloud executes this work remotely.",
 	"Fresh context is used by default; prior Pi context is included only with explicit bootstrap opt-in.",
 	"Pi-local tools and the Pi bridge are unavailable, and Pi environment variables are not forwarded.",
@@ -145,7 +145,7 @@ export function resolveCursorStatusRuntime(ctx: CursorRuntimeContext): CursorRun
 	}
 }
 
-export function formatResolvedCursorRuntime(runtime: CursorResolvedSetting<CursorRuntime>): string {
+function formatResolvedCursorRuntime(runtime: CursorResolvedSetting<CursorRuntime>): string {
 	const cap = runtime.cappedBy;
 	return cap
 		? `${runtime.value} (source: ${runtime.source} safety cap over ${cap.cappedSource} ${cap.cappedValue})`

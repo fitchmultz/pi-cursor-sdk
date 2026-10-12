@@ -40,7 +40,7 @@ import {
 	buildWebSearchReplaySummaryArgs,
 	type CursorReplayActivityBuildContext,
 } from "./cursor-replay-activity-builders.js";
-import { CURSOR_REPLAY_SOURCE_TOOL_NAMES, type CursorReplaySourceToolName } from "./cursor-replay-source-names.js";
+import type { CursorReplaySourceToolName } from "./cursor-replay-source-names.js";
 import type {
 	CursorReplayActivityDetailFields,
 	CursorReplayGenerateImageDetailFields,
@@ -112,7 +112,7 @@ const WEB_SEARCH_NAME_PATTERN =
 const WEB_FETCH_NAME_PATTERN =
 	/^(?:web[-_ ]?fetch|fetch[-_ ]?web|webfetch|browser[-_ ]?fetch|fetch[-_ ]?url)$/i;
 
-export const CURSOR_TOOL_PRESENTATION_SPECS = [
+const CURSOR_TOOL_PRESENTATION_SPECS = [
 	{
 		normalizedName: "read",
 		nameAliases: ["read_file"],
@@ -345,9 +345,7 @@ const WEB_KIND_BY_PATTERN = CURSOR_TOOL_PRESENTATION_SPECS.flatMap((spec) => {
 	return webNamePatterns.map((pattern) => ({ pattern, webKind }));
 });
 
-export const CURSOR_KNOWN_NORMALIZED_TOOL_NAMES: readonly CursorNormalizedToolName[] = CURSOR_REPLAY_SOURCE_TOOL_NAMES;
-
-export function getCursorToolPresentationSpec(
+function getCursorToolPresentationSpec(
 	name: string,
 ): CursorToolPresentationSpec | undefined {
 	const trimmed = name.trim();

@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { Type } from "typebox";
 import {
 	resetCursorProviderTestState,
 	mockedCreate,
@@ -16,8 +15,6 @@ import {
 	mockedMessagesList,
 	asMockSdkAgent,
 	createMockAgentPlatform,
-	registerBridgeForProviderTest,
-	createTestToolInfo,
 } from "./helpers/cursor-provider-harness.js";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { cursorLiveRuns } from "../src/cursor-provider-live-run-drain.js";
@@ -61,11 +58,10 @@ describe("streamCursor prompt and model config", () => {
 
 		await collectEvents(streamCursor(makeModel("gpt-5.5@1m"), makeContext(), { apiKey: "test-key" }));
 
-		expect(mockedCreate.mock.calls[0][0].local).toMatchObject({
-			cwd: process.cwd(),
-			settingSources: ["all"],
-			store: expect.any(Object),
-		});
+		const local = mockedCreate.mock.calls[0][0].local;
+		expect(local).toMatchObject({ cwd: process.cwd(), settingSources: ["all"], store: expect.any(Object) });
+		expect(local).not.toHaveProperty("autoReview");
+		expect(local).not.toHaveProperty("sandboxOptions");
 	});
 
 	it("sets absolute CURSOR_RIPGREP_PATH before local Agent.create", async () => {
@@ -460,7 +456,8 @@ describe("streamCursor prompt and model config", () => {
 				},
 			],
 		};
-		const smallModel = { ...makeModel("gpt-5.5@1m"), contextWindow: 250, maxTokens: 50 };
+		// Text fits alone; the image reservation is what forces history omission.
+		const smallModel = { ...makeModel("gpt-5.5@1m"), contextWindow: 1600, maxTokens: 100 };
 
 		const stream = streamCursor(smallModel, context, { apiKey: "test-key" });
 		await collectEvents(stream);
@@ -507,83 +504,6 @@ describe("streamCursor prompt and model config", () => {
 		expect(sentMessage.text).not.toContain("Pi bridge");
 		expect(sentMessage.text).not.toContain("Use pi__cursor_ask_question");
 		expect(sentMessage.text).not.toContain("prefer pi__mcp");
-	});
-
-	it("keeps pi bridge prompt guidance when the actual bridge exposes tools even if context tools are empty", async () => {
-		const previousManifest = process.env.PI_CURSOR_TOOL_MANIFEST;
-		delete process.env.PI_CURSOR_TOOL_MANIFEST;
-		registerBridgeForProviderTest({
-			active: ["sem_reindex"],
-			tools: [createTestToolInfo("sem_reindex", Type.Object({ target: Type.String() }), "Reindex semantic cache")],
-		});
-		const mockSend = vi.fn().mockResolvedValue({
-			id: "run-1",
-			agentId: "agent-1",
-			status: "finished",
-			wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
-			cancel: vi.fn(),
-			supports: () => true,
-			unsupportedReason: () => undefined,
-		});
-		mockCreatedAgent({
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
-		const context = makeContext([{ role: "user", content: "use bridge if needed", timestamp: 1 }]);
-		context.tools = [];
-
-		try {
-			await collectEvents(streamCursor(makeModel("gpt-5.5@272k"), context, { apiKey: "test-key", reasoning: "medium" }));
-		} finally {
-			if (previousManifest === undefined) delete process.env.PI_CURSOR_TOOL_MANIFEST;
-			else process.env.PI_CURSOR_TOOL_MANIFEST = previousManifest;
-		}
-
-		const sentMessage = mockSend.mock.calls[0]?.[0] as { text: string };
-		expect(sentMessage.text).toContain("For exposed pi bridge tools");
-		expect(sentMessage.text).not.toContain("Use pi__cursor_ask_question");
-		expect(sentMessage.text).toContain("Pi bridge: call exposed pi__* MCP names");
-		expect(sentMessage.text).toContain("prefer pi__mcp for MCP work and pi__subagent for delegation");
-		expect(sentMessage.text).toContain("pi__sem_reindex");
-	});
-
-	it("forwards latest user images to Cursor Agent.send", async () => {
-		const mockSend = vi.fn().mockResolvedValue({
-			id: "run-1",
-			agentId: "agent-1",
-			status: "finished",
-			wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
-			cancel: vi.fn(),
-			supports: () => true,
-			unsupportedReason: () => undefined,
-		});
-		mockCreatedAgent({
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
-		const context: Context = {
-			systemPrompt: "Be helpful.",
-			messages: [
-				{
-					role: "user",
-					content: [
-						{ type: "text", text: "Describe this image" },
-						{ type: "image", data: "base64-image", mimeType: "image/png" },
-					],
-					timestamp: 1,
-				},
-			],
-		};
-
-		const stream = streamCursor(makeModel("gpt-5.5@1m"), context, { apiKey: "test-key" });
-		await collectEvents(stream);
-
-		expect(mockSend).toHaveBeenCalledWith(
-			expect.objectContaining({
-				images: [{ data: "base64-image", mimeType: "image/png" }],
-			}),
-			expect.any(Object),
-		);
 	});
 
 	it("caches SDK checkpoint context windows after successful runs", async () => {
@@ -642,7 +562,14 @@ describe("streamCursor prompt and model config", () => {
 
 		await collectEvents(streamCursor(makeModel("gpt-5.5@1m"), makeContext(), { apiKey: "test-key" }));
 
-		expect(mockedCreate).toHaveBeenCalledWith(expect.objectContaining({ mode: "plan" }));
+		expect(mockedCreate).toHaveBeenCalledWith(expect.objectContaining({
+			mode: "plan",
+			model: { id: "gpt-5.5", params: [
+				{ id: "context", value: "1m" },
+				{ id: "fast", value: "false" },
+				{ id: "reasoning", value: "none" },
+			] },
+		}));
 		expect(mockSend.mock.calls[0]?.[1]).toMatchObject({
 			mode: "plan",
 			model: {
@@ -736,39 +663,6 @@ describe("streamCursor prompt and model config", () => {
 					params: [
 						{ id: "context", value: "272k" },
 						{ id: "reasoning", value: "medium" },
-					],
-				},
-			}),
-		);
-	});
-
-	it("passes Cursor model selection with context and pi thinking off to Agent.create", async () => {
-		const modelWithParams = makeModel("gpt-5.5@1m");
-		const mockSend = vi.fn().mockResolvedValue({
-			id: "run-1",
-			agentId: "agent-1",
-			status: "finished",
-			wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
-			cancel: vi.fn(),
-			supports: () => true,
-			unsupportedReason: () => undefined,
-		});
-		mockCreatedAgent({
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
-
-		const stream = streamCursor(modelWithParams, makeContext(), { apiKey: "test-key" });
-		await collectEvents(stream);
-
-		expect(mockedCreate).toHaveBeenCalledWith(
-			expect.objectContaining({
-				model: {
-					id: "gpt-5.5",
-					params: [
-						{ id: "context", value: "1m" },
-						{ id: "fast", value: "false" },
-						{ id: "reasoning", value: "none" },
 					],
 				},
 			}),

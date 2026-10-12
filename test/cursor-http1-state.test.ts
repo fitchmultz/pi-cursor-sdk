@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelListItem } from "@cursor/sdk";
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
-import { CURSOR_HTTP1_ENV } from "../src/cursor-config.js";
+import { CURSOR_HTTP1_ENV, getCursorSdkUserConfigPath } from "../src/cursor-config.js";
 import {
 	CURSOR_HTTP1_ENTRY_TYPE,
 	getStoredCursorHttp1Enabled,
@@ -101,7 +101,7 @@ describe("Cursor HTTP/1.1 state", () => {
 
 	it("toggles session state and atomically updates cursor-sdk.json", async () => {
 		writeFileSync(
-			__testUtils.getConfigPath(),
+			getCursorSdkUserConfigPath(),
 			JSON.stringify({ future: { enabled: true }, local: { futureLocal: "keep" } }),
 		);
 		const { pi, ctx, commandCtx, commands } = createHarness();
@@ -111,7 +111,7 @@ describe("Cursor HTTP/1.1 state", () => {
 
 		expect(getStoredCursorHttp1Enabled()).toBe(true);
 		expect(pi.appendEntry).toHaveBeenCalledWith(CURSOR_HTTP1_ENTRY_TYPE, { enabled: true });
-		expect(JSON.parse(readFileSync(__testUtils.getConfigPath(), "utf-8"))).toEqual({
+		expect(JSON.parse(readFileSync(getCursorSdkUserConfigPath(), "utf-8"))).toEqual({
 			future: { enabled: true },
 			local: { futureLocal: "keep", useHttp1ForAgent: true },
 		});
@@ -120,7 +120,7 @@ describe("Cursor HTTP/1.1 state", () => {
 		await commands.get("cursor-http")!.handler("toggle", commandCtx);
 
 		expect(getStoredCursorHttp1Enabled()).toBe(false);
-		expect(JSON.parse(readFileSync(__testUtils.getConfigPath(), "utf-8"))).toMatchObject({
+		expect(JSON.parse(readFileSync(getCursorSdkUserConfigPath(), "utf-8"))).toMatchObject({
 			local: { futureLocal: "keep", useHttp1ForAgent: false },
 		});
 		expect(ctx.ui.notify).toHaveBeenCalledWith("Cursor HTTP/1.1/SSE transport disabled", "info");
@@ -136,7 +136,7 @@ describe("Cursor HTTP/1.1 state", () => {
 
 		await commands.get("cursor-http")!.handler("off", commandCtx);
 
-		expect(JSON.parse(readFileSync(__testUtils.getConfigPath(), "utf-8"))).toEqual({
+		expect(JSON.parse(readFileSync(getCursorSdkUserConfigPath(), "utf-8"))).toEqual({
 			local: { useHttp1ForAgent: false },
 		});
 		expect(ctx.ui.notify).toHaveBeenCalledWith(
@@ -148,7 +148,7 @@ describe("Cursor HTTP/1.1 state", () => {
 
 	it("restores the global preference from cursor-sdk.json", async () => {
 		writeFileSync(
-			__testUtils.getConfigPath(),
+			getCursorSdkUserConfigPath(),
 			JSON.stringify({ local: { useHttp1ForAgent: true } }),
 		);
 		const { pi, ctx } = createHarness();
@@ -178,7 +178,7 @@ describe("Cursor HTTP/1.1 state", () => {
 	it("does not show the local-only marker for cloud runtime", async () => {
 		process.env[CURSOR_HTTP1_ENV] = "1";
 		const { pi, ctx } = createHarness([
-			customEntry("runtime", __testUtils.RUNTIME_ENTRY_TYPE, {
+			customEntry("runtime", "cursor-runtime-state", {
 				runtime: "cloud",
 				cloudAcknowledged: true,
 			}),

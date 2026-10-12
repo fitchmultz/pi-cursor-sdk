@@ -28,11 +28,12 @@ const emitProcessEvent = (event: string | symbol, ...args: unknown[]): boolean =
 	(process.emit as (event: string | symbol, ...args: unknown[]) => boolean).call(process, event, ...args);
 
 // Synthetic auth input with a normalized frame from the retained .35 transport capture.
-function makeUnauthenticatedConnectError(): Error & { rawMessage: string; code: number } {
-	const error = new Error("[unauthenticated] Error") as Error & { rawMessage: string; code: number };
+function makeUnauthenticatedConnectError(): Error & { rawMessage: string; code: number; metadata: Headers } {
+	const error = new Error("[unauthenticated] Error") as Error & { rawMessage: string; code: number; metadata: Headers };
 	error.name = "ConnectError";
 	error.rawMessage = "Error";
 	error.code = 16;
+	error.metadata = new Headers({ authorization: "Bearer secret-key" });
 	error.stack =
 		"ConnectError: [unauthenticated] Error\n" +
 		"    at file:///repo/node_modules/@connectrpc/connect/dist/esm/protocol-connect/error-json.js:53:19\n" +
@@ -227,7 +228,7 @@ describe("streamCursor auth and abort", () => {
 		expect(error.reason).toBe("error");
 		expect(error.error.errorMessage).toContain("Cursor SDK authentication failed");
 		expect(error.error.errorMessage).toContain("code: 16");
-		expect(error.error.errorMessage).not.toMatch(/API key|\/login/);
+		expect(error.error.errorMessage).not.toMatch(/API key|\/login|secret-key|Bearer/);
 	});
 
 	it("suppresses duplicate process-level unauthenticated ConnectError during an active provider turn", async () => {
@@ -270,12 +271,16 @@ describe("streamCursor auth and abort", () => {
 			tools: [createTestToolInfo("sem_reindex", Type.Object({ target: Type.String() }), "Reindex semantic cache")],
 		});
 		const bridgeCancelSpy = vi.spyOn(CursorPiToolBridgeRunImpl.prototype, "cancel");
+		const removeListenerSpy = vi.spyOn(AbortSignal.prototype, "removeEventListener");
+		let messagesListStarted!: () => void;
+		const probing = new Promise<void>((resolve) => { messagesListStarted = resolve; });
 
 		let releaseMessagesList: () => void = () => {};
 		const messagesListGate = new Promise<void>((resolve) => {
 			releaseMessagesList = resolve;
 		});
 		mockedMessagesList.mockImplementation(async () => {
+			messagesListStarted();
 			await messagesListGate;
 			return [];
 		});
@@ -295,25 +300,31 @@ describe("streamCursor auth and abort", () => {
 		});
 		const eventsPromise = collectEvents(stream);
 
-		await vi.waitFor(() => expect(mockedMessagesList).toHaveBeenCalled());
+		await probing;
 		controller.abort();
-		await vi.waitFor(() => expect(bridgeCancelSpy).toHaveBeenCalledWith("Cursor SDK run aborted"));
+		expect(bridgeCancelSpy).toHaveBeenCalledWith("Cursor SDK run aborted");
 
 		releaseMessagesList();
 		const events = await eventsPromise;
 
 		expect(getErrorEvent(events).reason).toBe("aborted");
 		expect(mockSend).not.toHaveBeenCalled();
+		expect(removeListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function));
 		bridgeCancelSpy.mockRestore();
+		removeListenerSpy.mockRestore();
 	});
 
 	it.each([
 		{ sdkStatus: "finished" as const, sdkResult: "hello" },
 		{ sdkStatus: "error" as const, sdkResult: "boom" },
+		{ sdkStatus: "cancelled" as const, sdkResult: "" },
 	])(
 		"treats caller abort during pending wait as cancelled when SDK resolves $sdkStatus",
 		async ({ sdkStatus, sdkResult }) => {
 			const controller = new AbortController();
+			const cancel = vi.fn().mockResolvedValue(undefined);
+			let waitStarted!: () => void;
+			const waiting = new Promise<void>((resolve) => { waitStarted = resolve; });
 			let resolveWait!: (value: { id: string; status: typeof sdkStatus; result?: string }) => void;
 			const waitPromise = new Promise<{ id: string; status: typeof sdkStatus; result?: string }>((resolve) => {
 				resolveWait = resolve;
@@ -323,8 +334,8 @@ describe("streamCursor auth and abort", () => {
 					id: "run-1",
 					agentId: "agent-1",
 					status: "running",
-					wait: vi.fn().mockReturnValue(waitPromise),
-					cancel: vi.fn().mockResolvedValue(undefined),
+					wait: vi.fn(() => { waitStarted(); return waitPromise; }),
+					cancel,
 				}),
 			);
 			mockCreatedAgent({
@@ -338,57 +349,16 @@ describe("streamCursor auth and abort", () => {
 			});
 			const eventsPromise = collectEvents(stream);
 
-			await vi.waitFor(() => expect(mockSend).toHaveBeenCalled());
+			await waiting;
 			controller.abort();
 			resolveWait({ id: "run-1", status: sdkStatus, result: sdkResult });
 
 			const events = await eventsPromise;
 			expect(getErrorEvent(events).reason).toBe("aborted");
 			expect(hasEventType(events, "done")).toBe(false);
+			expect(cancel).toHaveBeenCalled();
 		},
 	);
-
-	it("cancels run on abort signal", async () => {
-		const controller = new AbortController();
-		const mockCancel = vi.fn().mockResolvedValue(undefined);
-		let resolveWait: () => void;
-		const waitPromise = new Promise<{ id: string; status: string }>((resolve) => {
-			resolveWait = () => resolve({ id: "run-1", status: "cancelled" });
-		});
-		const mockSend = vi.fn().mockImplementation(async () => {
-			return asMockCursorRun({
-				id: "run-1",
-				agentId: "agent-1",
-				status: "running",
-				wait: vi.fn().mockReturnValue(waitPromise),
-				cancel: mockCancel,
-				supports: () => true,
-				unsupportedReason: () => undefined,
-			});
-		});
-		mockCreatedAgent({
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
-
-		const stream = streamCursor(makeModel(), makeContext(), {
-			apiKey: "test-key",
-			signal: controller.signal,
-		});
-
-		// Give the async IIFE time to start the run
-		await vi.waitFor(() => expect(mockSend).toHaveBeenCalled());
-
-		// Now abort
-		controller.abort();
-
-		// Let the run resolve
-		resolveWait!();
-
-		await collectEvents(stream);
-
-		expect(mockCancel).toHaveBeenCalled();
-	});
 
 	it("removes abort listener when agent.send throws after listener registration", async () => {
 		const controller = new AbortController();
@@ -406,37 +376,6 @@ describe("streamCursor auth and abort", () => {
 		const events = await collectEvents(stream);
 
 		expect(getErrorEvent(events).reason).toBe("error");
-		expect(removeListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function));
-		removeListenerSpy.mockRestore();
-	});
-
-	it("removes abort listener when abort happens during send offset probing", async () => {
-		const controller = new AbortController();
-		const removeListenerSpy = vi.spyOn(AbortSignal.prototype, "removeEventListener");
-		let releaseMessagesList: () => void = () => {};
-		const messagesListGate = new Promise<void>((resolve) => {
-			releaseMessagesList = resolve;
-		});
-		mockedMessagesList.mockImplementation(async () => {
-			await messagesListGate;
-			return [];
-		});
-		const mockSend = vi.fn();
-		mockCreatedAgent({ send: mockSend });
-
-		const stream = streamCursor(makeModel(), makeContext(), {
-			apiKey: "test-key",
-			signal: controller.signal,
-		});
-		const eventsPromise = collectEvents(stream);
-
-		await vi.waitFor(() => expect(mockedMessagesList).toHaveBeenCalled());
-		controller.abort();
-		releaseMessagesList();
-		const events = await eventsPromise;
-
-		expect(getErrorEvent(events).reason).toBe("aborted");
-		expect(mockSend).not.toHaveBeenCalled();
 		expect(removeListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function));
 		removeListenerSpy.mockRestore();
 	});

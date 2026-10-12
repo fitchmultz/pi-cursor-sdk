@@ -40,9 +40,11 @@ test("native replay completes with the same JSON arguments as its streamed delta
     for await (const event of stream) events.push(event);
     const delta = events.find((event) => event.type === "toolcall_delta");
     const completed = events.find((event) => event.type === "toolcall_end").toolCall;
-    assert.deepEqual(completed.arguments, { path: "README.md", nested: { keep: false } });
+    args.path = "changed after emission";
+    args.nested.keep = true;
+    assert.deepEqual(completed.arguments, { path: "README.md", nested: { keep: false } },
+      "later external argument mutation must not alter the persisted call");
     assert.deepEqual(completed.arguments, JSON.parse(delta.delta));
-    assert.notEqual(completed.arguments, args, "later external argument mutation must not alter the persisted call");
   } finally {
     await cursorLiveRuns.release(run);
     replayState.reset();

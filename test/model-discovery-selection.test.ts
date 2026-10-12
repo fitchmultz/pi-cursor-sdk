@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import ts from "@typescript/typescript6";
 import { resolveInstalledPackageRoot } from "./helpers/installed-package.js";
 import {
@@ -26,7 +26,7 @@ function grok47Fixture(): ModelListItem {
 }
 
 describe("buildCursorModelSelection", () => {
-	beforeEach(() => {
+	it("uses selected context, pi thinking, and fast state", () => {
 		register([
 			{
 				id: "gpt-5.4",
@@ -58,66 +58,13 @@ describe("buildCursorModelSelection", () => {
 					},
 				],
 			},
-			{
-				id: "claude-opus-4-7",
-				displayName: "Opus 4.7",
-				parameters: [
-					{ id: "thinking", displayName: "Thinking", values: [{ value: "false" }, { value: "true" }] },
-					{ id: "context", displayName: "Context", values: [{ value: "1m" }, { value: "300k" }] },
-					{
-						id: "effort",
-						displayName: "Effort",
-						values: [
-							{ value: "low" },
-							{ value: "medium" },
-							{ value: "high" },
-							{ value: "xhigh" },
-						],
-					},
-				],
-				variants: [
-					{
-						params: [
-							{ id: "thinking", value: "true" },
-							{ id: "context", value: "1m" },
-							{ id: "effort", value: "xhigh" },
-						],
-						displayName: "Opus 4.7",
-						isDefault: true,
-					},
-				],
-			},
 		]);
-	});
-
-	it("uses selected context, pi thinking, and fast state", () => {
 		expect(buildCursorModelSelection("gpt-5.4@272k", "xhigh", true)).toEqual({
 			id: "gpt-5.4",
 			params: [
 				{ id: "context", value: "272k" },
 				{ id: "reasoning", value: "extra-high" },
 				{ id: "fast", value: "true" },
-			],
-		});
-	});
-
-	it("turns Claude thinking off and omits effort when pi thinking is off", () => {
-		expect(buildCursorModelSelection("claude-opus-4-7@300k", "off")).toEqual({
-			id: "claude-opus-4-7",
-			params: [
-				{ id: "thinking", value: "false" },
-				{ id: "context", value: "300k" },
-			],
-		});
-	});
-
-	it("turns Claude thinking on and maps effort when pi thinking is enabled", () => {
-		expect(buildCursorModelSelection("claude-opus-4-7@1m", "high")).toEqual({
-			id: "claude-opus-4-7",
-			params: [
-				{ id: "thinking", value: "true" },
-				{ id: "context", value: "1m" },
-				{ id: "effort", value: "high" },
 			],
 		});
 	});

@@ -2,19 +2,6 @@ import { describe, expect, it } from "vitest";
 import { CursorToolCompletionLedger, getToolFingerprint } from "../src/cursor-provider-turn-tool-ledger.js";
 
 describe("CursorToolCompletionLedger", () => {
-	it("suppresses duplicate completions by identity", () => {
-		const ledger = new CursorToolCompletionLedger();
-		const fingerprint = getToolFingerprint({ toolName: "read", args: { path: "a.ts" }, result: {} });
-
-		ledger.recordCompletedTool({ identity: "cursor-tool:call-1", source: "started", fingerprint });
-		expect(
-			ledger.shouldSkipDuplicateCompletion({
-				identity: "cursor-tool:call-1",
-				source: "started",
-				fingerprint,
-			}),
-		).toBe("identity-already-completed");
-	});
 
 	it("suppresses started completions when fallback fingerprint already completed", () => {
 		const ledger = new CursorToolCompletionLedger();
@@ -28,15 +15,6 @@ describe("CursorToolCompletionLedger", () => {
 				fingerprint,
 			}),
 		).toBe("fallback-fingerprint-already-completed");
-	});
-
-	it("matches started tool calls by fingerprint for step completions", () => {
-		const ledger = new CursorToolCompletionLedger();
-		const toolCall = { toolName: "shell", args: { command: "echo hi" } };
-		ledger.registerStartedToolCall("call-a", toolCall);
-
-		expect(ledger.removeStartedToolCallForStep(toolCall, "other-id")).toBe("call-a");
-		expect(ledger.hasStartedToolCall("call-a")).toBe(false);
 	});
 
 	// Legacy alias inputs exercise the unknown-tool boundary, not observed SDK callbacks.

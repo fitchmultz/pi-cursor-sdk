@@ -1,6 +1,5 @@
 import { toNamespacedPath } from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { computeCursorContextFingerprint, shouldBootstrapCursorContext } from "../src/context.js";
 import { createEventHarness, createExtensionTestContext, makeContext } from "./helpers/pi-harness.js";
 import { __testUtils as cursorSessionScopeTestUtils, registerCursorSessionScope } from "../src/cursor-session-scope.js";
 import { __testUtils as resumeTestUtils } from "../src/cursor-session-agent-resume.js";
@@ -19,33 +18,6 @@ describe("cursor-session-agent", () => {
 		resumeTestUtils.reset();
 		await sessionAgentTestUtils.disposeAllSessionCursorAgents();
 		vi.clearAllMocks();
-	});
-
-	it("reuses the same SDK agent for the same pi session scope", async () => {
-		const mockDispose = vi.fn().mockResolvedValue(undefined);
-		const createAgent = vi.fn().mockResolvedValue({
-			agentId: "agent-1",
-			[Symbol.asyncDispose]: mockDispose,
-		});
-
-		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/test.jsonl");
-		const params = {
-			apiKey: "test-key",
-			agentMode: "agent" as const,
-			cwd: "/tmp/project",
-			modelSelection: { id: "composer-2.5" },
-			createAgent,
-		};
-
-		const first = await acquireSessionCursorAgent(params);
-		const second = await acquireSessionCursorAgent(params);
-
-		expect(first.created).toBe(true);
-		expect(second.created).toBe(false);
-		expect(first.agent).toBe(second.agent);
-		expect(createAgent).toHaveBeenCalledTimes(1);
-		expect(createAgent).toHaveBeenCalledWith(expect.objectContaining({ mode: "agent" }));
-		expect(mockDispose).not.toHaveBeenCalled();
 	});
 
 	it("passes one session-scoped store through Agent.create and disposes it with the pooled agent", async () => {
@@ -112,6 +84,7 @@ describe("cursor-session-agent", () => {
 		const first = await acquireSessionCursorAgent(params);
 		const second = await acquireSessionCursorAgent({ ...params, agentMode: "plan" });
 
+		expect(first.created).toBe(true);
 		expect(second.created).toBe(false);
 		expect(second.agent).toBe(first.agent);
 		expect(createAgent).toHaveBeenCalledTimes(1);
@@ -209,8 +182,8 @@ describe("cursor-session-agent", () => {
 		first.trackRunCompletion(completion);
 		const replacementPromise = acquireSessionCursorAgent({ ...baseParams, apiKey: "key-b" });
 
-		await vi.waitFor(() => expect(createAgent).toHaveBeenCalledTimes(2));
 		const replacement = await replacementPromise;
+		expect(createAgent).toHaveBeenCalledTimes(2);
 
 		expect(replacement.agent).not.toBe(first.agent);
 		expect(replacement.agent.agentId).toBe("agent-2");
@@ -392,8 +365,11 @@ describe("cursor-session-agent", () => {
 			agentId: `agent-${createAgent.mock.calls.length + 1}`,
 			[Symbol.asyncDispose]: mockDispose,
 		}));
+		const pi = createEventHarness();
+		registerCursorSessionAgentLifecycle(pi);
 
 		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/test.jsonl");
+		await pi.runSessionStart({ cwd: "/tmp/project", sessionManager: { getSessionFile: () => "/tmp/sessions/test.jsonl" } });
 		const params = {
 			apiKey: "test-key",
 			agentMode: "agent" as const,
@@ -403,7 +379,7 @@ describe("cursor-session-agent", () => {
 		};
 
 		const first = await acquireSessionCursorAgent(params);
-		sessionAgentTestUtils.invalidateSessionAgent("/tmp/sessions/test.jsonl");
+		await pi.runSessionCompact();
 		const second = await acquireSessionCursorAgent(params);
 
 		expect(first.agent).not.toBe(second.agent);
@@ -413,11 +389,13 @@ describe("cursor-session-agent", () => {
 
 	it("disposes in-flight Agent.create results after session disposal without recreating", async () => {
 		const mockDisposeLate = vi.fn().mockResolvedValue(undefined);
+		const enteredCreate = Promise.withResolvers<void>();
 		let resolveLateCreate: (agent: unknown) => void = () => {};
 		const createAgent = vi.fn().mockImplementation(
 			() =>
 				new Promise((resolve) => {
 					resolveLateCreate = resolve;
+					enteredCreate.resolve();
 				}),
 		);
 
@@ -431,7 +409,8 @@ describe("cursor-session-agent", () => {
 		};
 
 		const acquirePromise = acquireSessionCursorAgent(params);
-		await vi.waitFor(() => expect(createAgent).toHaveBeenCalledTimes(1));
+		await enteredCreate.promise;
+		expect(createAgent).toHaveBeenCalledTimes(1);
 		await sessionAgentTestUtils.disposeSessionCursorAgent("/tmp/sessions/test.jsonl");
 		resolveLateCreate({
 			agentId: "agent-late",
@@ -450,14 +429,18 @@ describe("cursor-session-agent", () => {
 		const mockDisposeLate = vi.fn().mockResolvedValue(undefined);
 		const mockDisposeReplacement = vi.fn().mockResolvedValue(undefined);
 		let resolveLateCreate: (agent: unknown) => void = () => {};
+		const enteredFirst = Promise.withResolvers<void>();
+		const enteredSecond = Promise.withResolvers<void>();
 		let createCount = 0;
 		const createAgent = vi.fn().mockImplementation(async () => {
 			createCount += 1;
 			if (createCount === 1) {
 				return new Promise((resolve) => {
 					resolveLateCreate = resolve;
+					enteredFirst.resolve();
 				});
 			}
+			enteredSecond.resolve();
 			return {
 				agentId: "agent-replacement",
 				[Symbol.asyncDispose]: mockDisposeReplacement,
@@ -473,9 +456,11 @@ describe("cursor-session-agent", () => {
 		};
 
 		const firstAcquirePromise = acquireSessionCursorAgent({ ...baseParams, apiKey: "key-a" });
-		await vi.waitFor(() => expect(createAgent).toHaveBeenCalledTimes(1));
+		await enteredFirst.promise;
+		expect(createAgent).toHaveBeenCalledTimes(1);
 		const secondAcquirePromise = acquireSessionCursorAgent({ ...baseParams, apiKey: "key-b" });
-		await vi.waitFor(() => expect(createAgent).toHaveBeenCalledTimes(2));
+		await enteredSecond.promise;
+		expect(createAgent).toHaveBeenCalledTimes(2);
 		resolveLateCreate({
 			agentId: "agent-late",
 			[Symbol.asyncDispose]: mockDisposeLate,
@@ -491,30 +476,6 @@ describe("cursor-session-agent", () => {
 		expect(storeMock.openedOptions[0].stateRoot).not.toBe(storeMock.openedOptions[1].stateRoot);
 		expect(storeMock.stores[0].dispose).toHaveBeenCalledTimes(1);
 		expect(storeMock.stores[1].dispose).not.toHaveBeenCalled();
-	});
-
-	it("keeps a fileless acquisition temporary when scope becomes persisted before it completes", async () => {
-		const getDefaultStateRoot = vi.fn(() => "/tmp/cursor-sdk-state/workspace");
-		const storeMock = installCursorSessionStoreMock(getDefaultStateRoot);
-		const createAgent = vi.fn().mockResolvedValue({
-			agentId: "agent-fileless",
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
-		cursorSessionScopeTestUtils.set("/tmp/project", undefined, "ephemeral");
-
-		const acquire = acquireSessionCursorAgent({
-			apiKey: "test-key",
-			agentMode: "agent",
-			cwd: "/tmp/project",
-			modelSelection: { id: "composer-2.5" },
-			createAgent,
-		});
-		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/persisted.jsonl", "persisted");
-
-		await acquire;
-		expect(getDefaultStateRoot).not.toHaveBeenCalled();
-		expect(storeMock.openedOptions[0].stateRoot).toContain("pi-cursor-sdk");
-		expect(storeMock.openedOptions[0].stateRoot).not.toContain("cursor-sdk-state");
 	});
 
 	it("clears invalidation before the first agent is created", async () => {
@@ -551,12 +512,13 @@ describe("cursor-session-agent", () => {
 		};
 		process.on("unhandledRejection", onUnhandledRejection);
 
+		const enteredCreate = Promise.withResolvers<void>();
 		let rejectCreate: (error: Error) => void = () => {};
-		const mockDisposeLate = vi.fn().mockResolvedValue(undefined);
 		const createAgent = vi.fn().mockImplementation(
 			() =>
 				new Promise((_resolve, reject) => {
 					rejectCreate = reject;
+					enteredCreate.resolve();
 				}),
 		);
 
@@ -570,7 +532,8 @@ describe("cursor-session-agent", () => {
 		};
 
 		const acquirePromise = acquireSessionCursorAgent(params);
-		await vi.waitFor(() => expect(createAgent).toHaveBeenCalledTimes(1));
+		await enteredCreate.promise;
+		expect(createAgent).toHaveBeenCalledTimes(1);
 		await sessionAgentTestUtils.disposeSessionCursorAgent("/tmp/sessions/test.jsonl");
 		rejectCreate(new Error("ConnectError: [unavailable] read ETIMEDOUT"));
 
@@ -578,49 +541,6 @@ describe("cursor-session-agent", () => {
 		await Promise.resolve();
 		expect(rejections).toEqual([]);
 		process.off("unhandledRejection", onUnhandledRejection);
-	});
-
-	it("detects when a follow-up send should bootstrap after branch shrink", () => {
-		const sendState = {
-			bootstrapped: true,
-			contextFingerprint: computeCursorContextFingerprint({
-				messages: [
-					{ role: "user", content: "Hello", timestamp: 1 },
-					{ role: "assistant", content: [{ type: "text", text: "Hi" }], api: "cursor-sdk", provider: "cursor", model: "test", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "stop", timestamp: 2 },
-					{ role: "user", content: "More", timestamp: 3 },
-					{ role: "assistant", content: [{ type: "text", text: "Ok" }], api: "cursor-sdk", provider: "cursor", model: "test", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "stop", timestamp: 4 },
-				],
-			}),
-			incrementalSendCount: 0,
-		};
-		const context = makeContext([
-			{ role: "user", content: "Hello", timestamp: 1 },
-			{ role: "assistant", content: [{ type: "text", text: "Hi" }], api: "cursor-sdk", provider: "cursor", model: "test", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "stop", timestamp: 2 },
-		]);
-
-		expect(shouldBootstrapCursorContext(sendState, context)).toBe(true);
-	});
-
-	it("recreates the session agent when the API key identity changes", async () => {
-		const mockDispose = vi.fn().mockResolvedValue(undefined);
-		const createAgent = vi.fn().mockImplementation(async () => ({
-			agentId: `agent-${createAgent.mock.calls.length + 1}`,
-			[Symbol.asyncDispose]: mockDispose,
-		}));
-
-		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/test.jsonl");
-		const baseParams = {
-			agentMode: "agent" as const,
-			cwd: "/tmp/project",
-			modelSelection: { id: "composer-2.5" },
-			createAgent,
-		};
-
-		await acquireSessionCursorAgent({ ...baseParams, apiKey: "key-a" });
-		await acquireSessionCursorAgent({ ...baseParams, apiKey: "key-b" });
-
-		expect(createAgent).toHaveBeenCalledTimes(2);
-		expect(mockDispose).toHaveBeenCalledTimes(1);
 	});
 
 	it("disposes the scoped session agent on terminal session_shutdown", async () => {
@@ -803,31 +723,6 @@ describe("cursor-session-agent", () => {
 		);
 
 		expect(sessionAgentTestUtils.sessionAgentsByScope.has("/tmp/sessions/session-a.jsonl")).toBe(false);
-		expect(mockDispose).toHaveBeenCalledTimes(1);
-	});
-
-	it("invalidates and recreates the session agent after session_tree-style invalidation", async () => {
-		const mockDispose = vi.fn().mockResolvedValue(undefined);
-		const createAgent = vi.fn().mockImplementation(async () => ({
-			agentId: `agent-${createAgent.mock.calls.length + 1}`,
-			[Symbol.asyncDispose]: mockDispose,
-		}));
-
-		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/test.jsonl");
-		const params = {
-			apiKey: "test-key",
-			agentMode: "agent" as const,
-			cwd: "/tmp/project",
-			modelSelection: { id: "composer-2.5" },
-			createAgent,
-		};
-
-		const first = await acquireSessionCursorAgent(params);
-		sessionAgentTestUtils.invalidateSessionAgent("/tmp/sessions/test.jsonl");
-		const second = await acquireSessionCursorAgent(params);
-
-		expect(first.agent).not.toBe(second.agent);
-		expect(createAgent).toHaveBeenCalledTimes(2);
 		expect(mockDispose).toHaveBeenCalledTimes(1);
 	});
 

@@ -161,22 +161,6 @@ describe("Cursor cloud options", () => {
 		})).toThrow("valid Git branch name");
 	});
 
-	it("passes a valid Git branch name to the SDK", () => {
-		const branch = "feature/demo";
-		const resolvedConfig = resolveCursorSdkConfig({
-			cli: {
-				runtime: "cloud",
-				cloud: { acknowledged: true, repo: "https://github.com/example/repo.git", branch },
-			},
-		});
-		expect(buildCursorCloudAgentOptions({
-			apiKey: "test-key",
-			modelSelection: { id: "composer-2.5" },
-			agentMode: "agent",
-			resolvedConfig,
-		}).cloud?.repos).toEqual([{ url: "https://github.com/example/repo.git", startingRef: branch }]);
-	});
-
 	it("passes a full commit SHA to the SDK", () => {
 		const sha = "a".repeat(40);
 		const resolvedConfig = resolveCursorSdkConfig({

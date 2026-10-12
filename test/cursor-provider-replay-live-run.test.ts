@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { installCursorProviderVirtualTime } from "./helpers/cursor-provider-virtual-time.js";
 import { Type } from "typebox";
 import {
 	resetCursorProviderTestState,
@@ -15,12 +16,12 @@ import {
 	isToolCallBlock,
 	registerNativeToolDisplayForTest,
 	type CursorDeltaHandler,
-	type CursorStepHandler,
 	type RegisteredTool,
 	mockCreatedAgent,
 	asMockCursorRun,
 	createPiHarness,
-	createExtensionTestContext} from "./helpers/cursor-provider-harness.js";
+	createExtensionTestContext,
+} from "./helpers/cursor-provider-harness.js";
 import { captureProviderTestOwnership, streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { streamCursor as streamOwnedCursor } from "../src/cursor-provider.js";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -28,9 +29,6 @@ import { captureCursorUsageRecorder, readCursorUsageView } from "../src/cursor-u
 import { __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
 import { __testUtils as sessionAgentTestUtils } from "../src/cursor-session-agent.js";
 import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
-import { estimateCursorPromptMessageTokens } from "../src/context.js";
-import { __testUtils as nativeToolDisplayTestUtils } from "../src/cursor-native-tool-display-state.js";
-import type { Context } from "@earendil-works/pi-ai";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { writeRawTestEvidence } from "./helpers/raw-test-evidence.mjs";
@@ -39,6 +37,7 @@ import { join } from "node:path";
 
 describe("streamCursor native replay live run", () => {
 	beforeEach(resetCursorProviderTestState);
+	installCursorProviderVirtualTime();
 
 	it("uses bounded approximate usage on the final native replay stop turn when no turn-ended usage arrives", async () => {
 		const model = { ...makeModel(), cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.5 } };
@@ -293,7 +292,7 @@ describe("streamCursor native replay live run", () => {
 			});
 			mockCreatedAgent({ agentId: "agent-1", send: mockSend, [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined) });
 			const firstEventsPromise = collectEvents(streamOwnedCursor(model, context, { apiKey: "test-key" }, ownership));
-			while (!firstOnDelta) await new Promise((resolve) => setTimeout(resolve, 0));
+			while (!firstOnDelta) await vi.advanceTimersByTimeAsync(0);
 			const firstDone = getDoneEvent(await firstEventsPromise);
 			expect(firstDone.reason).toBe("toolUse");
 			const toolCall = firstDone.message.content.find(isToolCallBlock);
@@ -304,7 +303,7 @@ describe("streamCursor native replay live run", () => {
 				role: "toolResult", toolCallId: toolCall!.id, toolName: "read", content: toolResult.content,
 				details: toolResult.details, isError: false, timestamp: 2,
 			}];
-			await new Promise((resolve) => setTimeout(resolve, 300));
+			await vi.advanceTimersByTimeAsync(300);
 			const secondEventsPromise = collectEvents(streamOwnedCursor(model, replayContext, { apiKey: "test-key" }, ownership));
 			setTimeout(() => {
 				firstOnDelta?.({ update: { type: "tool-call-started", toolCall: { name: "read", args: { path: "package.json" } }, callId: "second-1" } });
@@ -314,6 +313,7 @@ describe("streamCursor native replay live run", () => {
 				firstOnDelta?.({ update: { type: "turn-ended",
 					usage: { inputTokens: 40_000, outputTokens: 800, cacheReadTokens: 39_000, cacheWriteTokens: 0 } } });
 			}, 0);
+			await vi.advanceTimersByTimeAsync(0);
 			const secondDone = getDoneEvent(await secondEventsPromise);
 			const secondToolCall = secondDone.message.content.find(isToolCallBlock);
 			expect(secondDone.reason).toBe("toolUse");
@@ -404,8 +404,8 @@ describe("streamCursor native replay live run", () => {
 		context.tools = [{ name: "read", description: "Read files", parameters: Type.Object({}) }];
 
 		const eventsPromise = collectEvents(streamCursor(makeModel(), context, { apiKey: "test-key" }));
-		while (!firstOnDelta) await new Promise((resolve) => setTimeout(resolve, 0));
-		await new Promise((resolve) => setTimeout(resolve, 200));
+		while (!firstOnDelta) await vi.advanceTimersByTimeAsync(0);
+		await vi.advanceTimersByTimeAsync(200);
 		firstOnDelta?.({
 			update: {
 				type: "turn-ended",
@@ -707,7 +707,7 @@ describe("streamCursor native replay live run", () => {
 
 		const scopedEventsPromise = collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 		await Promise.resolve();
-		await new Promise((resolve) => setTimeout(resolve, 30));
+		await vi.advanceTimersByTimeAsync(30);
 
 		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(1);
 		expect(cancelRun).not.toHaveBeenCalled();
@@ -900,7 +900,7 @@ describe("streamCursor native replay live run", () => {
 		];
 		const followUpEventsPromise = collectEvents(streamCursor(makeModel(), followUpContext, { apiKey: "test-key" }));
 		await Promise.resolve();
-		await new Promise((resolve) => setTimeout(resolve, 30));
+		await vi.advanceTimersByTimeAsync(30);
 
 		expect(mockSend).toHaveBeenCalledTimes(1);
 

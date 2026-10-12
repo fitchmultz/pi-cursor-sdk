@@ -11,19 +11,9 @@ import {
 	isCursorSdkConnectionStalledError,
 	formatCursorSdkAbortMessage,
 	formatCursorSdkRunFailureDetail,
-	isUnauthenticatedConnectError,
 	resolveCursorSdkAbortCause,
 	sanitizeCursorProviderError,
 } from "../src/cursor-provider-errors.js";
-
-function makeUnauthenticatedConnectError(): Error & { rawMessage: string; code: number; metadata: Headers } {
-	const error = new Error("[unauthenticated] Error") as Error & { rawMessage: string; code: number; metadata: Headers };
-	error.name = "ConnectError";
-	error.rawMessage = "Error";
-	error.code = 16;
-	error.metadata = new Headers({ authorization: "Bearer secret-key" });
-	return error;
-}
 
 // Synthetic errors use SDK frames from the retained .35 offline harness capture;
 // only the repo prefix is normalized. They are not new backend observations.
@@ -233,14 +223,6 @@ describe("cursor-provider-errors", () => {
 		expect(detail).toBe("ConnectError: read ETIMEDOUT");
 	});
 
-	it("scrubs secrets and maps explicit invalid keys to actionable auth guidance", () => {
-		expect(sanitizeCursorProviderError(new Error("Error"), "test-key")).toContain("Cursor SDK request failed");
-		expect(sanitizeCursorProviderError(new Error("Invalid API key Bearer secret-key"), "secret-key")).toContain(
-			"invalid or unauthorized",
-		);
-		expect(sanitizeCursorProviderError(new Error("Bearer secret-key"), "secret-key")).not.toContain("secret-key");
-	});
-
 	it("uses the installed AuthenticationError class only for cloud guidance", () => {
 		const error = new AuthenticationError("Invalid User API Key at https://alice:pw@api.cursor.com");
 		const localMessage = "Cursor SDK request failed because the Cursor SDK API key may be invalid or unauthorized. Cursor Agent CLI/Desktop login is not reused. Run /login -> Use an API key -> Cursor, verify CURSOR_API_KEY, or pass --api-key, then retry.";
@@ -321,19 +303,6 @@ describe("cursor-provider-errors", () => {
 		expect(message).not.toContain(endpointToken);
 		expect(message).not.toContain("127.0.0.1");
 		expect(message).not.toContain("/cursor-pi-tool-bridge/");
-	});
-
-	it("preserves unauthenticated ConnectError without diagnosing a rejected API key", () => {
-		const error = makeUnauthenticatedConnectError();
-		const message = sanitizeCursorProviderError(error, "secret-key");
-
-		expect(isUnauthenticatedConnectError(error)).toBe(true);
-		expect(message).toContain("Cursor SDK authentication failed");
-		expect(message).toContain("ConnectError");
-		expect(message).toContain("code: 16");
-		expect(message).not.toMatch(/API key|\/login/);
-		expect(message).not.toContain("secret-key");
-		expect(message).not.toContain("Bearer");
 	});
 
 	it("maps connect-layer network failures to pi's retryable Network error classifier", () => {

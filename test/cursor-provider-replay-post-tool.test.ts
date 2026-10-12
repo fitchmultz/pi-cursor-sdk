@@ -1,51 +1,39 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { installCursorProviderVirtualTime } from "./helpers/cursor-provider-virtual-time.js";
 import { Type } from "typebox";
 import {
 	resetCursorProviderTestState,
 	mockedCreate,
-	mockedCreateAgentPlatform,
 	makeModel,
 	makeContext,
-	makeAssistantMessage,
 	collectEvents,
 	collectTextDeltas,
 	collectThinkingDeltas,
-	getEventsOfType,
 	getDoneEvent,
-	getErrorEvent,
 	getTextEndEvent,
-	hasEventType,
 	isToolCallBlock,
-	isCursorToolStreamEvent,
 	getCreatedAgentOptions,
-	createMockAgentPlatform,
 	registerBridgeForProviderTest,
 	registerNativeToolDisplayForTest,
 	connectMcpClient,
 	createBuiltinToolInfo,
-	createTestToolInfo,
-	cursorModelItems,
 	type CursorDeltaHandler,
-	type CursorStepHandler,
 	type RegisteredTool,
 	mockCreatedAgent,
 	asMockCursorRun,
 	getPiToolsMcpUrlFromAgentCreateOptions,
-	createExtensionTestContext} from "./helpers/cursor-provider-harness.js";
+	createExtensionTestContext,
+} from "./helpers/cursor-provider-harness.js";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";
-import { __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
 import { estimateCursorPromptMessageTokens } from "../src/context.js";
-import { __testUtils as nativeToolDisplayTestUtils } from "../src/cursor-native-tool-display-state.js";
-import type { AssistantMessageEvent, Context } from "@earendil-works/pi-ai";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import type { AssistantMessageEvent } from "@earendil-works/pi-ai";
 
 
 describe("streamCursor native replay post-tool text", () => {
 	beforeEach(resetCursorProviderTestState);
+	installCursorProviderVirtualTime();
 
-it("streams post-tool Cursor thinking and text while a native replay run is still active", async () => {
+	it("streams post-tool Cursor thinking and text while a native replay run is still active", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		const registeredTools: RegisteredTool[] = [];
 		await registerNativeToolDisplayForTest(registeredTools);
@@ -593,6 +581,8 @@ it("streams post-tool Cursor thinking and text while a native replay run is stil
 	});
 
 	it("does not trim final text when pre-tool text is only a word prefix", async () => {
+		// The real loopback MCP client owns transport timers; only replay-only cases use the clock.
+		vi.useRealTimers();
 		process.env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS = "1";
 		registerBridgeForProviderTest({
 			active: ["read"],

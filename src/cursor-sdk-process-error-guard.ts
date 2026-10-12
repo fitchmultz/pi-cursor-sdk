@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { classifyCursorConnectError, isCursorSdkAbortConnectError, isCursorSdkConnectionStalledError } from "./cursor-provider-errors.js";
+import { classifyCursorConnectError, isCursorSdkConnectionStalledError } from "./cursor-provider-errors.js";
 
 interface CursorSdkProcessErrorGuardToken {
 	suppressAbortErrors: boolean;
@@ -146,8 +146,6 @@ export const __testUtils = {
 		lifecycleSessionGuards.clear();
 	},
 };
-
-export { isCursorSdkAbortConnectError };
 
 export function installCursorSdkProcessErrorGuard(): CursorSdkProcessErrorGuard {
 	const token: CursorSdkProcessErrorGuardToken = { suppressAbortErrors: false };

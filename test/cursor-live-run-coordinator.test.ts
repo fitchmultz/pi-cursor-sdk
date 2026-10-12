@@ -293,9 +293,11 @@ describe("cursor live run coordinator", () => {
 		const run = startRun(coordinator);
 		const order: string[] = [];
 		let releaseFirst: () => void = () => {};
+		const entered = Promise.withResolvers<void>();
 
 		const firstLease = coordinator.withRunLease(run, undefined, async () => {
 			order.push("first-enter");
+			entered.resolve();
 			await new Promise<void>((resolve) => {
 				releaseFirst = resolve;
 			});
@@ -305,7 +307,8 @@ describe("cursor live run coordinator", () => {
 			order.push("second-enter");
 		});
 
-		await vi.waitFor(() => expect(order).toEqual(["first-enter"]));
+		await entered.promise;
+		expect(order).toEqual(["first-enter"]);
 		releaseFirst();
 		await Promise.all([firstLease, secondLease]);
 
@@ -319,20 +322,20 @@ describe("cursor live run coordinator", () => {
 		const sdkCancel = vi.fn().mockResolvedValue(undefined);
 		coordinator.attachSdkRun(run, { cancel: sdkCancel });
 		let releaseLease: () => void = () => {};
-		let leaseWaiting = false;
+		const leaseWaiting = Promise.withResolvers<void>();
 
 		const lease = coordinator.withRunLease(run, undefined, async () => {
 			coordinator.requestIdleDispose(run);
 			await vi.advanceTimersByTimeAsync(20);
 			expect(coordinator.count()).toBe(1);
 			expect(sdkCancel).not.toHaveBeenCalled();
-			leaseWaiting = true;
+			leaseWaiting.resolve();
 			await new Promise<void>((resolve) => {
 				releaseLease = resolve;
 			});
 		});
 
-		await vi.waitFor(() => expect(leaseWaiting).toBe(true));
+		await leaseWaiting.promise;
 		releaseLease();
 		await lease;
 		await vi.advanceTimersByTimeAsync(4);

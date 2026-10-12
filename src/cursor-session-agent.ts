@@ -153,7 +153,7 @@ interface SessionCursorAgentCreateParams {
 const sessionAgentsByScope = new Map<string, SessionCursorAgentPoolEntry>();
 const invalidatedScopeKeys = new Set<string>();
 const deadTransportScopeKeys = new Set<string>();
-let deadTransportAgentDisposeTimeoutMs = 3000;
+const DEAD_TRANSPORT_AGENT_DISPOSE_TIMEOUT_MS = 3000;
 const terminalDisposedScopeGenerations = new Map<string, number>();
 const scopeCreationGenerations = new Map<string, number>();
 const EMPTY_POOL_STATE: SessionCursorAgentPoolState = { status: "empty" };
@@ -273,7 +273,7 @@ async function disposePoolEntry(entry: SessionCursorAgentPoolEntry, options?: { 
 		await (options?.deadTransport
 			? Promise.race([
 					disposal,
-					new Promise<void>((resolve) => setTimeout(resolve, deadTransportAgentDisposeTimeoutMs).unref?.()),
+					new Promise<void>((resolve) => setTimeout(resolve, DEAD_TRANSPORT_AGENT_DISPOSE_TIMEOUT_MS).unref?.()),
 				])
 			: disposal);
 	} catch {
@@ -725,11 +725,6 @@ export const __testUtils = {
 	resetSessionCursorAgent,
 	refreshSessionCursorAgentConfig,
 	disposeAllSessionCursorAgents,
-	setDeadTransportAgentDisposeTimeoutMs(ms: number): number {
-		const previous = deadTransportAgentDisposeTimeoutMs;
-		deadTransportAgentDisposeTimeoutMs = ms;
-		return previous;
-	},
 	SessionCursorAgentCreationSupersededError,
 	SessionCursorAgentScopeClosedError,
 };

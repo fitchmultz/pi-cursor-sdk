@@ -55,6 +55,8 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Qualify both frozen latest host graphs and installed forms
         env:
+          # The shared host helpers read official installer assets through the GitHub API.
+          GH_TOKEN: ${{ github.token }}
           OFFICIAL_VERSION: ${{ needs.resolve.outputs.official-version }}
           FORK_REF: ${{ needs.resolve.outputs.fork-ref }}
           PI_COMPAT_EVIDENCE_DIR: ${{ runner.temp }}/cursor-hosts
@@ -105,6 +107,7 @@ jobs:
       - name: Select the frozen latest official graph
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           OFFICIAL_VERSION: ${{ needs.resolve.outputs.official-version }}
           PI_COMPAT_EVIDENCE_DIR: ${{ runner.temp }}/native-host
         run: node scripts/ci-compatibility.mjs --automation automation --official-version "$OFFICIAL_VERSION" --select-only

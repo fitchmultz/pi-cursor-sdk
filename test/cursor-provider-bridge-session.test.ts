@@ -1,4 +1,3 @@
-import type { Context } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -23,7 +22,6 @@ import {
 	getPiToolsMcpUrlFromAgentCreateOptions,
 } from "./helpers/cursor-provider-harness.js";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";
-import { __testUtils as sessionAgentTestUtils } from "../src/cursor-session-agent.js";
 
 describe("streamCursor session agent", () => {
 	beforeEach(resetCursorProviderTestState);
@@ -112,66 +110,6 @@ describe("streamCursor session agent", () => {
 		expect(secondPrompt.text).toContain("User: Follow up");
 		expect(secondPrompt.text).not.toContain("User: Hello");
 		expect(secondPrompt.text).toContain("prefer pi__mcp for MCP work and pi__subagent for delegation");
-	});
-
-	it("recreates the session agent after session-tree invalidation", async () => {
-		const mockDispose = vi.fn().mockResolvedValue(undefined);
-		const mockSend = vi.fn().mockResolvedValue({
-			id: "run-1",
-			agentId: "agent-1",
-			status: "finished",
-			wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished", result: "ok" }),
-			cancel: vi.fn(),
-			supports: () => true,
-			unsupportedReason: () => undefined,
-		});
-		mockedCreate.mockImplementation(async () => asMockSdkAgent({
-			agentId: `agent-${mockedCreate.mock.calls.length + 1}`,
-			send: mockSend,
-			[Symbol.asyncDispose]: mockDispose,
-		}));
-
-		await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
-		sessionAgentTestUtils.invalidateSessionAgent();
-		await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
-
-		expect(mockedCreate).toHaveBeenCalledTimes(2);
-		expect(mockDispose).toHaveBeenCalledTimes(1);
-	});
-
-	it("bootstraps with branch summary context after /tree navigation", async () => {
-		const mockSend = vi.fn().mockImplementation(async (message: { text?: string }) => ({
-			id: "run-1",
-			agentId: "agent-1",
-			status: "finished",
-			wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished", result: message.text ?? "" }),
-			cancel: vi.fn(),
-			supports: () => true,
-			unsupportedReason: () => undefined,
-		}));
-		mockCreatedAgent({
-			agentId: "agent-1",
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
-
-		const treeContext = makeContext();
-		treeContext.messages = [
-			{ role: "user", content: "Hello", timestamp: 1 },
-			{
-				role: "branchSummary",
-				summary: "We explored approach A and rejected it.",
-				fromId: "entry-a",
-				timestamp: 2,
-			} as unknown as Context["messages"][number],
-			{ role: "user", content: "Continue on approach B", timestamp: 3 },
-		];
-
-		await collectEvents(streamCursor(makeModel(), treeContext, { apiKey: "test-key" }));
-
-		const prompt = mockSend.mock.calls[0]?.[0] as { text?: string };
-		expect(prompt.text).toContain("We explored approach A and rejected it.");
-		expect(prompt.text).toContain("User: Continue on approach B");
 	});
 
 	it("recreates the session agent when context diverges and sends a full bootstrap prompt", async () => {
@@ -394,6 +332,8 @@ describe("streamCursor session agent", () => {
 
 		const firstPrompt = mockSend.mock.calls[0]?.[0] as { text?: string };
 		expect(firstPrompt.text).toContain("Callable tool surfaces this run:");
+		expect(firstPrompt.text).toContain("Cursor SDK tool boundary:");
+		expect(firstPrompt.text).toContain("See callable surfaces below.");
 		expect(firstPrompt.text).toContain("Cursor host/MCP");
 		expect(firstPrompt.text).not.toContain("pi__cursor_ask_question");
 	});

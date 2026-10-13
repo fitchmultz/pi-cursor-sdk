@@ -7,6 +7,7 @@ import {
 	collectTextDeltas,
 	collectThinkingDeltas,
 	hasEventType,
+	getTextEndEvent,
 	type CursorDeltaHandler,
 	mockCreatedAgent,
 	asMockCursorRun,
@@ -99,6 +100,7 @@ describe("streamCursor incomplete tools", () => {
 		expect(trace).toContain("completed");
 		expect(trace).not.toContain("did not complete");
 		expect(collectTextDeltas(events)).toBe("done");
+		expect(getTextEndEvent(events).content).toBe("done");
 	});
 
 	it("retains a different unmatched shell after another shell completes and assistant text succeeds", async () => {

@@ -130,41 +130,24 @@ describe("platform smoke artifact transport", () => {
 		const out = mkdtempSync(join(tmpdir(), "platform-benign-duplicate-out-"));
 		// Container punctuation must end scalar auth context, not label array elements as tokens.
 		const document = String.raw`{"apiKey":["ordinary-long-identifier"],"api\u004bey":{},"ownerToken":1,"ownerToken":2,"name":"@scope/first","name":"@scope/second","docs":"apiKey=\"placeholder\" CURSOR_API_KEY=\"your-key\"","nested":[{"id":"agent-first","id":"agent-second"}],"empty":null,"enabled":true,"count":-1.25e+2}`;
-		const inputs = { "metadata.json": document + "\n", "session.jsonl": `${document}\r\n\r\n["@scope/pkg",null,false,42,{"apiKey":[],"id":"agent-fixture"}]\r\n` };
+		const record = { ownerToken: 1, packageName: "@scope/package", text: 'CURSOR_API_KEY="your-key" apiKey="placeholder"', usage: { input: 3 }, id: "agent-fixture" };
+		const inputs = {
+			"metadata.json": document + "\n",
+			"session.jsonl": `${document}\r\n\r\n["@scope/pkg",null,false,42,{"apiKey":[],"id":"agent-fixture"}]\r\n`,
+			"pretty.json": JSON.stringify(record, null, 2) + "\n",
+			"ordinary.jsonl": [record, { type: "compaction", summary: record.text }, { type: "message", message: { role: "assistant", content: [] } }].map(value => JSON.stringify(value)).join("\r\n") + "\r\n",
+		};
 		try {
 			for (const [path, content] of Object.entries(inputs)) writeFileSync(join(root, path), content);
 			expect(scanArtifacts(root)).toEqual([]);
 			const bundle = buildPlatformArtifactBundle(root, "evidence");
-			expect(bundle.files).toHaveLength(2);
+			expect(bundle.files).toHaveLength(4);
 			const result = extractPlatformArtifactBundle(out, formatPlatformArtifactBundle(bundle));
 			expect(result.ok).toBe(process.platform !== "win32");
 			if (process.platform !== "win32") {
 				for (const [path, content] of Object.entries(inputs)) expect(readFileSync(join(out, "evidence", path))).toEqual(Buffer.from(content));
+				expect(JSON.parse(readFileSync(join(out, "evidence/pretty.json"), "utf8"))).toEqual(record);
 				expect(result.violations).toEqual([]);
-				expect(scanArtifacts(out)).toEqual([]);
-			}
-		} finally {
-			rmSync(root, { recursive: true, force: true });
-			rmSync(out, { recursive: true, force: true });
-		}
-	});
-
-	it("retains secret-scanned JSON/JSONL byte-for-byte without text-regex corruption", async () => {
-		const { buildPlatformArtifactBundle, extractPlatformArtifactBundle, formatPlatformArtifactBundle, scanArtifacts } = await import(artifactsModule);
-		const root = mkdtempSync(join(tmpdir(), "platform-structured-"));
-		const out = mkdtempSync(join(tmpdir(), "platform-structured-out-"));
-		const record = { ownerToken: 1, packageName: "@scope/package", text: 'CURSOR_API_KEY="your-key" apiKey="placeholder"', usage: { input: 3 }, id: "agent-fixture" };
-		const inputs = {
-			"metadata.json": JSON.stringify(record, null, 2) + "\n",
-			"session.jsonl": [record, { type: "compaction", summary: record.text }, { type: "message", message: { role: "assistant", content: [] } }].map(value => JSON.stringify(value)).join("\r\n") + "\r\n",
-		};
-		try {
-			for (const [path, content] of Object.entries(inputs)) writeFileSync(join(root, path), content);
-			const result = extractPlatformArtifactBundle(out, formatPlatformArtifactBundle(buildPlatformArtifactBundle(root, "evidence")));
-			expect(result.ok).toBe(process.platform !== "win32");
-			if (process.platform !== "win32") {
-				for (const [path, content] of Object.entries(inputs)) expect(readFileSync(join(out, "evidence", path), "utf8")).toBe(content);
-				expect(JSON.parse(readFileSync(join(out, "evidence/metadata.json"), "utf8"))).toEqual(record);
 				expect(scanArtifacts(out)).toEqual([]);
 			}
 		} finally {
@@ -552,41 +535,26 @@ while (true) {
 		}
 	}, 20_000);
 
-	it.skipIf(process.platform === "win32")("round-trips local-resume session, debug, and runtime evidence through the canonical bundle", () => {
-		const code = String.raw`
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { buildPlatformArtifactBundle, extractPlatformArtifactBundle, formatPlatformArtifactBundle } from "./scripts/platform-smoke/artifacts.mjs";
-const root = mkdtempSync(join(tmpdir(), "local-resume-bundle-source-"));
-const out = mkdtempSync(join(tmpdir(), "local-resume-bundle-out-"));
-try {
-  mkdirSync(join(root, "sessions"), { recursive: true });
-  mkdirSync(join(root, "debug", "sessions", "s1"), { recursive: true });
-  writeFileSync(join(root, "sessions", "session.jsonl"), "{}\n");
-  writeFileSync(join(root, "debug", "sessions", "s1", "session.json"), JSON.stringify({ payload: "x".repeat(100_000) }) + "\n");
-  writeFileSync(join(root, "runtime-launches.jsonl"), JSON.stringify({ extensionPath: "/packed/node_modules/pi-cursor-sdk" }) + "\n");
-  const payload = buildPlatformArtifactBundle(root, "local-resume-evidence");
-  const stdout = formatPlatformArtifactBundle(payload);
-  const extracted = extractPlatformArtifactBundle(out, stdout);
-  const runtime = readFileSync(join(out, "local-resume-evidence", "runtime-launches.jsonl"), "utf8");
-  const result = {
-    ok: extracted.ok,
-    session: readFileSync(join(out, "local-resume-evidence", "sessions", "session.jsonl"), "utf8") === "{}\n",
-    debug: JSON.parse(readFileSync(join(out, "local-resume-evidence", "debug", "sessions", "s1", "session.json"), "utf8")).payload.length === 100_000,
-    packed: runtime.includes("/packed/node_modules/pi-cursor-sdk"),
-    boundedLines: Math.max(...stdout.split("\n").map((line) => line.length)) < 32768,
-  };
-  console.log(JSON.stringify(result));
-  if (!Object.values(result).every(Boolean)) process.exit(1);
-} finally {
-  rmSync(root, { recursive: true, force: true });
-  rmSync(out, { recursive: true, force: true });
-}
-`;
-		const result = run(process.execPath, ["--input-type=module", "-e", code]);
-		expect(result.status).toBe(0);
-		expect(result.stdout).toContain('"packed":true');
+	it.skipIf(process.platform === "win32")("round-trips local-resume session, debug, and runtime evidence through the canonical bundle", async () => {
+		const { buildPlatformArtifactBundle, extractPlatformArtifactBundle, formatPlatformArtifactBundle } = await import(artifactsModule);
+		const root = mkdtempSync(join(tmpdir(), "local-resume-bundle-source-"));
+		const out = mkdtempSync(join(tmpdir(), "local-resume-bundle-out-"));
+		try {
+			mkdirSync(join(root, "sessions"), { recursive: true });
+			mkdirSync(join(root, "debug", "sessions", "s1"), { recursive: true });
+			writeFileSync(join(root, "sessions", "session.jsonl"), "{}\n");
+			writeFileSync(join(root, "debug", "sessions", "s1", "session.json"), JSON.stringify({ payload: "x".repeat(100_000) }) + "\n");
+			writeFileSync(join(root, "runtime-launches.jsonl"), JSON.stringify({ extensionPath: "/packed/node_modules/pi-cursor-sdk" }) + "\n");
+			const stdout = formatPlatformArtifactBundle(buildPlatformArtifactBundle(root, "local-resume-evidence"));
+			expect(extractPlatformArtifactBundle(out, stdout).ok).toBe(true);
+			expect(readFileSync(join(out, "local-resume-evidence", "sessions", "session.jsonl"), "utf8")).toBe("{}\n");
+			expect(JSON.parse(readFileSync(join(out, "local-resume-evidence", "debug", "sessions", "s1", "session.json"), "utf8")).payload).toHaveLength(100_000);
+			expect(readFileSync(join(out, "local-resume-evidence", "runtime-launches.jsonl"), "utf8")).toContain("/packed/node_modules/pi-cursor-sdk");
+			expect(Math.max(...stdout.split("\n").map((line: string) => line.length))).toBeLessThan(32768);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+			rmSync(out, { recursive: true, force: true });
+		}
 	});
 
 	it("bounds actual gzip output at the public compressed bundle cap", () => {

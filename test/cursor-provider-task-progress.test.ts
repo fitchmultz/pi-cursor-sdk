@@ -15,7 +15,6 @@ import {
 	type RegisteredTool,
 } from "./helpers/cursor-provider-harness.js";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";
-import { getFinalAssistantText } from "../src/cursor-run-final-text.js";
 import { installCursorProviderVirtualTime } from "./helpers/cursor-provider-virtual-time.js";
 
 const delayBeforeToolCompletion = () => vi.advanceTimersByTimeAsync(120);
@@ -110,17 +109,6 @@ describe("streamCursor Cursor task progress", () => {
 		expect(collectTextDeltas(finalEvents)).toBe("Final answer.");
 	});
 
-	it("selects the final answer as the last non-empty text block in multi-part assistant messages", () => {
-		expect(getFinalAssistantText({
-			content: [
-				{ type: "text", text: "Running diagnostic smoke...\n" },
-				{ type: "thinking", thinking: "Checking tool result.\n" },
-				{ type: "text", text: "   \n" },
-				{ type: "text", text: "LIVE TEST PASS final report" },
-			],
-		})).toBe("LIVE TEST PASS final report");
-	});
-
 	it("can preserve SDK task wording through the experiment opt-out", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
 		process.env.PI_CURSOR_TASK_PRESENTATION = "task";
@@ -204,6 +192,7 @@ describe("streamCursor Cursor task progress", () => {
 		expect(trace).not.toContain("Cursor subagent:");
 		expect(trace).not.toContain("Cursor tool: read started");
 		expect(trace).not.toContain("Cursor tool: bash started");
+		expect(trace).not.toMatch(/Cursor (read|grep|glob):/);
 		expect(trace).toContain("read README.md");
 		expect(trace).toContain("Cursor shell: git status");
 	});

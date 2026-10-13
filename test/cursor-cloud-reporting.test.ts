@@ -13,7 +13,7 @@ const usageContractFixture = JSON.parse(readFileSync(
 };
 
 describe("cursor cloud reporting", () => {
-	it("matches the captured official raw usage route and response contract", async () => {
+	it.each([true, false])("matches the captured official raw usage route and response contract (runId: %s)", async (includeRunId) => {
 		const previousBackendUrl = process.env.CURSOR_BACKEND_URL;
 		process.env.CURSOR_BACKEND_URL = "https://evil.example";
 		const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify(usageContractFixture.response), { status: 200 }));
@@ -21,7 +21,7 @@ describe("cursor cloud reporting", () => {
 			const agentId = usageContractFixture.request.path.split("/")[3];
 			const report = await fetchCursorCloudRawUsage({
 				agentId,
-				runId: usageContractFixture.request.optionalRunId,
+				runId: includeRunId ? usageContractFixture.request.optionalRunId : undefined,
 				apiKey: "secret-key",
 				fetchImpl,
 			});
@@ -32,11 +32,11 @@ describe("cursor cloud reporting", () => {
 			});
 			expect(usageContractFixture.request.method).toBe("GET");
 			expect(fetchImpl.mock.calls[0]?.[0].toString()).toBe(
-				`https://api.cursor.com${usageContractFixture.request.path}?runId=${usageContractFixture.request.optionalRunId}`,
+				`https://api.cursor.com${usageContractFixture.request.path}${includeRunId ? `?runId=${usageContractFixture.request.optionalRunId}` : ""}`,
 			);
 			expect(report).toEqual({
 				totalUsage: usageContractFixture.response.totalUsage,
-				runUsage: usageContractFixture.response.runs[0]?.usage,
+				...(includeRunId ? { runUsage: usageContractFixture.response.runs[0]?.usage } : {}),
 			});
 		} finally {
 			if (previousBackendUrl === undefined) delete process.env.CURSOR_BACKEND_URL;
@@ -44,40 +44,11 @@ describe("cursor cloud reporting", () => {
 		}
 	});
 
-	it("omits the optional runId query while still parsing total usage", async () => {
-		const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify(usageContractFixture.response), { status: 200 }));
-		const agentId = usageContractFixture.request.path.split("/")[3];
-
-		const report = await fetchCursorCloudRawUsage({ agentId, apiKey: "secret-key", fetchImpl });
-
-		expect(fetchImpl.mock.calls[0]?.[0].toString()).toBe(`https://api.cursor.com${usageContractFixture.request.path}`);
-		expect(report).toEqual({ totalUsage: usageContractFixture.response.totalUsage });
-	});
-
-	it("aborts the raw usage fetch when the timeout fires", async () => {
+	it.each(["fetch", "body"])("aborts raw usage %s when the timeout fires", async (stage) => {
 		let signal: AbortSignal | undefined;
 		const fetchImpl = vi.fn((_url: URL | RequestInfo, init?: RequestInit) => {
 			signal = init?.signal ?? undefined;
-			return new Promise<Response>(() => {});
-		}) as typeof fetch;
-
-		const report = await fetchCursorCloudRawUsage({
-			agentId: "bc-agent",
-			runId: "run-1",
-			apiKey: "secret-key",
-			fetchImpl,
-			timeoutMs: 1,
-		});
-
-		expect(report).toBeUndefined();
-		expect(signal?.aborted).toBe(true);
-	});
-
-	it("aborts raw usage response body parsing when the timeout fires", async () => {
-		let signal: AbortSignal | undefined;
-		const fetchImpl = vi.fn((_url: URL | RequestInfo, init?: RequestInit) => {
-			signal = init?.signal ?? undefined;
-			return Promise.resolve({
+			return stage === "fetch" ? new Promise<Response>(() => {}) : Promise.resolve({
 				ok: true,
 				json: () => new Promise(() => {}),
 			} as Response);

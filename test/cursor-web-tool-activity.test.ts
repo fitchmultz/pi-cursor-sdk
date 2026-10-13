@@ -30,6 +30,7 @@ describe("cursor web tool activity", () => {
 	it.each([
 		["WebSearch", "webSearch", "Cursor web search", "web search", { search_term: "pi mathematics" }, { query: "pi mathematics" }, "pi mathematics"],
 		["web_search", "webSearch", "Cursor web search", "web search", { search_term: "pi mathematics" }, { query: "pi mathematics" }, "pi mathematics"],
+		["web_search", "webSearch", "Cursor web search", "web search", { query: "typescript sdk" }, { query: "typescript sdk" }, "typescript sdk"],
 		["WebFetch", "webFetch", "Cursor web fetch", "web fetch", { url: "https://example.com/docs" }, { url: "https://example.com/docs" }, "https://example.com/docs"],
 		["web_fetch", "webFetch", "Cursor web fetch", "web fetch", { url: "https://example.com/docs" }, { url: "https://example.com/docs" }, "https://example.com/docs"],
 	] as const)("displays MCP tool %s as %s", (name, sourceToolName, title, label, nestedArgs, displayArgs, summary) => {
@@ -47,21 +48,5 @@ describe("cursor web tool activity", () => {
 			});
 			expect(formatCursorToolTranscript(toolCall)).toBe(`${label} ${summary}\n\nExample Domain\n`);
 		}
-	});
-
-	it("formats MCP web_search completions as Cursor web search activity", () => {
-		const toolCall = {
-			name: "mcp",
-			args: { toolName: "web_search", args: { query: "typescript sdk" } },
-			result: { status: "success", value: { content: [{ text: { text: "SDK docs" } }], isError: false } },
-		};
-
-		const display = buildCursorPiToolDisplay(toolCall);
-		expect(display).toMatchObject({
-			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-			args: { query: "typescript sdk", activityTitle: "Cursor web search", activitySummary: "typescript sdk" },
-			result: { details: { variant: "activity", sourceToolName: "webSearch", title: "Cursor web search" } },
-		});
-		expect(formatCursorToolTranscript(toolCall)).toContain("web search typescript sdk");
 	});
 });

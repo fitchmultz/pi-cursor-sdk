@@ -10,10 +10,13 @@ import {
 describe("pi-harness before_agent_start results", () => {
 	it("chains systemPrompt edits across multiple handlers", async () => {
 		const pi = createEventHarness();
-		pi.on("before_agent_start", (event) => ({ systemPrompt: `${event.systemPrompt}-first` }));
 		pi.on("before_agent_start", (event, ctx) => {
-			expect(event.systemPrompt).toContain("-first");
-			expect(ctx.getSystemPrompt()).toContain("-first");
+			expect(ctx.getSystemPrompt()).toBe("base");
+			return { systemPrompt: `${event.systemPrompt}-first` };
+		});
+		pi.on("before_agent_start", (event, ctx) => {
+			expect(event.systemPrompt).toBe("base-first");
+			expect(ctx.getSystemPrompt()).toBe("base-first");
 			return { systemPrompt: `${event.systemPrompt}-second` };
 		});
 
@@ -27,31 +30,6 @@ describe("pi-harness before_agent_start results", () => {
 		const result = await pi.invokeEvent("before_agent_start", event);
 
 		expect(result?.systemPrompt).toBe("base-first-second");
-	});
-
-	it("rebinds ctx.getSystemPrompt() while chaining handlers", async () => {
-		const pi = createEventHarness();
-		const seenPrompts: string[] = [];
-		pi.on("before_agent_start", (_event, ctx) => {
-			seenPrompts.push(ctx.getSystemPrompt());
-			return { systemPrompt: "after-first" };
-		});
-		pi.on("before_agent_start", (_event, ctx) => {
-			seenPrompts.push(ctx.getSystemPrompt());
-			return { systemPrompt: "after-second" };
-		});
-
-		const event = {
-			type: "before_agent_start",
-			messageType: "user",
-			prompt: "hello",
-			systemPrompt: "base",
-			systemPromptOptions: createDefaultSystemPromptOptions("/repo"),
-		} satisfies BeforeAgentStartEvent & { messageType: "user" };
-		const result = await pi.invokeEvent("before_agent_start", event);
-
-		expect(seenPrompts).toEqual(["base", "after-first"]);
-		expect(result?.systemPrompt).toBe("after-second");
 	});
 
 	it("returns undefined when no handler modifies the prompt", async () => {

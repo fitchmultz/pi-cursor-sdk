@@ -491,7 +491,7 @@ describe("extension native Cursor tool replay", () => {
 		);
 	});
 
-	it("does not register native Cursor tool wrappers on non-Cursor models", async () => {
+	it("registers native Cursor tool wrappers only after the first Cursor model transition", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		mockedDiscover.mockResolvedValueOnce([]);
 		const pi = createExtensionPi();
@@ -506,18 +506,6 @@ describe("extension native Cursor tool replay", () => {
 		expect(canRenderCursorToolNatively("write")).toBe(false);
 		expect(pi.registerTool).toHaveBeenCalledTimes(2);
 		expect(pi._activeToolNames()).toEqual(["read", "bash", "edit", "write"]);
-	});
-
-	it("registers native Cursor tool wrappers on first Cursor model transition", async () => {
-		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
-		mockedDiscover.mockResolvedValueOnce([]);
-		const pi = createExtensionPi();
-		await extensionFactory(pi);
-		await pi.runSessionStart({
-			model: makeHarnessModel("openai-codex", "openai-codex-responses", "gpt-5.5"),
-		});
-
-		expect(pi._tools.map((tool) => tool.name)).toEqual([CURSOR_ASK_QUESTION_TOOL_NAME, CURSOR_ACTIVATE_SKILL_TOOL_NAME]);
 
 		await pi.runModelSelect(makeModel("composer-2.5"));
 
@@ -619,28 +607,20 @@ describe("extension native Cursor tool replay", () => {
 		expect(notify).toHaveBeenCalledWith(expect.stringContaining("Cursor native tool replay skipped for read"), "warning");
 	});
 
-	it("does not register native Cursor tool wrappers when native display is disabled", async () => {
-		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
-		mockedDiscover.mockResolvedValueOnce([]);
-		const pi = createExtensionPi();
-		await extensionFactory(pi);
-		await pi.runSessionStart();
+	it.each(["PI_CURSOR_NATIVE_TOOL_DISPLAY", "PI_CURSOR_REGISTER_NATIVE_TOOLS"])(
+		"does not register native Cursor tool wrappers when %s is disabled",
+		async (disabledEnv) => {
+			process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+			process.env[disabledEnv] = "0";
+			mockedDiscover.mockResolvedValueOnce([]);
+			const pi = createExtensionPi();
+			await extensionFactory(pi);
+			await pi.runSessionStart();
 
-		expect(pi._tools.map((tool) => tool.name)).toEqual([CURSOR_ASK_QUESTION_TOOL_NAME, CURSOR_ACTIVATE_SKILL_TOOL_NAME]);
-		expect(canRenderCursorToolNatively("read")).toBe(false);
-	});
-
-	it("does not register native Cursor tool wrappers when native tool registration is disabled", async () => {
-		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
-		process.env.PI_CURSOR_REGISTER_NATIVE_TOOLS = "0";
-		mockedDiscover.mockResolvedValueOnce([]);
-		const pi = createExtensionPi();
-		await extensionFactory(pi);
-		await pi.runSessionStart();
-
-		expect(pi._tools.map((tool) => tool.name)).toEqual([CURSOR_ASK_QUESTION_TOOL_NAME, CURSOR_ACTIVATE_SKILL_TOOL_NAME]);
-		expect(canRenderCursorToolNatively("read")).toBe(false);
-	});
+			expect(pi._tools.map((tool) => tool.name)).toEqual([CURSOR_ASK_QUESTION_TOOL_NAME, CURSOR_ACTIVATE_SKILL_TOOL_NAME]);
+			expect(canRenderCursorToolNatively("read")).toBe(false);
+		},
+	);
 
 	it("skips only native Cursor tool wrappers owned by another extension", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";

@@ -57,7 +57,7 @@ describe("prepareCursorSessionForCompaction", () => {
 		try {
 			await client.connect(transport);
 			const call = client.callTool({ name: "pi__slow_tool", arguments: {} }).catch(error => error);
-			await vi.waitFor(() => expect(requests).toHaveLength(1));
+			await vi.waitFor(() => expect(requests).toHaveLength(1), { interval: 1 });
 			cursorLiveRuns.requestIdleDispose(liveRun);
 			expect(bridgeRun.hasPendingToolCalls()).toBe(true);
 			await prepareCursorSessionForCompaction(scopeKey);

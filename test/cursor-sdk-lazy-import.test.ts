@@ -666,7 +666,24 @@ describe("Cursor SDK lazy runtime imports", () => {
 		expect(collectUnsafeHostPeerLoads([fixturePath])).toEqual([]);
 	});
 
-	it("rejects direct require use in the canonical resolve-only loader", () => {
+	it.each([
+		{
+			label: "direct require calls",
+			uses: [
+				'class NamedLoader extends require("../shared/helper.mjs").default {}',
+				'class DirectLoader extends createRequire(import.meta.url)("../shared/helper.mjs").default {}',
+			],
+			messages: [
+				"require created by createRequire may only be used via require.resolve",
+				"createRequire may only initialize a named resolve-only loader",
+			],
+		},
+		{
+			label: "aliases",
+			uses: ['const alias = require;', 'alias("../shared/helper.mjs");'],
+			messages: ["require created by createRequire may only be used via require.resolve"],
+		},
+	])("rejects $label in the canonical resolve-only loader", ({ uses, messages }) => {
 		tmpAgentDir = mkdtempSync(join(tmpdir(), "pi-cursor-sdk-native-require-"));
 		const srcDir = join(tmpAgentDir, "src");
 		const sharedDir = join(tmpAgentDir, "shared");
@@ -676,28 +693,12 @@ describe("Cursor SDK lazy runtime imports", () => {
 		writeFileSync(entryPath, [
 			'import { createRequire } from "node:module";',
 			'const require = createRequire(import.meta.url);',
-			'class NamedLoader extends require("../shared/helper.mjs").default {}',
-			'class DirectLoader extends createRequire(import.meta.url)("../shared/helper.mjs").default {}',
+			...uses,
 		].join("\n"));
 		writeFileSync(join(sharedDir, "helper.mjs"), 'import {} from "@earendil-works/pi-tui";\nexport default class Helper {}\n');
 
 		const findings = collectUnsafeHostPeerLoads(runtimeModuleFiles(srcDir, sharedDir), entryPath).join("\n");
-		expect(findings).toContain("require created by createRequire may only be used via require.resolve");
-		expect(findings).toContain("createRequire may only initialize a named resolve-only loader");
-	});
-
-	it("rejects aliases of the canonical native loader", () => {
-		tmpAgentDir = mkdtempSync(join(tmpdir(), "pi-cursor-sdk-native-require-alias-"));
-		const entryPath = join(tmpAgentDir, "cursor-ripgrep-path.ts");
-		writeFileSync(entryPath, [
-			'import { createRequire } from "node:module";',
-			'const require = createRequire(import.meta.url);',
-			'const alias = require;',
-			'alias("../shared/helper.mjs");',
-		].join("\n"));
-
-		const findings = collectUnsafeHostPeerLoads([entryPath], entryPath).join("\n");
-		expect(findings).toContain("require created by createRequire may only be used via require.resolve");
+		for (const message of messages) expect(findings).toContain(message);
 	});
 
 	it("allows canonical loader names in erased type queries", () => {

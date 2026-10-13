@@ -118,7 +118,9 @@ describe("cursor-session-agent local resume", () => {
 			manager.appendMessage({ role: "user", content: "ordinary request", timestamp: 1 });
 			await pi.runBeforeAgentStart({ cwd: root, sessionManager: sessionManager(manager) });
 			const lease = await acquireSessionCursorAgent(params);
+			expect(resumeTestUtils.state.pendingHandle).toBeUndefined();
 			lease.commitSend(makeContext(), true);
+			expect(pi.appendEntry).not.toHaveBeenCalled();
 			manager.appendMessage(makeAssistantMessage("ordinary answer"));
 			await pi.runTurnEnd({}, { cwd: root, sessionManager: sessionManager(manager) });
 			const file = manager.getSessionFile()!;
@@ -127,7 +129,18 @@ describe("cursor-session-agent local resume", () => {
 			expect(persisted).not.toContain("private definition prompt");
 			expect(persisted).not.toContain("private description");
 			const record = manager.getEntries().find(entry => entry.type === "custom" && entry.customType === CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE);
-			expect(record).toMatchObject({ data: { poolKey: lease.poolKey, agentId: lease.agent.agentId } });
+			expect(record).toMatchObject({
+				data: {
+					runtime: "local",
+					poolKey: lease.poolKey,
+					agentId: lease.agent.agentId,
+					sendState: {
+						bootstrapped: true,
+						contextFingerprint: computeCursorContextFingerprint(makeContext()),
+						incrementalSendCount: 0,
+					},
+				},
+			});
 
 			await sessionAgentTestUtils.disposeAllSessionCursorAgents();
 			resumeTestUtils.reset();
@@ -462,44 +475,4 @@ describe("cursor-session-agent local resume", () => {
 		expect(enabled.agent).toBe(disabledAgain.agent);
 		expect(createAgent).toHaveBeenCalledTimes(1);
 	});
-
-	it("schedules a local resume handle only after a successful send commit", async () => {
-		const appendEntry = vi.fn();
-		const createAgent = vi.fn().mockResolvedValue({ agentId: "agent-1", [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined) });
-		const scopeKey = "/tmp/sessions/test.jsonl";
-		cursorSessionScopeTestUtils.set("/tmp/project", scopeKey);
-		resumeTestUtils.set({
-			appendEntry,
-			scopeKey,
-			sessionFile: scopeKey,
-			cwd: "/tmp/project",
-			branchPathHash: resumeTestUtils.EMPTY_BRANCH_HASH,
-			compactionGeneration: 0,
-		});
-		const context = makeContext([{ role: "user", content: "Hello", timestamp: 1 }]);
-
-		const lease = await acquireSessionCursorAgent({
-			apiKey: "test-key",
-			agentMode: "agent",
-			cwd: "/tmp/project",
-			modelSelection: { id: "composer-2.5" },
-			localResume: true,
-			createAgent,
-		});
-		expect(resumeTestUtils.state.pendingHandle).toBeUndefined();
-		lease.commitSend(context, true);
-
-		expect(appendEntry).not.toHaveBeenCalled();
-		expect(resumeTestUtils.state.pendingHandle).toMatchObject({
-			runtime: "local",
-			agentId: "agent-1",
-			poolKey: lease.poolKey,
-			sendState: expect.objectContaining({
-				bootstrapped: true,
-				contextFingerprint: computeCursorContextFingerprint(context),
-				incrementalSendCount: 0,
-			}),
-		});
-	});
-
 });

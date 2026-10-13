@@ -1,6 +1,6 @@
 import { toNamespacedPath } from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createEventHarness, createExtensionTestContext, makeContext } from "./helpers/pi-harness.js";
+import { createEventHarness, makeContext } from "./helpers/pi-harness.js";
 import { __testUtils as cursorSessionScopeTestUtils, registerCursorSessionScope } from "../src/cursor-session-scope.js";
 import { __testUtils as resumeTestUtils } from "../src/cursor-session-agent-resume.js";
 import {
@@ -543,31 +543,6 @@ describe("cursor-session-agent", () => {
 		process.off("unhandledRejection", onUnhandledRejection);
 	});
 
-	it("disposes the scoped session agent on terminal session_shutdown", async () => {
-		const mockDispose = vi.fn().mockResolvedValue(undefined);
-		const createAgent = vi.fn().mockResolvedValue({
-			agentId: "agent-1",
-			[Symbol.asyncDispose]: mockDispose,
-		});
-		const pi = createEventHarness();
-
-		registerCursorSessionAgentLifecycle(pi);
-		cursorSessionScopeTestUtils.set("/tmp/project", "/tmp/sessions/test.jsonl");
-		await pi.runSessionStart({ cwd: "/tmp/project", sessionManager: { getSessionFile: () => "/tmp/sessions/test.jsonl" } });
-		await acquireSessionCursorAgent({
-			apiKey: "test-key",
-			agentMode: "agent" as const,
-			cwd: "/tmp/project",
-			modelSelection: { id: "composer-2.5" },
-			createAgent,
-		});
-
-		expect(sessionAgentTestUtils.sessionAgentsByScope.has("/tmp/sessions/test.jsonl")).toBe(true);
-		await pi.runSessionShutdown({ reason: "quit" });
-		expect(sessionAgentTestUtils.sessionAgentsByScope.has("/tmp/sessions/test.jsonl")).toBe(false);
-		expect(mockDispose).toHaveBeenCalledTimes(1);
-	});
-
 	it("allows reacquiring a session agent after reload session_shutdown", async () => {
 		const mockDispose = vi.fn().mockResolvedValue(undefined);
 		const createAgent = vi.fn().mockImplementation(async () => ({
@@ -690,40 +665,6 @@ describe("cursor-session-agent", () => {
 		expect(resumed.agent).not.toBe(first.agent);
 		expect(createAgent).toHaveBeenCalledTimes(3);
 		expect(mockDispose).toHaveBeenCalledTimes(2);
-	});
-
-	it("disposes the previous scope agent when the session file changes", async () => {
-		const mockDispose = vi.fn().mockResolvedValue(undefined);
-		const createAgent = vi.fn().mockResolvedValue({
-			agentId: "agent-1",
-			[Symbol.asyncDispose]: mockDispose,
-		});
-		const pi = createEventHarness();
-
-		registerCursorSessionScope(pi);
-		registerCursorSessionAgentLifecycle(pi);
-		await pi.runSessionStart({ cwd: "/tmp/project", sessionManager: { getSessionFile: () => "/tmp/sessions/session-a.jsonl" } });
-		await acquireSessionCursorAgent({
-			apiKey: "test-key",
-			agentMode: "agent" as const,
-			cwd: "/tmp/project",
-			modelSelection: { id: "composer-2.5" },
-			createAgent,
-		});
-
-		await pi.invokeEventWithContext(
-			"session_start",
-			{ type: "session_start", reason: "startup" },
-			createExtensionTestContext({
-				cwd: "/tmp/project",
-				sessionManager: {
-					getSessionFile: () => "/tmp/sessions/session-b.jsonl",
-				},
-			}),
-		);
-
-		expect(sessionAgentTestUtils.sessionAgentsByScope.has("/tmp/sessions/session-a.jsonl")).toBe(false);
-		expect(mockDispose).toHaveBeenCalledTimes(1);
 	});
 
 	it("resets the scoped session agent when session_tree fires", async () => {

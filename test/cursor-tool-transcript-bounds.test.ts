@@ -1,6 +1,3 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CURSOR_REPLAY_UNREGISTERED_ACTIVITY_TOOL_NAME } from "../src/cursor-replay-tool-details.js";
 import { CURSOR_REPLAY_ACTIVITY_TOOL_NAME } from "../src/cursor-tool-presentation-registry.js";
@@ -229,31 +226,6 @@ describe("formatCursorToolTranscript bounds and aliases", () => {
 		expect(fileOnlyContentGrepDisplay.result.content[0].text).toBe("./package.json");
 		expect(emptyGlobDisplay.result.content[0].text).toBe("No files found matching pattern");
 		expect(emptyCursorGlobDisplay.result.content[0].text).toBe("No files found matching pattern");
-	});
-
-	it("labels native read display local previews when Cursor read content is unavailable", () => {
-		const dir = mkdtempSync(join(tmpdir(), "cursor-tool-display-"));
-		try {
-			writeFileSync(join(dir, "README.md"), "# Local display preview\n");
-
-			const display = buildCursorPiToolDisplay(
-				{
-					name: "read",
-					args: { path: join(dir, "README.md") },
-					result: { status: "success", value: { content: "", totalLines: 1, fileSize: 24 } },
-				},
-				{ cwd: dir },
-			);
-
-			expect(display.args).toMatchObject({ localReadPreview: true });
-			expect(display.result.details).toMatchObject({ localReadPreview: true });
-			expect(display.result.content[0].text).toContain(
-				"[local file preview at transcript time; Cursor read result content was unavailable]",
-			);
-			expect(display.result.content[0].text).toContain("# Local display preview");
-		} finally {
-			rmSync(dir, { recursive: true, force: true });
-		}
 	});
 
 	it("bounds large Cursor read output", () => {

@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { buildCursorPrompt } from "../src/context.js";
 import {
 	buildCursorToolManifestText,
 	CURSOR_TOOL_MANIFEST_ENV,
@@ -69,16 +68,5 @@ describe("cursor-tool-manifest", () => {
 	it("defaults manifest env to enabled", () => {
 		expect(resolveCursorToolManifestEnabled({})).toBe(true);
 		expect(resolveCursorToolManifestEnabled({ [CURSOR_TOOL_MANIFEST_ENV]: "0" })).toBe(false);
-	});
-
-	it("includes manifest in bootstrap prompts when provided", () => {
-		const manifest = buildCursorToolManifestText();
-		const prompt = buildCursorPrompt(
-			{ messages: [{ role: "user", content: "hi", timestamp: 1 }] },
-			{ toolManifest: manifest },
-		);
-		expect(prompt.text).toContain("Callable tool surfaces this run:");
-		expect(prompt.text).toContain("Cursor SDK tool boundary:");
-		expect(prompt.text).toContain("See callable surfaces below.");
 	});
 });

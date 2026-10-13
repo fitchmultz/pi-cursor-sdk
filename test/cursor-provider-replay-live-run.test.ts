@@ -598,67 +598,6 @@ describe("streamCursor native replay live run", () => {
 		expect(steerDone.reason).toBe("stop");
 	});
 
-	it("settles a scope-active live run directly when context has no matching tool results", async () => {
-		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
-		const registeredTools: RegisteredTool[] = [];
-		await registerNativeToolDisplayForTest(registeredTools);
-
-		let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
-		const runWait = vi.fn(
-			() =>
-				new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
-					resolveRun = resolve;
-				}),
-		);
-		let firstOnDelta: CursorDeltaHandler | undefined;
-		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
-			firstOnDelta = opts.onDelta;
-			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "bash", args: { command: "git status" } }, callId: "c1" } });
-			opts.onDelta({
-				update: {
-					type: "tool-call-completed",
-					toolCall: {
-						name: "bash",
-						result: { status: "success", value: { stdout: "clean", stderr: "", exitCode: 0 } },
-					},
-					callId: "c1",
-				},
-			});
-			return asMockCursorRun({
-				id: "run-1",
-				agentId: "agent-1",
-				status: "running",
-				wait: runWait,
-				cancel: vi.fn(),
-				supports: () => true,
-				unsupportedReason: () => undefined,
-			});
-		});
-		mockCreatedAgent({
-			agentId: "agent-1",
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
-
-		const firstEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
-		expect(getDoneEvent(firstEvents).reason).toBe("toolUse");
-
-		firstOnDelta?.({ update: { type: "text-delta", text: "Late scoped text." } });
-		const scopedEventsPromise = collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
-		await Promise.resolve();
-		resolveRun({ id: "run-1", status: "finished", result: "Late scoped final." });
-
-		const scopedEvents = await Promise.race([
-			scopedEventsPromise,
-			new Promise<never>((_, reject) => setTimeout(() => reject(new Error("scope-active live run settlement timed out")), 1000)),
-		]);
-
-		expect(mockSend).toHaveBeenCalledTimes(1);
-		expect(collectTextDeltas(scopedEvents)).toContain("Late scoped text.");
-		expect(getDoneEvent(scopedEvents).reason).toBe("stop");
-	});
-
-
 	it("does not let idle disposal release an active run while pre-send drain owns it", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		cursorProviderTestUtils.setCursorNativeReplayIdleDisposeMs(10);
@@ -673,7 +612,9 @@ describe("streamCursor native replay live run", () => {
 				}),
 		);
 		const cancelRun = vi.fn().mockResolvedValue(undefined);
+		let firstOnDelta: CursorDeltaHandler | undefined;
 		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
+			firstOnDelta = opts.onDelta;
 			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "bash", args: { command: "git status" } }, callId: "c1" } });
 			opts.onDelta({
 				update: {
@@ -705,6 +646,7 @@ describe("streamCursor native replay live run", () => {
 		expect(getDoneEvent(firstEvents).reason).toBe("toolUse");
 		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(1);
 
+		firstOnDelta?.({ update: { type: "text-delta", text: "Late scoped text." } });
 		const scopedEventsPromise = collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 		await Promise.resolve();
 		await vi.advanceTimersByTimeAsync(30);
@@ -716,7 +658,7 @@ describe("streamCursor native replay live run", () => {
 		resolveRun({ id: "run-1", status: "finished", result: "Scoped final." });
 		const scopedEvents = await scopedEventsPromise;
 
-		expect(collectTextDeltas(scopedEvents)).toBe("Scoped final.");
+		expect(collectTextDeltas(scopedEvents)).toBe("Late scoped text.Scoped final.");
 		expect(getDoneEvent(scopedEvents).reason).toBe("stop");
 		expect(cancelRun).not.toHaveBeenCalled();
 		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);

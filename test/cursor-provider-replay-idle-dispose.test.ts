@@ -25,56 +25,6 @@ describe("streamCursor native replay idle dispose", () => {
 	installCursorProviderVirtualTime();
 
 
-	it("disposes abandoned native replay runs after the idle timeout and abandons the session agent", async () => {
-		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
-		cursorProviderTestUtils.setCursorNativeReplayIdleDisposeMs(1);
-		const registeredTools: RegisteredTool[] = [];
-		await registerNativeToolDisplayForTest(registeredTools);
-
-		const mockDispose = vi.fn().mockResolvedValue(undefined);
-		const runWait = vi.fn(() => new Promise<{ id: string; status: "finished"; result: string }>(() => {}));
-		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
-			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "read", args: { path: "README.md" } }, callId: "c1" } });
-			opts.onDelta({
-				update: {
-					type: "tool-call-completed",
-					toolCall: {
-						name: "read",
-						result: { status: "success", value: { content: "# pi-cursor-sdk" } },
-					},
-					callId: "c1",
-				},
-			});
-			return asMockCursorRun({
-				id: "run-1",
-				agentId: "agent-1",
-				status: "running",
-				wait: runWait,
-				cancel: vi.fn(),
-				supports: () => true,
-				unsupportedReason: () => undefined,
-			});
-		});
-		mockCreatedAgent({
-			agentId: "agent-1",
-			send: mockSend,
-			[Symbol.asyncDispose]: mockDispose,
-		});
-
-		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
-		const done = getDoneEvent(events);
-
-		expect(done.reason).toBe("toolUse");
-		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(1);
-		expect(nativeToolDisplayTestUtils.nativeToolResultCount()).toBe(1);
-		expect(mockDispose).not.toHaveBeenCalled();
-
-		await vi.advanceTimersByTimeAsync(1);
-		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
-		expect(nativeToolDisplayTestUtils.nativeToolResultCount()).toBe(0);
-		expect(mockDispose).toHaveBeenCalledTimes(1);
-	});
-
 	it("keeps an eligible replay run past five minutes and disposes it at the configured deadline", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		process.env.PI_CURSOR_LIVE_RUN_IDLE_DISPOSE_MS = "900000";
@@ -103,6 +53,7 @@ describe("streamCursor native replay idle dispose", () => {
 			const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 			expect(getDoneEvent(events).reason).toBe("toolUse");
 			expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(1);
+			expect(nativeToolDisplayTestUtils.nativeToolResultCount()).toBe(1);
 			await vi.advanceTimersByTimeAsync(300001);
 			expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(1);
 			expect(mockDispose).not.toHaveBeenCalled();
@@ -110,6 +61,7 @@ describe("streamCursor native replay idle dispose", () => {
 			expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(1);
 			await vi.advanceTimersByTimeAsync(1);
 			expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
+			expect(nativeToolDisplayTestUtils.nativeToolResultCount()).toBe(0);
 			expect(mockDispose).toHaveBeenCalledTimes(1);
 		} finally {
 			await cursorProviderTestUtils.releaseAllPendingCursorLiveRunsForTests();

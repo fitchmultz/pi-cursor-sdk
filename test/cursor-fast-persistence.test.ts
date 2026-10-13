@@ -107,24 +107,6 @@ describe("Cursor fast preference persistence", () => {
 		});
 	});
 
-	it("preserves forward-compatible config fields when saving fast defaults", async () => {
-		writeFileSync(getCursorSdkUserConfigPath(), JSON.stringify({
-			future: { enabled: true },
-			cloud: { futureCloud: "kept" },
-			fastDefaults: { "composer-2": true },
-		}));
-		const { pi, ctx, commandCtx, commands } = createFastHarness({ modelId: "composer-2" });
-		await pi.invokeEventWithContext("session_start", { type: "session_start", reason: "startup" }, ctx);
-
-		await commands.get("cursor-fast")!.handler("", commandCtx);
-
-		expect(JSON.parse(readFileSync(getCursorSdkUserConfigPath(), "utf-8"))).toEqual({
-			future: { enabled: true },
-			cloud: { futureCloud: "kept" },
-			fastDefaults: { "composer-2": false },
-		});
-	});
-
 	it("rejects malformed config before saving fast defaults or appending session state", async () => {
 		const sentinel = "PI_CURSOR_MALFORMED_SECRET";
 		writeFileSync(getCursorSdkUserConfigPath(), `{"secret":"${sentinel}`);
@@ -194,31 +176,11 @@ describe("Cursor fast preference persistence", () => {
 		expect(pi.appendEntry).not.toHaveBeenCalled();
 	});
 
-	it("keeps the global fast save authoritative when session append fails", async () => {
-		writeFileSync(getCursorSdkUserConfigPath(), JSON.stringify({ fastDefaults: { "composer-2": true } }));
-		const { pi, ctx, commandCtx, commands } = createFastHarness({ modelId: "composer-2" });
-		pi.appendEntry.mockImplementationOnce(() => {
-			throw new Error("journal unavailable");
-		});
-		await pi.invokeEventWithContext("session_start", { type: "session_start", reason: "startup" }, ctx);
-
-		await commands.get("cursor-fast")!.handler("", commandCtx);
-
-		expect(ctx.ui.notify).toHaveBeenCalledWith(
-			expect.stringContaining("was saved globally, but persisting the session entry failed"),
-			"error",
-		);
-		expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("cursor", "cursor:local · fast:off");
-		expect(getEffectiveFastForModelId("composer-2")).toBe(false);
-		expect(JSON.parse(readFileSync(getCursorSdkUserConfigPath(), "utf-8"))).toEqual({
-			fastDefaults: { "composer-2": false },
-		});
-	});
-
-	it("keeps new and forward-compatible config changes when session append fails", async () => {
+	it("keeps the global fast save authoritative and forward-compatible when session append fails", async () => {
 		const path = getCursorSdkUserConfigPath();
 		const original = {
 			future: { enabled: true },
+			cloud: { futureCloud: "kept" },
 			fastDefaults: { "composer-2": "future-value", other: true },
 		};
 		writeFileSync(path, JSON.stringify(original));
@@ -232,8 +194,15 @@ describe("Cursor fast preference persistence", () => {
 
 		expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
 			future: { enabled: true },
+			cloud: { futureCloud: "kept" },
 			fastDefaults: { "composer-2": false, other: true },
 		});
+		expect(ctx.ui.notify).toHaveBeenCalledWith(
+			expect.stringContaining("was saved globally, but persisting the session entry failed"),
+			"error",
+		);
+		expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("cursor", "cursor:local · fast:off");
+		expect(getEffectiveFastForModelId("composer-2")).toBe(false);
 		expect(existsSync(`${path}.lock`)).toBe(false);
 	});
 

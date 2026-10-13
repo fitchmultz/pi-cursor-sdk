@@ -72,30 +72,21 @@ describe("resolveCursorSkillSystemPrompt", () => {
 		"</available_skills>",
 	].join("\n");
 
-	it("replaces pi's raw read-based skill wording for Cursor models", () => {
-		const resolved = resolveCursorSkillSystemPrompt(
-			piSkillSection,
-			cursorModel,
-			{ ...createDefaultSystemPromptOptions("/repo"), skills: [skill] },
-		);
-
-		expect(resolved).toContain(CURSOR_ACTIVATE_SKILL_MCP_NAME);
-		expect(resolved).toContain("<name>global-skill</name>");
-		expect(resolved).not.toContain("Use the read tool to load a skill's file");
-	});
-
 	it("does not change prompts for non-Cursor models", () => {
 		expect(
 			resolveCursorSkillSystemPrompt(piSkillSection, otherModel, { ...createDefaultSystemPromptOptions("/repo"), skills: [skill] }),
 		).toBe(piSkillSection);
 	});
 
-	it("preserves the rewritten catalog through buildCursorPrompt sanitization", () => {
+	it("replaces pi's raw read-based skill wording and preserves the catalog through prompt sanitization", () => {
 		const resolved = resolveCursorSkillSystemPrompt(
 			piSkillSection,
 			cursorModel,
 			{ ...createDefaultSystemPromptOptions("/repo"), skills: [skill] },
 		);
+		expect(resolved).toContain(CURSOR_ACTIVATE_SKILL_MCP_NAME);
+		expect(resolved).toContain("<name>global-skill</name>");
+		expect(resolved).not.toContain("Use the read tool to load a skill's file");
 		const prompt = buildCursorPrompt({ systemPrompt: resolved, messages: [] });
 
 		expect(prompt.text).toContain(CURSOR_ACTIVATE_SKILL_MCP_NAME);

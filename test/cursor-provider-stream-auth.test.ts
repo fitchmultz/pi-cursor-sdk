@@ -82,18 +82,8 @@ describe("streamCursor auth and abort", () => {
 		expect(mockDispose).toHaveBeenCalledTimes(1);
 	});
 
-	it("emits actionable error when no API key", async () => {
-		const stream = streamCursor(makeModel(), makeContext(), { apiKey: undefined });
-		const events = await collectEvents(stream);
-
-		const error = getErrorEvent(events);
-		expect(error.error.errorMessage).toContain("/login");
-		expect(error.error.errorMessage).toContain("CURSOR_API_KEY");
-		expect(error.error.errorMessage).toContain("--api-key");
-	});
-
-	it.each(["CURSOR_API_KEY", "$CURSOR_API_KEY", "${CURSOR_API_KEY}", "pi-cursor-sdk-cursor-api-key-placeholder"])(
-		"treats unresolved %s provider placeholders as a missing API key",
+	it.each([undefined, "CURSOR_API_KEY", "$CURSOR_API_KEY", "${CURSOR_API_KEY}", "pi-cursor-sdk-cursor-api-key-placeholder"])(
+		"rejects missing credentials or unresolved provider placeholder %s before Agent.create",
 		async (placeholder) => {
 			const originalKey = process.env.CURSOR_API_KEY;
 			delete process.env.CURSOR_API_KEY;

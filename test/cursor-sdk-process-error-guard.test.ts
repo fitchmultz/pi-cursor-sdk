@@ -433,129 +433,39 @@ setTimeout(() => console.log("survived"), 20);
 	});
 
 	it.each([
-		["Cursor SDK stack", makeCursorSdkUnauthenticatedConnectError],
-		["Cursor backend details", makeCursorBackendUnauthenticatedConnectError],
-	])("suppresses Cursor unauthenticated process errors with %s while a provider turn is active", (_name, makeError) => {
+		{ label: "unauthenticated SDK stack", event: "uncaughtException", makeError: makeCursorSdkUnauthenticatedConnectError },
+		{ label: "unauthenticated backend details", event: "uncaughtException", makeError: makeCursorBackendUnauthenticatedConnectError },
+		{ label: "network SDK stack", event: "uncaughtException", makeError: makeCursorSdkNetworkConnectError },
+		{ label: "network backend details", event: "uncaughtException", makeError: makeCursorBackendNetworkConnectError },
+		{ label: "backend unavailable details", event: "uncaughtException", makeError: makeCursorBackendUnavailableConnectError },
+		{ label: "HTTP/2 stream reset", event: "uncaughtException", makeError: makeCursorSdkHttp2EnhanceYourCalmConnectError },
+		{ label: "stall abort wrapper", event: "uncaughtException", makeError: makeCursorSdkStallAbortWrapperConnectError },
+		{ label: "network SDK stack", event: "unhandledRejection", makeError: makeCursorSdkNetworkConnectError },
+	] as const)("suppresses $label on $event while a provider turn is active", ({ event, makeError }) => {
 		const suppression = installCursorSdkProcessErrorGuard();
-		let listenerCalled = false;
-		const listener = () => {
-			listenerCalled = true;
-		};
-		process.once("uncaughtException", listener);
+		const listener = vi.fn();
+		process.once(event, listener);
 		try {
-			const emitted = emitProcessEvent("uncaughtException", makeError(), "uncaughtException");
+			const emitted = emitProcessEvent(event, makeError(), event === "unhandledRejection" ? Promise.resolve() : "uncaughtException");
 			expect(emitted).toBe(true);
-			expect(listenerCalled).toBe(false);
+			expect(listener).not.toHaveBeenCalled();
 		} finally {
-			process.removeListener("uncaughtException", listener);
-			suppression.dispose();
-		}
-	});
-
-	it("does not suppress non-Cursor unauthenticated ConnectErrors", () => {
-		const suppression = installCursorSdkProcessErrorGuard();
-		let listenerCalled = false;
-		const listener = () => {
-			listenerCalled = true;
-		};
-		process.once("uncaughtException", listener);
-		try {
-			const emitted = emitProcessEvent("uncaughtException", makeNonCursorUnauthenticatedConnectError(), "uncaughtException");
-			expect(emitted).toBe(true);
-			expect(listenerCalled).toBe(true);
-		} finally {
-			process.removeListener("uncaughtException", listener);
+			process.removeListener(event, listener);
 			suppression.dispose();
 		}
 	});
 
 	it.each([
-		["Cursor SDK stack", makeCursorSdkNetworkConnectError],
-		["Cursor backend details", makeCursorBackendNetworkConnectError],
-		["Cursor backend unavailable details", makeCursorBackendUnavailableConnectError],
-	])("suppresses Cursor network process errors with %s while a provider turn is active", (_name, makeError) => {
+		["unauthenticated", makeNonCursorUnauthenticatedConnectError],
+		["network", makeProvenanceFreeNetworkConnectError],
+	] as const)("does not suppress non-Cursor %s ConnectErrors during an active provider turn", (_name, makeError) => {
 		const suppression = installCursorSdkProcessErrorGuard();
-		let listenerCalled = false;
-		const listener = () => {
-			listenerCalled = true;
-		};
+		const listener = vi.fn();
 		process.once("uncaughtException", listener);
 		try {
 			const emitted = emitProcessEvent("uncaughtException", makeError(), "uncaughtException");
 			expect(emitted).toBe(true);
-			expect(listenerCalled).toBe(false);
-		} finally {
-			process.removeListener("uncaughtException", listener);
-			suppression.dispose();
-		}
-	});
-
-	it("suppresses Cursor SDK HTTP/2 stream reset process errors while a provider turn is active", () => {
-		const suppression = installCursorSdkProcessErrorGuard();
-		let listenerCalled = false;
-		const listener = () => {
-			listenerCalled = true;
-		};
-		process.once("uncaughtException", listener);
-		try {
-			const emitted = emitProcessEvent(
-				"uncaughtException",
-				makeCursorSdkHttp2EnhanceYourCalmConnectError(),
-				"uncaughtException",
-			);
-			expect(emitted).toBe(true);
-			expect(listenerCalled).toBe(false);
-		} finally {
-			process.removeListener("uncaughtException", listener);
-			suppression.dispose();
-		}
-	});
-
-	it("suppresses Cursor SDK stall abort wrappers while a provider turn is active", () => {
-		const suppression = installCursorSdkProcessErrorGuard();
-		let listenerCalled = false;
-		const listener = () => {
-			listenerCalled = true;
-		};
-		process.once("uncaughtException", listener);
-		try {
-			const emitted = emitProcessEvent("uncaughtException", makeCursorSdkStallAbortWrapperConnectError(), "uncaughtException");
-			expect(emitted).toBe(true);
-			expect(listenerCalled).toBe(false);
-		} finally {
-			process.removeListener("uncaughtException", listener);
-			suppression.dispose();
-		}
-	});
-
-	it("suppresses Cursor network unhandled rejections while a provider turn is active", () => {
-		const suppression = installCursorSdkProcessErrorGuard();
-		let listenerCalled = false;
-		const listener = () => {
-			listenerCalled = true;
-		};
-		process.once("unhandledRejection", listener);
-		try {
-			const emitted = emitProcessEvent("unhandledRejection", makeCursorSdkNetworkConnectError(), Promise.resolve());
-			expect(emitted).toBe(true);
-			expect(listenerCalled).toBe(false);
-		} finally {
-			process.removeListener("unhandledRejection", listener);
-			suppression.dispose();
-		}
-	});
-
-	it("does not suppress provenance-free network ConnectErrors during an active provider turn", () => {
-		const suppression = installCursorSdkProcessErrorGuard();
-		let listenerCalled = false;
-		const listener = () => {
-			listenerCalled = true;
-		};
-		process.once("uncaughtException", listener);
-		try {
-			const emitted = emitProcessEvent("uncaughtException", makeProvenanceFreeNetworkConnectError(), "uncaughtException");
-			expect(emitted).toBe(true);
-			expect(listenerCalled).toBe(true);
+			expect(listener).toHaveBeenCalledOnce();
 		} finally {
 			process.removeListener("uncaughtException", listener);
 			suppression.dispose();

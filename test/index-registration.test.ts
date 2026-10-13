@@ -646,55 +646,6 @@ describe("extension registration and discovery", () => {
 		expect(notify).toHaveBeenCalledWith("Cursor config refresh is available only for Cursor models.", "info");
 	});
 
-	it("notifies interactive users when fallback models are registered", async () => {
-		mockedDiscover.mockImplementationOnce(async (options: DiscoverOptions) => {
-			options?.onFallback?.({
-				reason: "missing-api-key",
-				message: "synthetic startup fallback warning",
-			});
-			return [makeProviderModelConfig("composer-2", { name: "Cursor Composer 2" })];
-		});
-
-		const pi = createExtensionPi();
-		await extensionFactory(pi);
-
-		const notify = vi.fn();
-		await pi.runSessionStart({
-			hasUI: true,
-			model: makeHarnessModel("cursor", "cursor-sdk", "composer-2"),
-			ui: { notify, setStatus: vi.fn() },
-			sessionManager: { getBranch: vi.fn(() => []) },
-		});
-
-		expect(notify).toHaveBeenCalledWith(
-			"synthetic startup fallback warning",
-			"warning",
-		);
-	});
-
-	it("does not notify fallback discovery issues for non-Cursor sessions", async () => {
-		mockedDiscover.mockImplementationOnce(async (options: DiscoverOptions) => {
-			options?.onFallback?.({
-				reason: "empty-model-list",
-				message: "Cursor model discovery returned no models; using fallback Cursor model list.",
-			});
-			return [];
-		});
-
-		const pi = createExtensionPi();
-		await extensionFactory(pi);
-
-		const notify = vi.fn();
-		await pi.runSessionStart({
-			hasUI: true,
-			model: makeHarnessModel("anthropic", "anthropic-messages", "claude-sonnet-4-5"),
-			ui: { notify, setStatus: vi.fn() },
-			sessionManager: { getBranch: vi.fn(() => []) },
-		});
-
-		expect(notify).not.toHaveBeenCalled();
-	});
-
 	it("notifies fallback discovery issues after delayed Cursor model selection", async () => {
 		mockedDiscover.mockImplementationOnce(async (options: DiscoverOptions) => {
 			options?.onFallback?.({

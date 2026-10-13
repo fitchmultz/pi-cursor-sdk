@@ -102,10 +102,24 @@ describe("package metadata cutover baselines", () => {
 		expect(new Set(refs).size, `Mixed shared automation revisions: ${[...new Set(refs)].join(", ")}`).toBe(1);
 	});
 
-	it("pins Cursor SDK exactly", () => {
+	it("pins SDK, MCP/Hono, Pi, and TypeBox validation dependencies", () => {
 		const version = packageJson.dependencies["@cursor/sdk"];
 		expect(version).toMatch(/^\d+\.\d+\.\d+$/);
 		expect(lockPackageVersion("@cursor/sdk")).toBe(version);
+		for (const packageName of BUNDLED_MCP_HONO_CLOSURE) {
+			expect(packageJson.dependencies[packageName]).toMatch(/^\d+\.\d+\.\d+$/);
+			expect(lockPackageVersion(packageName)).toBe(packageJson.dependencies[packageName]);
+		}
+		expect(packageJson.dependencies["@modelcontextprotocol/sdk"]).toBeUndefined();
+		expect(packageJson.bundledDependencies).toEqual([...BUNDLED_MCP_HONO_CLOSURE]);
+		const baseline = packageJson.devDependencies["@earendil-works/pi-coding-agent"];
+		expect(baseline).toMatch(/^\d+\.\d+\.\d+$/);
+		for (const packageName of PI_PACKAGES) {
+			expect(packageJson.devDependencies[packageName]).toBe(baseline);
+			expect(lockPackageVersion(packageName)).toBe(baseline);
+		}
+		expect(packageJson.devDependencies.typebox).toMatch(/^\d+\.\d+\.\d+$/);
+		expect(lockPackageVersion("typebox")).toBe(packageJson.devDependencies.typebox);
 	});
 
 	it("keeps registry dependencies public", () => {
@@ -115,15 +129,6 @@ describe("package metadata cutover baselines", () => {
 			expect(url.protocol).toBe("https:");
 			expect(url.host).toBe("registry.npmjs.org");
 		}
-	});
-
-	it("ships an exact MCP/Hono bundledDependencies closure for published installs", () => {
-		for (const packageName of BUNDLED_MCP_HONO_CLOSURE) {
-			expect(packageJson.dependencies[packageName]).toMatch(/^\d+\.\d+\.\d+$/);
-			expect(lockPackageVersion(packageName)).toBe(packageJson.dependencies[packageName]);
-		}
-		expect(packageJson.dependencies["@modelcontextprotocol/sdk"]).toBeUndefined();
-		expect(packageJson.bundledDependencies).toEqual([...BUNDLED_MCP_HONO_CLOSURE]);
 	});
 
 	it("keeps local agent ID policy aligned with the installed public string contract", () => {
@@ -140,9 +145,6 @@ describe("package metadata cutover baselines", () => {
 
 	it("leaves the Cursor SDK transport dependency tree to npm resolution", () => {
 		expect(packageJson.dependencies.undici).toBeUndefined();
-		expect(packageJson.bundledDependencies).toEqual([...BUNDLED_MCP_HONO_CLOSURE]);
-		expect(packageJson.bundledDependencies).not.toContain("undici");
-		expect(packageJson.bundledDependencies).not.toContain("@cursor/sdk");
 		expect(packageJson.overrides).toBeUndefined();
 	});
 
@@ -259,20 +261,6 @@ describe("package metadata cutover baselines", () => {
 			rmSync(tempRoot, { recursive: true, force: true });
 		}
 	}, 60_000);
-
-	it("pins one coherent stable Pi validation baseline", () => {
-		const baseline = packageJson.devDependencies["@earendil-works/pi-coding-agent"];
-		expect(baseline).toMatch(/^\d+\.\d+\.\d+$/);
-		for (const packageName of PI_PACKAGES) {
-			expect(packageJson.devDependencies[packageName]).toBe(baseline);
-			expect(lockPackageVersion(packageName)).toBe(baseline);
-		}
-	});
-
-	it("retains the package's TypeBox validation baseline", () => {
-		expect(packageJson.devDependencies.typebox).toMatch(/^\d+\.\d+\.\d+$/);
-		expect(lockPackageVersion("typebox")).toBe(packageJson.devDependencies.typebox);
-	});
 
 	it("tracks installed Pi GPT-5.6 Codex metadata", () => {
 		for (const modelId of ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"] as const) {

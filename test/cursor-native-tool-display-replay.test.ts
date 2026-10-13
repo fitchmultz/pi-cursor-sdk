@@ -67,40 +67,22 @@ describe("cursor native replay rendering", () => {
 		expect(rendered).toContain("Cursor subagent");
 	});
 
-	it("colors unified diff body lines in neutral Cursor edit activity cards", () => {
-		// Unstructured path (no diffString): still exercises extract + canonical renderer.
+	it("colors unified diff body lines in neutral Cursor edit activity cards after a long preamble", () => {
+		const preamble = Array.from({ length: 12 }, (_, index) => `note ${index + 1}`).join("\n");
 		const rendered = renderReplayResultWithDetails({
 			variant: "activity",
 			sourceToolName: "edit",
 			title: "Cursor edit",
 			summary: "file.txt added 1 line, removed 1 line",
-			expandedText: "edit file.txt\n\n+1 -1\n\n--- a/file.txt\n+++ b/file.txt\n@@ -1,3 +1,3 @@\n-old line\n+new line\n keep line\n final line",
+			expandedText: `${preamble}\n\nedit file.txt\n\n+1 -1\n\n--- a/file.txt\n+++ b/file.txt\n@@ -1,3 +1,3 @@\n-old line\n+new line\n keep line\n final line`,
 		});
 
-		// Canonical output: numbered lines, raw headers omitted (consistent with nativeEdit + structured activity).
 		expect(rendered).toContain("<toolDiffRemoved>-1 old line</toolDiffRemoved>");
 		expect(rendered).toContain("<toolDiffAdded>+1 new line</toolDiffAdded>");
 		expect(rendered).toContain("<toolDiffContext> 2 keep line</toolDiffContext>");
 		expect(rendered).toContain("<toolDiffContext> 3 final line</toolDiffContext>");
 		expect(rendered).not.toContain("--- a/file.txt");
 		expect(rendered).not.toContain("+++ b/file.txt");
-	});
-
-	it("colors collapsed diff lines when transcript preamble exceeds preview budget", () => {
-		// This exercises the extract path for activity details that only have diff in expandedText
-		// and no diffString. It routes through the single canonical renderer while proving preamble is ignored.
-		const preamble = Array.from({ length: 12 }, (_, index) => `note ${index + 1}`).join("\n");
-		const rendered = renderReplayResultWithDetails({
-			variant: "activity",
-			sourceToolName: "edit",
-			title: "Cursor edit",
-			summary: "src/file.ts added 1 line",
-			expandedText: `${preamble}\n\nedit src/file.ts\n\n+1 -0\n\n--- a/src/file.ts\n+++ b/src/file.ts\n@@ -1,3 +1,3 @@\n-old line\n+new line\n context line`,
-		});
-
-		// Canonical numbered output from formatCursorReplayDiff after extract.
-		expect(rendered).toContain("<toolDiffRemoved>-1 old line</toolDiffRemoved>");
-		expect(rendered).toContain("<toolDiffAdded>+1 new line</toolDiffAdded>");
 	});
 
 	it("activity edit with structured diffString uses canonical colored diff renderer (ignores expandedText preamble; text extraction not used)", () => {

@@ -113,11 +113,14 @@ describe("Cursor cloud options", () => {
 		expect(configured.cloud).toMatchObject({ autoCreatePR: false, skipReviewerRequest: false });
 	});
 
-	it("normalizes refs/heads starting refs for SDK options", () => {
+	it.each([
+		["refs/heads/main", "main"],
+		["a".repeat(40), "a".repeat(40)],
+	])("maps supported starting refs to SDK options (%s)", (branch, startingRef) => {
 		const resolvedConfig = resolveCursorSdkConfig({
 			cli: {
 				runtime: "cloud",
-				cloud: { acknowledged: true, repo: "https://github.com/example/repo.git", branch: "refs/heads/main" },
+				cloud: { acknowledged: true, repo: "https://github.com/example/repo.git", branch },
 			},
 		});
 
@@ -126,14 +129,17 @@ describe("Cursor cloud options", () => {
 			modelSelection: { id: "composer-2.5" },
 			agentMode: "agent",
 			resolvedConfig,
-		}).cloud?.repos).toEqual([{ url: "https://github.com/example/repo.git", startingRef: "main" }]);
+		}).cloud?.repos).toEqual([{ url: "https://github.com/example/repo.git", startingRef }]);
 	});
 
-	it("rejects unsupported refs in preflight and SDK options", () => {
+	it.each([
+		["refs/tags/release", "other refs/* are unsupported"],
+		["HEAD", "valid Git branch name"],
+	])("rejects unsupported starting refs in preflight and SDK options (%s)", (branch, message) => {
 		const resolvedConfig = resolveCursorSdkConfig({
 			cli: {
 				runtime: "cloud",
-				cloud: { acknowledged: true, repo: "https://github.com/example/repo.git", branch: "refs/tags/release" },
+				cloud: { acknowledged: true, repo: "https://github.com/example/repo.git", branch },
 			},
 		});
 		expect(preflightCursorCloudRuntime({ resolvedConfig, localState: OUTSIDE_GIT }).issues.map((issue) => issue.code)).toEqual(["cloud_branch_invalid"]);
@@ -142,40 +148,7 @@ describe("Cursor cloud options", () => {
 			modelSelection: { id: "composer-2.5" },
 			agentMode: "agent",
 			resolvedConfig,
-		})).toThrow("other refs/* are unsupported");
-	});
-
-	it("rejects an invalid Git branch before SDK creation", () => {
-		const resolvedConfig = resolveCursorSdkConfig({
-			cli: {
-				runtime: "cloud",
-				cloud: { acknowledged: true, repo: "https://github.com/example/repo.git", branch: "HEAD" },
-			},
-		});
-		expect(preflightCursorCloudRuntime({ resolvedConfig, localState: OUTSIDE_GIT }).issues.map((issue) => issue.code)).toEqual(["cloud_branch_invalid"]);
-		expect(() => buildCursorCloudAgentOptions({
-			apiKey: "test-key",
-			modelSelection: { id: "composer-2.5" },
-			agentMode: "agent",
-			resolvedConfig,
-		})).toThrow("valid Git branch name");
-	});
-
-	it("passes a full commit SHA to the SDK", () => {
-		const sha = "a".repeat(40);
-		const resolvedConfig = resolveCursorSdkConfig({
-			cli: {
-				runtime: "cloud",
-				cloud: { acknowledged: true, repo: "https://github.com/example/repo.git", branch: sha },
-			},
-		});
-
-		expect(buildCursorCloudAgentOptions({
-			apiKey: "test-key",
-			modelSelection: { id: "composer-2.5" },
-			agentMode: "agent",
-			resolvedConfig,
-		}).cloud?.repos).toEqual([{ url: "https://github.com/example/repo.git", startingRef: sha }]);
+		})).toThrow(message);
 	});
 
 	it.each([

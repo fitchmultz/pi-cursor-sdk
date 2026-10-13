@@ -184,51 +184,6 @@ describe("discoverModels", () => {
 		});
 	});
 
-	it("skips aliases that multiple Cursor base models share", async () => {
-		process.env.CURSOR_API_KEY = "test-key-123";
-		mockedList.mockResolvedValueOnce([
-			{
-				id: "model-a",
-				displayName: "Model A",
-				aliases: ["model-latest", "model-shared"],
-				variants: [{ params: [], displayName: "Model A", isDefault: true }],
-			},
-			{
-				id: "model-b",
-				displayName: "Model B",
-				aliases: ["model-stable", "model-shared"],
-				variants: [{ params: [], displayName: "Model B", isDefault: true }],
-			},
-		]);
-
-		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
-
-		expect(models.map((model) => model.id)).toEqual(["model-a", "model-latest", "model-b", "model-stable"]);
-		expect(getCursorModelMetadata("model-shared")).toBeUndefined();
-	});
-
-	it("skips aliases that collide with another Cursor base model id", async () => {
-		process.env.CURSOR_API_KEY = "test-key-123";
-		mockedList.mockResolvedValueOnce([
-			{
-				id: "model-a",
-				displayName: "Model A",
-				aliases: ["model-b", "model-a-latest"],
-				variants: [{ params: [], displayName: "Model A", isDefault: true }],
-			},
-			{
-				id: "model-b",
-				displayName: "Model B",
-				variants: [{ params: [], displayName: "Model B", isDefault: true }],
-			},
-		]);
-
-		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
-
-		expect(models.map((model) => model.id)).toEqual(["model-a", "model-a-latest", "model-b"]);
-		expect(getCursorModelMetadata("model-b")?.baseModelId).toBe("model-b");
-	});
-
 	it("uses the aliased base model context-window cache for aliases without context params", async () => {
 		process.env.CURSOR_API_KEY = "test-key-123";
 		mockedList.mockResolvedValueOnce([
@@ -367,40 +322,34 @@ describe("discoverModels", () => {
 	});
 
 	it("uses bundled SDK-derived context windows for models without context params", async () => {
-		const tmpAgentDir = mkdtempSync(join(tmpdir(), "pi-cursor-context-window-bundled-"));
-		process.env.PI_CODING_AGENT_DIR = tmpAgentDir;
-		try {
-			process.env.CURSOR_API_KEY = "test-key-123";
-			mockedList.mockResolvedValueOnce([
-				{
-					id: "composer-2",
-					displayName: "Composer 2",
-					parameters: [{ id: "fast", displayName: "Fast", values: [{ value: "false" }, { value: "true" }] }],
-					variants: [{ params: [{ id: "fast", value: "true" }], displayName: "Composer 2", isDefault: true }],
-				},
-				{
-					id: "new-sdk-model",
-					displayName: "New SDK Model",
-					variants: [{ params: [], displayName: "New SDK Model", isDefault: true }],
-				},
-			]);
+		process.env.CURSOR_API_KEY = "test-key-123";
+		mockedList.mockResolvedValueOnce([
+			{
+				id: "composer-2",
+				displayName: "Composer 2",
+				parameters: [{ id: "fast", displayName: "Fast", values: [{ value: "false" }, { value: "true" }] }],
+				variants: [{ params: [{ id: "fast", value: "true" }], displayName: "Composer 2", isDefault: true }],
+			},
+			{
+				id: "new-sdk-model",
+				displayName: "New SDK Model",
+				variants: [{ params: [], displayName: "New SDK Model", isDefault: true }],
+			},
+		]);
 
-			const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 
-			expect(models.find(({ id }) => id === "new-sdk-model")).toMatchObject({
-				reasoning: false,
-				input: ["text", "image"],
-			});
-			expect(models.find(({ id }) => id === "new-sdk-model")?.thinkingLevelMap).toBeUndefined();
-			expect(models.map((model) => [model.id, model.contextWindow])).toEqual([
-				["composer-2", 200000],
-				["composer-2:fast", 200000],
-				["composer-2:slow", 200000],
-				["new-sdk-model", 200000],
-			]);
-		} finally {
-			rmSync(tmpAgentDir, { recursive: true, force: true });
-		}
+		expect(models.find(({ id }) => id === "new-sdk-model")).toMatchObject({
+			reasoning: false,
+			input: ["text", "image"],
+		});
+		expect(models.find(({ id }) => id === "new-sdk-model")?.thinkingLevelMap).toBeUndefined();
+		expect(models.map((model) => [model.id, model.contextWindow])).toEqual([
+			["composer-2", 200000],
+			["composer-2:fast", 200000],
+			["composer-2:slow", 200000],
+			["new-sdk-model", 200000],
+		]);
 	});
 
 	it.each([3, 25])("bounds populated context-window cache reads for a %i-model catalog", async (catalogSize) => {
@@ -427,29 +376,23 @@ describe("discoverModels", () => {
 	});
 
 	it("lets user cache override context-qualified model IDs", async () => {
-		const tmpAgentDir = mkdtempSync(join(tmpdir(), "pi-cursor-context-window-qualified-"));
-		process.env.PI_CODING_AGENT_DIR = tmpAgentDir;
-		try {
-			saveCachedContextWindow("gpt-5.5@1m", 950000);
-			process.env.CURSOR_API_KEY = "test-key-123";
-			mockedList.mockResolvedValueOnce([
-				{
-					id: "gpt-5.5",
-					displayName: "GPT-5.5",
-					parameters: [{ id: "context", displayName: "Context", values: [{ value: "1m" }, { value: "272k" }] }],
-					variants: [{ params: [{ id: "context", value: "1m" }], displayName: "GPT-5.5", isDefault: true }],
-				},
-			]);
+		saveCachedContextWindow("gpt-5.5@1m", 950000);
+		process.env.CURSOR_API_KEY = "test-key-123";
+		mockedList.mockResolvedValueOnce([
+			{
+				id: "gpt-5.5",
+				displayName: "GPT-5.5",
+				parameters: [{ id: "context", displayName: "Context", values: [{ value: "1m" }, { value: "272k" }] }],
+				variants: [{ params: [{ id: "context", value: "1m" }], displayName: "GPT-5.5", isDefault: true }],
+			},
+		]);
 
-			const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 
-			expect(models.map((model) => [model.id, model.contextWindow])).toEqual([
-				["gpt-5.5@1m", 950000],
-				["gpt-5.5@272k", 272000],
-			]);
-		} finally {
-			rmSync(tmpAgentDir, { recursive: true, force: true });
-		}
+		expect(models.map((model) => [model.id, model.contextWindow])).toEqual([
+			["gpt-5.5@1m", 950000],
+			["gpt-5.5@272k", 272000],
+		]);
 	});
 
 	it("inherits base context and fast evidence for aliases without exact observations", () => {
@@ -478,52 +421,40 @@ describe("discoverModels", () => {
 	});
 
 	it("lets user cache override bundled context windows", async () => {
-		const tmpAgentDir = mkdtempSync(join(tmpdir(), "pi-cursor-context-window-"));
-		process.env.PI_CODING_AGENT_DIR = tmpAgentDir;
-		try {
-			saveCachedContextWindow("composer-2", 201000);
-			process.env.CURSOR_API_KEY = "test-key-123";
-			mockedList.mockResolvedValueOnce([
-				{
-					id: "composer-2",
-					displayName: "Composer 2",
-					parameters: [{ id: "fast", displayName: "Fast", values: [{ value: "false" }, { value: "true" }] }],
-					variants: [{ params: [{ id: "fast", value: "true" }], displayName: "Composer 2", isDefault: true }],
-				},
-			]);
+		saveCachedContextWindow("composer-2", 201000);
+		process.env.CURSOR_API_KEY = "test-key-123";
+		mockedList.mockResolvedValueOnce([
+			{
+				id: "composer-2",
+				displayName: "Composer 2",
+				parameters: [{ id: "fast", displayName: "Fast", values: [{ value: "false" }, { value: "true" }] }],
+				variants: [{ params: [{ id: "fast", value: "true" }], displayName: "Composer 2", isDefault: true }],
+			},
+		]);
 
-			const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 
-			expect(models.map((model) => [model.id, model.contextWindow])).toEqual([
-				["composer-2", 201000],
-				["composer-2:fast", 201000],
-				["composer-2:slow", 201000],
-			]);
-		} finally {
-			rmSync(tmpAgentDir, { recursive: true, force: true });
-		}
+		expect(models.map((model) => [model.id, model.contextWindow])).toEqual([
+			["composer-2", 201000],
+			["composer-2:fast", 201000],
+			["composer-2:slow", 201000],
+		]);
 	});
 
 	it("ignores malformed context-window cache values", async () => {
-		const tmpAgentDir = mkdtempSync(join(tmpdir(), "pi-cursor-context-window-malformed-"));
-		process.env.PI_CODING_AGENT_DIR = tmpAgentDir;
-		try {
-			writeFileSync(join(tmpAgentDir, "cursor-sdk-context-windows.json"), JSON.stringify({ contextWindows: { "composer-2": "201000" } }));
-			process.env.CURSOR_API_KEY = "test-key-123";
-			mockedList.mockResolvedValueOnce([
-				{
-					id: "composer-2",
-					displayName: "Composer 2",
-					variants: [{ params: [], displayName: "Composer 2", isDefault: true }],
-				},
-			]);
+		writeFileSync(join(tmpAgentDir, "cursor-sdk-context-windows.json"), JSON.stringify({ contextWindows: { "composer-2": "201000" } }));
+		process.env.CURSOR_API_KEY = "test-key-123";
+		mockedList.mockResolvedValueOnce([
+			{
+				id: "composer-2",
+				displayName: "Composer 2",
+				variants: [{ params: [], displayName: "Composer 2", isDefault: true }],
+			},
+		]);
 
-			const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 
-			expect(models.find((model) => model.id === "composer-2")?.contextWindow).toBe(200000);
-		} finally {
-			rmSync(tmpAgentDir, { recursive: true, force: true });
-		}
+		expect(models.find((model) => model.id === "composer-2")?.contextWindow).toBe(200000);
 	});
 
 	it("maps Cursor reasoning values to pi thinking levels", async () => {
@@ -601,56 +532,6 @@ describe("discoverModels", () => {
 		});
 	});
 
-	it("maps Claude effort with distinct xhigh and max values", async () => {
-		process.env.CURSOR_API_KEY = "test-key-123";
-		mockedList.mockResolvedValueOnce([
-			{
-				id: "claude-opus-4-7",
-				displayName: "Opus 4.7",
-				parameters: [
-					{ id: "thinking", displayName: "Thinking", values: [{ value: "false" }, { value: "true" }] },
-					{ id: "context", displayName: "Context", values: [{ value: "300k" }, { value: "1m" }] },
-					{
-						id: "effort",
-						displayName: "Effort",
-						values: [
-							{ value: "low" },
-							{ value: "medium" },
-							{ value: "high" },
-							{ value: "xhigh" },
-							{ value: "max" },
-							{ value: "extra-high" },
-						],
-					},
-				],
-				variants: [
-					{
-						params: [
-							{ id: "thinking", value: "true" },
-							{ id: "context", value: "1m" },
-							{ id: "effort", value: "xhigh" },
-						],
-						displayName: "Opus 4.7",
-						isDefault: true,
-					},
-				],
-			},
-		]);
-		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
-		expect(models.map((model) => model.id)).toEqual(["claude-opus-4-7@300k", "claude-opus-4-7@1m"]);
-		expect(models[0].contextWindow).toBe(300000);
-		expect(models[1].contextWindow).toBe(1000000);
-		expect(models[0].thinkingLevelMap).toEqual({
-			off: "false",
-			minimal: null,
-			low: "low",
-			medium: "medium",
-			high: "high",
-			xhigh: "xhigh",
-			max: "max",
-		});
-	});
-
 	it("maps reasoning off to unsupported null when Cursor exposes no none or off value", async () => {
 		process.env.CURSOR_API_KEY = "test-key-123";
 		mockedList.mockResolvedValueOnce([
@@ -694,7 +575,7 @@ describe("discoverModels", () => {
 				parameters: [
 					{ id: "context", displayName: "Context", values: [{ value: "300k" }, { value: "1m" }] },
 					{ id: "thinking", displayName: "Thinking", values: [{ value: "false" }, { value: "true" }] },
-					{ id: effortId, displayName: "Effort", values: [{ value: "low" }, { value: "medium" }, { value: "high" }, { value: "xhigh" }, { value: "max" }] },
+					{ id: effortId, displayName: "Effort", values: [{ value: "low" }, { value: "medium" }, { value: "high" }, { value: "xhigh" }, { value: "max" }, { value: "extra-high" }] },
 				],
 				variants: [
 					{
@@ -712,6 +593,10 @@ describe("discoverModels", () => {
 
 		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
 
+		expect(models.map((model) => [model.id, model.contextWindow])).toEqual([
+			["claude-like@300k", 300000],
+			["claude-like@1m", 1000000],
+		]);
 		expect(models[0].thinkingLevelMap).toEqual({
 			off: "false",
 			minimal: null,

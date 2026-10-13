@@ -108,7 +108,7 @@ describe("Cursor SDK config resolver", () => {
 		expect(loadCursorSdkUserConfig(getCursorSdkUserConfigPath(agentDir)).subagents).toEqual(user.subagents);
 	});
 
-	it("resolves ordinary settings by CLI, env, trusted project, user, built-in order", () => {
+	it("resolves runtime by CLI, env, session, trusted project, user, built-in order", () => {
 		const user = { runtime: "cloud" as const };
 		const project = { runtime: "local" as const };
 
@@ -126,6 +126,18 @@ describe("Cursor SDK config resolver", () => {
 			resolveCursorSdkConfig({ cli: { runtime: "local" }, env: { [CURSOR_RUNTIME_ENV]: "cloud" }, user, project }).runtime,
 		).toMatchObject({ value: "local", source: "cli", trustLevel: "one-shot" });
 		expect(resolveCursorSdkConfig().runtime).toMatchObject({ value: "local", source: "builtin" });
+		expect(resolveCursorSdkConfig({ session: { runtime: "cloud" }, project: { runtime: "local" } }).runtime).toMatchObject({
+			value: "cloud",
+			source: "session",
+		});
+		expect(resolveCursorSdkConfig({ env: { [CURSOR_RUNTIME_ENV]: "local" }, session: { runtime: "cloud" } }).runtime).toMatchObject({
+			value: "local",
+			source: "environment",
+		});
+		expect(resolveCursorSdkConfig({ cli: { runtime: "local" }, session: { runtime: "cloud" } }).runtime).toMatchObject({
+			value: "local",
+			source: "cli",
+		});
 	});
 
 	it("resolves HTTP/1.1 as session, env, user, then byte-identical default", () => {
@@ -174,7 +186,7 @@ describe("Cursor SDK config resolver", () => {
 		expect(existsSync(join(root, "user"))).toBe(false);
 	});
 
-	it("rejects invalid explicit CLI runtime and cloud-context overrides before lower layers", () => {
+	it("rejects invalid explicit CLI and env runtime and cloud-context overrides before lower layers", () => {
 		expect(() => resolveCursorSdkConfig({
 			cli: { runtime: "remote" },
 			env: { [CURSOR_RUNTIME_ENV]: "cloud" },
@@ -183,9 +195,6 @@ describe("Cursor SDK config resolver", () => {
 			cli: { cloud: { contextHandoff: "reuse" } },
 			user: { cloud: { contextHandoff: "bootstrap" } },
 		})).toThrow('Invalid --cursor-cloud-context "reuse". Use "never", "fresh", or "bootstrap".');
-	});
-
-	it("rejects invalid explicit env runtime and cloud-context overrides before lower config", () => {
 		expect(() => resolveCursorSdkConfig({
 			env: { [CURSOR_RUNTIME_ENV]: "remote" },
 			user: { runtime: "cloud" },
@@ -576,21 +585,6 @@ describe("Cursor SDK config resolver", () => {
 			runtime: "cloud",
 			cloud: { repo: "repo", environment: { name: "gpu" }, acknowledged: true },
 			local: { sandboxOptions: { enabled: true }, autoReview: true },
-		});
-	});
-
-	it("lets session runtime override config but not CLI or env", () => {
-		expect(resolveCursorSdkConfig({ session: { runtime: "cloud" }, project: { runtime: "local" } }).runtime).toMatchObject({
-			value: "cloud",
-			source: "session",
-		});
-		expect(resolveCursorSdkConfig({ env: { [CURSOR_RUNTIME_ENV]: "local" }, session: { runtime: "cloud" } }).runtime).toMatchObject({
-			value: "local",
-			source: "environment",
-		});
-		expect(resolveCursorSdkConfig({ cli: { runtime: "local" }, session: { runtime: "cloud" } }).runtime).toMatchObject({
-			value: "local",
-			source: "cli",
 		});
 	});
 

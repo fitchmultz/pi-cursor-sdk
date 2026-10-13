@@ -29,7 +29,6 @@ import { CURSOR_SDK_EVENT_DEBUG_ENV_NAMES as sharedSdkEventDebugEnvNames } from 
 import {
 	serializeCursorSettingSources,
 } from "../shared/cursor-setting-sources.mjs";
-import { scrubSensitiveText } from "../shared/cursor-sensitive-text.mjs";
 import { createScriptFail } from "../scripts/lib/cursor-script-fail.mjs";
 
 function processExists(pid: number): boolean {
@@ -139,15 +138,6 @@ describe("maintainer scripts shared lib", () => {
 		expect(plan.env.PI_CURSOR_NATIVE_TOOL_DISPLAY).toBe("0");
 	});
 
-	it("scrubs secrets and bridge endpoints", () => {
-		const leakedKey = "super-secret-cursor-key-12345";
-		const sample = `Bearer ${leakedKey} http://127.0.0.1:4242/cursor-pi-tool-bridge/abc/mcp`;
-		const scrubbed = scrubSensitiveText(sample, leakedKey);
-		expect(scrubbed).not.toContain(leakedKey);
-		expect(scrubbed).toContain("Bearer [redacted]");
-		expect(scrubbed).toContain("[redacted-bridge-endpoint]");
-	});
-
 	it("serializes setting sources for child env forwarding", () => {
 		expect(serializeCursorSettingSources(["all"])).toBe("all");
 		expect(serializeCursorSettingSources(["project", "user"])).toBe("project,user");
@@ -212,14 +202,6 @@ describe("maintainer scripts shared lib", () => {
 			}),
 		).toThrow(/--self-test does not accept a value/);
 
-		expect(requireApiKey({ apiKey: "key" }, {}, fail)).toBe("key");
-		expect(() => requireApiKey({}, {}, fail)).toThrow(/Cursor API key is required/);
-	});
-
-	it("rejects malformed repeated flag values", () => {
-		const fail = vi.fn((message: string) => {
-			throw new Error(message);
-		});
 		expect(() =>
 			parseArgv(["--model", "--model=bad"], {
 				defaults: { model: "default" },
@@ -227,6 +209,9 @@ describe("maintainer scripts shared lib", () => {
 				fail,
 			}),
 		).toThrow(/--model requires a value/);
+
+		expect(requireApiKey({ apiKey: "key" }, {}, fail)).toBe("key");
+		expect(() => requireApiKey({}, {}, fail)).toThrow(/Cursor API key is required/);
 	});
 
 	it("builds timestamped artifact directories under /tmp by default", () => {

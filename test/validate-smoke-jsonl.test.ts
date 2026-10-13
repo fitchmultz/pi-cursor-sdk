@@ -51,27 +51,19 @@ describe("validate-smoke-jsonl", () => {
 		expect(result.stdout).toContain('"badUsageCount":0');
 	});
 
-	it("fails an empty JSONL file", () => {
+	it.each([
+		{ name: "empty", content: "", expectedFragments: ['"lineCount":0', '"assistantCount":0'] },
+		{ name: "no-assistant", content: JSON.stringify({ type: "message", message: { role: "user", content: "hi" } }) + "\n", expectedFragments: ['"assistantCount":0'] },
+	])("rejects $name JSONL files", ({ name, content, expectedFragments }) => {
 		const smokeDir = makeSmokeDir();
-		const sessionDir = join(smokeDir, "empty");
+		const sessionDir = join(smokeDir, name);
 		mkdirSync(sessionDir, { recursive: true });
-		writeFileSync(join(sessionDir, "session.jsonl"), "");
+		writeFileSync(join(sessionDir, "session.jsonl"), content);
 
 		const result = runValidator(smokeDir);
 
 		expect(result.status).toBe(1);
-		expect(result.stdout).toContain('"lineCount":0');
-		expect(result.stdout).toContain('"assistantCount":0');
-	});
-
-	it("fails JSONL files with no assistant messages", () => {
-		const smokeDir = makeSmokeDir();
-		writeSessionJsonl(smokeDir, "no-assistant", [{ type: "message", message: { role: "user", content: "hi" } }]);
-
-		const result = runValidator(smokeDir);
-
-		expect(result.status).toBe(1);
-		expect(result.stdout).toContain('"assistantCount":0');
+		for (const fragment of expectedFragments) expect(result.stdout).toContain(fragment);
 	});
 
 	it("fails assistant messages with missing or negative usage", () => {
@@ -137,7 +129,7 @@ describe("validate-smoke-jsonl", () => {
 		expect(result.stdout).toContain('"replayErrorCount":1');
 	});
 
-	it("passes replay-errors-only when no native replay tool failures are present", () => {
+	it("ignores replay error strings in successful read tool results", () => {
 		const smokeDir = makeSmokeDir();
 		writeSessionJsonl(smokeDir, "clean-replay", [
 			{
@@ -151,14 +143,6 @@ describe("validate-smoke-jsonl", () => {
 			},
 		]);
 
-		const result = runValidator(smokeDir, ["--replay-errors-only"]);
-
-		expect(result.status).toBe(0);
-		expect(result.stdout).toContain('"replayErrorCount":0');
-	});
-
-	it("ignores replay error strings in successful read tool results", () => {
-		const smokeDir = makeSmokeDir();
 		writeSessionJsonl(smokeDir, "doc-mention", [
 			{
 				type: "message",
@@ -174,7 +158,8 @@ describe("validate-smoke-jsonl", () => {
 		const result = runValidator(smokeDir, ["--replay-errors-only"]);
 
 		expect(result.status).toBe(0);
-		expect(result.stdout).toContain('"replayErrorCount":0');
+		const summaries = result.stdout.trim().split("\n").map((line) => JSON.parse(line));
+		expect(summaries.map((summary) => summary.replayErrorCount)).toEqual([0, 0]);
 	});
 
 	it("fails default usage validation with --replay-errors when replay tool failures are present", () => {

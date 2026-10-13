@@ -17,49 +17,6 @@ function makeWaitResult(status: "finished" | "cancelled" | "error", result?: str
 }
 
 describe("cursor-provider-run-outcome", () => {
-	it("normalizes signal-aborted finished waits to cancelled outcomes", () => {
-		const outcome = resolveCursorRunOutcome({
-			waitResult: makeWaitResult("finished", "hello"),
-			runtimeTarget: "local",
-			signalAborted: true,
-			textDeltas: ["hello"],
-			emittedText: "",
-		});
-		expect(outcome.kind).toBe("cancelled");
-		expect(isCursorRunFinishedSuccessfully(outcome)).toBe(false);
-		expect(classifyCursorRunEmission(outcome)).toBe("cancelled");
-	});
-
-	it("normalizes signal-aborted error waits to cancelled outcomes", () => {
-		const outcome = resolveCursorRunOutcome({
-			waitResult: makeWaitResult("error", "boom"),
-			runtimeTarget: "local",
-			signalAborted: true,
-			textDeltas: [],
-			emittedText: "",
-		});
-		expect(outcome.kind).toBe("cancelled");
-		expect(classifyCursorRunEmission(outcome)).toBe("cancelled");
-	});
-
-	it("classifies SDK cancelled and error statuses for both emission strategies", () => {
-		const cancelled = resolveCursorRunOutcome({
-			waitResult: makeWaitResult("cancelled"),
-			runtimeTarget: "local",
-			textDeltas: [],
-			emittedText: "",
-		});
-		expect(classifyCursorRunEmission(cancelled)).toBe("cancelled");
-
-		const failed = resolveCursorRunOutcome({
-			waitResult: makeWaitResult("error", "boom"),
-			runtimeTarget: "local",
-			textDeltas: [],
-			emittedText: "",
-		});
-		expect(classifyCursorRunEmission(failed)).toBe("failed");
-	});
-
 	it("uses the runtime target for terminal auth guidance", () => {
 		const cloud = resolveCursorRunOutcome({
 			waitResult: makeWaitResult("error", "Invalid API key"),

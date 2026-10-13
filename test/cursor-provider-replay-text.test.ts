@@ -8,7 +8,6 @@ import {
 	collectEvents,
 	collectTextDeltas,
 	getDoneEvent,
-	hasEventType,
 	isToolCallBlock,
 	registerNativeToolDisplayForTest,
 	type CursorDeltaHandler,
@@ -379,71 +378,6 @@ describe("streamCursor native replay text and usage", () => {
 			},
 		];
 		const finalEvents = await collectEvents(streamCursor(makeModel(), incompleteReplayContext, { apiKey: "test-key" }));
-		expect(getDoneEvent(finalEvents).reason).toBe("stop");
-		expect(collectTextDeltas(finalEvents)).toBe("Done.");
-		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
-	});
-
-	it("surfaces incomplete native replay runs that only have started Cursor tool calls", async () => {
-		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
-		const registeredTools: RegisteredTool[] = [];
-		await registerNativeToolDisplayForTest(registeredTools);
-
-		let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
-		const runWait = vi.fn(
-			() =>
-				new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
-					resolveRun = resolve;
-				}),
-		);
-		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
-			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "mcp", args: { toolName: "demo" } }, callId: "c1" } });
-			return asMockCursorRun({
-				id: "run-1",
-				agentId: "agent-1",
-				status: "running",
-				wait: runWait,
-				cancel: vi.fn(),
-				supports: () => true,
-				unsupportedReason: () => undefined,
-			});
-		});
-		mockCreatedAgent({
-			agentId: "agent-1",
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
-
-		const eventsPromise = collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
-		await vi.waitFor(() => expect(runWait).toHaveBeenCalledTimes(1));
-		resolveRun({ id: "run-1", status: "finished", result: "Done." });
-		const events = await eventsPromise;
-		const done = getDoneEvent(events);
-		const text = collectTextDeltas(events);
-
-		expect(done.reason).toBe("toolUse");
-		expect(text).toBe("");
-		expect(done.message.content.find(isToolCallBlock)).toMatchObject({
-			name: "cursor",
-			arguments: { activityTitle: "Cursor MCP", activitySummary: "missing completion" },
-		});
-		expect(hasEventType(events, "toolcall_start")).toBe(true);
-		expect(nativeToolDisplayTestUtils.nativeToolResultCount()).toBe(1);
-
-		const replayContext = makeContext();
-		replayContext.messages = [
-			...replayContext.messages,
-			done.message,
-			{
-				role: "toolResult" as const,
-				toolCallId: done.message.content.find(isToolCallBlock)!.id,
-				toolName: "cursor",
-				content: [{ type: "text" as const, text: "Cursor MCP did not complete" }],
-				isError: true,
-				timestamp: 2,
-			},
-		];
-		const finalEvents = await collectEvents(streamCursor(makeModel(), replayContext, { apiKey: "test-key" }));
 		expect(getDoneEvent(finalEvents).reason).toBe("stop");
 		expect(collectTextDeltas(finalEvents)).toBe("Done.");
 		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);

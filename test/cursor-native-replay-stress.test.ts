@@ -20,47 +20,9 @@ import { __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.j
 
 const CURSOR_MODEL = makeModel();
 
-function mockFinishedGrepSend() {
+function mockFinishedToolSend(toolCall: unknown, callId: string) {
 	return vi.fn(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
-		opts.onDelta({
-			update: {
-				type: "tool-call-completed",
-				toolCall: {
-					name: "grep",
-					args: { pattern: "sidebar", path: "src" },
-					result: { status: "success", value: { matches: ["src/a.css"] } },
-				},
-				callId: "grep-1",
-			},
-		});
-		return asMockCursorRun({
-			id: "run-1",
-			agentId: "agent-1",
-			status: "finished",
-			wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished", result: "done" }),
-			cancel: vi.fn(),
-			supports: () => true,
-			unsupportedReason: () => undefined,
-		});
-	});
-}
-
-function mockFinishedTaskSend() {
-	return vi.fn(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
-		opts.onDelta({
-			update: {
-				type: "tool-call-completed",
-				toolCall: {
-					name: "task",
-					args: { description: "Verify plan-strip resync" },
-					result: {
-						status: "success",
-						value: { result: { success: { command: "echo ok", stdout: "ok\n" } } },
-					},
-				},
-				callId: "task-1",
-			},
-		});
+		opts.onDelta({ update: { type: "tool-call-completed", toolCall, callId } });
 		return asMockCursorRun({
 			id: "run-1",
 			agentId: "agent-1",
@@ -86,17 +48,29 @@ describe("native replay stress", () => {
 		await cursorProviderTestUtils.resetSessionCursorAgents();
 	});
 
-	it("plan strip then turn_start resync replays grep when context.tools match active tools", async () => {
+	it.each([
+		{
+			name: "grep",
+			args: { pattern: "sidebar", path: "src" },
+			result: { matches: ["src/a.css"] },
+			expected: { name: "grep", arguments: { pattern: "sidebar", path: "src" } },
+		},
+		{
+			name: "task",
+			args: { description: "Verify plan-strip resync" },
+			result: { result: { success: { command: "echo ok", stdout: "ok\n" } } },
+			expected: { name: "cursor", arguments: { activityTitle: "Cursor subagent", activitySummary: "Verify plan-strip resync: $ echo ok" } },
+		},
+	])("plan strip then turn_start resync replays $name when context.tools match active tools", async ({ name, args, result, expected }) => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		const pi = await createNativeToolDisplayPiForTest();
 		pi.setActiveTools(["read", "bash", "edit", "write"]);
 		await pi.runTurnStart({ model: CURSOR_MODEL });
-		expect(pi.getActiveTools()).toContain("grep");
-		expect(pi.getActiveTools()).toContain("cursor");
+		expect(pi.getActiveTools()).toEqual(expect.arrayContaining([expected.name, "cursor"]));
 
 		mockCreatedAgent({
 			agentId: "agent-1",
-			send: mockFinishedGrepSend(),
+			send: mockFinishedToolSend({ name, args, result: { status: "success", value: result } }, `${name}-1`),
 			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
 		});
 
@@ -106,62 +80,19 @@ describe("native replay stress", () => {
 		const done = getDoneEvent(events);
 		expect(done.reason).toBe("toolUse");
 		expect(hasEventType(events, "toolcall_start")).toBe(true);
-		expect(done.message.content.filter(isToolCallBlock)).toMatchObject([
-			{ name: "grep", arguments: { pattern: "sidebar", path: "src" } },
-		]);
+		expect(done.message.content.filter(isToolCallBlock)).toMatchObject([expected]);
 	});
 
-	it("plan strip then turn_start resync replays neutral task activity when context.tools match active tools", async () => {
-		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
-		const pi = await createNativeToolDisplayPiForTest();
-		pi.setActiveTools(["read", "bash", "edit", "write"]);
-		await pi.runTurnStart({ model: CURSOR_MODEL });
-		expect(pi.getActiveTools()).toContain("cursor");
-
-		mockCreatedAgent({
-			agentId: "agent-1",
-			send: mockFinishedTaskSend(),
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
-
-		const context = makeContext();
-		context.tools = pi.getActiveTools().map((name) => ({ name, description: name, parameters: Type.Object({}) }));
-		const events = await collectEvents(streamCursor(CURSOR_MODEL, context, { apiKey: "test-key" }));
-		const done = getDoneEvent(events);
-		expect(done.reason).toBe("toolUse");
-		expect(hasEventType(events, "toolcall_start")).toBe(true);
-		expect(done.message.content.filter(isToolCallBlock)).toMatchObject([
-			{ name: "cursor", arguments: { activityTitle: "Cursor subagent", activitySummary: "Verify plan-strip resync: $ echo ok" } },
-		]);
-	});
-
-	it("stale context.tools without grep still avoids toolUse (coordinator guard)", async () => {
+	it.each([
+		["grep", { pattern: "sidebar", path: "src" }, { matches: ["src/a.css"] }, /grep|sidebar/i],
+		["edit", { path: "src/app.tsx" }, {}, /Cursor edit:|edit.*completed/i],
+		["find", { pattern: "**/*", path: "." }, {}, /find/i],
+	] as const)("inactive %s in context uses trace fallback instead of toolUse", async (name, args, result, traceMatcher) => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		await createNativeToolDisplayPiForTest();
 		mockCreatedAgent({
 			agentId: "agent-1",
-			send: vi.fn(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
-				opts.onDelta({
-					update: {
-						type: "tool-call-completed",
-						toolCall: {
-							name: "grep",
-							args: { pattern: "sidebar", path: "src" },
-							result: { status: "success", value: { matches: ["src/a.css"] } },
-						},
-						callId: "grep-1",
-					},
-				});
-				return asMockCursorRun({
-					id: "run-1",
-					agentId: "agent-1",
-					status: "finished",
-					wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished", result: "done" }),
-					cancel: vi.fn(),
-					supports: () => true,
-					unsupportedReason: () => undefined,
-				});
-			}),
+			send: mockFinishedToolSend({ name, args, result: { status: "success", value: result } }, `${name}-1`),
 			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
 		});
 
@@ -169,77 +100,7 @@ describe("native replay stress", () => {
 		context.tools = [{ name: "read", description: "Read", parameters: Type.Object({}) }];
 		const events = await collectEvents(streamCursor(makeModel(), context, { apiKey: "test-key" }));
 		expect(hasEventType(events, "toolcall_start")).toBe(false);
-		expect(collectThinkingDeltas(events)).toMatch(/grep|sidebar/i);
-	});
-
-	it("inactive cursor edit maps to trace text, not broken toolUse", async () => {
-		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
-		await createNativeToolDisplayPiForTest();
-		mockCreatedAgent({
-			agentId: "agent-1",
-			send: vi.fn(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
-				opts.onDelta({
-					update: {
-						type: "tool-call-completed",
-						toolCall: {
-							name: "edit",
-							args: { path: "src/app.tsx" },
-							result: { status: "success", value: {} },
-						},
-						callId: "edit-1",
-					},
-				});
-				return asMockCursorRun({
-					id: "run-1",
-					agentId: "agent-1",
-					status: "finished",
-					wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished", result: "done" }),
-					cancel: vi.fn(),
-					supports: () => true,
-					unsupportedReason: () => undefined,
-				});
-			}),
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
-
-		const context = makeContext();
-		context.tools = [{ name: "read", description: "Read", parameters: Type.Object({}) }];
-		const events = await collectEvents(streamCursor(makeModel(), context, { apiKey: "test-key" }));
-		expect(hasEventType(events, "toolcall_start")).toBe(false);
-		expect(collectThinkingDeltas(events)).toMatch(/Cursor edit:|edit.*completed/i);
-	});
-
-	it("find inactive in context uses trace fallback", async () => {
-		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
-		await createNativeToolDisplayPiForTest();
-		mockCreatedAgent({
-			agentId: "agent-1",
-			send: vi.fn(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
-				opts.onDelta({
-					update: {
-						type: "tool-call-completed",
-						toolCall: { name: "find", args: { pattern: "**/*", path: "." }, result: { status: "success", value: {} } },
-						callId: "find-1",
-					},
-				});
-				return asMockCursorRun({
-					id: "run-1",
-					agentId: "agent-1",
-					status: "finished",
-					wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished", result: "done" }),
-					cancel: vi.fn(),
-					supports: () => true,
-					unsupportedReason: () => undefined,
-				});
-			}),
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
-
-		const context = makeContext();
-		context.tools = [{ name: "read", description: "Read", parameters: Type.Object({}) }];
-		const events = await collectEvents(streamCursor(makeModel(), context, { apiKey: "test-key" }));
-		expect(hasEventType(events, "toolcall_start")).toBe(false);
-		expect(collectThinkingDeltas(events)).toMatch(/find/i);
+		expect(collectThinkingDeltas(events)).toMatch(traceMatcher);
 	});
 
 	it("inactive MCP trace scrubs secrets from collapsed summary", async () => {

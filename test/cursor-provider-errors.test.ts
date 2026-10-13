@@ -183,44 +183,18 @@ describe("cursor-provider-errors", () => {
 		expect(detail).not.toBe("Cursor SDK run failed");
 	});
 
-	it("prefers non-generic SDK result text", () => {
-		const detail = formatCursorSdkRunFailureDetail({
-			id: "run-1",
-			status: "error",
-			result: "MCP tool call timed out after 60s",
-		});
-
-		expect(detail).toBe("MCP tool call timed out after 60s");
-	});
-
-	it("preserves RunError terminal details and code", () => {
-		const detail = formatCursorSdkRunFailureDetail({
-			id: "run-error",
-			status: "error",
-			result: "Cursor SDK run failed",
-			error: { message: "Backend rejected the run", code: "backend_rejected" },
-		});
-
-		expect(detail).toBe("Backend rejected the run (code: backend_rejected)");
-	});
-
-	it("uses run.error fallback when wait result text is generic", () => {
-		const detail = formatCursorSdkRunFailureDetail(
-			{ id: "run-error-fallback", status: "error", result: "Cursor SDK run failed" },
-			undefined,
-			{ message: "Run handle failure", code: "run_handle_error" },
-		);
-
-		expect(detail).toBe("Run handle failure (code: run_handle_error)");
-	});
-
-	it("falls back to run.result when wait result text is generic", () => {
-		const detail = formatCursorSdkRunFailureDetail(
-			{ id: "run-2", status: "error", result: "Cursor SDK run failed" },
-			"ConnectError: read ETIMEDOUT",
-		);
-
-		expect(detail).toBe("ConnectError: read ETIMEDOUT");
+	it.each([
+		["non-generic SDK result", { id: "run-1", status: "error", result: "MCP tool call timed out after 60s" },
+			undefined, undefined, "MCP tool call timed out after 60s"],
+		["RunError terminal details", { id: "run-error", status: "error", result: "Cursor SDK run failed",
+			error: { message: "Backend rejected the run", code: "backend_rejected" } },
+			undefined, undefined, "Backend rejected the run (code: backend_rejected)"],
+		["run.error fallback", { id: "run-error-fallback", status: "error", result: "Cursor SDK run failed" },
+			undefined, { message: "Run handle failure", code: "run_handle_error" }, "Run handle failure (code: run_handle_error)"],
+		["run.result fallback", { id: "run-2", status: "error", result: "Cursor SDK run failed" },
+			"ConnectError: read ETIMEDOUT", undefined, "ConnectError: read ETIMEDOUT"],
+	] as const)("selects run failure detail from %s", (_source, result, runResult, runError, expected) => {
+		expect(formatCursorSdkRunFailureDetail(result, runResult, runError)).toBe(expected);
 	});
 
 	it("uses the installed AuthenticationError class only for cloud guidance", () => {
@@ -318,35 +292,16 @@ describe("cursor-provider-errors", () => {
 		);
 	});
 
-	it("classifies Cursor SDK network ConnectErrors without leaking raw network codes", () => {
-		const error = makeCursorSdkNetworkConnectError();
-		const classification = classifyCursorConnectError(error);
+	it.each([
+		["ECONNRESET", makeCursorSdkNetworkConnectError, "ECONNRESET"],
+		["HTTP/2 backpressure", makeCursorSdkHttp2EnhanceYourCalmConnectError, "NGHTTP2_ENHANCE_YOUR_CALM"],
+		["captured stall abort wrapper", makeCursorSdkStallAbortWrapperConnectError, "operation was aborted"],
+	] as const)("classifies Cursor SDK %s as retryable without leaking raw detail", (_kind, createError, excluded) => {
+		const error = createError();
+		expect(classifyCursorConnectError(error)).toEqual({ kind: "network", source: "cursor-sdk-stack" });
 		const message = sanitizeCursorProviderError(error, "test-key");
-
-		expect(classification).toEqual({ kind: "network", source: "cursor-sdk-stack" });
 		expect(message).toContain("Network error");
-		expect(message).toContain("failed during network or service I/O");
-		expect(message).not.toContain("ECONNRESET");
-	});
-
-	it("classifies Cursor SDK HTTP/2 stream backpressure ConnectErrors as retryable network failures", () => {
-		const error = makeCursorSdkHttp2EnhanceYourCalmConnectError();
-		const classification = classifyCursorConnectError(error);
-		const message = sanitizeCursorProviderError(error, "test-key");
-
-		expect(classification).toEqual({ kind: "network", source: "cursor-sdk-stack" });
-		expect(message).toContain("Network error");
-		expect(message).not.toContain("NGHTTP2_ENHANCE_YOUR_CALM");
-	});
-
-	it("classifies the captured default-depth Cursor SDK stall abort wrapper as a retryable network failure", () => {
-		const error = makeCursorSdkStallAbortWrapperConnectError();
-		const classification = classifyCursorConnectError(error);
-		const message = sanitizeCursorProviderError(error, "test-key");
-
-		expect(classification).toEqual({ kind: "network", source: "cursor-sdk-stack" });
-		expect(message).toContain("Network error");
-		expect(message).not.toContain("operation was aborted");
+		expect(message).not.toContain(excluded);
 	});
 
 	it.each([2, "unknown"] as const)("does not classify incomplete wrapped abort causes as cancellation (outer code %s)", (code) => {

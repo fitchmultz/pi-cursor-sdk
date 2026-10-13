@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { TurnEndedUpdateSchema } from "@cursor/sdk";
 import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
+import { calculateContextTokens } from "@earendil-works/pi-coding-agent";
 import {
 	applyCursorUsage,
 	isCursorSdkUsageSafeForPiMessage,
@@ -128,7 +129,8 @@ describe("installed Cursor SDK turn-ended usage contract", () => {
 			expect(isCursorSdkUsageSafeForPiMessage(turn!, model)).toBe(true);
 
 			const partial = makeAssistantMessage();
-			applyCursorUsage(partial, model, context, 7, { runtime: "local", turn: turn! });
+			// The stale trusted occupancy floor must not override fresh LOCAL turn counts.
+			applyCursorUsage(partial, model, context, 7, { runtime: "local", turn: turn!, occupancyFloor: 100000 });
 			expect(partial.usage).toMatchObject(fixture.expectedPiMappingFromRawTurnEnded[index]!);
 			expect(
 				partial.usage.input + partial.usage.cacheRead + partial.usage.cacheWrite + partial.usage.output,
@@ -141,6 +143,7 @@ describe("installed Cursor SDK turn-ended usage contract", () => {
 				sample.usage.cacheWriteTokens;
 			expect(partial.usage.totalTokens).not.toBe(publishedAdditiveTotal);
 			expect(partial.usage.totalTokens).toBe(sample.usage.inputTokens + sample.usage.outputTokens);
+			expect(calculateContextTokens(partial.usage)).toBe(partial.usage.totalTokens);
 		}
 	});
 });

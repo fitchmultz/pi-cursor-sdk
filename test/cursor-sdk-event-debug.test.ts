@@ -33,7 +33,7 @@ describe("cursor sdk event debug sink", () => {
 		);
 	});
 
-	it("records raw payloads to disk without stderr by default", async () => {
+	it.each([false, true])("records raw payloads to disk with stderr summary enabled=%s", async (stderrEnabled) => {
 		const artifactDir = mkdtempSync(join(tmpdir(), "pi-cursor-sdk-event-debug-"));
 		const stderrLines: string[] = [];
 		const originalWrite = process.stderr.write.bind(process.stderr);
@@ -50,6 +50,7 @@ describe("cursor sdk event debug sink", () => {
 				env: {
 					PI_CURSOR_SDK_EVENT_DEBUG: "1",
 					PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR: artifactDir,
+					...(stderrEnabled ? { PI_CURSOR_SDK_EVENT_DEBUG_STDERR: "1" } : {}),
 				},
 			});
 			expect(sink?.artifactDir).toBe(artifactDir);
@@ -111,7 +112,7 @@ describe("cursor sdk event debug sink", () => {
 			});
 			expect(readFileSync(join(artifactDir, sdkEventDebugTestUtils.ARTIFACTS.timeline), "utf8")).toContain('"layer":"display-decisions"');
 			expect(readFileSync(join(artifactDir, sdkEventDebugTestUtils.ARTIFACTS.finalPartial), "utf8")).toContain('"toolUse"');
-			expect(stderrLines.some((line) => line.includes(CURSOR_SDK_EVENT_DEBUG_LOG_PREFIX))).toBe(false);
+			expect(stderrLines.some((line) => line.includes(CURSOR_SDK_EVENT_DEBUG_LOG_PREFIX))).toBe(stderrEnabled);
 		} finally {
 			process.stderr.write = originalWrite;
 			rmSync(artifactDir, { recursive: true, force: true });
@@ -232,34 +233,6 @@ describe("cursor sdk event debug sink", () => {
 				sdkEventDebugTestUtils.ARTIFACTS.timeline,
 			]);
 		} finally {
-			rmSync(artifactDir, { recursive: true, force: true });
-		}
-	});
-
-	it("can opt in to stderr summary output", async () => {
-		const artifactDir = mkdtempSync(join(tmpdir(), "pi-cursor-sdk-event-debug-"));
-		const stderrLines: string[] = [];
-		const originalWrite = process.stderr.write.bind(process.stderr);
-		process.stderr.write = ((chunk: string | Uint8Array) => {
-			stderrLines.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
-			return true;
-		}) as typeof process.stderr.write;
-
-		try {
-			const sink = CursorSdkEventDebugSink.maybeCreate({
-				cwd: "/repo",
-				modelId: "composer-2.5",
-				provider: "cursor",
-				env: {
-					PI_CURSOR_SDK_EVENT_DEBUG: "1",
-					PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR: artifactDir,
-					PI_CURSOR_SDK_EVENT_DEBUG_STDERR: "1",
-				},
-			});
-			await sink?.finalize();
-			expect(stderrLines.some((line) => line.includes(CURSOR_SDK_EVENT_DEBUG_LOG_PREFIX))).toBe(true);
-		} finally {
-			process.stderr.write = originalWrite;
 			rmSync(artifactDir, { recursive: true, force: true });
 		}
 	});
@@ -677,18 +650,9 @@ describe("debug-provider-events maintainer probe", () => {
 		});
 	});
 
-	it("forwards explicit --setting-sources none to child pi env", () => {
+	it.each(["none", "  ,  "])("keeps disabled setting sources %j disabled through child env", (sources) => {
 		const args = parseDebugProviderEventsArgs(
-			["--prompt", "hello", "--setting-sources", "none"],
-			{ CURSOR_API_KEY: "key" },
-		);
-		expect(args.settingSources).toBeUndefined();
-		expect(serializeCursorSettingSources(args.settingSources)).toBe("none");
-	});
-
-	it("does not re-enable all when comma-only setting sources round-trip through child env", () => {
-		const args = parseDebugProviderEventsArgs(
-			["--prompt", "hello", "--setting-sources", "  ,  "],
+			["--prompt", "hello", "--setting-sources", sources],
 			{ CURSOR_API_KEY: "key" },
 		);
 		expect(args.settingSources).toBeUndefined();

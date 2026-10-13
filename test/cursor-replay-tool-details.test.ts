@@ -113,24 +113,27 @@ describe("cursor replay tool details contract", () => {
 		expect(rendered).not.toContain("Cursor generateImage");
 	});
 
-	it("renders path-only edit errors with the activity error body", () => {
+	it.each([
+		["edit", "no match", "Cursor edit"],
+		["write", "permission denied", "write src/a.ts"],
+	] as const)("renders path-only %s errors with the activity error body", (name, error, expectedText) => {
 		const display = buildCursorPiToolDisplayFromSpec({
-			rawName: "edit",
-			name: "edit",
+			rawName: name,
+			name,
 			args: { path: "src/a.ts" },
-			result: { status: "error", value: undefined, error: "no match" },
+			result: { status: "error", value: undefined, error },
 			options: { cwd: "/repo", maxChars: 4000 },
 		});
 		const rendered = renderReplayResult(display.result.details, display.result.content[0]?.text ?? "", true);
 
 		expect(display.result.details).toMatchObject({
 			variant: "activity",
-			sourceToolName: "edit",
-			title: "Cursor edit",
+			sourceToolName: name,
+			title: `Cursor ${name}`,
 		});
-		expect(rendered).toContain("Cursor edit");
-		expect(rendered).toContain("Error: no match");
-		expect(rendered).not.toMatch(/^edit src\/a\.ts$/m);
+		expect(rendered).toContain(expectedText);
+		expect(rendered).toContain(`Error: ${error}`);
+		expect(rendered.split("\n")).not.toContain(`${name} src/a.ts`);
 	});
 
 	it("renders path-only edit no-change results with the Cursor edit activity title", () => {
@@ -150,26 +153,6 @@ describe("cursor replay tool details contract", () => {
 		});
 		expect(rendered).toContain("Cursor edit");
 		expect(rendered).not.toMatch(/^edit src\/a\.ts$/m);
-	});
-
-	it("renders path-only write errors with the activity error body", () => {
-		const display = buildCursorPiToolDisplayFromSpec({
-			rawName: "write",
-			name: "write",
-			args: { path: "src/a.ts" },
-			result: { status: "error", value: undefined, error: "permission denied" },
-			options: { cwd: "/repo", maxChars: 4000 },
-		});
-		const rendered = renderReplayResult(display.result.details, display.result.content[0]?.text ?? "", true);
-
-		expect(display.result.details).toMatchObject({
-			variant: "activity",
-			sourceToolName: "write",
-			title: "Cursor write",
-		});
-		expect(rendered).toContain("write src/a.ts");
-		expect(rendered).toContain("Error: permission denied");
-		expect(rendered).not.toMatch(/^write src\/a\.ts$/m);
 	});
 
 	it("renders generateImage producer error details with the current visible title", () => {

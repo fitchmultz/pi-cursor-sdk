@@ -73,14 +73,6 @@ describe("model-list-cache", () => {
 		expect(loadFreshCachedModels(fingerprintApiKey("other-key"))).toBeUndefined();
 	});
 
-	it("treats entries older than the TTL as a miss but still returns them as stale", () => {
-		vi.useFakeTimers({ toFake: ["Date"] });
-		saveModelListCache(fp, MODELS);
-		vi.setSystemTime(Date.now() + DEFAULT_TTL_MS + 1);
-		expect(loadFreshCachedModels(fp)).toBeUndefined();
-		expect(loadAnyCachedModelCatalog(fp)?.models).toEqual(MODELS);
-	});
-
 	it("ignores a corrupt cache file", () => {
 		writeFileSync(cachePath, "{ not json");
 		expect(loadFreshCachedModels(fp)).toBeUndefined();
@@ -154,14 +146,15 @@ describe("model-list-cache", () => {
 		expect(loadAnyCachedModelCatalog(fp)?.models).toEqual(MODELS);
 	});
 
-	it.each(["not-a-number", "-1"])("falls back to the default TTL for invalid env value %s", (value) => {
+	it.each([undefined, "not-a-number", "-1"])("uses the default TTL when env is unset or invalid: %s", (value) => {
 		vi.useFakeTimers({ toFake: ["Date"] });
-		process.env.PI_CURSOR_SDK_MODEL_CACHE_TTL_MS = value;
+		if (value !== undefined) process.env.PI_CURSOR_SDK_MODEL_CACHE_TTL_MS = value;
 		saveModelListCache(fp, MODELS);
 		const savedAt = Date.now();
 		vi.setSystemTime(savedAt + DEFAULT_TTL_MS);
 		expect(loadFreshCachedModels(fp)).toEqual(MODELS);
 		vi.setSystemTime(savedAt + DEFAULT_TTL_MS + 1);
 		expect(loadFreshCachedModels(fp)).toBeUndefined();
+		expect(loadAnyCachedModelCatalog(fp)?.models).toEqual(MODELS);
 	});
 });

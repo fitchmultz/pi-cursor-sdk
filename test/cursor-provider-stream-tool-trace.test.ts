@@ -10,7 +10,6 @@ import {
 	getDoneEvent,
 	isCursorToolStreamEvent,
 	type CursorDeltaHandler,
-	type CursorStepHandler,
 	mockCreatedAgent,
 	asMockCursorRun,
 } from "./helpers/cursor-provider-harness.js";
@@ -123,52 +122,6 @@ describe("streamCursor tool trace", () => {
 			expect(trace).toContain("$ echo completed");
 			expect(trace).toContain("completed\n");
 			expect(trace).not.toContain("did not complete");
-		});
-
-		it("dedupes a completed tool call reported through both delta and step callbacks", async () => {
-			const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler; onStep: CursorStepHandler }) => {
-				opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "read", args: { path: "README.md" } }, callId: "c1" } });
-				opts.onStep({
-					step: {
-						type: "toolCall",
-						message: {
-							type: "read",
-							args: { path: "README.md" },
-							result: { status: "success", value: { content: "# pi-cursor-sdk" } },
-						},
-					} as CursorOnStepPayload["step"],
-				});
-				opts.onDelta({
-					update: {
-						type: "tool-call-completed",
-						toolCall: {
-							name: "read",
-							result: { status: "success", value: { content: "# pi-cursor-sdk" } },
-						},
-						callId: "c1",
-					},
-				});
-				return asMockCursorRun({
-					id: "run-1",
-					agentId: "agent-1",
-					status: "finished",
-					wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished", result: "done" }),
-					cancel: vi.fn(),
-					supports: () => true,
-					unsupportedReason: () => undefined,
-				});
-			});
-			mockCreatedAgent({
-				send: mockSend,
-				[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-			});
-
-			const stream = streamCursor(makeModel(), makeContext(), { apiKey: "test-key" });
-			const events = await collectEvents(stream);
-			const trace = collectThinkingDeltas(events);
-
-			expect(trace.match(/read README\.md/g)).toHaveLength(1);
-			expect(trace.match(/# pi-cursor-sdk/g)).toHaveLength(1);
 		});
 
 		it("renders a completed tool call re-delivered with the same call ID once", async () => {

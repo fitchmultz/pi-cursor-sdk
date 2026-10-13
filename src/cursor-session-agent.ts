@@ -584,7 +584,7 @@ export {
 } from "./cursor-session-send-policy.js";
 
 export function invalidateSessionAgent(
-	scopeKey: string = getCursorSessionScopeKey(),
+	scopeKey: string,
 	options?: { deadTransport?: boolean },
 ): void {
 	invalidatedScopeKeys.add(scopeKey);

@@ -42,6 +42,9 @@ describe("resolveCursorToolCompletion", () => {
 			action: "ignore-bridge",
 			identity: "cursor-tool:bridge-1",
 		});
+		expect(resolveCursorToolCompletion({
+			source: "delta", callId: "bridge-1", toolCall: { toolName: "pi__run_test" }, ledger, shellOutput,
+		}).action).toBe("handle");
 	});
 
 	it("ignores bridge tool calls detected on the live run", () => {

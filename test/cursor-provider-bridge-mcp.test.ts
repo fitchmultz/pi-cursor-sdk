@@ -3,29 +3,22 @@ import { Type } from "typebox";
 import {
 	resetCursorProviderTestState,
 	mockedCreate,
-	mockedCreateAgentPlatform,
 	makeModel,
 	makeContext,
-	makeAssistantMessage,
 	collectEvents,
 	collectTextDeltas,
 	collectThinkingDeltas,
-	getEventsOfType,
 	getDoneEvent,
 	getErrorEvent,
-	getTextEndEvent,
 	hasEventType,
 	isToolCallBlock,
-	isCursorToolStreamEvent,
 	getCreatedAgentOptions,
-	createMockAgentPlatform,
 	createPiHarness,
 	registerBridgeForProviderTest,
 	registerNativeToolDisplayForTest,
 	connectMcpClient,
 	createBuiltinToolInfo,
 	createTestToolInfo,
-	cursorModelItems,
 	type CursorDeltaHandler,
 	type CursorStepHandler,
 	type RegisteredTool,
@@ -40,15 +33,9 @@ import { __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.j
 import { estimateCursorPromptMessageTokens } from "../src/context.js";
 import { registerCursorRuntimeControls } from "../src/cursor-state.js";
 import { registerCursorSessionScope } from "../src/cursor-session-scope.js";
-import { __testUtils as sessionAgentTestUtils } from "../src/cursor-session-agent.js";
 import { __testUtils as cursorPiToolBridgeTestUtils } from "../src/cursor-pi-tool-bridge.js";
 import { registerCursorNativeToolDisplayState, __testUtils as nativeToolDisplayTestUtils } from "../src/cursor-native-tool-display-state.js";
-import type { Context } from "@earendil-works/pi-ai";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { convertPiContentToMcpContent } from "../src/cursor-pi-tool-bridge-mcp.js";
-
 
 async function setCursorModeForBridgeTest(mode: "agent" | "plan"): Promise<void> {
 	const pi = createPiHarness({ flagValues: { "cursor-mode": mode } });
@@ -60,38 +47,37 @@ async function setCursorModeForBridgeTest(mode: "agent" | "plan"): Promise<void>
 describe("streamCursor bridge MCP", () => {
 	beforeEach(resetCursorProviderTestState);
 
-	it("preserves unknown array and object content blocks as text fallbacks", () => {
-		expect(convertPiContentToMcpContent([["unexpected", "block"], { custom: true }])).toEqual([
-			{ type: "text", text: '["unexpected","block"]' },
-			{ type: "text", text: '{"custom":true}' },
-		]);
-	});
-
-	it("safely stringifies non-array MCP content fallbacks", () => {
+	it("safely stringifies unknown MCP content fallbacks", () => {
 		const circular: Record<string, unknown> = {};
 		circular.self = circular;
 		const throwing = { toJSON: () => { throw new Error("boom"); } };
 
+		expect(convertPiContentToMcpContent([["unexpected", "block"], { custom: true }])).toEqual([
+			{ type: "text", text: '["unexpected","block"]' },
+			{ type: "text", text: '{"custom":true}' },
+		]);
 		expect(convertPiContentToMcpContent(undefined)).toEqual([{ type: "text", text: "" }]);
 		expect(convertPiContentToMcpContent(BigInt(1))).toEqual([{ type: "text", text: "1" }]);
 		expect(convertPiContentToMcpContent(circular)).toEqual([{ type: "text", text: "[object Object]" }]);
 		expect(convertPiContentToMcpContent(throwing)).toEqual([{ type: "text", text: "[object Object]" }]);
 	});
 
-	it("surfaces empty live-run error status with run metadata", async () => {
+	it.each([
+		["run metadata", {
+			id: "run-abc123456789", status: "error", result: "Cursor SDK run failed",
+			durationMs: 900, model: { id: "composer-2.5" },
+		}, ["model composer-2.5", "900ms"]],
+		["explicit SDK detail", {
+			id: "run-1", status: "error", result: "MCP tool call timed out after 60s",
+		}, ["MCP tool call timed out after 60s"]],
+	] as const)("surfaces live-run wait errors with %s", async (_label, result, expected) => {
 		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
 			opts.onDelta({ update: { type: "text-delta", text: "partial" } });
 			return asMockCursorRun({
-				id: "run-abc123456789",
+				id: result.id,
 				agentId: "agent-1",
 				status: "error",
-				wait: vi.fn().mockResolvedValue({
-					id: "run-abc123456789",
-					status: "error",
-					result: "Cursor SDK run failed",
-					durationMs: 900,
-					model: { id: "composer-2.5" },
-				}),
+				wait: vi.fn().mockResolvedValue(result),
 				cancel: vi.fn(),
 				supports: () => true,
 				unsupportedReason: () => undefined,
@@ -105,38 +91,9 @@ describe("streamCursor bridge MCP", () => {
 
 		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 		const error = getErrorEvent(events);
-
 		expect(error.reason).toBe("error");
-		expect(error.error.errorMessage).toContain("model composer-2.5");
-		expect(error.error.errorMessage).toContain("900ms");
+		for (const detail of expected) expect(error.error.errorMessage).toContain(detail);
 		expect(error.error.errorMessage).not.toBe("Cursor SDK run failed");
-		expect(hasEventType(events, "done")).toBe(false);
-	});
-
-	it("surfaces live-run wait error status as a provider error", async () => {
-		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
-			opts.onDelta({ update: { type: "text-delta", text: "partial" } });
-			return asMockCursorRun({
-				id: "run-1",
-				agentId: "agent-1",
-				status: "error",
-				wait: vi.fn().mockResolvedValue({ id: "run-1", status: "error", result: "MCP tool call timed out after 60s" }),
-				cancel: vi.fn(),
-				supports: () => true,
-				unsupportedReason: () => undefined,
-			});
-		});
-		mockCreatedAgent({
-			agentId: "agent-1",
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
-
-		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
-		const error = getErrorEvent(events);
-
-		expect(error.reason).toBe("error");
-		expect(error.error.errorMessage).toContain("MCP tool call timed out after 60s");
 		expect(hasEventType(events, "done")).toBe(false);
 	});
 
@@ -576,7 +533,10 @@ describe("streamCursor bridge MCP", () => {
 		}
 	});
 
-	it.each(["explicit release", "bridge deadline"] as const)("protects pending bridge MCP waits until %s and still abandons the session agent", async (cleanup) => {
+	it.each([
+		{ cleanup: "explicit release", advanceMs: 0 },
+		{ cleanup: "bridge deadline", advanceMs: 500 },
+	] as const)("protects pending bridge MCP waits until $cleanup and still abandons the session agent", async ({ cleanup, advanceMs }) => {
 		const previousBridgeTimeout = process.env.PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS;
 		process.env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS = "1";
 		cursorProviderTestUtils.setCursorNativeReplayIdleDisposeMs(1);
@@ -607,6 +567,7 @@ describe("streamCursor bridge MCP", () => {
 		const createOptions = getCreatedAgentOptions();
 		const { client, transport } = await connectMcpClient(getPiToolsMcpUrlFromAgentCreateOptions(createOptions));
 		try {
+			vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 			const callErrorPromise = client.callTool({ name: "pi__read", arguments: { path: "README.md" } }).catch((error: unknown) => error);
 			const firstEvents = await firstEventsPromise;
 			const firstDone = getDoneEvent(firstEvents);
@@ -614,9 +575,11 @@ describe("streamCursor bridge MCP", () => {
 			expect(firstDone.reason).toBe("toolUse");
 			expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(1);
 
-			await new Promise((resolve) => setTimeout(resolve, 20));
+			await vi.advanceTimersByTimeAsync(20);
 			expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(1);
 			expect(mockDispose).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(advanceMs);
+			vi.useRealTimers();
 			if (cleanup === "explicit release") await cursorProviderTestUtils.releaseAllPendingCursorLiveRunsForTests();
 			const error = await callErrorPromise;
 			await vi.waitFor(() => expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0));
@@ -624,6 +587,7 @@ describe("streamCursor bridge MCP", () => {
 			expect((error as Error).message).toMatch(cleanup === "bridge deadline" ? /timed out|MCP error/i : /disposed|cancelled|released|MCP error/i);
 			await vi.waitFor(() => expect(mockDispose).toHaveBeenCalledTimes(1));
 		} finally {
+			vi.useRealTimers();
 			if (previousBridgeTimeout === undefined) delete process.env.PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS;
 			else process.env.PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS = previousBridgeTimeout;
 			await client.close().catch(() => undefined);

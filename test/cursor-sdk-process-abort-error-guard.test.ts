@@ -50,11 +50,14 @@ function processListenerCalled(event: "uncaughtException" | "unhandledRejection"
 }
 
 describe("Cursor SDK raw AbortError process guard", () => {
-	it("suppresses the unhandledRejection path", () => {
+	it.each([
+		{ label: "the unhandledRejection path", event: "unhandledRejection", makeError: makeCursorSdkRawAbortDomException },
+		{ label: "a plain Error variant with Cursor SDK provenance", event: "uncaughtException", makeError: makeCursorSdkRawAbortError },
+	] as const)("suppresses $label", ({ event, makeError }) => {
 		const guard = installCursorSdkProcessErrorGuard();
 		guard.suppressAbortErrors();
 		try {
-			expect(processListenerCalled("unhandledRejection", makeCursorSdkRawAbortDomException())).toBe(false);
+			expect(processListenerCalled(event, makeError())).toBe(false);
 		} finally {
 			guard.dispose();
 		}
@@ -64,16 +67,6 @@ describe("Cursor SDK raw AbortError process guard", () => {
 		const guard = installCursorSdkProcessErrorGuard();
 		try {
 			expect(processListenerCalled("uncaughtException", makeCursorSdkRawAbortDomException())).toBe(false);
-		} finally {
-			guard.dispose();
-		}
-	});
-
-	it("suppresses a plain Error variant with Cursor SDK provenance", () => {
-		const guard = installCursorSdkProcessErrorGuard();
-		guard.suppressAbortErrors();
-		try {
-			expect(processListenerCalled("uncaughtException", makeCursorSdkRawAbortError())).toBe(false);
 		} finally {
 			guard.dispose();
 		}

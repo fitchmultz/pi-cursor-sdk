@@ -66,12 +66,6 @@ import {
 	suppressCursorSdkOutput,
 } from "../scripts/lib/cursor-sdk-output-filter.mjs";
 import { buildTerminalHtml, writeTerminalScreenshot } from "../scripts/lib/cursor-visual-render.mjs";
-import { scrubSensitiveText as scrubSensitiveTextFromScriptLib } from "../shared/cursor-sensitive-text.mjs";
-import {
-	CURSOR_SETTING_SOURCES_ENV as SCRIPT_CURSOR_SETTING_SOURCES_ENV,
-	resolveCursorSettingSources as resolveCursorSettingSourcesFromScriptLib,
-	serializeCursorSettingSources as serializeCursorSettingSourcesFromScriptLib,
-} from "../shared/cursor-setting-sources.mjs";
 import { scrubSensitiveText } from "../shared/cursor-sensitive-text.mjs";
 import {
 	CURSOR_SETTING_SOURCES_ENV,
@@ -174,15 +168,11 @@ const _isStartupNoise: boolean = isCursorSdkStartupNoise("managed_skills.loaded"
 const _parsedJsonLines: unknown[] = parseJsonLines('{"ok":true}\n');
 const _failFactory: (prefix: string) => (message: string, secrets?: string | string[]) => never = createScriptFail;
 const _scrubbedFromShared: string = scrubSensitiveText("token", "token");
-const _scrubbedFromScriptLib: string = scrubSensitiveTextFromScriptLib("token", "token");
 const _settingSourcesEnv: "PI_CURSOR_SETTING_SOURCES" = CURSOR_SETTING_SOURCES_ENV;
-const _scriptSettingSourcesEnv: "PI_CURSOR_SETTING_SOURCES" = SCRIPT_CURSOR_SETTING_SOURCES_ENV;
 const _sdkEventDebugEnvNames: readonly string[] = CURSOR_SDK_EVENT_DEBUG_ENV_NAMES;
 const _scriptSdkEventDebugEnvNames: readonly string[] = SCRIPT_CURSOR_SDK_EVENT_DEBUG_ENV_NAMES;
 const _resolvedSharedSources: string[] | undefined = resolveCursorSettingSources("all");
-const _resolvedScriptSources: string[] | undefined = resolveCursorSettingSourcesFromScriptLib("all");
 const _serializedSharedSources: string = serializeCursorSettingSources(["project"]);
-const _serializedScriptSources: string = serializeCursorSettingSourcesFromScriptLib(["project"]);
 const _defaultApiKey: string | undefined = defaultApiKeyFromEnv({ CURSOR_API_KEY: "key" });
 const _timestampedDir: string = defaultTimestampedDir("debug");
 const _commonPathFlag: Record<string, unknown> = commonProbePathFlag("cwd");
@@ -314,13 +304,9 @@ void [
 	_cloudSmokeEnvContextArg,
 	_failFactory,
 	_scrubbedFromShared,
-	_scrubbedFromScriptLib,
 	_settingSourcesEnv,
-	_scriptSettingSourcesEnv,
 	_resolvedSharedSources,
-	_resolvedScriptSources,
 	_serializedSharedSources,
-	_serializedScriptSources,
 	_defaultApiKey,
 	_timestampedDir,
 	_commonPathFlag,

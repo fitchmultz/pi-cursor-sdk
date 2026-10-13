@@ -262,40 +262,6 @@ describe("streamCursor Cursor tool lifecycle", () => {
 		expect(trace).toContain("$ cd /Users/test/project && gh pr view 114");
 	});
 
-	it("does not emit lifecycle progress for fast read completions", async () => {
-		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
-		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
-			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "read", args: { path: "README.md" } }, callId: "read-1" } });
-			opts.onDelta({
-				update: {
-					type: "tool-call-completed",
-					toolCall: { name: "read", result: { status: "success", value: { content: "readme" } } },
-					callId: "read-1",
-				},
-			});
-			opts.onDelta({ update: { type: "text-delta", text: "done" } });
-			return asMockCursorRun({
-				id: "run-1",
-				agentId: "agent-1",
-				status: "finished",
-				wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
-				cancel: vi.fn(),
-				supports: () => true,
-				unsupportedReason: () => undefined,
-			});
-		});
-		mockCreatedAgent({
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
-
-		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
-		const trace = collectThinkingDeltas(events);
-
-		expect(trace).not.toMatch(/Cursor (read|grep|glob):/);
-		expect(trace).toContain("read README.md");
-	});
-
 	it("does not emit lifecycle progress for fast lifecycle-eligible MCP completions", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {

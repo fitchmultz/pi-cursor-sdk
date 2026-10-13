@@ -48,7 +48,7 @@ describe("formatCursorToolTranscript MCP and web", () => {
 	});
 
 	it("summarizes Cursor MCP non-text content without dumping raw payloads", () => {
-		const display = buildCursorPiToolDisplay({
+		const toolCall = {
 			name: "mcp",
 			args: { toolName: "image_service" },
 			result: {
@@ -60,20 +60,9 @@ describe("formatCursorToolTranscript MCP and web", () => {
 					],
 				},
 			},
-		});
-		const transcript = formatCursorToolTranscript({
-			name: "mcp",
-			args: { toolName: "image_service" },
-			result: {
-				status: "success",
-				value: {
-					content: [
-						{ type: "image", mimeType: "image/png", data: "base64-image-data" },
-						{ type: "resource", uri: "file:///secret.txt", blob: "raw-resource-payload" },
-					],
-				},
-			},
-		});
+		};
+		const display = buildCursorPiToolDisplay(toolCall);
+		const transcript = formatCursorToolTranscript(toolCall);
 
 		expect(display.result.content[0].text).toContain("[image image/png omitted]");
 		expect(display.result.content[0].text).toContain("[resource omitted]");
@@ -129,16 +118,19 @@ describe("formatCursorToolTranscript MCP and web", () => {
 		expect(transcript).not.toContain('"results"');
 	});
 
-	it("formats semSearch errors without dumping raw payloads", () => {
+	it.each([
+		["semSearch", { query: "missing index" }, "semSearch missing index", "semantic index unavailable", "query"],
+		["recordScreen", { mode: "START_RECORDING" }, "recordScreen start recording", "screen capture unavailable", "mode"],
+	] as const)("formats %s errors without dumping raw payloads", (name, args, header, message, rawKey) => {
 		const transcript = formatCursorToolTranscript({
-			name: "semSearch",
-			args: { query: "missing index" },
-			result: { status: "error", error: { message: "semantic index unavailable" } },
+			name,
+			args,
+			result: { status: "error", error: { message } },
 		});
 
-		expect(transcript).toContain("semSearch missing index");
-		expect(transcript).toContain("semantic index unavailable");
-		expect(transcript).not.toContain('"query"');
+		expect(transcript).toContain(header);
+		expect(transcript).toContain(message);
+		expect(transcript).not.toContain(`"${rawKey}"`);
 	});
 
 	it("formats completed recordScreen activity with mode, path, and duration", () => {
@@ -187,18 +179,6 @@ describe("formatCursorToolTranscript MCP and web", () => {
 		expect(display.result.content[0].text).toContain("Duration: 4.2s");
 		expect(transcript).toContain("recordScreen save recording");
 		expect(transcript).not.toContain('"recordingDurationMs"');
-	});
-
-	it("formats recordScreen errors without dumping raw payloads", () => {
-		const transcript = formatCursorToolTranscript({
-			name: "recordScreen",
-			args: { mode: "START_RECORDING" },
-			result: { status: "error", error: { message: "screen capture unavailable" } },
-		});
-
-		expect(transcript).toContain("recordScreen start recording");
-		expect(transcript).toContain("screen capture unavailable");
-		expect(transcript).not.toContain('"mode"');
 	});
 
 	it("shows Cursor generateImage output paths without dumping image data", () => {

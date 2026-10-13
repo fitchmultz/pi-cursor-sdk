@@ -13,6 +13,7 @@ import {
 	resetCursorProviderTestState, createExtensionTestContext, type RegisteredTool,
 } from "./helpers/cursor-provider-harness.js";
 import { installedCursorModules } from "./helpers/cursor-sdk-installed-modules.js";
+import { installCursorProviderVirtualTime } from "./helpers/cursor-provider-virtual-time.js";
 
 type TextCallback =
 	| { channel: "onDelta"; args: Parameters<NonNullable<SendOptions["onDelta"]>>[0] }
@@ -50,6 +51,7 @@ const complete = (value: string): TextCallback => ({ channel: "onStep", args: { 
 
 describe("Cursor completed assistant-message boundaries", () => {
 	beforeEach(resetCursorProviderTestState);
+	installCursorProviderVirtualTime();
 	afterEach(async () => {
 		await __testUtils.releaseAllPendingCursorLiveRunsForTests();
 		await __testUtils.resetSessionCursorAgents();

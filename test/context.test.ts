@@ -219,35 +219,22 @@ describe("buildCursorPrompt", () => {
 
 		const expected = 'Assistant: I will inspect the directory.\nHistorical tool request (bash, call tc1): {"command":"ls"}';
 		expect(estimateCursorPromptMessageTokens(assistant, { charsPerToken: 1 })).toBe(expected.length);
-		expect(expected).not.toContain("hidden reasoning");
 	});
 
-	it("estimates tool-result prompt-message tokens from replayed tool result text", () => {
+	it.each([
+		{ toolName: "bash", content: [{ type: "text" as const, text: "README.md" }], expected: "Historical tool result (bash, call tc1): README.md" },
+		{ toolName: "read_image", content: [{ type: "image" as const, data: "base64", mimeType: "image/png" }], expected: "Historical tool result (read_image, call tc1): [image omitted from transcript]" },
+	])("estimates tool-result prompt-message tokens from replayed $toolName content", ({ toolName, content, expected }) => {
 		const toolResult = {
 			role: "toolResult",
 			toolCallId: "tc1",
-			toolName: "bash",
-			content: [{ type: "text", text: "README.md" }],
+			toolName,
+			content,
 			isError: false,
 			timestamp: 3,
 		} satisfies ToolResultMessage;
 
-		expect(estimateCursorPromptMessageTokens(toolResult, { charsPerToken: 1 })).toBe("Historical tool result (bash, call tc1): README.md".length);
-	});
-
-	it("estimates tool-result image prompt content as the replay placeholder text", () => {
-		const toolResult = {
-			role: "toolResult",
-			toolCallId: "tc1",
-			toolName: "read_image",
-			content: [{ type: "image", data: "base64", mimeType: "image/png" }],
-			isError: false,
-			timestamp: 3,
-		} satisfies ToolResultMessage;
-
-		expect(estimateCursorPromptMessageTokens(toolResult, { charsPerToken: 1 })).toBe(
-			"Historical tool result (read_image, call tc1): [image omitted from transcript]".length,
-		);
+		expect(estimateCursorPromptMessageTokens(toolResult, { charsPerToken: 1 })).toBe(expected.length);
 	});
 
 	it("estimates context tokens from the budgeted Cursor prompt and latest user image reserve", () => {
@@ -339,7 +326,7 @@ describe("buildCursorPrompt", () => {
 		expect(computeCursorContextFingerprint(ctx)).toBe(fingerprint);
 	});
 
-	it("extracts images from latest user message only", () => {
+	it.each([false, true])("keeps historical images as text and extracts only latest user image bytes (latest image=%s)", (latestHasImage) => {
 		const ctx: Context = {
 			messages: [
 				{
@@ -352,46 +339,23 @@ describe("buildCursorPrompt", () => {
 				} satisfies UserMessage,
 				{
 					role: "user",
-					content: [
+					content: latestHasImage ? [
 						{ type: "text", text: "And this one" },
 						{ type: "image", data: "newbase64", mimeType: "image/jpeg" },
-					],
-					timestamp: 2,
-				} satisfies UserMessage,
-			],
-		};
-		const result = buildCursorPrompt(ctx);
-		expect(result.images).toHaveLength(1);
-		expect(result.images[0]).toEqual({ data: "newbase64", mimeType: "image/jpeg" });
-	});
-
-	it("explains that only latest user images are available as image bytes", () => {
-		const result = buildCursorPrompt({ messages: [{ role: "user", content: "test", timestamp: 1 }] });
-		expect(result.text).toContain("only latest user images are sent");
-		expect(result.text).toContain("ask to reattach prior images");
-	});
-
-	it("replaces historical images with placeholder text", () => {
-		const ctx: Context = {
-			messages: [
-				{
-					role: "user",
-					content: [
-						{ type: "text", text: "First" },
-						{ type: "image", data: "abc", mimeType: "image/png" },
-					],
-					timestamp: 1,
-				} satisfies UserMessage,
-				{
-					role: "user",
-					content: "Second",
+					] : "Second",
 					timestamp: 2,
 				} satisfies UserMessage,
 			],
 		};
 		const result = buildCursorPrompt(ctx);
 		expect(result.text).toContain("[image omitted from transcript]");
-		expect(result.images).toHaveLength(0);
+		expect(result.images).toEqual(latestHasImage ? [{ data: "newbase64", mimeType: "image/jpeg" }] : []);
+	});
+
+	it("explains that only latest user images are available as image bytes", () => {
+		const result = buildCursorPrompt({ messages: [{ role: "user", content: "test", timestamp: 1 }] });
+		expect(result.text).toContain("only latest user images are sent");
+		expect(result.text).toContain("ask to reattach prior images");
 	});
 
 	it("budgets transcript history while preserving system prompt and latest user request", () => {
@@ -618,23 +582,6 @@ describe("cursor session prompt assembly", () => {
 		expect(planCursorSessionSend(sendState, context).mode).toBe("bootstrap");
 	});
 
-	it("rebootstraps when same-length history diverges", () => {
-		const priorContext: Context = {
-			messages: [{ role: "user", content: "Hello", timestamp: 1 }],
-		};
-		const editedContext: Context = {
-			messages: [{ role: "user", content: "Hello edited", timestamp: 1 }],
-		};
-		const sendState = {
-			bootstrapped: true,
-			contextFingerprint: computeCursorContextFingerprint(priorContext),
-			incrementalSendCount: 0,
-		};
-
-		expect(shouldBootstrapCursorContext(sendState, editedContext)).toBe(true);
-		expect(planCursorSessionSend(sendState, editedContext).mode).toBe("bootstrap");
-	});
-
 	it("rebootstraps with current system instructions when the system context diverges", () => {
 		const priorContext: Context = {
 			systemPrompt: "Previous invariant instruction.",
@@ -703,29 +650,13 @@ describe("cursor session prompt assembly", () => {
 		expect(prompt.text).toContain("summary of a branch that this conversation came back from");
 		expect(prompt.text).toContain("We explored approach A and decided against it.");
 		expect(prompt.text).toContain("User: Continue on approach B");
-	});
 
-	it("rebootstraps when /tree adds a branch summary to the active context", () => {
-		const priorContext: Context = {
-			messages: [{ role: "user", content: "Hello", timestamp: 1 }],
-		};
-		const treeContext: Context = {
-			messages: [
-				{ role: "user", content: "Hello", timestamp: 1 },
-				{
-					role: "branchSummary",
-					summary: "Abandoned branch details",
-					fromId: "entry-a",
-					timestamp: 2,
-				} as unknown as Context["messages"][number],
-			],
-		};
+		const treeContext = { messages: context.messages.slice(0, -1) };
 		const sendState = {
 			bootstrapped: true,
-			contextFingerprint: computeCursorContextFingerprint(priorContext),
+			contextFingerprint: computeCursorContextFingerprint({ messages: context.messages.slice(0, 1) }),
 			incrementalSendCount: 0,
 		};
-
 		expect(shouldBootstrapCursorContext(sendState, treeContext)).toBe(true);
 		expect(planCursorSessionSend(sendState, treeContext).mode).toBe("bootstrap");
 	});

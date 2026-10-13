@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { installCursorProviderVirtualTime } from "./helpers/cursor-provider-virtual-time.js";
 import {
 	resetCursorProviderTestState,
@@ -25,11 +25,11 @@ import { __testUtils as nativeToolDisplayTestUtils } from "../src/cursor-native-
 describe("streamCursor incomplete native replay tools", () => {
 	beforeEach(resetCursorProviderTestState);
 	installCursorProviderVirtualTime();
-	afterEach(() => {
-		vi.restoreAllMocks();
-	});
 
-	it("surfaces incomplete started Cursor tools on abort when a completed native replay tool is already queued", async () => {
+	it.each([
+		{ completedToolQueued: true, incompleteTool: "grep" },
+		{ completedToolQueued: false, incompleteTool: "read" },
+	])("surfaces incomplete $incompleteTool on abort (completed tool queued: $completedToolQueued)", async ({ completedToolQueued, incompleteTool }) => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		const registeredTools: RegisteredTool[] = [];
 		await registerNativeToolDisplayForTest(registeredTools);
@@ -44,17 +44,19 @@ describe("streamCursor incomplete native replay tools", () => {
 		});
 		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
 			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "read", args: { path: "README.md" } }, callId: "c1" } });
-			opts.onDelta({
-				update: {
-					type: "tool-call-completed",
-					toolCall: {
-						name: "read",
-						result: { status: "success", value: { content: "# readme" } },
+			if (completedToolQueued) {
+				opts.onDelta({
+					update: {
+						type: "tool-call-completed",
+						toolCall: {
+							name: "read",
+							result: { status: "success", value: { content: "# readme" } },
+						},
+						callId: "c1",
 					},
-					callId: "c1",
-				},
-			});
-			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "grep", args: { pattern: "foo" } }, callId: "c2" } });
+				});
+				opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "grep", args: { pattern: "foo" } }, callId: "c2" } });
+			}
 			return {
 				id: "run-1",
 				agentId: "agent-1",
@@ -73,48 +75,7 @@ describe("streamCursor incomplete native replay tools", () => {
 		const events = await eventsPromise;
 
 		expect(getErrorEvent(events).reason).toBe("aborted");
-		expect(collectThinkingDeltas(events)).toContain("Cursor grep did not complete");
-		expect(collectThinkingDeltas(events)).toContain("aborted");
-		expect(getEventsOfType(events, "toolcall_start")).toHaveLength(0);
-		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
-		expect(cancelRun).toHaveBeenCalled();
-		expect(mockDispose).toHaveBeenCalledTimes(1);
-	});
-
-	it("surfaces incomplete started Cursor tools when aborting a scoped native live run", async () => {
-		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
-		const registeredTools: RegisteredTool[] = [];
-		await registerNativeToolDisplayForTest(registeredTools);
-
-		const controller = new AbortController();
-		const mockDispose = vi.fn().mockResolvedValue(undefined);
-		const cancelRun = vi.fn().mockResolvedValue(undefined);
-		const waitStarted = Promise.withResolvers<void>();
-		const runWait = vi.fn(() => {
-			waitStarted.resolve();
-			return new Promise<{ id: string; status: "finished"; result: string }>(() => {});
-		});
-		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
-			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "read", args: { path: "README.md" } }, callId: "c1" } });
-			return {
-				id: "run-1",
-				agentId: "agent-1",
-				status: "running",
-				wait: runWait,
-				cancel: cancelRun,
-				supports: () => true,
-				unsupportedReason: () => undefined,
-			};
-		});
-		mockCreatedAgent({ send: mockSend, [Symbol.asyncDispose]: mockDispose });
-
-		const eventsPromise = collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key", signal: controller.signal }));
-		await waitStarted.promise;
-		controller.abort();
-		const events = await eventsPromise;
-
-		expect(getErrorEvent(events).reason).toBe("aborted");
-		expect(collectThinkingDeltas(events)).toContain("Cursor read did not complete");
+		expect(collectThinkingDeltas(events)).toContain(`Cursor ${incompleteTool} did not complete`);
 		expect(collectThinkingDeltas(events)).toContain("aborted");
 		expect(getEventsOfType(events, "toolcall_start")).toHaveLength(0);
 		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
@@ -158,6 +119,8 @@ describe("streamCursor incomplete native replay tools", () => {
 		const toolCalls = firstDone.message.content.filter(isToolCallBlock);
 
 		expect(firstDone.reason).toBe("toolUse");
+		expect(collectTextDeltas(firstEvents)).toBe("");
+		expect(hasEventType(firstEvents, "toolcall_start")).toBe(true);
 		expect(toolCalls).toHaveLength(1);
 		expect(toolCalls[0]?.name).toBe("cursor");
 		expect(toolCalls[0]?.arguments).toMatchObject({

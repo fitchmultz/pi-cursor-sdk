@@ -669,205 +669,47 @@ describe("streamCursor prompt and model config", () => {
 		);
 	});
 
-	it("applies pi medium thinking level to Cursor reasoning parameter", async () => {
-		const modelWithParams = {
-			...makeModel("gpt-5.5@1m"),
-			reasoning: true,
-			thinkingLevelMap: { low: "low", medium: "medium", high: "high", xhigh: "extra-high", off: null, minimal: null },
-		};
-		const mockSend = vi.fn().mockResolvedValue({
-			id: "run-1",
-			agentId: "agent-1",
-			status: "finished",
-			wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
-			cancel: vi.fn(),
-			supports: () => true,
-			unsupportedReason: () => undefined,
-		});
+	it.each([
+		{
+			modelId: "gpt-5.5@1m", reasoning: "medium", supportsThinking: true,
+			selection: { id: "gpt-5.5", params: [
+				{ id: "context", value: "1m" }, { id: "fast", value: "false" }, { id: "reasoning", value: "medium" },
+			] },
+		},
+		{
+			modelId: "gpt-5.5@272k", reasoning: "xhigh", supportsThinking: true,
+			selection: { id: "gpt-5.5", params: [
+				{ id: "context", value: "272k" }, { id: "fast", value: "false" }, { id: "reasoning", value: "extra-high" },
+			] },
+		},
+		{
+			modelId: "claude-opus-4-7@1m", reasoning: "xhigh", supportsThinking: true,
+			selection: { id: "claude-opus-4-7", params: [
+				{ id: "context", value: "1m" }, { id: "effort", value: "xhigh" }, { id: "thinking", value: "true" },
+			] },
+		},
+		{
+			modelId: "claude-sonnet-4-6@1m", reasoning: undefined, supportsThinking: true,
+			selection: { id: "claude-sonnet-4-6", params: [
+				{ id: "context", value: "1m" }, { id: "thinking", value: "false" },
+			] },
+		},
+		{
+			modelId: "gemini-3.1-pro", reasoning: undefined, supportsThinking: false,
+			selection: { id: "gemini-3.1-pro" },
+		},
+	] as const)("passes $modelId with pi thinking=$reasoning to Agent.create", async ({ modelId, reasoning, supportsThinking, selection }) => {
 		mockCreatedAgent({
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
-
-		const stream = streamCursor(modelWithParams, makeContext(), { apiKey: "test-key", reasoning: "medium" });
-		await collectEvents(stream);
-
-		expect(mockedCreate).toHaveBeenCalledWith(
-			expect.objectContaining({
-				model: {
-					id: "gpt-5.5",
-					params: [
-						{ id: "context", value: "1m" },
-						{ id: "fast", value: "false" },
-						{ id: "reasoning", value: "medium" },
-					],
-				},
+			send: vi.fn().mockResolvedValue({
+				id: "run-1", agentId: "agent-1", status: "finished",
+				wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
+				cancel: vi.fn(), supports: () => true, unsupportedReason: () => undefined,
 			}),
-		);
-	});
-
-	it("maps pi xhigh thinking to Cursor extra-high reasoning for a sibling context", async () => {
-		const modelWithParams = {
-			...makeModel("gpt-5.5@272k"),
-			reasoning: true,
-			thinkingLevelMap: { low: "low", medium: "medium", high: "high", xhigh: "extra-high", off: null, minimal: null },
-		};
-		const mockSend = vi.fn().mockResolvedValue({
-			id: "run-1",
-			agentId: "agent-1",
-			status: "finished",
-			wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
-			cancel: vi.fn(),
-			supports: () => true,
-			unsupportedReason: () => undefined,
-		});
-		mockCreatedAgent({
-			send: mockSend,
 			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
 		});
-
-		const stream = streamCursor(modelWithParams, makeContext(), { apiKey: "test-key", reasoning: "xhigh" });
-		await collectEvents(stream);
-
-		expect(mockedCreate).toHaveBeenCalledWith(
-			expect.objectContaining({
-				model: {
-					id: "gpt-5.5",
-					params: [
-						{ id: "context", value: "272k" },
-						{ id: "fast", value: "false" },
-						{ id: "reasoning", value: "extra-high" },
-					],
-				},
-			}),
-		);
-	});
-
-	it("applies pi thinking level to Cursor Claude effort and thinking parameters", async () => {
-		const modelWithParams = {
-			...makeModel("claude-opus-4-7@1m"),
-			reasoning: true,
-			thinkingLevelMap: {
-				off: "false",
-				low: "low",
-				medium: "medium",
-				high: "high",
-				xhigh: "xhigh",
-			},
-		};
-		const mockSend = vi.fn().mockResolvedValue({
-			id: "run-1",
-			agentId: "agent-1",
-			status: "finished",
-			wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
-			cancel: vi.fn(),
-			supports: () => true,
-			unsupportedReason: () => undefined,
-		});
-		mockCreatedAgent({
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
-
-		const stream = streamCursor(modelWithParams, makeContext(), { apiKey: "test-key", reasoning: "xhigh" });
-		await collectEvents(stream);
-
-		expect(mockedCreate).toHaveBeenCalledWith(
-			expect.objectContaining({
-				model: {
-					id: "claude-opus-4-7",
-					params: [
-						{ id: "context", value: "1m" },
-						{ id: "effort", value: "xhigh" },
-						{ id: "thinking", value: "true" },
-					],
-				},
-			}),
-		);
-	});
-
-	it("turns Cursor thinking off when pi thinking is off", async () => {
-		const modelWithParams = {
-			...makeModel("claude-sonnet-4-6@1m"),
-			reasoning: true,
-			thinkingLevelMap: { off: "false", low: "low", medium: "medium", high: "high", xhigh: "xhigh" },
-		};
-		const mockSend = vi.fn().mockResolvedValue({
-			id: "run-1",
-			agentId: "agent-1",
-			status: "finished",
-			wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
-			cancel: vi.fn(),
-			supports: () => true,
-			unsupportedReason: () => undefined,
-		});
-		mockCreatedAgent({
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
-
-		const stream = streamCursor(modelWithParams, makeContext(), { apiKey: "test-key" });
-		await collectEvents(stream);
-
-		expect(mockedCreate).toHaveBeenCalledWith(
-			expect.objectContaining({
-				model: {
-					id: "claude-sonnet-4-6",
-					params: [
-						{ id: "context", value: "1m" },
-						{ id: "thinking", value: "false" },
-					],
-				},
-			}),
-		);
-	});
-
-	it("passes plain model id without params to Agent.create", async () => {
-		const plainModel = makeModel("gemini-3.1-pro");
-		const mockSend = vi.fn().mockResolvedValue({
-			id: "run-1",
-			agentId: "agent-1",
-			status: "finished",
-			wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
-			cancel: vi.fn(),
-			supports: () => true,
-			unsupportedReason: () => undefined,
-		});
-		mockCreatedAgent({
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
-
-		const stream = streamCursor(plainModel, makeContext(), { apiKey: "test-key" });
-		await collectEvents(stream);
-
-		expect(mockedCreate).toHaveBeenCalledWith(
-			expect.objectContaining({
-				model: { id: "gemini-3.1-pro" },
-			}),
-		);
-	});
-
-	it("emits result text when no deltas were received", async () => {
-		const mockSend = vi.fn().mockResolvedValue({
-			id: "run-1",
-			agentId: "agent-1",
-			status: "finished",
-			wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished", result: "fallback text" }),
-			cancel: vi.fn(),
-			supports: () => true,
-			unsupportedReason: () => undefined,
-		});
-		mockCreatedAgent({
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
-
-		const stream = streamCursor(makeModel(), makeContext(), { apiKey: "test-key" });
-		const events = await collectEvents(stream);
-
-		const textEnd = getTextEndEvent(events);
-		expect(textEnd).toBeDefined();
-		expect(textEnd.content).toBe("fallback text");
+		await collectEvents(streamCursor(
+			{ ...makeModel(modelId), reasoning: supportsThinking }, makeContext(), { apiKey: "test-key", reasoning },
+		));
+		expect(mockedCreate).toHaveBeenCalledWith(expect.objectContaining({ model: selection }));
 	});
 });

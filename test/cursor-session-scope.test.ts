@@ -50,13 +50,16 @@ describe("cursor-session-scope cwd", () => {
 		expect(cursorSessionScopeTestUtils.isCliProjectTrustApproved([])).toBe(false);
 	});
 
-	it("syncs the normalized session name from session_start", async () => {
+	it.each([
+		["  Cloud handoff  ", "Cloud handoff"],
+		["x".repeat(120), `${"x".repeat(99)}…`],
+	])("normalizes and bounds session names from session_start (%#)", async (name, expected) => {
 		const pi = createEventHarness();
 		registerCursorSessionScope(pi);
 
-		await pi.runSessionStart({ sessionManager: { getSessionName: vi.fn(() => "  Cloud handoff  ") } });
+		await pi.runSessionStart({ sessionManager: { getSessionName: vi.fn(() => name) } });
 
-		expect(getCursorSessionScopeSnapshot(pi).sessionName).toBe("Cloud handoff");
+		expect(getCursorSessionScopeSnapshot(pi).sessionName).toBe(expected);
 	});
 
 	it("updates the normalized session name when session metadata changes", async () => {
@@ -72,17 +75,6 @@ describe("cursor-session-scope cwd", () => {
 
 		await pi.invokeEvent("session_info_changed", { type: "session_info_changed", name: " \t\u001b\0 " });
 		expect(getCursorSessionScopeSnapshot(pi).sessionName).toBeUndefined();
-	});
-
-	it("bounds session names before exposing them to provider callers", async () => {
-		const pi = createEventHarness();
-		registerCursorSessionScope(pi);
-		await pi.runSessionStart({
-			sessionManager: { getSessionName: vi.fn(() => "x".repeat(120)) },
-		});
-
-		expect(getCursorSessionScopeSnapshot(pi).sessionName).toHaveLength(100);
-		expect(getCursorSessionScopeSnapshot(pi).sessionName?.endsWith("…")).toBe(true);
 	});
 
 	it("updates cwd on subsequent session_start events", async () => {

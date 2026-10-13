@@ -1,3 +1,4 @@
+import { scheduler } from "node:timers/promises";
 import type { SDKAgent } from "@cursor/sdk";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { makeAssistantMessage, makeContext, makeModel } from "./helpers/pi-harness.js";
@@ -11,7 +12,6 @@ import {
 	hasTrailingUserMessagesAfterToolResults,
 	type CursorLiveRun,
 } from "../src/cursor-live-run-coordinator.js";
-import type { CursorNativeToolDisplayItem } from "../src/cursor-native-tool-display-state.js";
 import type { CursorPiToolBridgeRun } from "../src/cursor-pi-tool-bridge.js";
 import {
 	cursorLiveRuns,
@@ -26,16 +26,6 @@ const emitProcessEvent = (event: string | symbol, ...args: unknown[]): boolean =
 
 function makeAgent(agentId = "agent-1"): SDKAgent {
 	return { agentId } as SDKAgent;
-}
-
-function makeToolDisplay(id: string): CursorNativeToolDisplayItem {
-	return {
-		id,
-		toolName: "read",
-		args: { path: "README.md" },
-		result: { content: [{ type: "text", text: "ok" }] },
-		isError: false,
-	};
 }
 
 function makeCursorSdkAbortConnectError(): Error & { rawMessage: string; code: number; cause: DOMException } {
@@ -114,6 +104,7 @@ describe("cursor live run coordinator", () => {
 		resetCursorNativeReplayIdleDisposeMs();
 		vi.unstubAllEnvs();
 		vi.useRealTimers();
+		vi.restoreAllMocks();
 		expect(cursorLiveRuns.count()).toBe(0);
 	});
 
@@ -220,6 +211,8 @@ describe("cursor live run coordinator", () => {
 	});
 
 	it("does not emit an empty tool-use turn when every queued bridge call expired", async () => {
+		// All events are queued before draining; this case does not test batch-settling time.
+		vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
 		const bridgeRun = makeBridgeRun("bridge-expired");
 		const run = cursorLiveRuns.start({
 			id: "expired-bridge-drain",
@@ -473,7 +466,7 @@ describe("cursor live run coordinator", () => {
 			const calls = ["slow_tool", "cursor_ask_question"].map((name) =>
 				client.callTool({ name: `pi__${name}`, arguments: {} }, { timeout: 3_600_000 }).catch((error: unknown) => error),
 			);
-			await vi.waitFor(() => expect(requests).toHaveLength(2));
+			await vi.waitFor(() => expect(requests).toHaveLength(2), { interval: 1 });
 			run = startRun(coordinator, { bridgeRun, sessionBridgeRun: bridgeRun });
 			coordinator.attachSdkRun(run, { cancel: sdkCancel });
 			const ownedRun = run;

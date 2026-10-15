@@ -573,6 +573,9 @@ PI_CURSOR_MCP_TOOL_TIMEOUT_MS=7200000 pi --model cursor/grok-4.6
 # Fail a stranded pi bridge CallTool sooner than the effective MCP tool timeout.
 PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS=120000 pi --model cursor/grok-4.6
 
+# Announce the bridge URL as localhost and listen on a port or range (for example for a Cursor team MCP allowlist such as http://localhost:800*/mcp).
+PI_CURSOR_PI_TOOL_BRIDGE_HOST=localhost PI_CURSOR_PI_TOOL_BRIDGE_PORT=8000-8009 pi --model cursor/grok-4.6
+
 # Override known MCP initialize/listTools timeouts on first send (default 10s).
 PI_CURSOR_MCP_CONNECT_TIMEOUT_SECONDS=5 pi --model cursor/grok-4.6
 PI_CURSOR_MCP_CONNECT_TIMEOUT_MS=5000 pi --model cursor/grok-4.6
@@ -588,6 +591,8 @@ PI_CURSOR_TOOL_MANIFEST=0 pi --model cursor/grok-4.6
 # Emit scrubbed bridge diagnostics as JSONL to stderr with prefix [pi-cursor-sdk:bridge].
 PI_CURSOR_PI_TOOL_BRIDGE_DEBUG=1 pi --model cursor/grok-4.6
 ```
+
+`PI_CURSOR_PI_TOOL_BRIDGE_HOST` and `PI_CURSOR_PI_TOOL_BRIDGE_PORT` exist for Cursor team MCP allowlists that match the bridge URL text, such as `http://localhost:800*/mcp`. `PI_CURSOR_PI_TOOL_BRIDGE_HOST` accepts `localhost` or `127.0.0.1` (trimmed, case-insensitive) and sets the host written into the bridge URL; the default is `127.0.0.1`. `PI_CURSOR_PI_TOOL_BRIDGE_PORT` accepts one port `N` or an inclusive range `N-M` (1-65535, `N` not above `M`), tried in order and skipping ports already in use; unset uses a random port. Invalid values of either setting fall back to the defaults. The server always binds `127.0.0.1` regardless of the URL host. If every port of a configured range is in use, the turn fails with an error naming the range.
 
 On bootstrap sends, a compact **callable tool surfaces** block is injected into the Cursor prompt by default. It reminds the model that Cursor host/configured MCP tools are controlled by Cursor, while pi tool toggles only affect pi tools/bridge exposure; when bridge tools are exposed, it lists the current `pi__*` names. Disable with `PI_CURSOR_TOOL_MANIFEST=0`.
 
@@ -623,7 +628,7 @@ Actual Cursor runs still need a key from `/login`, `CURSOR_API_KEY`, or `--api-k
 - **Commit/PR attribution has no supported opt-out.** SDK 1.0.37 exposes neither attribution control through public create/local/send/configure options. CLI-file edits and SDK-internal patches are not supported extension settings; [#302](https://github.com/fitchmultz/pi-cursor-sdk/issues/302) tracks both controls.
 
 - **Cloud runtime is explicit and minimal.** Local remains the default. Cloud runs create Cursor cloud agents only after first-use acknowledgement and safety preflight, use fresh context by default, do not expose the pi bridge or local MCP, do not forward pi env vars, support explicit Cursor-managed environment selection, name agents from the pi session title when available, stream display-only agent/run/branch/PR/artifact/raw-usage telemetry when available, and record only explicit session-branch lifecycle commands for cleanup (`/cursor-cloud list|archive|delete`).
-- **The pi tool bridge is local and MCP-backed.** Bridgeable active pi tools are exposed to local Cursor agents through a tokenized `127.0.0.1` MCP endpoint; internal Cursor replay activity names are excluded, and overlapping built-in pi tools are hidden by default. Set `PI_CURSOR_PI_TOOL_BRIDGE=0` to disable it or `PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1` to expose overlapping built-ins too.
+- **The pi tool bridge is local and MCP-backed.** Bridgeable active pi tools are exposed to local Cursor agents through a tokenized `127.0.0.1` MCP endpoint (the URL host can be set to `localhost` with `PI_CURSOR_PI_TOOL_BRIDGE_HOST`); internal Cursor replay activity names are excluded, and overlapping built-in pi tools are hidden by default. Set `PI_CURSOR_PI_TOOL_BRIDGE=0` to disable it or `PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1` to expose overlapping built-ins too.
 - **Cursor native tool replay is display-only.** Replay renders recorded Cursor SDK activity and never re-runs Cursor-side commands, reapplies Cursor edits, calls MCP servers, or mutates pi state. Workflow tools such as Cursor mode/task/todo/plan activity are not pi workflow controls. See [Cursor native tool replay](./cursor-native-tool-replay.md) for supported replay cards, ordering, conflict handling, and opt-out flags.
 - **Cursor run state can span tool-use turns.** Within a pi session, the extension reuses one Cursor SDK agent across compatible follow-up turns and sends incremental prompts when context still matches. It recreates the agent when context diverges, after compaction or `/tree` navigation, on API key changes, after send errors, or on session shutdown. For bridged pi tools, the matching pi `toolResult` resolves into the same live Cursor SDK run without creating a new `Agent`, unless the run was disposed, aborted, or cancelled. Replay can also split one live Cursor SDK run across pi `toolUse` turns for display.
 - **Final assistant text is the last non-empty text part.** Composer responses can produce one assistant message with early progress `text`, thinking/tool metadata, and a later final `text` report. Consumers that need a final answer should scan assistant message content from the end and use the last non-empty `text` part, not the first. Cursor `thinking` deltas are shown as thinking traces when the SDK emits them; those traces can include draft answers or copied exact-output targets and are intentionally not collapsed by this extension.

@@ -60,6 +60,9 @@ PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1 pi --model cursor/grok-4.6
 # Fail a stranded bridge call sooner than the effective MCP tool timeout
 PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS=120000 pi --model cursor/grok-4.6
 
+# Announce the bridge URL as localhost and listen on a port or range (for example for a Cursor team MCP allowlist such as http://localhost:800*/mcp).
+PI_CURSOR_PI_TOOL_BRIDGE_HOST=localhost PI_CURSOR_PI_TOOL_BRIDGE_PORT=8000-8009 pi --model cursor/grok-4.6
+
 # Disable bootstrap tool manifest
 PI_CURSOR_TOOL_MANIFEST=0 pi --model cursor/grok-4.6
 ```

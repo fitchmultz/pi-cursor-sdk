@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Add `PI_CURSOR_PI_TOOL_BRIDGE_HOST` (`localhost` or the default `127.0.0.1` in the bridge URL) and `PI_CURSOR_PI_TOOL_BRIDGE_PORT` (one port or an inclusive `N-M` range) so a Cursor team MCP allowlist such as `http://localhost:800*/mcp` can admit the pi tool bridge. The server still binds only `127.0.0.1`, and unset settings keep the previous random-port behavior.
+
 ### Changed
 
 - Rewrite the README around installation and everyday use, add a diagram of Cursor inside Pi, and move detailed configuration and maintainer procedures into linked reference pages.

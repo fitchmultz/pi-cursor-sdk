@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { request as httpRequest } from "node:http";
+import { createServer as createNetServer, type Server as NetServer } from "node:net";
+import { resolveCursorPiToolBridgePortRange } from "../src/cursor-pi-tool-bridge-env.js";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { Context, ToolResultMessage } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai";
@@ -1091,5 +1093,175 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 		const snapshotB = buildCursorPiToolBridgeSnapshot(createBridgePiHarness({ active: ["sem_reindex"], tools: [createToolInfo("sem_reindex", "Reindex", schemaV2)] }));
 
 		expect(buildCursorPiToolBridgeSurfaceSignature(snapshotA)).not.toBe(buildCursorPiToolBridgeSurfaceSignature(snapshotB));
+	});
+});
+
+describe("cursor pi tool bridge URL host and port", () => {
+	const createReadRegistry = (env: Record<string, string | undefined>) =>
+		__testUtils.createRegistry(
+			createBridgePiHarness({ active: ["read"], tools: [createToolInfo("read", "Read files", Type.Object({}))] }),
+			{ PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1", ...env },
+		);
+
+	async function listenOnFreePort(): Promise<{ server: NetServer; port: number }> {
+		const server = createNetServer();
+		await new Promise<void>((resolve, reject) => {
+			server.once("error", reject);
+			server.listen(0, "127.0.0.1", resolve);
+		});
+		return { server, port: (server.address() as { port: number }).port };
+	}
+
+	function closeServer(server: NetServer): Promise<void> {
+		return new Promise((resolve) => server.close(() => resolve()));
+	}
+
+	async function findFreeRange(length: number): Promise<number> {
+		for (let attempt = 0; attempt < 50; attempt += 1) {
+			const probe = await listenOnFreePort();
+			await closeServer(probe.server);
+			const first = probe.port;
+			if (first + length - 1 > 65535) continue;
+			const holders: NetServer[] = [];
+			try {
+				for (let offset = 0; offset < length; offset += 1) {
+					const holder = createNetServer();
+					await new Promise<void>((resolve, reject) => {
+						holder.once("error", reject);
+						holder.listen(first + offset, "127.0.0.1", resolve);
+					});
+					holders.push(holder);
+				}
+			} catch {
+				await Promise.all(holders.map(closeServer));
+				continue;
+			}
+			await Promise.all(holders.map(closeServer));
+			return first;
+		}
+		throw new Error("No free port range found");
+	}
+
+	async function holdPort(port: number): Promise<NetServer> {
+		const server = createNetServer();
+		await new Promise<void>((resolve, reject) => {
+			server.once("error", reject);
+			server.listen(port, "127.0.0.1", resolve);
+		});
+		return server;
+	}
+
+	it.each([
+		[undefined, "127.0.0.1"],
+		["localhost", "localhost"],
+		["  LOCALHOST ", "localhost"],
+		["127.0.0.1", "127.0.0.1"],
+		["0.0.0.0", "127.0.0.1"],
+		["::1", "127.0.0.1"],
+		["[::1]", "127.0.0.1"],
+		["attacker.example", "127.0.0.1"],
+		["localhost:8008", "127.0.0.1"],
+		["", "127.0.0.1"],
+		["   ", "127.0.0.1"],
+	])("writes host %j into the bridge URL as %s and binds 127.0.0.1", async (value, expectedHost) => {
+		const registry = createReadRegistry({ PI_CURSOR_PI_TOOL_BRIDGE_HOST: value });
+		const run = await registry.createRun();
+		try {
+			expect(new URL(getCursorPiBridgeMcpUrl(run)).hostname).toBe(expectedHost);
+			expect(registry.getHttpServerAddress()?.address).toBe("127.0.0.1");
+		} finally {
+			await run.dispose();
+		}
+	});
+
+	it("serves a real MCP client through the localhost URL", async () => {
+		const registry = createReadRegistry({ PI_CURSOR_PI_TOOL_BRIDGE_HOST: "localhost" });
+		const run = await registry.createRun();
+		const { client, transport } = await connectClient(getCursorPiBridgeMcpUrl(run));
+		try {
+			expect(new URL(getCursorPiBridgeMcpUrl(run)).hostname).toBe("localhost");
+			const listed = await client.listTools();
+			expect(listed.tools.map((tool) => tool.name)).toEqual(["pi__read"]);
+		} finally {
+			await client.close().catch(() => undefined);
+			await transport.close().catch(() => undefined);
+			await run.dispose();
+		}
+	});
+
+	it.each([
+		[undefined, undefined],
+		["", undefined],
+		["8008", { first: 8008, last: 8008 }],
+		[" 8008 ", { first: 8008, last: 8008 }],
+		["8000-8009", { first: 8000, last: 8009 }],
+		["1", { first: 1, last: 1 }],
+		["65535", { first: 65535, last: 65535 }],
+		["0", undefined],
+		["65536", undefined],
+		["-1", undefined],
+		["8009-8000", undefined],
+		["8000-", undefined],
+		["-8000", undefined],
+		["8000-8009-8010", undefined],
+		["80.5", undefined],
+		["abc", undefined],
+		["8000 - 8009", undefined],
+	])("parses port setting %j as %j", (value, expected) => {
+		expect(resolveCursorPiToolBridgePortRange({ PI_CURSOR_PI_TOOL_BRIDGE_PORT: value })).toEqual(expected);
+	});
+
+	it("uses a random non-zero port when no port is configured", async () => {
+		const registry = createReadRegistry({});
+		const run = await registry.createRun();
+		try {
+			expect(Number(new URL(getCursorPiBridgeMcpUrl(run)).port)).toBeGreaterThan(0);
+		} finally {
+			await run.dispose();
+		}
+	});
+
+	it("listens on a single configured free port", async () => {
+		const port = await findFreeRange(1);
+		const registry = createReadRegistry({ PI_CURSOR_PI_TOOL_BRIDGE_PORT: String(port) });
+		const run = await registry.createRun();
+		try {
+			expect(Number(new URL(getCursorPiBridgeMcpUrl(run)).port)).toBe(port);
+		} finally {
+			await run.dispose();
+		}
+	});
+
+	it("moves to the next port of the range when the first is in use", async () => {
+		const first = await findFreeRange(3);
+		const blocker = await holdPort(first);
+		const registry = createReadRegistry({ PI_CURSOR_PI_TOOL_BRIDGE_PORT: `${first}-${first + 2}` });
+		let run: CursorPiToolBridgeRun | undefined;
+		try {
+			run = await registry.createRun();
+			expect(Number(new URL(getCursorPiBridgeMcpUrl(run)).port)).toBe(first + 1);
+		} finally {
+			await run?.dispose();
+			await closeServer(blocker);
+		}
+	});
+
+	it("fails naming the range when every port is in use and recovers once one frees", async () => {
+		const first = await findFreeRange(2);
+		const blockers = [await holdPort(first), await holdPort(first + 1)];
+		const range = `${first}-${first + 1}`;
+		const registry = createReadRegistry({ PI_CURSOR_PI_TOOL_BRIDGE_PORT: range });
+		let run: CursorPiToolBridgeRun | undefined;
+		try {
+			await expect(registry.createRun()).rejects.toThrow(range);
+			await Promise.all(blockers.map(closeServer));
+			run = await registry.createRun();
+			const port = Number(new URL(getCursorPiBridgeMcpUrl(run)).port);
+			expect(port).toBeGreaterThanOrEqual(first);
+			expect(port).toBeLessThanOrEqual(first + 1);
+		} finally {
+			await run?.dispose();
+			await Promise.all(blockers.map((blocker) => (blocker.listening ? closeServer(blocker) : undefined)));
+		}
 	});
 });

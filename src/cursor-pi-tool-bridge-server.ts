@@ -6,6 +6,11 @@ import type {
 	CursorPiToolBridgeRunOptions,
 	CursorPiToolBridgeSnapshotApi,
 } from "./cursor-pi-tool-bridge-types.js";
+import {
+	resolveCursorPiToolBridgePortRange,
+	resolveCursorPiToolBridgeUrlHost,
+	type CursorPiToolBridgePortRange,
+} from "./cursor-pi-tool-bridge-env.js";
 import { asRecord } from "./cursor-record-utils.js";
 import { CursorPiToolBridgeRunImpl } from "./cursor-pi-tool-bridge-run.js";
 import {
@@ -18,6 +23,34 @@ import {
 
 const LOOPBACK_HOST = "127.0.0.1";
 const HTTP_SERVER_CLOSE_GRACE_MS = 250;
+
+function listenOnce(server: HttpServer, port: number): Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		const onError = (error: Error) => {
+			server.off("listening", onListening);
+			reject(error);
+		};
+		const onListening = () => {
+			server.off("error", onError);
+			resolve();
+		};
+		server.once("error", onError);
+		server.once("listening", onListening);
+		server.listen(port, LOOPBACK_HOST);
+	});
+}
+
+async function listenInRange(server: HttpServer, range: CursorPiToolBridgePortRange): Promise<void> {
+	for (let port = range.first; port <= range.last; port += 1) {
+		try {
+			await listenOnce(server, port);
+			return;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
+		}
+	}
+	throw new Error(`Cursor pi tool bridge could not listen on any port in ${range.first}-${range.last} (all in use)`);
+}
 
 export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 	private readonly pi: CursorPiToolBridgeSnapshotApi;
@@ -75,7 +108,7 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 			this.routes.set(pathname, run);
 			const address = this.getHttpServerAddress();
 			if (!address) throw new Error("Cursor pi tool bridge HTTP server is not listening");
-			return `http://${LOOPBACK_HOST}:${address.port}${pathname}`;
+			return `http://${resolveCursorPiToolBridgeUrlHost(this.env)}:${address.port}${pathname}`;
 		});
 	}
 
@@ -144,19 +177,9 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 		});
 		const server = createServer(getRequestListener(app.fetch, { overrideGlobalObjects: false }));
 		this.httpServer = server;
-		await new Promise<void>((resolve, reject) => {
-			const onError = (error: Error) => {
-				server.off("listening", onListening);
-				reject(error);
-			};
-			const onListening = () => {
-				server.off("error", onError);
-				resolve();
-			};
-			server.once("error", onError);
-			server.once("listening", onListening);
-			server.listen(0, LOOPBACK_HOST);
-		});
+		const range = resolveCursorPiToolBridgePortRange(this.env);
+		if (range) await listenInRange(server, range);
+		else await listenOnce(server, 0);
 	}
 
 	private async closeHttpServer(): Promise<void> {

@@ -5,9 +5,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
-import { after } from "node:test";
+import { after, afterEach } from "node:test";
 import { Type } from "typebox";
 import { state, Cursor } from "../fixtures/native-cursor-sdk.mjs";
+import { __testUtils as outputFilterTestUtils } from "../../shared/cursor-sdk-output-filter.mjs";
 import { writeRawTestEvidence } from "./raw-test-evidence.mjs";
 
 export { state };
@@ -21,6 +22,7 @@ const corePackage = JSON.parse(await readFile(corePackagePath, "utf8"));
 export const { Agent: PiAgent } = await import(pathToFileURL(join(dirname(corePackagePath), corePackage.exports["."].import)));
 
 export function setupNativeCursorHarness() {
+  afterEach(() => outputFilterTestUtils.resetProcessOutputFilter());
   // Only external Cursor transport/storage is substituted; Pi's loader,
   // registered provider, scheduler, persisted sessions and loopback MCP are real.
   const fixtureUrl = new URL("../fixtures/native-cursor-sdk.mjs", import.meta.url).href;

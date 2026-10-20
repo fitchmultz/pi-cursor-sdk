@@ -15,6 +15,7 @@ import { registerCursorFallbackIssueWarning } from "./cursor-fallback-warning.js
 import { registerCursorAgentsContextDedup } from "./cursor-agents-context-registration.js";
 import { registerCursorOverflowNormalization } from "./cursor-provider-overflow.js";
 import { registerCursorSdkSessionProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
+import { installCursorSdkProcessOutputFilter } from "./cursor-sdk-output-filter.js";
 import { prepareCursorSessionForCompaction } from "./cursor-session-compaction-prep.js";
 import { registerCursorUsageLedger } from "./cursor-usage-ledger.js";
 import { registerCursorUsageCommand } from "./cursor-usage-command.js";
@@ -37,6 +38,7 @@ type CursorExtensionApi =
 	& Parameters<typeof registerCursorUsageLedger>[0];
 
 export default async function (pi: CursorExtensionApi) {
+	installCursorSdkProcessOutputFilter();
 	// Session cwd must register before other session_start listeners that depend on it.
 	registerCursorSessionScope(pi);
 	registerCursorUsageLedger(pi);

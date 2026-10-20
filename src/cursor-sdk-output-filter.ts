@@ -1,4 +1,6 @@
 export {
+	__testUtils,
+	installCursorSdkProcessOutputFilter,
 	withCursorSdkOutputNoticeHandler,
 	installCursorSdkOutputFilter,
 	isCursorSdkOutputSuppressed,

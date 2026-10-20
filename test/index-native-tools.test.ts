@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 import { resetCapabilitiesCache, setCapabilities } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
@@ -42,6 +42,7 @@ import { CURSOR_ASK_QUESTION_TOOL_NAME } from "../src/cursor-question-tool.js";
 import { CURSOR_ACTIVATE_SKILL_TOOL_NAME } from "../src/cursor-skill-tool.js";
 
 describe("extension native Cursor tool replay", () => {
+	afterEach(resetIndexExtensionTestState);
 	beforeEach(async () => {
 		await resetIndexExtensionTestState();
 		process.env.PI_CURSOR_ASK_QUESTION = "1";

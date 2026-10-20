@@ -5,10 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAgentSessionFromServices, createAgentSessionServices, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { asMockCursorRun, mockCreatedAgent, resetCursorProviderTestState, type CursorDeltaHandler } from "./helpers/cursor-provider-harness.js";
 import cursorExtension from "../src/index.js";
+import { __testUtils as outputFilterTestUtils } from "../src/cursor-sdk-output-filter.js";
 
 describe("configured Cursor cost through Pi composition and persistence", () => {
 	beforeEach(resetCursorProviderTestState);
-	afterEach(() => vi.unstubAllEnvs());
+	afterEach(() => { outputFilterTestUtils.resetProcessOutputFilter(); vi.unstubAllEnvs(); });
 
 	it.each([
 		{ name: "default zero rates", cost: undefined, expectedCost: 0 },

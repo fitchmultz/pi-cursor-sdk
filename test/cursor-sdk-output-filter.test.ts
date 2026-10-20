@@ -1,33 +1,18 @@
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Console } from "node:console";
 import { beforeAll, describe, expect, it } from "vitest";
 import { installCursorSdkOutputFilter, withCursorSdkOutputNoticeHandler, suppressCursorSdkOutput } from "../src/cursor-sdk-output-filter.js";
 import { installCursorSdkOutputFilter as installScriptFilter } from "../scripts/lib/cursor-sdk-output-filter.mjs";
 import { prepareInstalledBootstrapEmitters } from "./helpers/cursor-sdk-bootstrap.js";
 import { writeRawTestEvidence } from "./helpers/raw-test-evidence.mjs";
-
-function collectOutput(backpressure = false) {
-	const originals = { stdout: process.stdout.write, stderr: process.stderr.write };
-	const originalConsole = globalThis.console;
-	globalThis.console = new Console({ stdout: process.stdout, stderr: process.stderr, colorMode: false });
-	const stdout: Buffer[] = [], stderr: Buffer[] = [];
-	for (const [stream, chunks] of [[process.stdout, stdout], [process.stderr, stderr]] as const) {
-		stream.write = ((chunk: string | Uint8Array, encoding?: BufferEncoding | ((error?: Error | null) => void), callback?: (error?: Error | null) => void) => {
-			chunks.push(typeof chunk === "string" ? Buffer.from(chunk, typeof encoding === "string" ? encoding : "utf8") : Buffer.from(chunk));
-			(typeof encoding === "function" ? encoding : callback)?.();
-			return !backpressure;
-		}) as typeof stream.write;
-	}
-	return { stdout, stderr, restore() { process.stdout.write = originals.stdout; process.stderr.write = originals.stderr; globalThis.console = originalConsole; } };
-}
+import { collectOutput } from "./helpers/process-output.js";
 
 // Dependency execution owns signature drift/confinement; sink replay owns byte
 // framing/restoration, not the timing of real Agent/backend emissions.
 describe("Cursor SDK presentation boundary", () => {
 	let installedBootstrapEmitters: Awaited<ReturnType<typeof prepareInstalledBootstrapEmitters>>;
-	beforeAll(async () => { installedBootstrapEmitters = await prepareInstalledBootstrapEmitters(); });
+	beforeAll(async () => { installedBootstrapEmitters = await prepareInstalledBootstrapEmitters(); }, 30_000);
 
 	it.each([false, true])("frames installed printer/guard/completion/hook bytes with colors=%s", async (colors) => {
 		const output = collectOutput();
@@ -106,6 +91,45 @@ describe("Cursor SDK presentation boundary", () => {
 		} finally { restore?.(); output.restore(); rmSync(root, { recursive: true, force: true }); }
 	});
 
+	it("matches installed unsupported/unknown Claude event templates without enumerating future names", async () => {
+		const sdk = await installedBootstrapEmitters(false);
+		const names = ["InstructionsLoaded", "ConfigChange", "WorktreeCreate", "FutureClaudeEvent42"];
+		const notices = sdk.claudeEventNotices(Object.fromEntries(
+			["Notification", "PermissionRequest", ...names].map(name => [name, []]),
+		));
+		expect(notices).toEqual([
+			...["Notification", "PermissionRequest"].map(name => `[hooks] Claude Code event "${name}" is not supported in Cursor and will be ignored`),
+			...names.map(name => `[hooks] Unknown Claude Code event "${name}", skipping`),
+		]);
+		// Future additions to the SDK's unsupported-event table use the same family.
+		const recognized = [...notices, '[hooks] Claude Code event "FutureUnsupportedEvent42" is not supported in Cursor and will be ignored'];
+		const invalidValue = sdk.claudeEventNotices({ SessionStart: "invalid" });
+		expect(invalidValue).toEqual(['[hooks] Claude Code event "SessionStart" has invalid value (expected array), skipping']);
+		const visible = [...invalidValue,
+			'[hooks] Unknown Claude Code event "Future" failed to load: permission denied',
+			'[hooks] Claude Code event "Future" is not supported in Cursor and will be ignored: failure',
+			'[hooks] Unknown Claude Code event "", skipping',
+			'[hooks] Unknown Claude Code event "bad"quote", skipping',
+			'[hooks] Refusing to load user config via symlink path: /unsafe',
+		];
+		const output = collectOutput(), restore = installCursorSdkOutputFilter();
+		try {
+			for (const message of [...recognized, ...visible]) {
+				const frame = Buffer.from(`\x1b[33m${message}\x1b[0m\r\n`);
+				for (let split = 0; split <= frame.length; split++) {
+					process.stdout.write(frame.subarray(0, split));
+					process.stdout.write(frame.subarray(split));
+					process.stderr.write(frame.subarray(0, split));
+					process.stderr.write(frame.subarray(split));
+				}
+				const expected = recognized.includes(message) ? Buffer.alloc(0) : Buffer.concat(Array.from({ length: frame.length + 1 }, () => frame));
+				expect(Buffer.concat(output.stdout)).toEqual(expected);
+				expect(Buffer.concat(output.stderr)).toEqual(expected);
+				output.stdout.length = output.stderr.length = 0;
+			}
+		} finally { restore(); output.restore(); }
+	});
+
 	it("attributes split warnings to their initial owner and preserves warnings when native reporting fails", async () => {
 		const output = collectOutput(), restore = installCursorSdkOutputFilter();
 		try {
@@ -159,6 +183,31 @@ describe("Cursor SDK presentation boundary", () => {
 			restore();
 			expect(Buffer.concat(output.stderr)).toEqual(Buffer.from("18:05:"));
 			expect(Buffer.concat(output.stdout)).toEqual(Buffer.concat([controls, prompt, Buffer.from([0xff, 0xc3, 0x28, 0x0a]), invalidFrame, Buffer.from([0xe9])]));
+		} finally { restore(); output.restore(); }
+	});
+
+	it("does not remove wrappers installed by another owner and deactivates retained filter methods", () => {
+		const output = collectOutput(), restore = installCursorSdkOutputFilter();
+		const filteredStdout = process.stdout.write, filteredStderr = process.stderr.write;
+		const laterStdout: typeof process.stdout.write = function (...args) { return Reflect.apply(filteredStdout, process.stdout, args) as boolean; };
+		const laterStderr: typeof process.stderr.write = function (...args) { return Reflect.apply(filteredStderr, process.stderr, args) as boolean; };
+		process.stdout.write = laterStdout;
+		process.stderr.write = laterStderr;
+		try {
+			process.stdout.write("18:05:");
+			restore();
+			expect(process.stdout.write).toBe(laterStdout);
+			expect(process.stderr.write).toBe(laterStderr);
+			const frame = '[hooks] Unknown Claude Code event "Future", skipping\n';
+			process.stdout.write(frame);
+			process.stderr.write(frame);
+			expect(Buffer.concat(output.stdout).toString()).toBe("18:05:" + frame);
+			expect(Buffer.concat(output.stderr).toString()).toBe(frame);
+			const reinstall = installCursorSdkOutputFilter();
+			process.stdout.write(frame);
+			reinstall();
+			expect(process.stdout.write).toBe(laterStdout);
+			expect(Buffer.concat(output.stdout).toString()).toBe("18:05:" + frame);
 		} finally { restore(); output.restore(); }
 	});
 

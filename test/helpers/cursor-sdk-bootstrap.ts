@@ -87,8 +87,14 @@ export async function prepareInstalledBootstrapEmitters() {
 	const hookFormat = find(ts.isTemplateExpression, "[hooks] ${");
 	const formatParameter = hookFormat.templateSpans[0]!.expression.getText(ast);
 	const hookFormatSource = `(${formatParameter}) => ${hookFormat.getText(ast)}`;
-	const hookSource = `const ${toolMap.getText(ast)}, ${unsupported.getText(ast)}, ${defaultLogger.getText(ast)};
-		${hookDefinition.getText(ast)}; (${hooks.getText(ast)})`;
+	const eventHooks = find(ts.isFunctionDeclaration, "Unknown Claude Code event");
+	const eventMap = find(ts.isVariableDeclaration, "Notification:null");
+	const eventNames = find(ts.isVariableDeclaration, 'beforeShellExecution:"beforeShellExecution"');
+	const unsupportedEvents = find(ts.isVariableDeclaration, '=["Notification","PermissionRequest"]');
+	const hookSource = `const ${eventNames.getText(ast)}, ${eventMap.getText(ast)}, ${unsupportedEvents.getText(ast)},
+		${toolMap.getText(ast)}, ${unsupported.getText(ast)}, ${defaultLogger.getText(ast)};
+		${hookDefinition.getText(ast)}; ${hooks.getText(ast)}; ${eventHooks.getText(ast)};
+		({ convertHook: ${hooks.name!.text}, convertEvents: ${eventHooks.name!.text} })`;
 	const parserWarning = find(ts.isStringLiteral, "shell-parser: tree-sitter natives are unavailable").text;
 	const asyncNamespaceName = asyncNamespace.expression.getText(ast);
 	const pathNamespaceName = pathNamespace.text, fsNamespaceName = fsNamespace.text;
@@ -122,7 +128,7 @@ export async function prepareInstalledBootstrapEmitters() {
 			[pathNamespaceName]: path, [inventoryLogger]: loggerFactory[0]!("builtin-skills-sync"),
 		});
 		const formatHook = runInNewContext(hookFormatSource) as (message: string) => string;
-		const convertHook = runInNewContext(hookSource);
+		const { convertHook, convertEvents } = runInNewContext(hookSource);
 		const hookNotices: string[] = [];
 		for (const [event, matchers] of [
 			["SessionStart", ["startup", "resume", "clear", "compact"]],
@@ -144,6 +150,11 @@ export async function prepareInstalledBootstrapEmitters() {
 			parserWarning,
 			completions: [...completions],
 			hookNotices,
+			claudeEventNotices(events: Record<string, unknown>): string[] {
+				const warnings: string[] = [];
+				convertEvents(events, { warn: (message: string) => warnings.push(formatHook(message)) });
+				return warnings;
+			},
 			completion: (message: string) => loggerFactory[0]!("cursor-rules").info(contextFactory[0]!().withName("loadRules"), message),
 		};
 	};

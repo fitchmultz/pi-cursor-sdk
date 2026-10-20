@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import test from "node:test";
+import test, { afterEach } from "node:test";
 import { createAssistantMessageEventStream, InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, resolveCliModel } from "@earendil-works/pi-coding-agent";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -14,6 +14,9 @@ import { buildCursorPrompt } from "../dist/context.js";
 import { resolveCursorPiContext } from "../dist/cursor-pi-context.js";
 import { cursorLiveRuns, drainCursorLiveRunTurn } from "../dist/cursor-provider-live-run-drain.js";
 import { __testUtils as replayState } from "../dist/cursor-native-tool-display-state.js";
+import { __testUtils as outputFilterTestUtils } from "../shared/cursor-sdk-output-filter.mjs";
+
+afterEach(() => outputFilterTestUtils.resetProcessOutputFilter());
 
 test("native replay completes with the same JSON arguments as its streamed delta", { timeout: 30_000 }, async () => {
   const stream = createAssistantMessageEventStream();

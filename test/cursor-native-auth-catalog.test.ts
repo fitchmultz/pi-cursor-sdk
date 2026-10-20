@@ -6,6 +6,7 @@ import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { ModelRuntime, ModelRegistry, resolveCliModel } from "@earendil-works/pi-coding-agent";
 import { createExtensionRegistrationPi } from "./helpers/pi-harness.js";
 import extension from "../src/index.js";
+import { __testUtils as outputFilterTestUtils } from "../src/cursor-sdk-output-filter.js";
 import * as sdkRuntime from "../src/cursor-sdk-runtime.js";
 import { buildCursorModelSelection, getCursorModelMetadata } from "../src/model-discovery.js";
 import { fingerprintApiKey, saveModelListCache } from "../src/model-list-cache.js";
@@ -27,7 +28,7 @@ beforeEach(() => {
 	vi.stubEnv("PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT", "1");
 	list.mockReset();
 });
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
+afterEach(() => { outputFilterTestUtils.resetProcessOutputFilter(); vi.restoreAllMocks(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
 
 async function fixture(configKey?: string, startSession = true, credentials = new InMemoryCredentialStore()) {
 	const modelsPath = join(root, "models.json");

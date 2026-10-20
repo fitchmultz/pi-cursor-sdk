@@ -1,8 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAssistantMessageEventStream, normalizeContext, type AssistantMessageEvent } from "@earendil-works/pi-ai";
 import {
 	createExtensionCommandContext,
-	createExtensionRegistrationPi,
 	createExtensionTestContext,
 	createTestToolInfo,
 	makeAssistantMessage,
@@ -13,6 +12,7 @@ import {
 } from "./helpers/pi-harness.js";
 import {
 	createExtensionPi,
+	createExtensionPiWithOptions,
 	resetIndexExtensionTestState,
 	cursorPiToolBridgeTestUtils,
 } from "./helpers/index-extension-test-kit.js";
@@ -46,28 +46,36 @@ const mockedStreamCursor = vi.mocked(streamCursor);
 type DiscoverOptions = Parameters<typeof discoverModels>[0];
 
 describe("extension registration and discovery", () => {
+	afterEach(resetIndexExtensionTestState);
 	beforeEach(async () => {
 		await resetIndexExtensionTestState();
 		process.env.PI_CURSOR_ASK_QUESTION = "1";
 	});
 
-	it("keeps one process error guard for the active session lifecycle", async () => {
-		mockedDiscover.mockResolvedValueOnce([]);
+	it("keeps one process sink across extension initialization and the session lifecycle", async () => {
+		mockedDiscover.mockResolvedValue([]);
 		const pi = createExtensionPi();
 		const originalEmit = process.emit;
+		const originalWrite = process.stdout.write;
 		await extensionFactory(pi);
-
+		const filteredWrite = process.stdout.write;
+		expect(filteredWrite).not.toBe(originalWrite); // installed before first session_start
+		await extensionFactory(createExtensionPi());
+		expect(process.stdout.write).toBe(filteredWrite);
 		expect(cursorSdkProcessErrorGuardTestUtils.activeSessionCount()).toBe(0);
 		await pi.runSessionStart();
 		expect(cursorSdkProcessErrorGuardTestUtils.activeSessionCount()).toBe(1);
 		expect(process.emit).not.toBe(originalEmit);
 		await pi.runSessionStart({}, { reason: "reload" });
+		expect(process.stdout.write).toBe(filteredWrite);
 		expect(cursorSdkProcessErrorGuardTestUtils.activeSessionCount()).toBe(1);
 		await pi.runSessionShutdown({ reason: "reload" });
 		expect(cursorSdkProcessErrorGuardTestUtils.activeSessionCount()).toBe(0);
 		expect(process.emit).toBe(originalEmit);
+		expect(process.stdout.write).toBe(filteredWrite); // no unfiltered reload interval
 		await pi.runSessionShutdown({ reason: "quit" });
 		expect(cursorSdkProcessErrorGuardTestUtils.activeSessionCount()).toBe(0);
+		expect(process.stdout.write).toBe(filteredWrite); // intentional process lifetime
 	});
 
 	it("registers Cursor runtime controls and one provider with correct fields", async () => {
@@ -351,7 +359,7 @@ describe("extension registration and discovery", () => {
 	it("does not reactivate Cursor-only tools when pi tools are disabled", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		mockedDiscover.mockResolvedValueOnce([]);
-		const pi = createExtensionRegistrationPi({ activeTools: [] });
+		const pi = createExtensionPiWithOptions({ activeTools: [] });
 		await extensionFactory(pi);
 
 		await pi.runSessionStart({ model: makeModel("composer-2.5") });
@@ -542,7 +550,7 @@ describe("extension registration and discovery", () => {
 		process.env.PI_CURSOR_ASK_QUESTION = "0";
 		mockedDiscover.mockResolvedValueOnce([]);
 		const bridgeToolName = "sem_reindex";
-		const pi = createExtensionRegistrationPi({
+		const pi = createExtensionPiWithOptions({
 			initialTools: [createTestToolInfo(bridgeToolName)],
 			activeTools: [bridgeToolName],
 		});

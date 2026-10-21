@@ -31,6 +31,10 @@ import {
 } from "../shared/cursor-setting-sources.mjs";
 import { createScriptFail } from "../scripts/lib/cursor-script-fail.mjs";
 
+// Windows tree verification can spend 15s each in taskkill and its CIM fallback,
+// even after child EOF. Leave room for startup, assertions, and finally cleanup.
+const PROCESS_TREE_TEST_TIMEOUT_MS = process.platform === "win32" ? 90_000 : 15_000;
+
 function processExists(pid: number): boolean {
 	try {
 		process.kill(pid, 0);
@@ -235,7 +239,7 @@ describe("maintainer scripts shared lib", () => {
 		child.stdout?.on("data", (chunk) => { stdout += chunk; });
 		await terminateChild(child, { graceMs: 2_000 });
 		expect(stdout).toContain("graceful-cleanup");
-	}, 15_000);
+	}, PROCESS_TREE_TEST_TIMEOUT_MS);
 
 	it("terminates a spawned parent and its long-lived grandchild", async () => {
 		const parent = spawn(
@@ -265,7 +269,7 @@ setInterval(() => {}, 60_000);`,
 				await forceCleanupProcess(grandchildPid);
 			}
 		}
-	}, 15_000);
+	}, PROCESS_TREE_TEST_TIMEOUT_MS);
 
 	it("terminates a live grandchild after its detached parent has exited", async () => {
 		const parent = spawn(
@@ -301,7 +305,7 @@ grandchild.stdout.once("data", () => {
 				await forceCleanupProcess(grandchildPid);
 			}
 		}
-	}, 30_000);
+	}, Math.max(30_000, PROCESS_TREE_TEST_TIMEOUT_MS));
 
 	it("createScriptFail scrubs generic secrets before applying explicit secrets", () => {
 		const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as typeof process.exit);

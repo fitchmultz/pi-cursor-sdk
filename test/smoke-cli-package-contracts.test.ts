@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -86,9 +86,12 @@ describe("smoke CLI and package contracts", () => {
 			expect(visualSelfTest.stdout).toContain("self-test PASS");
 		}
 		if (process.platform !== "win32") {
+			// Concurrent package tests read dist/ from this checkout; the self-test must not rebuild it.
+			const distBefore = statSync("dist/index.js", { throwIfNoEntry: false })?.ino;
 			const steeringSelfTest = run(process.execPath, ["scripts/steering-rpc-smoke.mjs", "--self-test"]);
 			expect(steeringSelfTest.status).toBe(0);
 			expect(steeringSelfTest.stdout).toContain("self-test PASS");
+			expect(statSync("dist/index.js", { throwIfNoEntry: false })?.ino).toBe(distBefore);
 		}
 		if (process.platform !== "win32") {
 			const liveSelfTest = run("scripts/tmux-live-smoke.sh", ["--self-test"]);

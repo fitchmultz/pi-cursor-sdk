@@ -333,11 +333,11 @@ async function main() {
 		printHelp();
 		return;
 	}
-	ensureBuilt();
 	if (process.argv.includes("--self-test")) {
 		await runSelfTest();
 		return;
 	}
+	ensureBuilt();
 
 	const sessionDir = process.env.SMOKE_SESSION_DIR ?? join("/tmp", `pi-cursor-steer-smoke-${Date.now()}`);
 	const piBin = resolvePiBin();

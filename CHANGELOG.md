@@ -10,6 +10,8 @@
 
 - Supply SDK 1.0.40's required Zod peer as a direct exact `zod@3.25.76` runtime dependency, retaining the already-qualified version rather than relying on peer auto-installation or an ambient host package.
 
+- Stop `smoke:steering --self-test` from rebuilding `dist/` before its offline probe. The rebuild briefly removed `dist/` while the concurrent package test packed the checkout, producing an intermittent missing `dist/index.js` failure. Live steering runs still rebuild first (fitchmultz/.github#98).
+
 ### Verification and limits
 
 - **User-visible rollout:** admitted user/project Claude hooks returning only nested denial/rewrite output can now affect tool execution where SDK 1.0.37 ignored that output; this is an intended behavior change, not just a test-harness repair.

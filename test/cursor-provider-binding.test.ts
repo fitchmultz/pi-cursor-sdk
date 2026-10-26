@@ -2,8 +2,9 @@ import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SessionManager, convertToLlm, createAgentSession, DefaultResourceLoader, ModelRuntime, SettingsManager, type AgentSession } from "@earendil-works/pi-coding-agent";
+import { SessionManager, convertToLlm, createAgentSession, DefaultResourceLoader, ModelRuntime, SettingsManager, type AgentSession, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createAssistantMessageEventStream, InMemoryCredentialStore, type Context } from "@earendil-works/pi-ai";
+import type { CursorModelFallbackIssue } from "../src/model-discovery.js";
 import { createPiHarness, makeAssistantMessage, makeModel, collectEvents, createExtensionTestContext } from "./helpers/pi-harness.js";
 import type { createCursorLazyStream } from "../src/cursor-provider-lazy.js";
 import { registerCursorProviderBinding } from "../src/cursor-provider-binding.js";
@@ -168,6 +169,36 @@ describe("provider header receipts and operation membership", () => {
 			await s.session.runSessionShutdown({ reason: "quit" });
 			expect((await s.dispatch(headers)).at(-1)).toMatchObject({ type: "error", error: { errorMessage: expect.stringContaining("not active") } });
 			expect(vi.mocked(streamCursor)).not.toHaveBeenCalled();
+		});
+
+		it("reports the serving provider's catalog provenance to the session until it shuts down", async () => {
+			let nextIssue: CursorModelFallbackIssue | undefined = { reason: "missing-api-key", message: "bootstrap had no key" };
+			vi.doMock("../src/model-discovery.js", () => ({
+				discoverModels: vi.fn(async (options: { publish?: (definitions: [], update: () => void) => Promise<unknown>; onFallback?: (issue: CursorModelFallbackIssue) => void }) => {
+					await options.publish?.([], () => { if (nextIssue) options.onFallback?.(nextIssue); });
+					return [];
+				}),
+			}));
+			try {
+				const load = async () => { vi.resetModules(); return await import("../src/cursor-provider-binding.js"); };
+				const bootstrap = createPiHarness(); (await load()).registerCursorProviderBinding(bootstrap)([], () => {});
+				const provider = bootstrap._registered[0]!.provider!;
+				const refresh = () => provider.refreshModels!({ allowNetwork: true, force: true, signal: new AbortController().signal, publish: async (publication) => { publication.update?.(); return true; } });
+				await refresh();
+				const session = createPiHarness(); const seen: (CursorModelFallbackIssue | undefined)[] = [];
+				(await load()).registerCursorProviderBinding(session)([], (issue) => { seen.push(issue); });
+				nextIssue = undefined;
+				const modelRegistry = { getProvider: () => provider, refresh } as unknown as ExtensionContext["modelRegistry"];
+				await session.invokeEventWithContext("session_start", { type: "session_start", reason: "startup" }, createExtensionTestContext({ modelRegistry }));
+				expect(seen).toEqual([{ reason: "missing-api-key", message: "bootstrap had no key" }, undefined]);
+				await session.runSessionShutdown({ reason: "quit" });
+				nextIssue = { reason: "cache-only", message: "after shutdown" };
+				await refresh();
+				expect(seen).toHaveLength(2);
+			} finally {
+				vi.doUnmock("../src/model-discovery.js");
+				vi.resetModules();
+			}
 		});
 	});
 

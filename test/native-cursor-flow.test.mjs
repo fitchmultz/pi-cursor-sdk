@@ -656,15 +656,16 @@ for (const failure of ["cancel", "error"]) {
   });
 }
 
-test("shared runtime requests require their actual session's registration and an active binding", { timeout: 60000 }, async (t) => {
+test("shared runtime requests require their actual session's registration once that registration has started", { timeout: 60000 }, async (t) => {
   await concurrentFixture(t, async ({ create }) => {
     const a = await create("shared-A");
     await a.session.prompt("A before sharing");
     const b = await create("shared-B", { runtime: a.session.modelRuntime, bind: false });
     const staleStream = a.session.modelRuntime.getProvider("cursor").streamSimple;
+    await a.session.prompt("unstarted B registration serves A's own receipt");
+    assert.equal(a.session.messages.at(-1).stopReason, "stop", a.session.messages.at(-1).errorMessage);
+    assert.equal(state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId).options.local.cwd, a.cwd);
     const beforeSends = state.sends.length;
-    await a.session.prompt("cannot use unbound B closure");
-    assert.match(a.session.messages.at(-1).errorMessage, /binding is not active/);
     await b.session.bindExtensions({ mode: "rpc" });
     await a.session.prompt("A cannot enter B registration");
     const ownershipError = a.session.messages.at(-1).errorMessage;

@@ -20,8 +20,18 @@ interface RequestReceipt {
 	projection: CursorRequestProjectionSnapshot;
 	usageRecorder: CursorUsageRecorder;
 	reportSdkNotice: CursorSdkOutputNoticeHandler;
+	operationPurpose(signal: AbortSignal | undefined): CursorRequestProvenance["purpose"] | undefined;
+	resolveSessionState(): {
+		bridge: ReturnType<typeof getRegisteredCursorPiToolBridge>;
+		nativeDisplay: ReturnType<typeof getCursorNativeToolDisplayState>;
+		recordCloudLifecycle: ReturnType<typeof captureCursorCloudLifecycleRecorder>;
+	};
 }
-const requestOwners = new WeakMap<object, RequestReceipt>();
+// Pi evaluates each extension instance with its own module graph. Hosts that share one
+// ModelRuntime keep the first instance's provider, so receipts must be visible process-wide.
+const REQUEST_OWNERS_KEY = Symbol.for("pi-cursor-sdk.provider-request-receipts.v1");
+const processState = globalThis as typeof globalThis & Record<symbol, WeakMap<object, RequestReceipt> | undefined>;
+const requestOwners = processState[REQUEST_OWNERS_KEY] ??= new WeakMap<object, RequestReceipt>();
 
 /** One closure per ExtensionAPI, including direct compaction/tree/bug-report streams. */
 export function registerCursorProviderBinding(
@@ -49,22 +59,30 @@ export function registerCursorProviderBinding(
 				else console.warn(message);
 				notices.add(kind);
 			},
+			operationPurpose: (signal) => signal && operations.get(signal),
+			resolveSessionState: () => ({
+				bridge: getRegisteredCursorPiToolBridge(pi),
+				nativeDisplay: getCursorNativeToolDisplayState(pi),
+				recordCloudLifecycle: captureCursorCloudLifecycleRecorder(pi),
+			}),
 		});
 	});
+	const inactiveError = () => new Error("Cursor provider binding is not active. Bind this session's extensions, or reload the session after shutdown.");
 	const stream = createCursorLazyStream((model, context, options) => {
 		const headers = options?.headers;
 		const owner = headers && requestOwners.get(headers);
 		if (headers) requestOwners.delete(headers);
-		if (!binding.active || binding.closed) throw new Error("Cursor provider binding is not active. Bind this session's extensions, or reload the session after shutdown.");
+		if (binding.closed || (!binding.active && !owner)) throw inactiveError();
 		if (!owner) throw new Error("Cursor provider ownership is unavailable: this call has no native session request receipt. Bare modelRegistry.streamSimple calls are unsupported for Cursor; use the owning AgentSession's stream path or an independent child AgentSession.");
-		if (owner.binding !== binding) throw new Error(CURSOR_PROVIDER_OWNERSHIP_ERROR);
+		// A registrant that never started is a shared-runtime host's bootstrap instance
+		// (e.g. PI WEB); it serves whichever bound session issued the receipt.
+		if (owner.binding !== binding && binding.active) throw new Error(CURSOR_PROVIDER_OWNERSHIP_ERROR);
+		if (!owner.binding.active || owner.binding.closed) throw inactiveError();
 		return {
-			request: resolveCursorRequestProvenance(owner.projection, model, context, options?.signal && operations.get(options.signal) || "normal"),
+			request: resolveCursorRequestProvenance(owner.projection, model, context, owner.operationPurpose(options?.signal) || "normal"),
 			usageRecorder: owner.usageRecorder,
 			scope: owner.scope,
-			bridge: getRegisteredCursorPiToolBridge(pi),
-			nativeDisplay: getCursorNativeToolDisplayState(pi),
-			recordCloudLifecycle: captureCursorCloudLifecycleRecorder(pi),
+			...owner.resolveSessionState(),
 			reportSdkNotice: owner.reportSdkNotice,
 		};
 	});

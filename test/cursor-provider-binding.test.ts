@@ -2,8 +2,9 @@ import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SessionManager, convertToLlm, createAgentSession, DefaultResourceLoader, ModelRuntime, SettingsManager, type AgentSession } from "@earendil-works/pi-coding-agent";
+import { SessionManager, convertToLlm, createAgentSession, DefaultResourceLoader, ModelRuntime, SettingsManager, type AgentSession, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createAssistantMessageEventStream, InMemoryCredentialStore, type Context } from "@earendil-works/pi-ai";
+import type { CursorModelFallbackIssue } from "../src/model-discovery.js";
 import { createPiHarness, makeAssistantMessage, makeModel, collectEvents, createExtensionTestContext } from "./helpers/pi-harness.js";
 import type { createCursorLazyStream } from "../src/cursor-provider-lazy.js";
 import { registerCursorProviderBinding } from "../src/cursor-provider-binding.js";
@@ -129,6 +130,76 @@ describe("provider header receipts and operation membership", () => {
 		await b.pi.runSessionShutdown({ reason: "quit" });
 		const closed = await collectEvents(b.stream(makeModel(), b.context()));
 		expect(closed.at(-1)).toMatchObject({ type: "error", error: { errorMessage: expect.stringContaining("not active") } });
+	});
+
+	describe("shared ModelRuntime bootstrap registrant", () => {
+		async function sharedRuntime() {
+			const f = fixture();
+			const bootstrap = createPiHarness(); registerCursorSessionScope(bootstrap); registerCursorNativeToolDisplayState(bootstrap); registerCursorProviderBinding(bootstrap)([], () => {});
+			const stream = bootstrap._registered[0]!.config.streamSimple! as ReturnType<typeof createCursorLazyStream>;
+			// Pi evaluates every extension instance with its own module graph (jiti moduleCache: false).
+			vi.resetModules();
+			const sessionCopy = {
+				binding: await import("../src/cursor-provider-binding.js"),
+				scope: await import("../src/cursor-session-scope.js"),
+				display: await import("../src/cursor-native-tool-display-state.js"),
+			};
+			const session = createPiHarness(); sessionCopy.scope.registerCursorSessionScope(session); sessionCopy.display.registerCursorNativeToolDisplayState(session); sessionCopy.binding.registerCursorProviderBinding(session)([], () => {});
+			const ctx = createExtensionTestContext({ cwd: "/tmp/provenance-owner", sessionManager: { getBranch: () => f.manager.getBranch(), buildSessionProjection: () => f.manager.buildSessionProjection(), getSessionId: () => f.manager.getSessionId(), getSessionFile: () => undefined } });
+			await session.invokeEventWithContext("session_start", { type: "session_start", reason: "startup" }, ctx);
+			async function receipt() {
+				const headers: Record<string, string> = {};
+				await session.invokeEventWithContext("before_provider_headers", { type: "before_provider_headers", headers }, ctx);
+				return headers;
+			}
+			const dispatch = (headers: Record<string, string>, signal?: AbortSignal) => collectEvents(stream(makeModel(), f.context(), { signal, headers }));
+			return { ...f, session, receipt, dispatch };
+		}
+
+		it("serves the bound session that issued the receipt, with that session's scope and operation purpose", async () => {
+			const s = await sharedRuntime(); const signal = new AbortController().signal;
+			await s.session.runSessionBeforeCompact({ signal });
+			const events = await s.dispatch(await s.receipt(), signal);
+			expect(events.at(-1)?.type).toBe("done");
+			expect(vi.mocked(streamCursor).mock.calls.at(-1)?.[3]).toMatchObject({ scope: { sessionId: s.manager.getSessionId(), cwd: "/tmp/provenance-owner" }, request: { purpose: "compaction" } });
+		});
+
+		it("rejects receipts from a shut-down session", async () => {
+			const s = await sharedRuntime(); const headers = await s.receipt();
+			await s.session.runSessionShutdown({ reason: "quit" });
+			expect((await s.dispatch(headers)).at(-1)).toMatchObject({ type: "error", error: { errorMessage: expect.stringContaining("not active") } });
+			expect(vi.mocked(streamCursor)).not.toHaveBeenCalled();
+		});
+
+		it("reports the serving provider's catalog provenance to the session until it shuts down", async () => {
+			let nextIssue: CursorModelFallbackIssue | undefined = { reason: "missing-api-key", message: "bootstrap had no key" };
+			vi.doMock("../src/model-discovery.js", () => ({
+				discoverModels: vi.fn(async (options: { publish?: (definitions: [], update: () => void) => Promise<unknown>; onFallback?: (issue: CursorModelFallbackIssue) => void }) => {
+					await options.publish?.([], () => { if (nextIssue) options.onFallback?.(nextIssue); });
+					return [];
+				}),
+			}));
+			try {
+				const load = async () => { vi.resetModules(); return await import("../src/cursor-provider-binding.js"); };
+				const bootstrap = createPiHarness(); (await load()).registerCursorProviderBinding(bootstrap)([], () => {});
+				const provider = bootstrap._registered[0]!.provider!;
+				const refresh = () => provider.refreshModels!({ allowNetwork: true, force: true, signal: new AbortController().signal, publish: async (publication) => { publication.update?.(); return true; } });
+				await refresh();
+				const session = createPiHarness(); const seen: (CursorModelFallbackIssue | undefined)[] = [];
+				(await load()).registerCursorProviderBinding(session)([], (issue) => { seen.push(issue); });
+				nextIssue = undefined;
+				const modelRegistry = { getProvider: () => provider, refresh } as unknown as ExtensionContext["modelRegistry"];
+				await session.invokeEventWithContext("session_start", { type: "session_start", reason: "startup" }, createExtensionTestContext({ modelRegistry }));
+				expect(seen).toEqual([{ reason: "missing-api-key", message: "bootstrap had no key" }, undefined]);
+				await session.runSessionShutdown({ reason: "quit" });
+				nextIssue = { reason: "cache-only", message: "after shutdown" };
+				await refresh();
+				expect(seen).toHaveLength(2);
+			} finally {
+				vi.doUnmock("../src/model-discovery.js");
+				vi.resetModules();
+			}
+		});
 	});
 
 	it("receives real official native headers and compaction/tree signals through sequential summaries and a retry", async () => {

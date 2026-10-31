@@ -20,8 +20,28 @@ interface RequestReceipt {
 	projection: CursorRequestProjectionSnapshot;
 	usageRecorder: CursorUsageRecorder;
 	reportSdkNotice: CursorSdkOutputNoticeHandler;
+	operationPurpose(signal: AbortSignal | undefined): CursorRequestProvenance["purpose"] | undefined;
+	resolveSessionState(): {
+		bridge: ReturnType<typeof getRegisteredCursorPiToolBridge>;
+		nativeDisplay: ReturnType<typeof getCursorNativeToolDisplayState>;
+		recordCloudLifecycle: ReturnType<typeof captureCursorCloudLifecycleRecorder>;
+	};
 }
-const requestOwners = new WeakMap<object, RequestReceipt>();
+// Pi evaluates each extension instance with its own module graph. Hosts that share one
+// ModelRuntime keep the first instance's provider, so receipts must be visible process-wide.
+const REQUEST_OWNERS_KEY = Symbol.for("pi-cursor-sdk.provider-request-receipts.v1");
+const processState = globalThis as typeof globalThis & Record<symbol, WeakMap<object, unknown> | undefined>;
+const requestOwners = (processState[REQUEST_OWNERS_KEY] ??= new WeakMap<object, RequestReceipt>()) as WeakMap<object, RequestReceipt>;
+type CatalogListener = (issue?: CursorModelFallbackIssue) => void;
+interface CatalogChannel { published: boolean; issue?: CursorModelFallbackIssue; listeners: Set<CatalogListener> }
+// Sessions served by another instance's provider learn its catalog provenance here.
+const CATALOG_CHANNELS_KEY = Symbol.for("pi-cursor-sdk.provider-catalog-channels.v1");
+const catalogChannels = (processState[CATALOG_CHANNELS_KEY] ??= new WeakMap<object, CatalogChannel>()) as WeakMap<object, CatalogChannel>;
+function catalogChannelFor(stream: object): CatalogChannel {
+	let channel = catalogChannels.get(stream);
+	if (!channel) catalogChannels.set(stream, channel = { published: false, listeners: new Set() });
+	return channel;
+}
 
 /** One closure per ExtensionAPI, including direct compaction/tree/bug-report streams. */
 export function registerCursorProviderBinding(
@@ -49,36 +69,62 @@ export function registerCursorProviderBinding(
 				else console.warn(message);
 				notices.add(kind);
 			},
+			operationPurpose: (signal) => signal && operations.get(signal),
+			resolveSessionState: () => ({
+				bridge: getRegisteredCursorPiToolBridge(pi),
+				nativeDisplay: getCursorNativeToolDisplayState(pi),
+				recordCloudLifecycle: captureCursorCloudLifecycleRecorder(pi),
+			}),
 		});
 	});
+	const inactiveError = () => new Error("Cursor provider binding is not active. Bind this session's extensions, or reload the session after shutdown.");
 	const stream = createCursorLazyStream((model, context, options) => {
 		const headers = options?.headers;
 		const owner = headers && requestOwners.get(headers);
 		if (headers) requestOwners.delete(headers);
-		if (!binding.active || binding.closed) throw new Error("Cursor provider binding is not active. Bind this session's extensions, or reload the session after shutdown.");
+		if (binding.closed || (!binding.active && !owner)) throw inactiveError();
 		if (!owner) throw new Error("Cursor provider ownership is unavailable: this call has no native session request receipt. Bare modelRegistry.streamSimple calls are unsupported for Cursor; use the owning AgentSession's stream path or an independent child AgentSession.");
-		if (owner.binding !== binding) throw new Error(CURSOR_PROVIDER_OWNERSHIP_ERROR);
+		// A registrant that never started is a shared-runtime host's bootstrap instance
+		// (e.g. PI WEB); it serves whichever bound session issued the receipt.
+		if (owner.binding !== binding && binding.active) throw new Error(CURSOR_PROVIDER_OWNERSHIP_ERROR);
+		if (!owner.binding.active || owner.binding.closed) throw inactiveError();
 		return {
-			request: resolveCursorRequestProvenance(owner.projection, model, context, options?.signal && operations.get(options.signal) || "normal"),
+			request: resolveCursorRequestProvenance(owner.projection, model, context, owner.operationPurpose(options?.signal) || "normal"),
 			usageRecorder: owner.usageRecorder,
 			scope: owner.scope,
-			bridge: getRegisteredCursorPiToolBridge(pi),
-			nativeDisplay: getCursorNativeToolDisplayState(pi),
-			recordCloudLifecycle: captureCursorCloudLifecycleRecorder(pi),
+			...owner.resolveSessionState(),
 			reportSdkNotice: owner.reportSdkNotice,
 		};
 	});
+	const ownCatalog = catalogChannelFor(stream);
+	let onCatalog: CatalogListener | undefined;
+	let servingCatalog: CatalogChannel | undefined;
+	const unsubscribeServingCatalog = () => {
+		if (servingCatalog && onCatalog) servingCatalog.listeners.delete(onCatalog);
+		servingCatalog = undefined;
+	};
 	pi.on("session_start", async (_event, ctx) => {
 		if (binding.closed) return;
 		binding.active = true;
 		registry = ctx.modelRegistry;
+		unsubscribeServingCatalog();
+		const serving = registry.getProvider("cursor")?.streamSimple;
+		if (onCatalog && serving && serving !== stream) {
+			servingCatalog = catalogChannelFor(serving);
+			servingCatalog.listeners.add(onCatalog);
+			if (servingCatalog.published) onCatalog(servingCatalog.issue);
+		}
 		// The genuine extension context supplies composed config auth; startup
 		// selection already has the known baseline, without reading a default store.
 		await registry.refresh({ providers: ["cursor"], allowNetwork: false });
 	});
-	pi.on("session_shutdown", () => { binding.active = false; binding.closed = true; registry = undefined; });
-	return (models: Awaited<ReturnType<typeof discoverModels>>, onCatalog: (issue?: CursorModelFallbackIssue) => void) => {
+	pi.on("session_shutdown", () => {
+		binding.active = false; binding.closed = true; registry = undefined;
+		unsubscribeServingCatalog();
+	});
+	return (models: Awaited<ReturnType<typeof discoverModels>>, catalogListener: CatalogListener) => {
 		if (binding.closed) return;
+		onCatalog = catalogListener;
 		const toNative = (definitions: typeof models): Model<"cursor-sdk">[] =>
 			definitions.map(({ compat: _compat, ...definition }) => ({
 				...definition, provider: "cursor", api: "cursor-sdk", baseUrl: "https://cursor.com",
@@ -110,7 +156,10 @@ export function registerCursorProviderBinding(
 							current = toNative(definitions);
 							// Do not infer logout before native composed auth is reachable.
 							if (registry && !apiKey) clearModelListCache();
-							onCatalog(issue);
+							ownCatalog.published = true;
+							ownCatalog.issue = issue;
+							catalogListener(issue);
+							for (const listener of ownCatalog.listeners) listener(issue);
 						},
 					}),
 				});

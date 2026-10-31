@@ -2,7 +2,7 @@
 
 **Release preparation is not a publication receipt:** confirm the exact version, source and artifact integrity in npm/GitHub publication records before relying on availability. No issue is closed by preparation alone.
 
-## Unreleased
+## 0.5.5
 
 ### Fixed
 
@@ -15,6 +15,10 @@
 - Both the SDK's v4/v4-mini parsers and the bridge's v4 parsers now include the bounded-collection fix for [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5): array, set and map size bounds are checked before parsing elements. Zod 4.6.7 differs from 4.6.6 only in version metadata. The legacy `zod/v3` implementation is unchanged, and unconstrained collections still validate every element; this is not a universal resource cap or a claim of a demonstrated SDK exploit.
 
 - Stop `smoke:steering --self-test` from rebuilding `dist/` before its offline probe. The rebuild briefly removed `dist/` while the concurrent package test packed the checkout, producing an intermittent missing `dist/index.js` failure. Live steering runs still rebuild first (fitchmultz/.github#98).
+
+### Changed
+
+- Refresh the fallback catalog from the authenticated SDK 1.0.40 catalog-only observation on 2026-10-31: 49 models, adding DeepSeek V4.1 Flash 1017 (`deepseek-v41-flash-1017`) and recording `cyber=false` on Claude Opus 5.5 variants. All 48 prior model IDs and the 33 bundled checkpoint-derived entries remain; no Agent/model turn or Cloud run was performed.
 
 ### Verification and limits
 

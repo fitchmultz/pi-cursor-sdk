@@ -1,6 +1,6 @@
 import type { ModelListItem } from "@cursor/sdk";
 
-// Generated with @cursor/sdk@1.0.37 from 48 Cursor models.
+// Generated with @cursor/sdk@1.0.40 from 49 Cursor models.
 // Refresh with: npm run refresh:cursor-snapshots -- --write
 // Do not add secrets; this file stores public model metadata only.
 export const FALLBACK_MODEL_ITEMS = [
@@ -4797,6 +4797,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "context",
 						value: "300k"
 					},
@@ -4814,6 +4818,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "context",
 						value: "300k"
 					},
@@ -4830,6 +4838,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			},
 			{
 				params: [
+					{
+						id: "cyber",
+						value: "false"
+					},
 					{
 						id: "context",
 						value: "300k"
@@ -4848,6 +4860,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "context",
 						value: "300k"
 					},
@@ -4865,6 +4881,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "context",
 						value: "300k"
 					},
@@ -4882,6 +4902,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "context",
 						value: "300k"
 					},
@@ -4898,6 +4922,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			},
 			{
 				params: [
+					{
+						id: "cyber",
+						value: "false"
+					},
 					{
 						id: "context",
 						value: "300k"
@@ -4916,6 +4944,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "context",
 						value: "300k"
 					},
@@ -4933,6 +4965,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "context",
 						value: "300k"
 					},
@@ -4949,6 +4985,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			},
 			{
 				params: [
+					{
+						id: "cyber",
+						value: "false"
+					},
 					{
 						id: "context",
 						value: "300k"
@@ -4967,6 +5007,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "context",
 						value: "1m"
 					},
@@ -4984,6 +5028,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "context",
 						value: "1m"
 					},
@@ -5000,6 +5048,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			},
 			{
 				params: [
+					{
+						id: "cyber",
+						value: "false"
+					},
 					{
 						id: "context",
 						value: "1m"
@@ -5019,6 +5071,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "context",
 						value: "1m"
 					},
@@ -5036,6 +5092,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "context",
 						value: "1m"
 					},
@@ -5052,6 +5112,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			},
 			{
 				params: [
+					{
+						id: "cyber",
+						value: "false"
+					},
 					{
 						id: "context",
 						value: "1m"
@@ -5070,6 +5134,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "context",
 						value: "1m"
 					},
@@ -5087,6 +5155,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "cyber",
+						value: "false"
+					},
+					{
 						id: "context",
 						value: "1m"
 					},
@@ -5103,6 +5175,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			},
 			{
 				params: [
+					{
+						id: "cyber",
+						value: "false"
+					},
 					{
 						id: "context",
 						value: "1m"
@@ -5120,6 +5196,10 @@ export const FALLBACK_MODEL_ITEMS = [
 			},
 			{
 				params: [
+					{
+						id: "cyber",
+						value: "false"
+					},
 					{
 						id: "context",
 						value: "1m"
@@ -6261,6 +6341,86 @@ export const FALLBACK_MODEL_ITEMS = [
 					}
 				],
 				displayName: "Composer 2.5"
+			}
+		]
+	},
+	{
+		id: "deepseek-v41-flash-1017",
+		displayName: "DeepSeek V4.1 Flash 1017",
+		parameters: [
+			{
+				id: "reasoning_effort",
+				displayName: "Reasoning",
+				values: [
+					{
+						value: "none",
+						displayName: "None"
+					},
+					{
+						value: "low",
+						displayName: "Low"
+					},
+					{
+						value: "medium",
+						displayName: "Medium"
+					},
+					{
+						value: "high",
+						displayName: "High"
+					},
+					{
+						value: "max",
+						displayName: "Max"
+					}
+				]
+			}
+		],
+		variants: [
+			{
+				params: [
+					{
+						id: "reasoning_effort",
+						value: "none"
+					}
+				],
+				displayName: "DeepSeek V4.1 Flash 1017 None"
+			},
+			{
+				params: [
+					{
+						id: "reasoning_effort",
+						value: "low"
+					}
+				],
+				displayName: "DeepSeek V4.1 Flash 1017 Low"
+			},
+			{
+				params: [
+					{
+						id: "reasoning_effort",
+						value: "medium"
+					}
+				],
+				displayName: "DeepSeek V4.1 Flash 1017 Medium"
+			},
+			{
+				params: [
+					{
+						id: "reasoning_effort",
+						value: "high"
+					}
+				],
+				displayName: "DeepSeek V4.1 Flash 1017 High"
+			},
+			{
+				params: [
+					{
+						id: "reasoning_effort",
+						value: "max"
+					}
+				],
+				displayName: "DeepSeek V4.1 Flash 1017 Max",
+				isDefault: true
 			}
 		]
 	},

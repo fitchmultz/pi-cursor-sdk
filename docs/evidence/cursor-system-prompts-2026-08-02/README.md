@@ -220,7 +220,7 @@ This is why model self-report was not used as the source of truth for the exact 
 
 - Capture date: 2026-08-02
 - Runtime: local Cursor agents on macOS
-- Installed extension SDK: exact `@cursor/sdk@1.0.23`
+- Installed extension SDK: see [capture provenance](./capture-provenance.md)
 - Workspace: a new empty non-Git directory per model under `/tmp`
 - Ambient local settings: disabled with `--setting-sources none`
 - Inline MCP/custom tools: none
@@ -272,12 +272,12 @@ npm run refresh:cursor-snapshots -- --write \
 
 Result:
 
-- fetched 34 models with the repository's pinned `@cursor/sdk@1.0.23`;
+- fetched 34 models with the repository's pinned SDK; see [capture provenance](./capture-provenance.md);
 - added `claude-opus-5`, `gemini-3.6-flash`, and `kimi-k3` to the fallback snapshot;
 - removed `gpt-5.1-codex-max`, `gpt-5.1-codex-mini`, and `gpt-5.2-codex`;
 - normalized 30 locally collected checkpoint inputs to 20 current selectable keys, then emitted 28 total observed/fallback entries after collapsing equivalent fast aliases and removing stale or ambiguous model IDs.
 
-The npm registry's current `@cursor/sdk` release was 1.0.26. This capture deliberately targets 1.0.23 because that is the exact runtime this extension currently pins and validates. Raising the runtime dependency is a separate SDK-contract and platform-smoke change, not part of the catalog snapshot refresh.
+The SDK used for this capture and the registry version available at the time are recorded in [capture provenance](./capture-provenance.md). The catalog refresh did not change the extension's runtime dependency.
 
 ### Requested-model defaults in the refreshed catalog
 

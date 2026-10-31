@@ -8,7 +8,7 @@ Use Cursor models in [Pi](https://pi.dev)'s terminal UI. `pi-cursor-sdk` runs Cu
 
 ## Quick start
 
-Requirements: Node.js 24+, Pi 0.87.1+, and an API key for Cursor SDK. The package installs `@cursor/sdk` for you.
+Requirements: Node.js, Pi, and an API key for Cursor SDK. Check the [supported Node.js and Pi versions](docs/reference.md#requirements). The package installs `@cursor/sdk` for you.
 
 Use a user key from Cursor Dashboard → API Keys or a service-account key from Team settings. Team Admin keys do not work. Cursor Desktop and Agent CLI login do not supply the SDK key.
 
@@ -56,7 +56,7 @@ The footer shows status such as `cursor:local · fast:off`, with `plan` or `http
 
 Cursor controls file tools, shell commands, edits, and configured MCP servers. The local MCP bridge exposes active Pi extension tools as `pi__*` names. The bridge is on by default. Pi hides matching built-ins from the bridge by default.
 
-**Availability:** `PI_CURSOR_NATIVE_TOOLS` and `/cursor-abort` require **0.5.4 or later**, beginning with the implementation from [#372](https://github.com/fitchmultz/pi-cursor-sdk/pull/372). Source checkouts preparing 0.5.4 remain candidates until exact publication records exist; the version change alone is not a publication record. Verify the exact npm version and GitHub release before relying on its availability. Published **0.5.3 ignores this flag and does not provide the command**; do not rely on them for native-tool restriction or pending-run recovery there. Development version labels alone do not establish which controls are installed.
+**Availability:** Some older releases **ignore `PI_CURSOR_NATIVE_TOOLS` and do not provide `/cursor-abort`**. Check your installed version against the [version boundary](docs/cursor-tool-surfaces.md#the-three-surfaces) before relying on either control; a development version label alone does not prove availability.
 
 **Pi's `--no-tools`, `--tools`, and `--exclude-tools` do not disable Cursor tools or Cursor MCP servers.** For local ordinary turns on a supporting revision, opt in to `PI_CURSOR_NATIVE_TOOLS=0` to allow only MCP through the public SDK tool surface (including disabling native task/subagents). It leaves configured Cursor MCP available unless you also disable ambient setting sources. Cloud rejects this opt-out for both ordinary and selected-Cloud summary requests; only existing isolated LOCAL summary agents remain unaffected with `tools: []`.
 
@@ -67,7 +67,7 @@ A policy mismatch preserves the pending local run: restore its prior policy to f
 Local runs leave Cursor auto-review and sandboxing off by default. Read the [safety controls and hook limits](docs/reference.md#cursor-local-agent-config-and-safety-controls) before you depend on those controls or Cursor hooks.
 
 ```bash
-# Requires 0.5.4+ containing #372; verify publication/installation (0.5.3 ignores the flag).
+# Verify the installed version supports the native-tool opt-out and /cursor-abort.
 # MCP-only local agent; explicitly expose Pi builtins through the Pi execution path.
 PI_CURSOR_NATIVE_TOOLS=0 PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1 PI_CURSOR_SETTING_SOURCES=none pi --model cursor/grok-4.6
 
@@ -117,7 +117,7 @@ Run `/cursor-cloud list` to see agents recorded for your session branch. Read th
 | Models appear, but a run fails | Run `/login` with an API key for Cursor SDK. Run `/cursor-refresh-models`. |
 | First reply is slow | Check configured Cursor MCP servers. Read [settings and connection limits](docs/reference.md#first-cursor-message-is-slow-10-seconds). |
 | Streams fail behind a VPN or proxy | Run `/cursor-http on`. This changes the local SDK transport only. |
-| Fallback catalog remains with a saved key | Read the [startup refresh limit](docs/reference.md#model-catalog-cache) for official Pi 1.0.4 and 1.1.0. |
+| Fallback catalog remains with a saved key | Read the [startup refresh limit](docs/reference.md#model-catalog-cache) for affected Pi versions. |
 
 See [Troubleshooting](docs/reference.md#troubleshooting) for other problems. [Report a bug](https://github.com/fitchmultz/pi-cursor-sdk/issues) with Pi/extension versions, model, flags, exact prompt, and a redacted session.
 

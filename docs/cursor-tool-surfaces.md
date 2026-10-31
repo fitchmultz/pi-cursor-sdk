@@ -4,7 +4,7 @@ pi-cursor-sdk runs Cursor models through the local `@cursor/sdk` agent runtime b
 
 ## The three surfaces
 
-**Version boundary:** the MCP-only opt-out (`PI_CURSOR_NATIVE_TOOLS`) and `/cursor-abort` require **0.5.4 or later**, including [#372](https://github.com/fitchmultz/pi-cursor-sdk/pull/372). Source checkouts preparing 0.5.4 remain candidates until exact npm/GitHub publication records exist; verify the installed artifact separately. Published **0.5.3 ignores the flag and has no such command**. Do not treat these examples as enforcement on an older installed package, or infer feature availability from a development version label alone.
+**Version boundary:** the MCP-only opt-out (`PI_CURSOR_NATIVE_TOOLS`) and `/cursor-abort` require **0.5.4 or later**, including [#372](https://github.com/fitchmultz/pi-cursor-sdk/pull/372). Published **0.5.3 ignores the flag and has no such command**. Verify the installed version before relying on these controls; a development version label alone does not prove availability.
 
 | Surface | Who owns it | Callable by Cursor? | What pi shows |
 | --- | --- | --- | --- |
@@ -18,14 +18,14 @@ Pi CLI tool toggles apply at the pi tool-registry boundary. `--no-tools`, `--too
 
 ## Opt-in MCP-only local turns
 
-This section requires the 0.5.4+ implementation and publication/installation check described above; it is not available in published npm 0.5.3.
+This section requires the supporting installed version described above; the controls are not available in published npm 0.5.3.
 
 `PI_CURSOR_NATIVE_TOOLS=0` restricts **ordinary LOCAL** agents through the public SDK `AgentOptions.tools: ["mcp"]`. All other main-agent tools are omitted, including native `task`/subagents (whose own curated toolsets do not inherit a main-loop restriction). Unset, blank, unrecognized, or enabled values preserve the SDK's default toolset. The canonical boolean parser accepts `0`, `false`, `off`, `none`, `no`, and `disabled` as off, and `1`, `true`, `on`, `yes`, and `enabled` as on, case-insensitively with surrounding whitespace ignored.
 
 To send file/shell work through Pi's normal execution and `tool_call` hook boundary instead of native Cursor tools:
 
 ```bash
-# Requires 0.5.4+ containing #372; verify publication/installation (0.5.3 ignores the flag).
+# Verify the installed version supports these controls (0.5.3 ignores the flag).
 PI_CURSOR_NATIVE_TOOLS=0 PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1 PI_CURSOR_SETTING_SOURCES=none pi --model cursor/grok-4.6
 ```
 

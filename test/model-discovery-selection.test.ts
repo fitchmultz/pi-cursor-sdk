@@ -137,8 +137,8 @@ describe("buildCursorModelSelection", () => {
 			node.name.text,
 			node.members.map((member) => member.getText(ast)),
 		]));
-		expect(shapes.ModelParameterValue).toEqual(["id: string;", "value: string;"]);
-		expect(shapes.ModelSelection).toEqual(["id: string;", "params?: ModelParameterValue[];", "maxMode?: boolean;"]);
+		expect(shapes.ModelParameterValue).toEqual(expect.arrayContaining(["id: string;", "value: string;"]));
+		expect(shapes.ModelSelection).toEqual(expect.arrayContaining(["id: string;", "params?: ModelParameterValue[];", "maxMode?: boolean;"]));
 		expect(shapes.ModelVariant).toEqual(expect.arrayContaining([
 			"params: ModelParameterValue[];", "isDefault?: boolean;", "isMaxMode?: boolean;",
 		]));

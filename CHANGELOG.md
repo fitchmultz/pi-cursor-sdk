@@ -6,6 +6,9 @@
 
 ### Fixed
 
+- Load `@cursor/sdk` on first use instead of at extension load, so Pi starts without evaluating it. `cursor-sdk-runtime` statically imports a Pi host peer, which compiled-Bun Pi can't load natively, so Pi's loader transpiles the module and resolves its `import("@cursor/sdk")` itself; the static SDK import from #228 is no longer needed. Checked with a fake key on compiled-Bun Pi 1.4.0 and npm Pi 1.4.0: both reach Cursor's `Invalid User API Key`.
+- Fill the model-list cache in RPC mode. The `session_start` local refresh superseded the network refresh Pi starts just before it, and Pi drops a superseded catalog unsaved, so the cache never filled and every Pi start loaded the SDK and fetched the catalog. `session_start` now requests the refresh again after its local one, with network allowed only as Pi's own setting allows.
+
 - Stop a failed LOCAL Cursor run's shell commands and other native tool processes. SDK 1.0.40 leaves them running after a run fails, for example when it gives up resuming a reset connection, and `Run.cancel()` stops them only while the run is still running. The provider now cancels the run while the SDK records the failure, which the SDK does before it marks the run failed, and still reports the SDK's failure message as a Pi error. A separate SDK error code, when present, is not shown after this cancellation. Explicit Pi aborts and Cloud runs are unchanged (#384).
 
 - Upgrade the exact unbundled Cursor SDK and its optional platform packages from 1.0.37 to 1.0.40 for LOCAL Claude-format hook compatibility: the SDK now enables translation of nested `hookSpecificOutput` denial/rewrite output into the fields its tool adapters consume. It also improves Windows command-hook UTF-8 input and native exit-code propagation. This is not a Pi pre-execution hook, universal policy guarantee, or resolution of the original rtk report (#173).

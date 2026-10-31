@@ -93,6 +93,25 @@ it("publishes the authenticated startup cache before warning about the initial f
 	} finally { await pi.runSessionShutdown(); }
 });
 
+it("caches the catalog when session_start supersedes Pi's startup network refresh (RPC mode)", async () => {
+	const credentials = new InMemoryCredentialStore();
+	await credentials.modify("cursor", async () => ({ type: "api_key", key: "synthetic-rpc" }));
+	const { registry, pi, notify } = await fixture(undefined, false, credentials);
+	try {
+		let release!: () => void;
+		const gate = new Promise<void>(resolve => { release = resolve; });
+		list.mockImplementationOnce(async () => { await gate; return [item("superseded")]; });
+		list.mockResolvedValueOnce([item("live")]);
+		const startup = registry.refresh({ providers: ["cursor"] });
+		await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+		await pi.runSessionStart({ modelRegistry: registry, hasUI: true, ui: { notify } });
+		release();
+		await startup;
+		await vi.waitFor(() => expect(existsSync(join(root, "cursor-sdk-model-list.json"))).toBe(true));
+		expect(readFileSync(join(root, "cursor-sdk-model-list.json"), "utf8")).toContain('"live"');
+	} finally { await pi.runSessionShutdown(); }
+});
+
 it("default no-auth fallback remains available and unresolved stored placeholders do not fake opt-in auth", async () => {
 	vi.stubEnv("PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT", undefined);
 	const { runtime, pi, credentials, registry } = await fixture();

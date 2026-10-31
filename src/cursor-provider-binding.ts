@@ -75,6 +75,11 @@ export function registerCursorProviderBinding(
 		// The genuine extension context supplies composed config auth; startup
 		// selection already has the known baseline, without reading a default store.
 		await registry.refresh({ providers: ["cursor"], allowNetwork: false });
+		// The local refresh above supersedes any network refresh Pi started before
+		// session_start (RPC mode does), and Pi drops a superseded catalog unsaved, so
+		// without this the cache never fills and every start fetches the catalog again.
+		// Pi's own setting decides whether this one may use the network.
+		void registry.refresh({ providers: ["cursor"] }).catch(() => {});
 	});
 	pi.on("session_shutdown", () => { binding.active = false; binding.closed = true; registry = undefined; });
 	return (models: Awaited<ReturnType<typeof discoverModels>>, onCatalog: (issue?: CursorModelFallbackIssue) => void) => {

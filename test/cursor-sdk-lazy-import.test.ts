@@ -158,9 +158,9 @@ function isCursorSdkSpecifier(specifier: string): boolean {
 	return specifier === "@cursor/sdk" || specifier.startsWith("@cursor/sdk/");
 }
 
-function isAllowedCursorSdkStaticImport(relativePath: string, specifier: string): boolean {
-	// Compiled Bun Pi omits bare deps reached only via runtime dynamic import (#228).
-	return relativePath.endsWith("src/cursor-sdk-runtime.ts") && specifier === "@cursor/sdk";
+function isAllowedCursorSdkStaticImport(_relativePath: string, _specifier: string): boolean {
+	// Evaluating the SDK takes about a second, so no module may load it at extension load.
+	return false;
 }
 
 function isAllowedBridgeRunStaticImport(relativePath: string): boolean {
@@ -168,7 +168,8 @@ function isAllowedBridgeRunStaticImport(relativePath: string): boolean {
 }
 
 function isAllowedCursorSdkDynamicImport(relativePath: string, specifier: string): boolean {
-	return relativePath.endsWith("src/cursor-session-store.ts") && specifier === "@cursor/sdk/sqlite";
+	return (relativePath.endsWith("src/cursor-session-store.ts") && specifier === "@cursor/sdk/sqlite")
+		|| (relativePath.endsWith("src/cursor-sdk-runtime.ts") && specifier === "@cursor/sdk");
 }
 
 function isMcpRuntimeSpecifier(specifier: string): boolean {
@@ -527,25 +528,35 @@ describe("Cursor SDK lazy runtime imports", () => {
 		expect(collectRuntimeSdkEdges()).toEqual([]);
 	});
 
-	it("requires static @cursor/sdk and bridge-run imports for compiled Bun Pi packaging (#228)", () => {
-		for (const [file, specifier] of [
-			["src/cursor-sdk-runtime.ts", "@cursor/sdk"],
-			["src/cursor-pi-tool-bridge-server.ts", "./cursor-pi-tool-bridge-run.js"],
-		] as const) {
-			const source = sourceFile(join(process.cwd(), file));
-			expect(source.statements.filter(ts.isImportDeclaration).some(node =>
-				moduleText(node) === specifier && importHasRuntimeBindings(node, false)), file).toBe(true);
-			const dynamicImports: string[] = [];
-			function visit(node: ts.Node): void {
+	it("keeps bridge-run static and @cursor/sdk lazy but jiti-transpiled for compiled Bun Pi (#228)", () => {
+		const staticImports = (file: string) => sourceFile(join(process.cwd(), file)).statements
+			.filter(ts.isImportDeclaration)
+			.filter(node => importHasRuntimeBindings(node, false))
+			.map(moduleText);
+		const dynamicImports = (file: string) => {
+			const found: string[] = [];
+			const visit = (node: ts.Node): void => {
 				if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
 					const argument = node.arguments[0];
-					if (argument && ts.isStringLiteralLike(argument)) dynamicImports.push(argument.text);
+					if (argument && ts.isStringLiteralLike(argument)) found.push(argument.text);
 				}
 				ts.forEachChild(node, visit);
-			}
-			visit(source);
-			expect(dynamicImports, file).not.toContain(specifier);
-		}
+			};
+			visit(sourceFile(join(process.cwd(), file)));
+			return found;
+		};
+
+		const bridgeServer = "src/cursor-pi-tool-bridge-server.ts";
+		expect(staticImports(bridgeServer)).toContain("./cursor-pi-tool-bridge-run.js");
+		expect(dynamicImports(bridgeServer)).not.toContain("./cursor-pi-tool-bridge-run.js");
+
+		// Compiled Bun resolves bare specifiers only in modules jiti transpiles. A static
+		// host-peer import fails native loading there, so jiti transpiles the runtime and
+		// rewrites its import("@cursor/sdk").
+		const runtime = "src/cursor-sdk-runtime.ts";
+		expect(staticImports(runtime).some(specifier => specifier !== undefined && isPiHostPeer(specifier))).toBe(true);
+		expect(staticImports(runtime)).not.toContain("@cursor/sdk");
+		expect(dynamicImports(runtime)).toContain("@cursor/sdk");
 	});
 
 	it("rejects static SDK subpaths and template SDK imports outside the runtime loaders", () => {

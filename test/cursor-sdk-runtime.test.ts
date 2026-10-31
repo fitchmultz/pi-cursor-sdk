@@ -17,7 +17,7 @@ it("initializes real native Bash parsing before SDK import when Pi lives outside
 	// Neither the launcher nor the Node executable can reach this extension's node_modules.
 	process.argv[1] = join(dirname(process.execPath), "pi-sibling", "cli.js");
 	expect(loadInstalledCursorParsers(sdkEntry)[0].available).toBe(false);
-	// Re-import so vendor-env side effects run before the static @cursor/sdk import (#228).
+	// Re-import so vendor-env side effects run before @cursor/sdk loads.
 	vi.resetModules();
 	const { loadCursorSdk } = await import("../src/cursor-sdk-runtime.js");
 	await loadCursorSdk();

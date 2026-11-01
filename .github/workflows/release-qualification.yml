@@ -41,7 +41,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: fitchmultz/.github
-          ref: 298709b018a4d99fe4eb4905647410ffdf193518 # reviewed Cursor qualification
+          ref: b90ae50ca9d9157b84b6efd0d311e96fbe488f6d # reviewed Cursor qualification
           path: automation
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -63,7 +63,7 @@ jobs:
         run: |
           PM="$(node -p 'require("./package.json").packageManager ?? require("./automation/package.json").packageManager')"
           npm exec --yes --package="$PM" -- npm install --global "$PM"
-          npm install --global --no-audit --no-fund pnpm@latest bun@latest
+          npm install --global --no-audit --no-fund --allow-scripts=bun,pnpm pnpm@latest bun@latest
           npm --version
           pnpm --version
           bun --version

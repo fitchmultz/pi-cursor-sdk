@@ -16,9 +16,9 @@ jobs:
   resolve:
     permissions:
       contents: read
-    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@298709b018a4d99fe4eb4905647410ffdf193518 # reviewed Cursor qualification
+    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@b90ae50ca9d9157b84b6efd0d311e96fbe488f6d # reviewed Cursor qualification
     with:
-      automation-ref: 298709b018a4d99fe4eb4905647410ffdf193518 # reviewed Cursor qualification
+      automation-ref: b90ae50ca9d9157b84b6efd0d311e96fbe488f6d # reviewed Cursor qualification
       official-version: ${{ inputs.official-version }}
       fork-ref: ${{ inputs.fork-ref }}
 
@@ -49,7 +49,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: fitchmultz/.github
-          ref: 298709b018a4d99fe4eb4905647410ffdf193518 # reviewed Cursor qualification
+          ref: b90ae50ca9d9157b84b6efd0d311e96fbe488f6d # reviewed Cursor qualification
           path: automation
           persist-credentials: false
       - run: npm ci --ignore-scripts --no-audit --no-fund
@@ -102,7 +102,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: fitchmultz/.github
-          ref: 298709b018a4d99fe4eb4905647410ffdf193518 # reviewed Cursor qualification
+          ref: b90ae50ca9d9157b84b6efd0d311e96fbe488f6d # reviewed Cursor qualification
           path: automation
           persist-credentials: false
       - run: npm ci --no-audit --no-fund

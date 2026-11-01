@@ -33,9 +33,9 @@ jobs:
       (github.event_name != 'check_run' ||
         github.event.check_run.app.slug == 'pi-durable' || github.event.check_run.app.slug == 'cursor') &&
       (github.event_name != 'issue_comment' || github.event.issue.pull_request != null)
-    uses: fitchmultz/.github/.github/workflows/npm-release-bump.yml@298709b018a4d99fe4eb4905647410ffdf193518 # reviewed Cursor qualification
+    uses: fitchmultz/.github/.github/workflows/npm-release-bump.yml@b90ae50ca9d9157b84b6efd0d311e96fbe488f6d # reviewed Cursor qualification
     with:
-      automation-ref: 298709b018a4d99fe4eb4905647410ffdf193518 # reviewed Cursor qualification
+      automation-ref: b90ae50ca9d9157b84b6efd0d311e96fbe488f6d # reviewed Cursor qualification
       app-client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
       package-qualified: true
       version-reviewed: true

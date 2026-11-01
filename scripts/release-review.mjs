@@ -12,11 +12,10 @@ import {
 	assertCommitReviewUnchanged, assertReleaseReviewUnchanged, captureCommitReview, captureReleaseReview,
 	catalogIdentity, repositoryRoot, requireCleanCheckout, requireCleanWorkingFiles, verifySourceBaseline,
 } from "./lib/release-review-evidence.mjs";
-import { hash } from "./lib/release-review-io.mjs";
+import { hash, writeJson } from "./lib/release-review-io.mjs";
 import { assertExtractedPackages } from "./lib/release-review-package.mjs";
 
 const digest = (value) => createHash("sha256").update(value).digest("hex");
-const writeJson = (path, value) => writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 
 function safeText(text) {
 	return [process.env.ZAI_API_KEY, process.env.CURSOR_API_KEY, process.env.GH_TOKEN]

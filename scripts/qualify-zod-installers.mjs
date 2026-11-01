@@ -1,15 +1,13 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { isDeepStrictEqual, parseArgs } from "node:util";
 import { spawnSync } from "node:child_process";
+import { hash, writeJson } from "./lib/release-review-io.mjs";
 
 const json = (path) => JSON.parse(readFileSync(path, "utf8"));
-const hash = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
-const writeJson = (path, value) => writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 
 function run(command, args, { cwd, env, log, allow = [0] }) {
 	const fd = openSync(log, "w");

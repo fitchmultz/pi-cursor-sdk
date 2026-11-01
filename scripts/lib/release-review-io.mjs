@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { closeSync, openSync, readFileSync } from "node:fs";
+import { closeSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import spawn from "cross-spawn";
 
 export function run(command, args, { cwd, env, output, allowed = [0] } = {}) {
@@ -19,4 +19,8 @@ export function run(command, args, { cwd, env, output, allowed = [0] } = {}) {
 
 export function hash(path, algorithm = "sha256", encoding = "hex") {
 	return createHash(algorithm).update(readFileSync(path)).digest(encoding);
+}
+
+export function writeJson(path, value) {
+	writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 }

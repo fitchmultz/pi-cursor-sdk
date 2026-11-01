@@ -53,6 +53,8 @@ jobs:
           path: automation
           persist-credentials: false
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify release review contracts
+        run: node --test test/release-review*.test.mjs
       - name: Qualify both frozen latest host graphs and installed forms
         env:
           # The shared host helpers read official installer assets through the GitHub API.
@@ -104,6 +106,8 @@ jobs:
           path: automation
           persist-credentials: false
       - run: npm ci --no-audit --no-fund
+      - name: Verify native release review contracts
+        run: node --test test/release-review.test.mjs test/release-review-npm.test.mjs test/release-review-github.test.mjs
       - name: Select the frozen latest official graph
         shell: bash
         env:

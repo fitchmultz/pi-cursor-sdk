@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, delimiter, join } from "node:path";
+import { basename, delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { captureCommitReview } from "../scripts/lib/release-review-evidence.mjs";
 import { assertExtractedPackages, comparePackages } from "../scripts/lib/release-review-package.mjs";
 
 const script = fileURLToPath(new URL("../scripts/release-review.mjs", import.meta.url));
+const piModule = import.meta.resolve("@earendil-works/pi-coding-agent");
+const zaiModule = import.meta.resolve("@earendil-works/pi-ai/providers/zai");
 
 function command(cwd, executable, args) {
 	const result = spawnSync(executable, args, { cwd, encoding: "utf8" });
@@ -34,18 +37,51 @@ function fixture(t, behavior = "pass") {
 	const base = command(repo, "git", ["rev-parse", "HEAD"]);
 	const fake = join(bin, process.platform === "win32" ? "pi.cjs" : "pi");
 	writeFileSync(fake, `#!/usr/bin/env node
-const fs = require("node:fs"), cp = require("node:child_process");
+const fs = require("node:fs"), cp = require("node:child_process"), path = require("node:path");
 if (process.argv.includes("--version")) { console.log("1.4.0"); process.exit(0); }
+(async () => {
+const { createReadTool } = await import(${JSON.stringify(piModule)});
+const { zaiProvider } = await import(${JSON.stringify(zaiModule)});
+const model = zaiProvider().getModels().find((entry) => entry.id === process.argv[process.argv.indexOf("--model") + 1]);
+const reader = createReadTool(process.cwd());
 if (process.env.GH_TOKEN || process.env.CURSOR_API_KEY || process.env.RELEASE_GH_TOKEN || process.env.UNRELATED_SECRET) process.exit(3);
 const prompt = fs.readFileSync(process.argv.at(-1).slice(1), "utf8");
 const input = JSON.parse(fs.readFileSync(/Read ((?:[A-Za-z]:)?[\\\\/][^\\r\\n]+?[\\\\/]review-input\\.json) for immutable identities/.exec(prompt)[1], "utf8"));
 const kind = ${JSON.stringify(behavior)};
+if (kind === "automation-context" && (!input.automation?.versioner || !prompt.includes(input.automation.versioner))) process.exit(4);
 if (kind === "interrupted") { process.kill(process.ppid, "SIGTERM"); process.exit(0); }
 const inputPath = /Read ((?:[A-Za-z]:)?[\\\\/][^\\r\\n]+?[\\\\/]review-input\\.json) for immutable identities/.exec(prompt)[1];
-for (const [i, path] of [inputPath, input.patch, input.commits, ...(kind === "unread" ? [] : input.sourceFiles)].entries()) {
-  fs.readFileSync(path);
-  console.log(JSON.stringify({type:"tool_execution_start",toolCallId:String(i),toolName:"read",args:{path}}));
-  console.log(JSON.stringify({type:"tool_execution_end",toolCallId:String(i),toolName:"read",isError:false}));
+let call = 0;
+async function read(path, offset, limit) {
+  const id = String(call++);
+  console.log(JSON.stringify({type:"tool_execution_start",toolCallId:id,toolName:"read",args:{path,offset,limit}}));
+  const result = await reader.execute(id, { path, offset, limit }, undefined, undefined, { cwd: process.cwd(), model });
+  console.log(JSON.stringify({type:"tool_execution_end",toolCallId:id,toolName:"read",isError:false,result}));
+  return result;
+}
+async function readAll(path) {
+  let offset = 1;
+  while (true) {
+    const result = await read(path, offset);
+    const truncation = result.details?.truncation;
+    if (!truncation?.truncated || !truncation.outputLines) return;
+    offset += truncation.outputLines;
+  }
+}
+for (const file of [inputPath, input.patch, input.commits, ...(kind === "unread" ? [] : input.sourceFiles)]) {
+  const target = fs.existsSync(file) ? file : path.join(input.sourceBase, file);
+  if (file === "candidate.txt" && kind === "partial-file") await read(target, 1, 1);
+  else if (file === "candidate.txt" && kind === "truncated-file") await read(target);
+  else if (file === "candidate.txt" && kind === "paginated-file") { await read(target, 1, 1); await read(target, 2); }
+  else await readAll(target);
+}
+if (input.mode === "release") {
+  for (const file of input.artifactFiles) {
+    const old = path.join(input.oldDir, file), current = path.join(input.newDir, file);
+    await readAll(kind === "old-artifact" && fs.existsSync(old) ? old : fs.existsSync(current) ? current : old);
+  }
+  for (const file of [input.artifactPatch, input.notes, input.context, input.catalogReceipt,
+    input.catalogOutput, input.npmReceipt, input.previousRelease]) await readAll(file);
 }
 const report = {
   scopeId: input.scopeId, completed: kind !== "incomplete",
@@ -62,8 +98,9 @@ const fence = String.fromCharCode(96).repeat(3);
 const output = ["fenced-finding","polish","preface"].includes(kind)
   ? (kind === "preface" ? "Inspected the diff and surrounding code.\\n\\n" : "") + fence + "json\\n" + JSON.stringify(report) + "\\n" + fence
   : JSON.stringify(report);
-console.log(JSON.stringify({type:"message_end",message:{role:"assistant",provider:"zai",model:"glm-5.3",stopReason:kind === "error" ? "error" : "stop",content:[{type:"text",text:output}]}}));
+console.log(JSON.stringify({type:"message_end",message:{role:"assistant",provider:"zai",model:model.id,stopReason:kind === "error" ? "error" : "stop",content:[{type:"text",text:output}]}}));
 if (kind !== "unsettled") console.log(JSON.stringify({type:"agent_settled",aborted:kind === "aborted"}));
+})().catch((error) => { console.error(error); process.exitCode = 1; });
 `);
 	chmodSync(fake, 0o755);
 	if (process.platform === "win32") {
@@ -72,6 +109,8 @@ if (kind !== "unsettled") console.log(JSON.stringify({type:"agent_settled",abort
 	const receipt = join(directory, "review.json");
 	const env = { ...process.env, PATH: [bin, process.env.PATH].join(delimiter), PI_RELEASE_REVIEW_SKILL: join(skill, "SKILL.md"),
 		ZAI_API_KEY: "model-key-for-test", UNRELATED_SECRET: "not-for-the-model" };
+	delete env.PI_RELEASE_REVIEW_MODEL;
+	delete env.PI_RELEASE_REVIEW_AUTOMATION_VERSIONER;
 	for (const name of ["GH_TOKEN", "GITHUB_TOKEN", "RELEASE_GH_TOKEN", "RELEASE_APP_PRIVATE_KEY", "CURSOR_API_KEY",
 		"NODE_AUTH_TOKEN", "NPM_TOKEN", "ACTIONS_ID_TOKEN_REQUEST_TOKEN"]) delete env[name];
 	return { repo, base, receipt, env, run: (...args) => spawnSync(process.execPath, [script, ...args, "--receipt", receipt],
@@ -96,6 +135,74 @@ test("a settled zero-finding review records the exact staged tree with an isolat
 	assert.deepEqual(receipt.scope.sourceLineCounts, [{ path: "candidate.txt", before: 1, after: 1 }]);
 	assert.deepEqual(receipt.readEvidence, { successfulReads: 4, sourceFiles: 1, artifactFiles: 0 });
 	assert.ok(readFileSync(`${f.receipt}.events.jsonl`, "utf8").includes('"agent_settled"'));
+});
+
+test("a deleted source file must be read completely from the recorded base", (t) => {
+	for (const behavior of ["pass", "unread"]) {
+		const f = fixture(t, behavior);
+		command(f.repo, "git", ["rm", "candidate.txt"]);
+		const result = f.run("pre-commit");
+		if (behavior === "pass") {
+			assert.equal(result.status, 0, result.stderr);
+			const receipt = JSON.parse(readFileSync(f.receipt, "utf8"));
+			assert.deepEqual(receipt.scope.sourceLineCounts, [{ path: "candidate.txt", before: 1, after: null }]);
+		} else {
+			assert.equal(result.status, 1, result.stdout);
+			assert.match(result.stderr, /No successful read recorded for changed source candidate.txt/);
+		}
+	}
+});
+
+for (const behavior of ["partial-file", "truncated-file", "paginated-file"]) {
+	test(`pre-commit ${behavior === "paginated-file" ? "accepts complete" : "rejects incomplete"} changed-file reads`, (t) => {
+		const f = fixture(t, behavior);
+		const content = behavior === "truncated-file" ? `${Array.from({ length: 2001 }, (_, i) => `line ${i + 1}`).join("\n")}\n`
+			: "first\nsecond\nthird\n";
+		writeFileSync(join(f.repo, "candidate.txt"), content);
+		command(f.repo, "git", ["add", "candidate.txt"]);
+		const result = f.run("pre-commit");
+		if (behavior === "paginated-file") assert.equal(result.status, 0, result.stderr);
+		else {
+			assert.equal(result.status, 1, result.stdout);
+			assert.match(result.stderr, /Incomplete read of changed source candidate.txt/);
+		}
+	});
+}
+
+for (const model of [undefined, "glm-5.3"]) {
+	test(`pre-commit ${model ? "rejects an image omitted from" : "uses vision for"} the review`, (t) => {
+		const f = fixture(t);
+		if (model) f.env.PI_RELEASE_REVIEW_MODEL = model;
+		copyFileSync(fileURLToPath(new URL("../.github/readme/cursor-in-pi.png", import.meta.url)), join(f.repo, "cursor-in-pi.png"));
+		command(f.repo, "git", ["add", "cursor-in-pi.png"]);
+		const result = f.run("pre-commit");
+		if (model) {
+			assert.equal(result.status, 1, result.stdout);
+			assert.match(result.stderr, /Image.*not available to the reviewer/);
+		} else {
+			assert.equal(result.status, 0, result.stderr);
+			const receipt = JSON.parse(readFileSync(f.receipt, "utf8"));
+			assert.equal(receipt.model, "glm-5.3-flash");
+			assert.equal(receipt.readEvidence.sourceFiles, 1);
+		}
+	});
+}
+
+test("the review receives and records the actual versioner used for the automatic update", (t) => {
+	const f = fixture(t, "automation-context");
+	const versioner = join(f.repo, "automation.mjs");
+	const contents = "export const versioner = true;\n";
+	writeFileSync(versioner, contents);
+	f.env.PI_RELEASE_REVIEW_AUTOMATION_VERSIONER = versioner;
+	stageChange(f.repo);
+	const result = f.run("pre-commit");
+	assert.equal(result.status, 0, result.stderr);
+	const receipt = JSON.parse(readFileSync(f.receipt, "utf8"));
+	assert.deepEqual(receipt.scope.automation, {
+		versioner: join(`${basename(f.receipt)}.inputs`, basename(versioner)),
+		sha256: createHash("sha256").update(contents).digest("hex"),
+	});
+	assert.equal(readFileSync(join(dirname(f.receipt), receipt.scope.automation.versioner), "utf8"), contents);
 });
 
 test("review refuses a GitHub credential in the launching process", (t) => {
@@ -254,4 +361,59 @@ test("package comparison records added, modified, and removed artifact paths", (
 	const changed = join(directory, "changed");
 	mkdirSync(changed);
 	assert.throws(() => assertExtractedPackages(directory, scope, changed), /git .*diff.* failed: 1/);
+});
+
+test("release review accepts a complete read of the previous copy of a modified artifact", (t) => {
+	const f = fixture(t, "old-artifact");
+	const directory = dirname(f.receipt), evidence = join(directory, "release-evidence");
+	mkdirSync(evidence);
+	command(f.repo, "git", ["tag", "v1.0.0", f.base]);
+	mkdirSync(join(f.repo, "src"));
+	mkdirSync(join(f.repo, "scripts"));
+	writeFileSync(join(f.repo, "src/cursor-fallback-models.generated.ts"), "catalog\n");
+	writeFileSync(join(f.repo, "scripts/refresh-cursor-model-snapshots.mjs"), "generator\n");
+	writeFileSync(join(f.repo, "candidate.txt"), "candidate\n");
+	command(f.repo, "git", ["add", "."]);
+	command(f.repo, "git", ["commit", "--quiet", "-m", "candidate"]);
+	const head = command(f.repo, "git", ["rev-parse", "HEAD"]);
+	const source = captureCommitReview(f.repo, "pre-push", f.base, evidence);
+	const oldPackage = join(directory, "old"), newPackage = join(directory, "new");
+	mkdirSync(join(oldPackage, "package"), { recursive: true });
+	mkdirSync(join(newPackage, "package"), { recursive: true });
+	writeFileSync(join(oldPackage, "package/changed.txt"), "old artifact\n");
+	writeFileSync(join(newPackage, "package/changed.txt"), "new artifact\n");
+	const previousTarball = join(directory, "old.tgz"), tarball = join(directory, "new.tgz");
+	command(directory, "tar", ["-czf", previousTarball, "-C", oldPackage, "package"]);
+	command(directory, "tar", ["-czf", tarball, "-C", newPackage, "package"]);
+	const packages = comparePackages(f.repo, previousTarball, tarball, evidence);
+	const file = (name) => {
+		const path = join(directory, name);
+		writeFileSync(path, `${name}\n`);
+		return path;
+	};
+	const hash = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
+	const previousRelease = file("release.json"), npmReceipt = file("npm.json"), candidateManifest = file("candidate.json");
+	const catalogReceipt = file("catalog.json"), catalogOutput = file("catalog.log"), notes = file("notes.md"), context = file("context.json");
+	f.env.GITHUB_RUN_ID = "123";
+	f.env.GITHUB_RUN_ATTEMPT = "1";
+	const catalog = {
+		source: head,
+		catalogSha256: hash(join(f.repo, "src/cursor-fallback-models.generated.ts")),
+		generatorSha256: hash(join(f.repo, "scripts/refresh-cursor-model-snapshots.mjs")),
+		runId: f.env.GITHUB_RUN_ID, runAttempt: f.env.GITHUB_RUN_ATTEMPT,
+		status: "passed", outputSha256: hash(catalogOutput),
+	};
+	const scope = {
+		...source, ...packages, mode: "release", baselineTag: "v1.0.0", releaseSource: head,
+		previousTarball, previousTarballSha256: hash(previousTarball), tarball, candidateSha256: hash(tarball),
+		previousRelease, previousReleaseSha256: hash(previousRelease), npmReceipt, npmReceiptSha256: hash(npmReceipt),
+		candidateManifest, candidateManifestSha256: hash(candidateManifest),
+		catalogReceipt, catalogReceiptSha256: hash(catalogReceipt), catalogOutput, catalog,
+		runId: f.env.GITHUB_RUN_ID, runAttempt: f.env.GITHUB_RUN_ATTEMPT,
+		notes, notesSha256: hash(notes), context, contextSha256: hash(context),
+	};
+	writeFileSync(join(evidence, "scope.json"), JSON.stringify(scope));
+	const result = f.run("release", "--source", head, "--release-source", head, "--evidence", evidence);
+	assert.equal(result.status, 0, result.stderr);
+	assert.equal(JSON.parse(readFileSync(f.receipt, "utf8")).status, "passed");
 });

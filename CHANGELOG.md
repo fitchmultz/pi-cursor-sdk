@@ -7,7 +7,11 @@
 <!-- npm-release:unreleased:start -->
 <!-- npm-release:unreleased:end -->
 
-- Merge pull request #397 from fitchmultz/fix/npm12-manager-scripts ([d82e5a3](https://github.com/fitchmultz/pi-cursor-sdk/commit/d82e5a391285c88079fc3e90983d985bae77af7c))
+- Reconcile queued version source commit [d82e5a3](https://github.com/fitchmultz/pi-cursor-sdk/commit/d82e5a391285c88079fc3e90983d985bae77af7c) (`Merge pull request #397 from fitchmultz/fix/npm12-manager-scripts`), which is already an ancestor of `v0.5.6` (`4dc13ea`).
+
+### Changed
+
+- Version-only metadata release (`package.json`, `package-lock.json`, and `CHANGELOG.md`). All functional and workflow changes from #397 already shipped in `0.5.6`; `v0.5.6...v0.5.7` contains no runtime, build, or dependency changes.
 
 **Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.6...v0.5.7
 

@@ -2,6 +2,15 @@
 
 **Release preparation is not a publication receipt:** confirm the exact version, source and artifact integrity in npm/GitHub publication records before relying on availability. No issue is closed by preparation alone.
 
+## 0.5.7 - 2026-11-01
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Merge pull request #397 from fitchmultz/fix/npm12-manager-scripts ([d82e5a3](https://github.com/fitchmultz/pi-cursor-sdk/commit/d82e5a391285c88079fc3e90983d985bae77af7c))
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.6...v0.5.7
+
 ## 0.5.6 - 2026-11-01
 
 <!-- npm-release:unreleased:start -->

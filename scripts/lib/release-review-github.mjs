@@ -129,7 +129,7 @@ export async function collectReleaseContext({ repository, commits, token, prospe
 		for (const issue of closingIssues) issues.set(`${issue.repository.nameWithOwner}#${issue.number}`, issue);
 		reviewedPulls.push({
 			number: pull.number, title: pull.title, body: pull.body, url: pull.html_url,
-			mergedAt: pull.merged_at, mergeCommit: pull.merge_commit_sha,
+			mergedAt: pull.merged_at, mergeCommit: pull.merged_at ? pull.merge_commit_sha : null,
 			...(pull.merged_at ? {} : { state: pull.state, head: pull.head.sha }),
 			closingIssues: closingIssues.map((issue) => issue.url),
 			comments: comments.map(comment),

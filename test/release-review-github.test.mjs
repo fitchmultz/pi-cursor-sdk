@@ -189,6 +189,7 @@ test("prospective release context includes the open PR only for the exact review
 	assert.equal(result.pulls.length, 1);
 	assert.equal(result.pulls[0].head, head);
 	assert.equal(result.pulls[0].state, "open");
+	assert.equal(result.pulls[0].mergeCommit, null);
 	assert.match(result.pulls[0].body, /extension load/);
 	await assert.rejects(collectReleaseContext({ ...options, prospective: { number: 389, head: merge } }),
 		/Prospective release PR head differs from the reviewed source/);

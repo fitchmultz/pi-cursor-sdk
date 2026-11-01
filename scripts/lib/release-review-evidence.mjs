@@ -184,8 +184,9 @@ export async function captureReleaseReview(root, options, directory) {
 	const commitIds = readFileSync(idsFile, "utf8").split("\n").filter(Boolean);
 	const context = join(directory, "pr-issue-context.json");
 	const prospective = options.pull ? { number: options.pull, head: source } : undefined;
-	writeFileSync(context, `${JSON.stringify(await collectReleaseContext({ repository, commits: commitIds, token: process.env.GH_TOKEN,
-		prospective }), null, 2)}\n`);
+	writeFileSync(context, `${JSON.stringify(await collectReleaseContext({
+		repository, commits: commitIds, token: process.env.GH_TOKEN, prospective,
+	}), null, 2)}\n`);
 	return {
 		mode: "release", base, baselineTag: release.tag_name, head: source, target: source, targetTree: tree(root, source),
 		releaseSource: options.releaseSource, ...(prospective ? { prospectivePull: prospective.number } : {}),

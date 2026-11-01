@@ -72,7 +72,7 @@ function inspectScope(scope, directory, env, evidence) {
 		"--no-textconv", "--", oldBundle, newBundle], { cwd: directory, env, log: join(evidence, "bundle-diff.log"), allow: [0, 1] }) === 1) {
 		reasons.push("bundled dependency files changed");
 	}
-	if (readFileSync(scope.patch, "utf8").split("\n").some((line) => /^[+-](?![+-]).*\bzod\b/i.test(line))) reasons.push("Zod source changed");
+	if (readFileSync(scope.patch, "utf8").split("\n").some((line) => /^[+-](?![+-]).*\bzod\b/i.test(line))) reasons.push("added or removed source line mentions Zod");
 	return { receipt, candidatePath: newPackage, reasons };
 }
 
@@ -96,7 +96,7 @@ function main() {
 			candidateSha256: scope.candidateSha256, previousTarballSha256: scope.previousTarballSha256,
 			diffSha256: scope.diffSha256, runId: scope.runId, runAttempt: scope.runAttempt, reasons, modes: [] };
 		if (!reasons.length) {
-			complete({ ...result, reason: "No runtime dependency metadata, lockfile graph, bundled dependency files, or Zod source changed" });
+			complete({ ...result, reason: "Runtime dependency metadata, lockfile graph, and bundled files are unchanged. No changed source line mentions Zod." });
 			console.log(`Zod installer qualification skipped: ${receiptPath}`);
 			return;
 		}

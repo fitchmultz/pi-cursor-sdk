@@ -282,6 +282,15 @@ function retainedScope(scope, receipt) {
 	return retained;
 }
 
+function assertReviewContextsUnchanged(scope, phase) {
+	for (const [label, context] of [
+		["Prepared review context", scope.preparedReviewContext],
+		["Supplied review context", scope.reviewContext],
+	]) {
+		if (context) assert.equal(hash(context.path), context.sha256, `${label} changed ${phase} review`);
+	}
+}
+
 async function main() {
 	const { positionals, values } = parseArgs({ allowPositionals: true, options: {
 		receipt: { type: "string" }, base: { type: "string" }, source: { type: "string" },
@@ -348,12 +357,10 @@ async function main() {
 				const path = resolve(values["review-context"]);
 				scope.reviewContext = { path, sha256: hash(path) };
 			}
-			if (scope.preparedReviewContext) assert.equal(hash(scope.preparedReviewContext.path), scope.preparedReviewContext.sha256, "Prepared review context changed before review");
-			if (scope.reviewContext) assert.equal(hash(scope.reviewContext.path), scope.reviewContext.sha256, "Supplied review context changed before review");
+			assertReviewContextsUnchanged(scope, "before");
 			const result = runReview(root, scope, receipt, directory);
 			if (scope.automation) assert.equal(hash(scope.automation.versioner), scope.automation.sha256, "Shared versioner changed during review");
-			if (scope.preparedReviewContext) assert.equal(hash(scope.preparedReviewContext.path), scope.preparedReviewContext.sha256, "Prepared review context changed during review");
-			if (scope.reviewContext) assert.equal(hash(scope.reviewContext.path), scope.reviewContext.sha256, "Supplied review context changed during review");
+			assertReviewContextsUnchanged(scope, "during");
 			if (mode === "release") {
 				assert.equal(hash(scopePath), scopeHash, "Prepared release scope changed during review");
 				assertReleaseReviewUnchanged(root, scope);

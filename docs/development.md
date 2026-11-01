@@ -18,7 +18,11 @@ Keep the exact SDK peer `zod@4.6.6` external and the bridge's newer nested `zod@
 
 Preserve that layout when updating dependencies. Installing the bridge's Zod version at the package root or deduplicating can move the shared copy to the root, where npm includes it in the bridge bundle. Pi's `--legacy-peer-deps` consumer then hoists the unbundled SDK without an accessible Zod peer. `--omit=peer` is not equivalent and does not reproduce that failure.
 
-`test/package-metadata.test.ts` owns the required peer/entrypoint contract, SDK v4/v4-mini and bridge parser controls, and the packed-root exclusion guard. Release qualification compares runtime dependency metadata, the runtime lock graph, bundled files and Zod source with the previous published release. When any of these change, it installs the exact candidate tarball into fresh consumers with default npm, Pi-managed npm (`--legacy-peer-deps`), npm `--omit=peer`, Pi-managed pnpm (peer auto-installation off) and Pi-managed Bun (`--omit=peer`). It checks actual SDK ESM imports and SDK-relative `zod`, `zod/v3`, `zod/v4`, `zod/v4-mini` resolution, plus the bundled bridge under Node and Bun, and retains artifact hashes and installer versions. A clean audit or source-only parser test does not prove the published installation works.
+`test/package-metadata.test.ts` owns the required peer/entrypoint contract, SDK v4/v4-mini and bridge parser controls, and the packed-root exclusion guard.
+
+Release qualification compares runtime dependency metadata, the runtime lock graph, and bundled files with the previous published release. A change to those inputs, or an added or removed source line that mentions Zod, triggers installer qualification. The source-line check includes prose.
+
+The qualifier installs the exact candidate tarball into fresh consumers with default npm, Pi-managed npm (`--legacy-peer-deps`), npm `--omit=peer`, Pi-managed pnpm (peer auto-installation off) and Pi-managed Bun (`--omit=peer`). It checks actual SDK ESM imports and SDK-relative `zod`, `zod/v3`, `zod/v4`, `zod/v4-mini` resolution, plus the bundled bridge under Node and Bun, and retains artifact hashes and installer versions. A clean audit or source-only parser test does not prove the published installation works.
 
 The installer qualifier attaches its passed or skipped receipt to the prepared review scope. The deep reviewer must read that receipt, and the review command verifies its hash before and after the review.
 

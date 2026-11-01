@@ -42,6 +42,8 @@ Publication records are independent: npm published 0.5.2, while GitHub's `v0.5.2
 
 ### Review and catalog qualification commands
 
+Run these maintainer commands from the repository root.
+
 `scripts/release-review.mjs` performs independent, read-only Pi reviews with the actual thermo-nuclear skill and its complete rubric. It requires the current Pi CLI, `ZAI_API_KEY`, and `PI_RELEASE_REVIEW_SKILL` pointing to that skill's `SKILL.md`. Run each review in a separate process without GitHub, npm publishing, OIDC, App, or Cursor credentials; Pi uses an isolated home and receives only its model credential. The receipt records the reviewed Git identities, skill/rubric hashes, and verdict; sibling files retain redacted Pi events and copies of the review inputs.
 
 ```bash
@@ -56,6 +58,8 @@ To supply retained verification evidence or prior finding dispositions, add `--r
 For a release candidate, `catalog --receipt PATH` runs the authenticated catalog check on a clean tracked checkout using `CURSOR_API_KEY` and binds its receipt and output to the current source, GitHub run, and attempt. For local staged changes, `catalog --staged` instead binds the staged tree; unstaged tracked changes are still rejected. In a separate step, `release-prepare --source SHA --release-source SHA --artifact DIR --catalog-receipt PATH --evidence DIR` collects the exact previous published tag-to-source diff, previous npm package and registry receipt, candidate artifacts, release notes, and associated PR/issue closure context. For a prospective release PR, add `--pull NUMBER` to include its current PR, review threads, and linked issue context; preparation rejects a PR whose head does not match the candidate source. The evidence directory must not already exist. Preparation requires `GITHUB_REPOSITORY`, `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, and a read-only `GH_TOKEN`.
 
 Run `release --source SHA --release-source SHA --evidence DIR --receipt PATH` in another process with the model key but no GitHub or Cursor credentials. It must retain the same `GITHUB_RUN_ID` and `GITHUB_RUN_ATTEMPT` as preparation, such as in a separate step of that GitHub Actions run. It revalidates source, run, catalog, package bytes and extracted trees before and after the review. Release qualification requires every finding, including polish, to be resolved. A successful receipt is evidence of the review and catalog scope; it does not replace the other release checks or publish anything.
+
+A release reviewer must open every changed package path. A complete changed-source read can also cover a byte-identical package copy. The receipt verifies the SHA-256 match and records both paths and trees in `readEvidence.artifactSourceReads`. Different package content still requires a complete read.
 
 ## Development
 

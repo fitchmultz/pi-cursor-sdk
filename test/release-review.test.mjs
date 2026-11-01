@@ -68,7 +68,9 @@ async function readAll(path) {
     offset += truncation.outputLines;
   }
 }
-for (const file of [inputPath, input.patch, input.commits, ...(kind === "unread" ? [] : input.sourceFiles)]) {
+for (const file of [inputPath, input.patch, input.commits, ...(kind === "unread" ? [] : input.sourceFiles),
+  ...(input.preparedReviewContext ? [input.preparedReviewContext.path] : []),
+  ...(input.reviewContext && kind !== "unread-context" ? [input.reviewContext.path] : [])]) {
   const target = fs.existsSync(file) ? file : path.join(input.sourceBase, file);
   if (file === "candidate.txt" && kind === "partial-file") await read(target, 1, 1);
   else if (file === "candidate.txt" && kind === "truncated-file") await read(target);
@@ -94,6 +96,7 @@ const report = {
   summary: kind === "secrets" ? "Authorization: Bearer test-bearer-token and " + process.env.ZAI_API_KEY : "Inspected the requested diff and files."
 };
 if (kind === "changed-index") { fs.writeFileSync("candidate.txt", "changed during review\\n"); cp.execFileSync("git", ["add", "candidate.txt"]); }
+if (kind === "changed-context") fs.writeFileSync(input.reviewContext.path, "changed during review\\n");
 const fence = String.fromCharCode(96).repeat(3);
 const output = ["fenced-finding","polish","preface"].includes(kind)
   ? (kind === "preface" ? "Inspected the diff and surrounding code.\\n\\n" : "") + fence + "json\\n" + JSON.stringify(report) + "\\n" + fence
@@ -204,6 +207,32 @@ test("the review receives and records the actual versioner used for the automati
 	});
 	assert.equal(readFileSync(join(dirname(f.receipt), receipt.scope.automation.versioner), "utf8"), contents);
 });
+
+for (const behavior of ["pass", "unread-context", "changed-context"]) {
+	test(`supplied review context is retained, read and immutable: ${behavior}`, (t) => {
+		const f = fixture(t, behavior);
+		const path = join(dirname(f.receipt), "verification.md");
+		const contents = "Retained runtime verification and finding dispositions.\n";
+		writeFileSync(path, contents);
+		stageChange(f.repo);
+		const result = f.run("pre-commit", "--review-context", path);
+		if (behavior === "pass") {
+			assert.equal(result.status, 0, result.stderr);
+			const receipt = JSON.parse(readFileSync(f.receipt, "utf8"));
+			assert.deepEqual(receipt.scope.reviewContext, {
+				path: join(`${basename(f.receipt)}.inputs`, "review-context.txt"),
+				sha256: createHash("sha256").update(contents).digest("hex"),
+			});
+			assert.equal(readFileSync(join(dirname(f.receipt), receipt.scope.reviewContext.path), "utf8"), contents);
+			assert.equal(receipt.readEvidence.successfulReads, 5);
+		} else {
+			assert.equal(result.status, 1, result.stdout);
+			assert.match(result.stderr, behavior === "unread-context" ? /No successful read recorded for supplied review context/
+				: /Supplied review context changed during review/);
+			assert.equal(JSON.parse(readFileSync(f.receipt, "utf8")).status, "failed");
+		}
+	});
+}
 
 test("review refuses a GitHub credential in the launching process", (t) => {
 	const f = fixture(t);
@@ -363,7 +392,7 @@ test("package comparison records added, modified, and removed artifact paths", (
 	assert.throws(() => assertExtractedPackages(directory, scope, changed), /git .*diff.* failed: 1/);
 });
 
-test("release review accepts a complete read of the previous copy of a modified artifact", (t) => {
+test("release review preserves prepared verification beside additional user context", (t) => {
 	const f = fixture(t, "old-artifact");
 	const directory = dirname(f.receipt), evidence = join(directory, "release-evidence");
 	mkdirSync(evidence);
@@ -394,6 +423,7 @@ test("release review accepts a complete read of the previous copy of a modified 
 	const hash = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
 	const previousRelease = file("release.json"), npmReceipt = file("npm.json"), candidateManifest = file("candidate.json");
 	const catalogReceipt = file("catalog.json"), catalogOutput = file("catalog.log"), notes = file("notes.md"), context = file("context.json");
+	const verification = file("verification.json"), supplemental = file("supplemental.md");
 	f.env.GITHUB_RUN_ID = "123";
 	f.env.GITHUB_RUN_ATTEMPT = "1";
 	const catalog = {
@@ -411,9 +441,19 @@ test("release review accepts a complete read of the previous copy of a modified 
 		catalogReceipt, catalogReceiptSha256: hash(catalogReceipt), catalogOutput, catalog,
 		runId: f.env.GITHUB_RUN_ID, runAttempt: f.env.GITHUB_RUN_ATTEMPT,
 		notes, notesSha256: hash(notes), context, contextSha256: hash(context),
+		reviewContext: { path: verification, sha256: hash(verification) },
 	};
 	writeFileSync(join(evidence, "scope.json"), JSON.stringify(scope));
-	const result = f.run("release", "--source", head, "--release-source", head, "--evidence", evidence);
+	const result = f.run("release", "--source", head, "--release-source", head, "--evidence", evidence, "--review-context", supplemental);
 	assert.equal(result.status, 0, result.stderr);
-	assert.equal(JSON.parse(readFileSync(f.receipt, "utf8")).status, "passed");
+	const receipt = JSON.parse(readFileSync(f.receipt, "utf8"));
+	assert.equal(receipt.status, "passed");
+	assert.equal(receipt.scope.preparedReviewContext?.sha256, hash(verification));
+	assert.equal(receipt.scope.reviewContext.sha256, hash(supplemental));
+	assert.equal(readFileSync(join(directory, receipt.scope.preparedReviewContext.path), "utf8"), "verification.json\n");
+	assert.equal(readFileSync(join(directory, receipt.scope.reviewContext.path), "utf8"), "supplemental.md\n");
+	writeFileSync(verification, "changed after preparation\n");
+	const changed = f.run("release", "--source", head, "--release-source", head, "--evidence", evidence, "--review-context", supplemental);
+	assert.equal(changed.status, 1, changed.stdout);
+	assert.match(changed.stderr, /Prepared review context changed before review/);
 });

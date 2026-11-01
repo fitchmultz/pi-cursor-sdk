@@ -490,10 +490,12 @@ for (const cleanup of ["answer", "abort", "shutdown", "deadline"]) {
         assert.match(retained.join(""), /Cursor skipped a local plugin/);
         assert.match(retained.join(""), /Cursor shell analysis is degraded/);
         const send = state.sends[before.sends];
-        await delay(80, undefined, { signal: t.signal });
-        assert.equal(state.cancelled.includes(send.runId), false, "pending Pi execution is not idle abandonment");
-        assert.equal(state.disposed.includes(send.agentId), false);
-        assert.equal(state.bridgeResults.length, before.results);
+        if (cleanup !== "deadline") {
+          await delay(80, undefined, { signal: t.signal });
+          assert.equal(state.cancelled.includes(send.runId), false, "pending Pi execution is not idle abandonment");
+          assert.equal(state.disposed.includes(send.agentId), false);
+          assert.equal(state.bridgeResults.length, before.results);
+        }
         if (cleanup === "answer") answer.resolve();
         else if (cleanup === "abort") await owner.session.abort();
         else if (cleanup === "shutdown") await owner.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });

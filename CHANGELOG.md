@@ -2,6 +2,21 @@
 
 **Release preparation is not a publication receipt:** confirm the exact version, source and artifact integrity in npm/GitHub publication records before relying on availability. No issue is closed by preparation alone.
 
+## 0.5.6 - 2026-11-01
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Merge pull request #395 from fitchmultz/task/npm-zod-release-gate ([49e7f8d](https://github.com/fitchmultz/pi-cursor-sdk/commit/49e7f8dbcfb6bf76b3f550f49ffd7d3f547cc9ab))
+
+### What's Changed
+* Qualify exact review scopes before release (1/3) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/393
+* Bind prospective release reviews to the open PR (2/3) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/394
+* Gate automatic Cursor releases on exact-candidate review (3/3) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/395
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.5...v0.5.6
+
 ## 0.5.5
 
 ### Fixed

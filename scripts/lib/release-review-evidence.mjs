@@ -183,10 +183,14 @@ export async function captureReleaseReview(root, options, directory) {
 	gitFile(root, idsFile, ["rev-list", "--reverse", `${base}..${source}`]);
 	const commitIds = readFileSync(idsFile, "utf8").split("\n").filter(Boolean);
 	const context = join(directory, "pr-issue-context.json");
-	writeFileSync(context, `${JSON.stringify(await collectReleaseContext({ repository, commits: commitIds, token: process.env.GH_TOKEN }), null, 2)}\n`);
+	const prospective = options.pull ? { number: options.pull, head: source } : undefined;
+	writeFileSync(context, `${JSON.stringify(await collectReleaseContext({
+		repository, commits: commitIds, token: process.env.GH_TOKEN, prospective,
+	}), null, 2)}\n`);
 	return {
 		mode: "release", base, baselineTag: release.tag_name, head: source, target: source, targetTree: tree(root, source),
-		releaseSource: options.releaseSource, candidateSha256: candidate.sha256, candidateIntegrity: candidate.integrity,
+		releaseSource: options.releaseSource, ...(prospective ? { prospectivePull: prospective.number } : {}),
+		candidateSha256: candidate.sha256, candidateIntegrity: candidate.integrity,
 		previousRelease, previousReleaseSha256: hash(previousRelease),
 		previousTarball: previous.tarball, previousTarballSha256: hash(previous.tarball),
 		npmReceipt: previous.receipt, npmReceiptSha256: hash(previous.receipt),

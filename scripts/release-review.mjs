@@ -261,19 +261,23 @@ async function main() {
 	const { positionals, values } = parseArgs({ allowPositionals: true, options: {
 		receipt: { type: "string" }, base: { type: "string" }, source: { type: "string" },
 		"release-source": { type: "string" }, artifact: { type: "string" }, "catalog-receipt": { type: "string" }, evidence: { type: "string" },
+		pull: { type: "string" },
 		staged: { type: "boolean", default: false },
 	} });
 	const [mode] = positionals;
 	assert.ok(positionals.length === 1 && ["pre-commit", "pre-push", "catalog", "release-prepare", "release"].includes(mode),
 		"Choose pre-commit, pre-push, catalog, release-prepare or release");
 	assert.ok(!values.staged || mode === "catalog", "--staged applies only to catalog");
+	assert.ok(values.pull === undefined || mode === "release-prepare", "--pull applies only to release-prepare");
 	const root = repositoryRoot();
 	if (mode === "release-prepare") {
 		assert.ok(values.evidence, "--evidence is required");
+		const pull = values.pull === undefined ? undefined : Number(values.pull);
+		assert.ok(pull === undefined || (Number.isSafeInteger(pull) && pull > 0), "--pull must be a PR number");
 		const evidence = resolve(values.evidence);
 		mkdirSync(evidence);
 		const scope = await captureReleaseReview(root, { source: values.source, releaseSource: values["release-source"],
-			artifact: values.artifact, catalogReceipt: values["catalog-receipt"] }, evidence);
+			artifact: values.artifact, catalogReceipt: values["catalog-receipt"], pull }, evidence);
 		writeJson(join(evidence, "scope.json"), scope);
 		console.log(`Release review inputs prepared: ${evidence}`);
 		return;

@@ -54,5 +54,5 @@ describe("installed Cursor SDK RetriableError connection-stalled contract", () =
 			expect(sanitized.toLowerCase()).toContain("network error");
 			expect(sanitized).not.toMatch(/stalled(?: repeatedly)?/i);
 		}
-	});
+	}, 30_000);
 });

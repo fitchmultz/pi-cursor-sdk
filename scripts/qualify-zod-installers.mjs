@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { isDeepStrictEqual, parseArgs } from "node:util";
 import { spawnSync } from "node:child_process";
-import { hash, writeJson } from "./lib/release-review-io.mjs";
+import { hash, run as captured, writeJson } from "./lib/release-review-io.mjs";
 
 const json = (path) => JSON.parse(readFileSync(path, "utf8"));
 
@@ -20,13 +20,6 @@ function run(command, args, { cwd, env, log, allow = [0] }) {
 	if (result.error) throw result.error;
 	assert.ok(allow.includes(result.status), `${command} ${args.join(" ")} failed: ${result.status}; see ${log}`);
 	return result.status;
-}
-
-function captured(command, args, { cwd, env }) {
-	const result = spawnSync(command, args, { cwd, env, encoding: "utf8" });
-	if (result.error) throw result.error;
-	assert.equal(result.status, 0, `${command} ${args.join(" ")} failed: ${result.stderr}`);
-	return result.stdout.trim();
 }
 
 function environment(root) {

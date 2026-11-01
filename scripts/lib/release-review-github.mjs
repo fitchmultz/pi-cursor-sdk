@@ -96,7 +96,7 @@ function comment(item) {
 	return { id: item.id, author: item.user?.login, body: item.body, url: item.html_url, createdAt: item.created_at };
 }
 
-export async function collectReleaseContext({ repository, commits, token }) {
+export async function collectReleaseContext({ repository, commits, token, prospective }) {
 	const [owner, name, ...extra] = repository.split("/");
 	assert.ok(owner && name && extra.length === 0, "Expected an owner/repository identity");
 	const github = client(token);
@@ -105,6 +105,16 @@ export async function collectReleaseContext({ repository, commits, token }) {
 		for (const pull of await github.pages(`/repos/${repository}/commits/${sha}/pulls`)) {
 			if (pull.merged_at) pulls.set(pull.number, pull);
 		}
+	}
+	if (prospective) {
+		assert.ok(Number.isSafeInteger(prospective.number) && prospective.number > 0, "Expected an open PR number");
+		const pull = await github.get(`/repos/${repository}/pulls/${prospective.number}`);
+		assert.equal(pull.number, prospective.number, "Prospective PR number changed");
+		assert.equal(pull.state, "open", "Prospective release PR is not open");
+		assert.equal(pull.base?.repo?.full_name, repository, "Prospective PR targets a different repository");
+		assert.equal(pull.base?.ref, "main", "Prospective release PR does not target main");
+		assert.equal(pull.head?.sha, prospective.head, "Prospective release PR head differs from the reviewed source");
+		pulls.set(pull.number, pull);
 	}
 	const issues = new Map();
 	const reviewedPulls = [];
@@ -120,6 +130,7 @@ export async function collectReleaseContext({ repository, commits, token }) {
 		reviewedPulls.push({
 			number: pull.number, title: pull.title, body: pull.body, url: pull.html_url,
 			mergedAt: pull.merged_at, mergeCommit: pull.merge_commit_sha,
+			...(pull.merged_at ? {} : { state: pull.state, head: pull.head.sha }),
 			closingIssues: closingIssues.map((issue) => issue.url),
 			comments: comments.map(comment),
 			reviews: reviews.map((review) => ({ ...comment(review), state: review.state, commit: review.commit_id, submittedAt: review.submitted_at })),

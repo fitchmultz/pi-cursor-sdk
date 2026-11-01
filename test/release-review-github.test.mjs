@@ -163,3 +163,33 @@ test("release context follows multiple closing-issue pages from a merged PR", as
 		`https://github.com/${repository}/issues/364`, `https://github.com/${repository}/issues/365`,
 	]);
 });
+
+test("prospective release context includes the open PR only for the exact reviewed head", async (t) => {
+	// This open PR's identity and API shape were observed on GitHub.
+	const head = "12564f0e21ea08eaa1937dff7a1f0677a9d7424e";
+	t.mock.method(globalThis, "fetch", async (address, options = {}) => {
+		const url = new URL(address);
+		if (url.pathname === `/repos/${repository}/pulls/389`) return Response.json({
+			number: 389, state: "open", merged_at: null, merge_commit_sha: "b490a768b298d3f270cccac9897054718b5af02a",
+			title: "Load @cursor/sdk lazily and fill the model-list cache in RPC mode",
+			body: "Pi no longer evaluates `@cursor/sdk` at extension load.",
+			html_url: `https://github.com/${repository}/pull/389`,
+			head: { sha: head }, base: { ref: "main", repo: { full_name: repository } },
+		});
+		if (url.pathname === "/graphql") {
+			const { query, variables } = JSON.parse(options.body);
+			assert.equal(variables.number, 389);
+			return Response.json(connection(query.includes("reviewThreads") ? "reviewThreads" : "closingIssuesReferences", [], false, null));
+		}
+		if (/\/(?:issues\/389\/comments|pulls\/389\/(?:comments|reviews))$/.test(url.pathname)) return Response.json([]);
+		assert.fail(`Unexpected GitHub request: ${url}`);
+	});
+	const options = { repository, commits: [], token: "captured-contract-token", prospective: { number: 389, head } };
+	const result = await collectReleaseContext(options);
+	assert.equal(result.pulls.length, 1);
+	assert.equal(result.pulls[0].head, head);
+	assert.equal(result.pulls[0].state, "open");
+	assert.match(result.pulls[0].body, /extension load/);
+	await assert.rejects(collectReleaseContext({ ...options, prospective: { number: 389, head: merge } }),
+		/Prospective release PR head differs from the reviewed source/);
+});

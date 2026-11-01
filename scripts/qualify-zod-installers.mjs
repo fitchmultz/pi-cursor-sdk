@@ -95,12 +95,13 @@ function main() {
 		writeJson(scopePath, { ...scope, reviewContext: { path: receiptPath, sha256: hash(receiptPath) } });
 	};
 	mkdirSync(evidence, { recursive: true });
-	writeJson(receiptPath, { status: "pending", source: scope.head, candidateSha256: scope.candidateSha256 });
+	let result = { status: "pending", source: scope.head, candidateSha256: scope.candidateSha256 };
+	writeJson(receiptPath, result);
 	const directory = mkdtempSync(join(tmpdir(), "cursor-zod-installers-"));
 	const baseEnv = environment(directory);
 	try {
 		const { receipt, candidatePath, reasons } = inspectScope(scope, directory, baseEnv);
-		const result = { status: reasons.length ? "running" : "skipped", source: scope.head, releaseSource: scope.releaseSource,
+		result = { status: reasons.length ? "running" : "skipped", source: scope.head, releaseSource: scope.releaseSource,
 			candidateSha256: scope.candidateSha256, previousTarballSha256: scope.previousTarballSha256,
 			diffSha256: scope.diffSha256, runId: scope.runId, runAttempt: scope.runAttempt, reasons, modes: [] };
 		if (!reasons.length) {
@@ -146,7 +147,7 @@ function main() {
 		complete(result);
 		console.log(`Zod installer qualification passed: ${receiptPath}`);
 	} catch (error) {
-		writeJson(receiptPath, { status: "failed", source: scope.head, candidateSha256: scope.candidateSha256,
+		writeJson(receiptPath, { ...result, status: "failed",
 			error: error instanceof Error ? error.message : String(error) });
 		throw error;
 	} finally {

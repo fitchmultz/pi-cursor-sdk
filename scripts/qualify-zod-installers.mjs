@@ -53,7 +53,7 @@ function runtimeLock(ref, env) {
 	return Object.fromEntries(Object.entries(lock.packages).filter(([path, entry]) => path && !entry.dev));
 }
 
-function inspectScope(scope, directory, env) {
+function inspectScope(scope, directory, env, evidence) {
 	assert.equal(scope.mode, "release", "Expected release-review inputs");
 	assert.equal(hash(scope.tarball), scope.candidateSha256, "Candidate tarball changed");
 	assert.equal(hash(scope.previousTarball), scope.previousTarballSha256, "Previously published tarball changed");
@@ -65,8 +65,8 @@ function inspectScope(scope, directory, env) {
 	const oldDir = join(directory, "previous");
 	const newDir = join(directory, "candidate");
 	mkdirSync(oldDir); mkdirSync(newDir);
-	run("tar", ["-xzf", scope.previousTarball, "-C", oldDir], { cwd: directory, env, log: join(directory, "extract-previous.log") });
-	run("tar", ["-xzf", scope.tarball, "-C", newDir], { cwd: directory, env, log: join(directory, "extract-candidate.log") });
+	run("tar", ["-xzf", scope.previousTarball, "-C", oldDir], { cwd: directory, env, log: join(evidence, "extract-previous.log") });
+	run("tar", ["-xzf", scope.tarball, "-C", newDir], { cwd: directory, env, log: join(evidence, "extract-candidate.log") });
 	const oldPackage = join(oldDir, "package"), newPackage = join(newDir, "package");
 	const previous = json(join(oldPackage, "package.json")), candidate = json(join(newPackage, "package.json"));
 	assert.equal(previous.name, receipt.name);
@@ -78,7 +78,7 @@ function inspectScope(scope, directory, env) {
 	const oldBundle = join(oldPackage, "node_modules"), newBundle = join(newPackage, "node_modules");
 	if (existsSync(oldBundle) !== existsSync(newBundle)) reasons.push("bundled dependency files changed");
 	else if (existsSync(oldBundle) && run("git", ["-c", "core.autocrlf=false", "diff", "--no-index", "--quiet", "--no-ext-diff",
-		"--no-textconv", "--", oldBundle, newBundle], { cwd: directory, env, log: join(directory, "bundle-diff.log"), allow: [0, 1] }) === 1) {
+		"--no-textconv", "--", oldBundle, newBundle], { cwd: directory, env, log: join(evidence, "bundle-diff.log"), allow: [0, 1] }) === 1) {
 		reasons.push("bundled dependency files changed");
 	}
 	if (readFileSync(scope.patch, "utf8").split("\n").some((line) => /^[+-](?![+-]).*\bzod\b/i.test(line))) reasons.push("Zod source changed");
@@ -100,7 +100,7 @@ function main() {
 	const directory = mkdtempSync(join(tmpdir(), "cursor-zod-installers-"));
 	const baseEnv = environment(directory);
 	try {
-		const { receipt, candidatePath, reasons } = inspectScope(scope, directory, baseEnv);
+		const { receipt, candidatePath, reasons } = inspectScope(scope, directory, baseEnv, evidence);
 		result = { status: reasons.length ? "running" : "skipped", source: scope.head, releaseSource: scope.releaseSource,
 			candidateSha256: scope.candidateSha256, previousTarballSha256: scope.previousTarballSha256,
 			diffSha256: scope.diffSha256, runId: scope.runId, runAttempt: scope.runAttempt, reasons, modes: [] };

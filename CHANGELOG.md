@@ -7,6 +7,8 @@
 <!-- npm-release:unreleased:start -->
 <!-- npm-release:unreleased:end -->
 
+- Merge pull request #395 from fitchmultz/task/npm-zod-release-gate ([49e7f8d](https://github.com/fitchmultz/pi-cursor-sdk/commit/49e7f8dbcfb6bf76b3f550f49ffd7d3f547cc9ab))
+
 ### Changed
 
 - Gate automatic patch releases on exact-scope commit, PR, prospective-release, and retained-candidate reviews. Bind catalog and installer qualification to the candidate and retain npm and GitHub publication evidence (#393, #394, #395).
@@ -17,8 +19,6 @@
 - Credit a complete source-file read for a byte-identical package copy after the reviewer opens the package path. The review receipt records SHA-256 provenance. Different package content still requires a complete read.
 
 Cursor runtime behavior and runtime dependency versions are unchanged.
-
-- Merge pull request #395 from fitchmultz/task/npm-zod-release-gate ([49e7f8d](https://github.com/fitchmultz/pi-cursor-sdk/commit/49e7f8dbcfb6bf76b3f550f49ffd7d3f547cc9ab))
 
 ### What's Changed
 * Qualify exact review scopes before release (1/3) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/393

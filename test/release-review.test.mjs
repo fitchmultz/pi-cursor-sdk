@@ -80,7 +80,8 @@ for (const file of [inputPath, input.patch, input.commits, ...(kind === "unread"
 if (input.mode === "release") {
   for (const file of input.artifactFiles) {
     const old = path.join(input.oldDir, file), current = path.join(input.newDir, file);
-    await readAll(kind === "old-artifact" && fs.existsSync(old) ? old : fs.existsSync(current) ? current : old);
+    if (kind === "partial-artifact") await read(current, 1, 1);
+    else if (kind !== "unread-artifact") await readAll(kind === "old-artifact" && fs.existsSync(old) ? old : fs.existsSync(current) ? current : old);
   }
   for (const file of [input.artifactPatch, input.notes, input.context, input.catalogReceipt,
     input.catalogOutput, input.npmReceipt, input.previousRelease]) await readAll(file);
@@ -392,8 +393,8 @@ test("package comparison records added, modified, and removed artifact paths", (
 	assert.throws(() => assertExtractedPackages(directory, scope, changed), /git .*diff.* failed: 1/);
 });
 
-test("release review preserves prepared verification beside additional user context", (t) => {
-	const f = fixture(t, "old-artifact");
+function releaseFixture(t, behavior = "old-artifact", artifactContent = "new artifact\n") {
+	const f = fixture(t, behavior);
 	const directory = dirname(f.receipt), evidence = join(directory, "release-evidence");
 	mkdirSync(evidence);
 	command(f.repo, "git", ["tag", "v1.0.0", f.base]);
@@ -401,7 +402,7 @@ test("release review preserves prepared verification beside additional user cont
 	mkdirSync(join(f.repo, "scripts"));
 	writeFileSync(join(f.repo, "src/cursor-fallback-models.generated.ts"), "catalog\n");
 	writeFileSync(join(f.repo, "scripts/refresh-cursor-model-snapshots.mjs"), "generator\n");
-	writeFileSync(join(f.repo, "candidate.txt"), "candidate\n");
+	writeFileSync(join(f.repo, "candidate.txt"), "candidate\nsecond\n");
 	command(f.repo, "git", ["add", "."]);
 	command(f.repo, "git", ["commit", "--quiet", "-m", "candidate"]);
 	const head = command(f.repo, "git", ["rev-parse", "HEAD"]);
@@ -409,8 +410,8 @@ test("release review preserves prepared verification beside additional user cont
 	const oldPackage = join(directory, "old"), newPackage = join(directory, "new");
 	mkdirSync(join(oldPackage, "package"), { recursive: true });
 	mkdirSync(join(newPackage, "package"), { recursive: true });
-	writeFileSync(join(oldPackage, "package/changed.txt"), "old artifact\n");
-	writeFileSync(join(newPackage, "package/changed.txt"), "new artifact\n");
+	writeFileSync(join(oldPackage, "package/candidate.txt"), "old artifact\n");
+	writeFileSync(join(newPackage, "package/candidate.txt"), artifactContent);
 	const previousTarball = join(directory, "old.tgz"), tarball = join(directory, "new.tgz");
 	command(directory, "tar", ["-czf", previousTarball, "-C", oldPackage, "package"]);
 	command(directory, "tar", ["-czf", tarball, "-C", newPackage, "package"]);
@@ -444,6 +445,12 @@ test("release review preserves prepared verification beside additional user cont
 		reviewContext: { path: verification, sha256: hash(verification) },
 	};
 	writeFileSync(join(evidence, "scope.json"), JSON.stringify(scope));
+	return { ...f, directory, evidence, head, verification, supplemental, hash };
+}
+
+test("release review preserves prepared verification beside additional user context", (t) => {
+	const f = releaseFixture(t);
+	const { directory, evidence, head, verification, supplemental, hash } = f;
 	const result = f.run("release", "--source", head, "--release-source", head, "--evidence", evidence, "--review-context", supplemental);
 	assert.equal(result.status, 0, result.stderr);
 	const receipt = JSON.parse(readFileSync(f.receipt, "utf8"));
@@ -457,3 +464,26 @@ test("release review preserves prepared verification beside additional user cont
 	assert.equal(changed.status, 1, changed.stdout);
 	assert.match(changed.stderr, /Prepared review context changed before review/);
 });
+
+for (const [name, behavior, artifactContent, accepted] of [
+	["an opened byte-identical copy", "partial-artifact", "candidate\nsecond\n", true],
+	["partially read distinct bytes", "partial-artifact", "candidate\ndifferent\n", false],
+	["an unopened byte-identical copy", "unread-artifact", "candidate\nsecond\n", false],
+]) {
+	test(`release review accounts for source content: ${name}`, (t) => {
+		const f = releaseFixture(t, behavior, artifactContent);
+		const result = f.run("release", "--source", f.head, "--release-source", f.head, "--evidence", f.evidence);
+		assert.equal(result.status, accepted ? 0 : 1, result.stderr);
+		const receipt = JSON.parse(readFileSync(f.receipt, "utf8"));
+		if (accepted) {
+			assert.equal(receipt.status, "passed");
+			assert.deepEqual(receipt.readEvidence.artifactSourceReads, [{
+				path: "package/candidate.txt", artifactTree: "candidate", source: "candidate.txt", sourceTree: "target",
+				sha256: f.hash(join(f.repo, "candidate.txt")),
+			}]);
+		} else {
+			assert.equal(receipt.status, "failed");
+			assert.match(result.stderr, /(?:Incomplete read of|No successful read recorded for) changed package artifact package\/candidate\.txt/);
+		}
+	});
+}

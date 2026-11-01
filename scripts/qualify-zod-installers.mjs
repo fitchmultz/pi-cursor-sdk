@@ -1,15 +1,13 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { isDeepStrictEqual, parseArgs } from "node:util";
 import { spawnSync } from "node:child_process";
+import { hash, run as captured, writeJson } from "./lib/release-review-io.mjs";
 
 const json = (path) => JSON.parse(readFileSync(path, "utf8"));
-const hash = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
-const writeJson = (path, value) => writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 
 function run(command, args, { cwd, env, log, allow = [0] }) {
 	const fd = openSync(log, "w");
@@ -22,13 +20,6 @@ function run(command, args, { cwd, env, log, allow = [0] }) {
 	if (result.error) throw result.error;
 	assert.ok(allow.includes(result.status), `${command} ${args.join(" ")} failed: ${result.status}; see ${log}`);
 	return result.status;
-}
-
-function captured(command, args, { cwd, env }) {
-	const result = spawnSync(command, args, { cwd, env, encoding: "utf8" });
-	if (result.error) throw result.error;
-	assert.equal(result.status, 0, `${command} ${args.join(" ")} failed: ${result.stderr}`);
-	return result.stdout.trim();
 }
 
 function environment(root) {
@@ -81,7 +72,7 @@ function inspectScope(scope, directory, env, evidence) {
 		"--no-textconv", "--", oldBundle, newBundle], { cwd: directory, env, log: join(evidence, "bundle-diff.log"), allow: [0, 1] }) === 1) {
 		reasons.push("bundled dependency files changed");
 	}
-	if (readFileSync(scope.patch, "utf8").split("\n").some((line) => /^[+-](?![+-]).*\bzod\b/i.test(line))) reasons.push("Zod source changed");
+	if (readFileSync(scope.patch, "utf8").split("\n").some((line) => /^[+-](?![+-]).*\bzod\b/i.test(line))) reasons.push("added or removed source line mentions Zod");
 	return { receipt, candidatePath: newPackage, reasons };
 }
 
@@ -105,7 +96,7 @@ function main() {
 			candidateSha256: scope.candidateSha256, previousTarballSha256: scope.previousTarballSha256,
 			diffSha256: scope.diffSha256, runId: scope.runId, runAttempt: scope.runAttempt, reasons, modes: [] };
 		if (!reasons.length) {
-			complete({ ...result, reason: "No runtime dependency metadata, lockfile graph, bundled dependency files, or Zod source changed" });
+			complete({ ...result, reason: "Runtime dependency metadata, lockfile graph, and bundled files are unchanged. No changed source line mentions Zod." });
 			console.log(`Zod installer qualification skipped: ${receiptPath}`);
 			return;
 		}

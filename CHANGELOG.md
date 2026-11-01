@@ -2,6 +2,32 @@
 
 **Release preparation is not a publication receipt:** confirm the exact version, source and artifact integrity in npm/GitHub publication records before relying on availability. No issue is closed by preparation alone.
 
+## 0.5.6 - 2026-11-01
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Merge pull request #395 from fitchmultz/task/npm-zod-release-gate ([49e7f8d](https://github.com/fitchmultz/pi-cursor-sdk/commit/49e7f8dbcfb6bf76b3f550f49ffd7d3f547cc9ab))
+
+### Changed
+
+- Gate automatic patch releases on exact-scope commit, PR, prospective-release, and retained-candidate reviews. Bind catalog and installer qualification to the candidate and retain npm and GitHub publication evidence (#393, #394, #395).
+- Approve Bun and pnpm's required setup scripts with npm 12's targeted `--allow-scripts=bun,pnpm` before the five-mode Node/Bun installer qualification (#397).
+
+### Fixed
+
+- Credit a complete source-file read for a byte-identical package copy after the reviewer opens the package path. The review receipt records SHA-256 provenance. Different package content still requires a complete read.
+
+Cursor runtime behavior and runtime dependency versions are unchanged.
+
+### What's Changed
+* Qualify exact review scopes before release (1/3) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/393
+* Bind prospective release reviews to the open PR (2/3) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/394
+* Gate automatic Cursor releases on exact-candidate review (3/3) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/395
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.5...v0.5.6
+
 ## 0.5.5
 
 ### Fixed

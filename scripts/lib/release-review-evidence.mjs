@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { collectReleaseContext, latestPublishedRelease } from "./release-review-github.mjs";
-import { hash, run } from "./release-review-io.mjs";
+import { hash, run, writeJson } from "./release-review-io.mjs";
 import { comparePackages, packPublishedPackage } from "./release-review-package.mjs";
 
 const shaPattern = /^[a-f0-9]{40}$/;
@@ -169,7 +169,7 @@ export async function captureReleaseReview(root, options, directory) {
 	const release = await latestPublishedRelease(repository, process.env.GH_TOKEN);
 	assert.ok(!release.draft && !release.prerelease, "The previous GitHub release is not published and stable");
 	const previousRelease = join(directory, "previous-github-release.json");
-	writeFileSync(previousRelease, `${JSON.stringify(release, null, 2)}\n`);
+	writeJson(previousRelease, release);
 	const base = commit(root, `refs/tags/${release.tag_name}`);
 	const previousManifest = JSON.parse(git(root, "show", `${base}:package.json`));
 	assert.equal(previousManifest.name, candidate.name);
@@ -184,9 +184,9 @@ export async function captureReleaseReview(root, options, directory) {
 	const commitIds = readFileSync(idsFile, "utf8").split("\n").filter(Boolean);
 	const context = join(directory, "pr-issue-context.json");
 	const prospective = options.pull ? { number: options.pull, head: source } : undefined;
-	writeFileSync(context, `${JSON.stringify(await collectReleaseContext({
+	writeJson(context, await collectReleaseContext({
 		repository, commits: commitIds, token: process.env.GH_TOKEN, prospective,
-	}), null, 2)}\n`);
+	}));
 	return {
 		mode: "release", base, baselineTag: release.tag_name, head: source, target: source, targetTree: tree(root, source),
 		releaseSource: options.releaseSource, ...(prospective ? { prospectivePull: prospective.number } : {}),

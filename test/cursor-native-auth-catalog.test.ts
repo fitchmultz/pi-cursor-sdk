@@ -25,6 +25,7 @@ beforeEach(() => {
 	vi.stubEnv("PI_CODING_AGENT_DIR", root);
 	vi.stubEnv("CURSOR_API_KEY", undefined);
 	vi.stubEnv("PI_CURSOR_SDK_DISABLE_MODEL_CACHE", undefined);
+	vi.stubEnv("PI_CURSOR_SDK_MODEL_CACHE_TTL_MS", undefined);
 	vi.stubEnv("PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT", "1");
 	list.mockReset();
 });
@@ -91,6 +92,87 @@ it("publishes the authenticated startup cache before warning about the initial f
 		expect(notify).not.toHaveBeenCalled();
 		expect(list).not.toHaveBeenCalled();
 	} finally { await pi.runSessionShutdown(); }
+});
+
+it.each([undefined, "1"])("session_start remains cache-only with PI_OFFLINE=%s", async (offline) => {
+	vi.stubEnv("PI_OFFLINE", offline);
+	const { registry, pi, notify } = await fixture("synthetic-startup", false);
+	const refresh = vi.spyOn(registry, "refresh");
+	const load = vi.spyOn(sdkRuntime, "loadCursorSdk");
+	try {
+		await pi.runSessionStart({ modelRegistry: registry, hasUI: true, ui: { notify } });
+		await pi.runSessionShutdown();
+		await new Promise(resolve => setImmediate(resolve));
+		expect(refresh).toHaveBeenCalledExactlyOnceWith({ providers: ["cursor"], allowNetwork: false });
+		expect(load).not.toHaveBeenCalled();
+		expect(list).not.toHaveBeenCalled();
+	} finally { await pi.runSessionShutdown(); }
+});
+
+it("does not replace Pi's superseded RPC startup network refresh", async () => {
+	vi.stubEnv("PI_OFFLINE", undefined);
+	const credentials = new InMemoryCredentialStore();
+	await credentials.modify("cursor", async () => ({ type: "api_key", key: "synthetic-rpc" }));
+	const { runtime, registry, pi, notify } = await fixture(undefined, false, credentials);
+	let release!: () => void;
+	const gate = new Promise<void>(resolve => { release = resolve; });
+	list.mockImplementationOnce(async () => { await gate; return [item("superseded")]; });
+	const startup = registry.refresh({ providers: ["cursor"] });
+	try {
+		await vi.waitFor(() => expect(list).toHaveBeenCalledExactlyOnceWith({ apiKey: "synthetic-rpc" }));
+		await pi.runSessionStart({ modelRegistry: registry, hasUI: true, ui: { notify } });
+		release();
+		await startup;
+		await new Promise(resolve => setImmediate(resolve));
+		// The SDK request cannot be undone, but its superseded result is not
+		// published or cached and the extension does not start a second request.
+		expect(list).toHaveBeenCalledExactlyOnceWith({ apiKey: "synthetic-rpc" });
+		expect(runtime.getModels("cursor").map(model => model.id)).not.toContain("superseded");
+		expect(getCursorModelMetadata("superseded")).toBeUndefined();
+		expect(existsSync(join(root, "cursor-sdk-model-list.json"))).toBe(false);
+	} finally { release(); await startup.catch(() => {}); await pi.runSessionShutdown(); }
+});
+
+it("does not start a delayed catalog refresh after session_start and a cache-only config change", async () => {
+	vi.stubEnv("PI_OFFLINE", undefined);
+	// A cache-only refresh may use an expired matching catalog; a network refresh
+	// would not. Stall any unawaited startup refresh before native admission so
+	// the later models.json update and explicit cache-only refresh win the race.
+	vi.stubEnv("PI_CURSOR_SDK_MODEL_CACHE_TTL_MS", "0");
+	const { runtime, registry, pi, notify, modelsPath } = await fixture("synthetic-original", false);
+	let release!: () => void;
+	const gate = new Promise<void>(resolve => { release = resolve; });
+	const nativeRefresh = registry.refresh.bind(registry);
+	let background: ReturnType<typeof registry.refresh> | undefined;
+	const refresh = vi.spyOn(registry, "refresh").mockImplementation(options => {
+		if (options?.allowNetwork === undefined) {
+			background = gate.then(() => nativeRefresh(options));
+			return background;
+		}
+		return nativeRefresh(options);
+	});
+	list.mockResolvedValue([item("unexpected-live")]);
+	try {
+		await pi.runSessionStart({ modelRegistry: registry, hasUI: true, ui: { notify } });
+		writeFileSync(modelsPath, JSON.stringify({ providers: { cursor: { apiKey: "synthetic-new-config" } } }));
+		saveModelListCache(fingerprintApiKey("synthetic-new-config"), [item("new-config-cached")]);
+		const bytes = readFileSync(join(root, "cursor-sdk-model-list.json"));
+		await registry.refresh({ providers: ["cursor"], allowNetwork: false });
+		expect((await registry.getProviderAuth("cursor"))?.auth.apiKey).toBe("synthetic-new-config");
+		release();
+		if (background) await background;
+		await new Promise(resolve => setImmediate(resolve));
+		expect(list).not.toHaveBeenCalled();
+		expect(runtime.getModels("cursor").map(model => model.id)).toEqual(["new-config-cached"]);
+		expect(readFileSync(join(root, "cursor-sdk-model-list.json"))).toEqual(bytes);
+		expect(refresh).toHaveBeenCalledTimes(2);
+		expect(refresh).toHaveBeenNthCalledWith(1, { providers: ["cursor"], allowNetwork: false });
+		expect(refresh).toHaveBeenNthCalledWith(2, { providers: ["cursor"], allowNetwork: false });
+	} finally {
+		release();
+		if (background) await background.catch(() => {});
+		await pi.runSessionShutdown();
+	}
 });
 
 it("default no-auth fallback remains available and unresolved stored placeholders do not fake opt-in auth", async () => {

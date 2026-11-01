@@ -37,6 +37,7 @@ export async function prepareCursorSummaryProviderTurn(
 	try {
 		ensureCursorRipgrepPath();
 		const sdk = await loadCursorSdk();
+		throwIfAborted();
 		configureCursorSdkHttp1(sdk, resolvedConfig.local.useHttp1ForAgent);
 		restoreCursorSdkOutputFilter = installCursorSdkOutputFilter();
 		sessionStore = (await openCursorSessionStoreForScope({

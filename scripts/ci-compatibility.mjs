@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { NATIVE_COMPATIBILITY_TEST_FILES, qualifySelectedHost, runCompatibilityCommand } from "./ci-compatibility-phases.mjs";
+import { NATIVE_COMPATIBILITY_TEST_FILES, probePackedSdkFirstUse, qualifySelectedHost, runCompatibilityCommand } from "./ci-compatibility-phases.mjs";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -141,6 +141,8 @@ function probe(label, host, extension) {
   assert.ok(commands.data.commands.some((command) => command.name === "cursor-refresh-models"),
     `${label}: Cursor extension command missing`);
   console.log(`${label}: Pi ${version}, Cursor extension loaded without a model turn`);
+  probePackedSdkFirstUse({ label, cli, extension, root, env });
+  console.log(`${label}: Pi ${version}, installed Cursor SDK import/export probe passed in Pi offline mode`);
 }
 
 try {

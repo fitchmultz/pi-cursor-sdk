@@ -4,6 +4,8 @@ import { Type } from "typebox";
 import {
 	resetCursorProviderTestState,
 	mockedCreate,
+	mockedResume,
+	mockedConfigureCursor,
 	mockedMessagesList,
 	makeModel,
 	makeContext,
@@ -19,7 +21,12 @@ import {
 } from "./helpers/cursor-provider-harness.js";
 import { CursorPiToolBridgeRunImpl } from "../src/cursor-pi-tool-bridge-run.js";
 import { __testUtils as cursorSdkProcessGuardTestUtils } from "../src/cursor-sdk-process-error-guard.js";
-import { streamCursor } from "./helpers/cursor-provider-ownership.js";
+import * as sdkRuntime from "../src/cursor-sdk-runtime.js";
+import * as cloudOptions from "../src/cursor-cloud-options.js";
+import * as sessionAgent from "../src/cursor-session-agent.js";
+import * as sessionStore from "../src/cursor-session-store.js";
+import { streamCursor as streamOwnedCursor } from "../src/cursor-provider.js";
+import { captureProviderTestOwnership, streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -57,6 +64,59 @@ describe("streamCursor auth and abort", () => {
 		expect(events.findIndex((event) => event.type === "start")).toBeLessThan(
 			events.findIndex((event) => event.type === "error"),
 		);
+	});
+
+	it.each(["local", "cloud", "summary"] as const)("aborts %s before side effects when SDK loading is still pending", async (kind) => {
+		if (kind === "cloud") {
+			process.env.PI_CURSOR_RUNTIME = "cloud";
+			process.env.PI_CURSOR_CLOUD_ACK = "1";
+			process.env.PI_CURSOR_CLOUD_ALLOW_LOCAL_STATE = "1";
+		} else {
+			// A non-default setting would otherwise configure the SDK after loading.
+			process.env.PI_CURSOR_HTTP_1_1 = "1";
+		}
+		const gate = Promise.withResolvers<void>();
+		let entered = false;
+		const originalLoad = sdkRuntime.loadCursorSdk;
+		const load = vi.spyOn(sdkRuntime, "loadCursorSdk").mockImplementation(async () => {
+			entered = true;
+			await gate.promise;
+			return originalLoad();
+		});
+		const acquire = vi.spyOn(sessionAgent, "acquireSessionCursorAgent");
+		const openStore = vi.spyOn(sessionStore, "openCursorSessionStoreForScope");
+		const buildCloudOptions = vi.spyOn(cloudOptions, "buildCursorCloudAgentOptions");
+		const controller = new AbortController();
+		const model = makeModel();
+		const context = makeContext();
+		const options = { apiKey: "test-key", signal: controller.signal };
+		const ownership = captureProviderTestOwnership(model, context);
+		const request = kind === "summary" ? { ...ownership.request, purpose: "compaction" as const } : ownership.request;
+		const events = collectEvents(streamOwnedCursor(model, context, options, { ...ownership, request }));
+		try {
+			await vi.waitFor(() => expect(entered).toBe(true));
+			expect(load).toHaveBeenCalledTimes(1);
+			expect(mockedCreate).not.toHaveBeenCalled();
+			controller.abort();
+			gate.resolve();
+			const result = await events;
+			expect(getErrorEvent(result).reason).toBe("aborted");
+			expect(getErrorEvent(result).error.stopReason).toBe("aborted");
+			expect(mockedCreate).not.toHaveBeenCalled();
+			expect(mockedResume).not.toHaveBeenCalled();
+			expect(acquire).not.toHaveBeenCalled();
+			expect(openStore).not.toHaveBeenCalled();
+			expect(buildCloudOptions).not.toHaveBeenCalled();
+			expect(mockedConfigureCursor).not.toHaveBeenCalled();
+		} finally {
+			controller.abort();
+			gate.resolve();
+			await events.catch(() => {});
+			load.mockRestore();
+			acquire.mockRestore();
+			openStore.mockRestore();
+			buildCloudOptions.mockRestore();
+		}
 	});
 
 	it("aborts after agent creation without sending a prompt when already cancelled", async () => {

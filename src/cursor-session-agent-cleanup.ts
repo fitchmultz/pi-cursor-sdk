@@ -266,19 +266,27 @@ function appendDurableCleanupEntry(
 }
 
 export async function runCursorSessionAgentCleanupCommand(pi: LocalResumeCleanupApi, args: string, ctx: LocalResumeCleanupCommandContext, storeRoot?: string): Promise<void> {
+	const ui = ctx.ui; // A session replacement may invalidate later command-context property reads.
+	const notify = (message: string, type: "info" | "error") => {
+		try { ui.notify(message, type); } catch { /* The old UI may also be gone; never write through a new context. */ }
+	};
 	const usage = "Usage: /cursor-local-resume-cleanup [--dry-run|--yes]";
 	const tokens = args.trim().split(/\s+/).filter(Boolean);
 	const dryRun = tokens.length === 0 || (tokens.length === 1 && tokens[0] === "--dry-run");
 	const deleteNow = tokens.length === 1 && tokens[0] === "--yes";
 	if (!dryRun && !deleteNow) {
-		ctx.ui.notify(`Invalid Cursor local resume cleanup arguments. ${usage}`, "error");
+		notify(`Invalid Cursor local resume cleanup arguments. ${usage}`, "error");
 		return;
 	}
 
-	const entries = ctx.sessionManager.getEntries();
-	const branch = ctx.sessionManager.getBranch();
+	const manager = ctx.sessionManager;
+	const entries = [...manager.getEntries()];
+	const branch = [...manager.getBranch()];
 	const scope = getCurrentCleanupScope(ctx);
 	const plan = readCursorSessionAgentCleanupPlanDetails(entries, branch, scope);
+	const entryIds = entries.map((entry) => entry.id);
+	const branchIds = branch.map((entry) => entry.id);
+	const planKey = JSON.stringify(plan); // Freeze IDs and recorded store identities before the import.
 	const baseEntry = {
 		runtime: "local" as const,
 		timestamp: new Date().toISOString(),
@@ -287,47 +295,93 @@ export async function runCursorSessionAgentCleanupCommand(pi: LocalResumeCleanup
 	};
 	if (dryRun) {
 		appendCleanupEntry(pi, { action: "dry-run", ...baseEntry });
-		ctx.ui.notify(formatCleanupPlan(plan), "info");
+		notify(formatCleanupPlan(plan), "info");
 		return;
 	}
 	if (plan.candidateAgentIds.length === 0) {
 		try {
 			appendCleanupEntry(pi, { action: "delete", phase: "result", ...baseEntry, deletedAgentIds: [] });
-			ctx.ui.notify("No recorded superseded local Cursor SDK agents to delete.", "info");
+			notify("No recorded superseded local Cursor SDK agents to delete.", "info");
 		} catch {
-			ctx.ui.notify("No agents were deleted, but the no-op cleanup result could not be recorded.", "error");
+			notify("No agents were deleted, but the no-op cleanup result could not be recorded.", "error");
 		}
 		return;
 	}
 
-	if (!scope.sessionFile || !appendDurableCleanupEntry(pi, ctx, { action: "delete", phase: "intent", ...baseEntry })) {
-		ctx.ui.notify("Cleanup intent could not be durably recorded. No agents were deleted.", "error");
+	if (!scope.sessionFile) {
+		notify("Cleanup intent could not be durably recorded. No agents were deleted.", "error");
 		return;
 	}
+
+	// Preload before the authoritative plan/intent. A first-use import can yield
+	// to Pi input; dry runs, empty plans, and fileless sessions do not load it.
+	let operations: LocalResumeCleanupSdkOperations | undefined;
+	let loadFailure: { error: unknown } | undefined;
+	try { operations = await getSdkOperations(); }
+	catch (error) { loadFailure = { error }; }
+	const currentSnapshot = () => {
+		try {
+			if (ctx.sessionManager !== manager) return undefined;
+			const current = getCurrentCleanupScope(ctx);
+			if (current.scopeKey !== scope.scopeKey || current.sessionFile !== scope.sessionFile ||
+				current.sessionId !== scope.sessionId || current.cwd !== scope.cwd || current.repoRoot !== scope.repoRoot) return undefined;
+			return { entries: manager.getEntries(), branch: manager.getBranch() };
+		} catch { return undefined; } // Replaced Pi contexts can throw from their getters.
+	};
+	const sameIds = (ids: readonly string[], current: readonly SessionEntry[]) =>
+		ids.length === current.length && ids.every((id, index) => id === current[index]?.id);
+	const snapshot = currentSnapshot();
+	if (!snapshot || !sameIds(branchIds, snapshot.branch)) {
+		notify("The pi session or branch changed while loading the Cursor SDK. No agents were deleted; run cleanup again.", "error");
+		return;
+	}
+	const refreshedPlan = readCursorSessionAgentCleanupPlanDetails(snapshot.entries, snapshot.branch, scope);
+	// Never expand the authorized set or switch its recorded store identity.
+	if (!sameIds(entryIds, snapshot.entries) || JSON.stringify(refreshedPlan) !== planKey) {
+		notify("The Cursor cleanup plan changed while loading the SDK. No agents were deleted; run cleanup again.", "error");
+		return;
+	}
+
+	const intent: CursorSessionAgentCleanupEntryData = { action: "delete", phase: "intent", ...baseEntry };
+	if (!appendDurableCleanupEntry(pi, ctx, intent)) {
+		notify("Cleanup intent could not be durably recorded. No agents were deleted.", "error");
+		return;
+	}
+	const anchor = manager.getBranch().at(-1);
+	const anchorData = anchor?.type === "custom" && anchor.customType === CURSOR_SESSION_AGENT_CLEANUP_ENTRY_TYPE
+		? parseCleanupEntryData(anchor.data) : undefined;
+	if (!anchor || !anchorData || !cleanupEntriesMatch(anchorData, intent) || anchor.parentId !== (branchIds.at(-1) ?? null)) {
+		notify("Cleanup intent could not be verified. No agents were deleted.", "error");
+		return;
+	}
+	const intentId = anchor.id;
 
 	const deletedAgentIds: string[] = [];
 	const failedAgentIds: CursorSessionAgentCleanupFailure[] = [];
 	const openedStores = new Map<string, Awaited<ReturnType<typeof openCursorSessionStore>>>();
 	try {
-		await withCursorSessionStoreIdentities(ctx.cwd, scope.scopeKey, storeRoot, async (identities) => {
-			const operations = await getSdkOperations();
-			for (const candidate of plan.candidates) {
+		// Keep the existing durable intent/result audit for a failed import, without deleting.
+		if (loadFailure) throw loadFailure.error;
+		if (!operations) throw new Error("Cursor SDK operations are unavailable");
+		const loaded = operations;
+		await withCursorSessionStoreIdentities(scope.cwd, scope.scopeKey, storeRoot, async (identities) => {
+			for (const candidate of refreshedPlan.candidates) {
 				const { agentId } = candidate;
 				try {
 					const identity = await resolveCursorSessionStoreIdentity({
-						cwd: ctx.cwd, scopeKey: scope.scopeKey,
+						cwd: scope.cwd, scopeKey: scope.scopeKey,
 						identities, recordedIdentity: candidate.storeIdentity, agentId,
 					});
 					if (!identity) throw new InvalidCursorSessionStoreIdentityError("Recorded Cursor local store identity is not valid for this pi session");
 					let openedStore = openedStores.get(identity.stateRoot);
 					if (!openedStore) {
-						openedStore = await openCursorSessionStore(ctx.cwd, identity, identities.workspaceRoot, identities.storeRoot);
+						openedStore = await openCursorSessionStore(scope.cwd, identity, identities.workspaceRoot, identities.storeRoot);
 						openedStores.set(identity.stateRoot, openedStore);
 					}
 					const release = claimCursorLocalAgent(identity, agentId);
 					if (!release) throw new Error("Cursor local agent is still owned by an active runtime");
 					try {
-						await operations.delete(agentId, { cwd: ctx.cwd, store: openedStore.store });
+						await loaded.delete(agentId, { cwd: scope.cwd, store: openedStore.store });
 					} finally { release(); }
 					deletedAgentIds.push(agentId);
 				} catch (error) {
@@ -345,7 +399,13 @@ export async function runCursorSessionAgentCleanupCommand(pi: LocalResumeCleanup
 	} finally {
 		await Promise.all([...openedStores.values()].map((store) => store.dispose().catch(() => undefined)));
 	}
-	if (!appendDurableCleanupEntry(pi, ctx, {
+	// A result must not be appended to a different session/branch, or clear a
+	// competing intent. If the tree changed, leave our durable intent pending.
+	const resultSnapshot = currentSnapshot();
+	const hasOnlyOurIntent = (ids: readonly string[], current: readonly SessionEntry[]) =>
+		current.length === ids.length + 1 && current.at(-1)?.id === intentId && sameIds(ids, current.slice(0, -1));
+	if (!resultSnapshot || !hasOnlyOurIntent(entryIds, resultSnapshot.entries) ||
+		!hasOnlyOurIntent(branchIds, resultSnapshot.branch) || !appendDurableCleanupEntry(pi, ctx, {
 		action: "delete",
 		phase: "result",
 		...baseEntry,
@@ -353,20 +413,20 @@ export async function runCursorSessionAgentCleanupCommand(pi: LocalResumeCleanup
 		...(failedAgentIds.length ? { failedAgentIds } : {}),
 	})) {
 		for (const agentId of plan.candidateAgentIds) nondurableCleanupResultAgentIds.add(agentId);
-		ctx.ui.notify(
-			`Deleted ${deletedAgentIds.length} recorded local Cursor SDK agent(s). The cleanup ledger is partial because its result could not be durably recorded; the durable intent blocks automatic retries.`,
+		notify(
+			`Deleted ${deletedAgentIds.length} recorded local Cursor SDK agent(s). The cleanup ledger is partial because its result could not be durably recorded on the original branch; the durable intent blocks automatic retries.`,
 			"error",
 		);
 		return;
 	}
 	if (failedAgentIds.length > 0) {
-		ctx.ui.notify(
+		notify(
 			`Deleted ${deletedAgentIds.length} recorded local Cursor SDK agent(s); ${failedAgentIds.length} failed.`,
 			"error",
 		);
 		return;
 	}
-	ctx.ui.notify(`Deleted ${deletedAgentIds.length} recorded local Cursor SDK agent(s).`, "info");
+	notify(`Deleted ${deletedAgentIds.length} recorded local Cursor SDK agent(s).`, "info");
 }
 
 export const __testUtils = {

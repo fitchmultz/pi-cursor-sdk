@@ -4,7 +4,7 @@ import { resolveCursorSdkPlatformPackageDirectory } from "./cursor-ripgrep-path.
 
 /**
  * Ensure CURSOR_TREE_SITTER_VENDOR_DIR is set before @cursor/sdk first loads.
- * Must run as a side effect of importing this module (before a static SDK import).
+ * Runs as an import side effect before the SDK is first loaded.
  */
 export function ensureCursorTreeSitterVendorDir(): void {
 	if (process.env.CURSOR_TREE_SITTER_VENDOR_DIR !== undefined) return;

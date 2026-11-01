@@ -362,7 +362,9 @@ describe("cursor-session-agent-cleanup", () => {
 			})),
 		]);
 		const deleteAgent = vi.fn();
-		const appendEntry = vi.fn();
+		const appendEntry = vi.fn((_type: string, value?: unknown) => {
+			entries.push(cleanupEntry(`c${entries.length}`, value as CursorSessionAgentCleanupEntryData, entries.at(-1)?.id ?? null));
+		});
 		const ctx = makeContext(entries);
 		cleanupTestUtils.setSdkOperations({ delete: deleteAgent });
 

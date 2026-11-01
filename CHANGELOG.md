@@ -2,6 +2,12 @@
 
 **Release preparation is not a publication receipt:** confirm the exact version, source and artifact integrity in npm/GitHub publication records before relying on availability. No issue is closed by preparation alone.
 
+## Unreleased
+
+### Changed
+
+- Load `@cursor/sdk` on first use instead of unconditionally evaluating it when the extension loads. A Pi host-peer import lets the compiled-Bun extension loader resolve the lazy SDK import; a network-allowed host refresh can still load it during startup. If the SDK import fails, correct the cause and restart Pi; the loader retains that failure rather than retrying into a potentially partial module.
+
 ## 0.5.5
 
 ### Fixed

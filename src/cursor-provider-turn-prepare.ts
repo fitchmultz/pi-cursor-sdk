@@ -155,6 +155,7 @@ async function prepareCursorCloudProviderTurn(
 		}
 
 		const { Agent } = await loadCursorSdk();
+		throwIfAborted();
 		restoreCursorSdkOutputFilter = installCursorSdkOutputFilter();
 		const promptContext = buildCursorCloudPromptContext(context, resolvedConfig.cloud.contextHandoff.value, params.request.nativeSourceRoles);
 		const nativeSourceRoles = params.request.nativeSourceRoles;
@@ -270,6 +271,7 @@ async function prepareCursorLocalProviderTurn(
 			sandboxEnabled: resolvedConfig.local.sandboxEnabled.value,
 		};
 		const sdk = await loadCursorSdk();
+		throwIfAborted();
 		const { Agent } = sdk;
 		const useHttp1ForAgent = configureCursorSdkHttp1(
 			sdk,

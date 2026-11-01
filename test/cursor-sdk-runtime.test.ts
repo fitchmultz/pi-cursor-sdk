@@ -12,12 +12,53 @@ afterEach(() => {
 	process.argv = [...argv];
 });
 
+it("loads the SDK on first use and memoizes concurrent and subsequent calls", async () => {
+	const sdkFactory = vi.fn(() => ({ marker: "offline-sdk" }));
+	vi.doMock("@cursor/sdk", sdkFactory);
+	try {
+		vi.resetModules();
+		const { loadCursorSdk } = await import("../src/cursor-sdk-runtime.js");
+		expect(sdkFactory).not.toHaveBeenCalled();
+		const first = loadCursorSdk();
+		const concurrent = loadCursorSdk();
+		expect(concurrent).toBe(first);
+		const sdk = await first;
+		expect(sdk).toMatchObject({ marker: "offline-sdk" });
+		expect(sdkFactory).toHaveBeenCalledTimes(1);
+		expect(loadCursorSdk()).toBe(first);
+		expect(await loadCursorSdk()).toBe(sdk);
+	} finally {
+		vi.doUnmock("@cursor/sdk");
+	}
+});
+
+it("retains the same rejected promise and original rejection rather than reimporting", async () => {
+	let attempts = 0;
+	vi.doMock("@cursor/sdk", () => {
+		if (++attempts === 1) throw new Error("synthetic load failure");
+		return { marker: "offline-sdk" };
+	});
+	try {
+		vi.resetModules();
+		const { loadCursorSdk } = await import("../src/cursor-sdk-runtime.js");
+		const failed = loadCursorSdk();
+		expect(loadCursorSdk()).toBe(failed);
+		const error = await failed.catch((reason: unknown) => reason);
+		expect(error).toMatchObject({ cause: { message: "synthetic load failure" } });
+		expect(loadCursorSdk()).toBe(failed);
+		await expect(loadCursorSdk()).rejects.toBe(error);
+		expect(attempts).toBe(1);
+	} finally {
+		vi.doUnmock("@cursor/sdk");
+	}
+});
+
 it("initializes real native Bash parsing before SDK import when Pi lives outside the extension tree", async () => {
 	vi.stubEnv("CURSOR_TREE_SITTER_VENDOR_DIR", undefined);
 	// Neither the launcher nor the Node executable can reach this extension's node_modules.
 	process.argv[1] = join(dirname(process.execPath), "pi-sibling", "cli.js");
 	expect(loadInstalledCursorParsers(sdkEntry)[0].available).toBe(false);
-	// Re-import so vendor-env side effects run before the static @cursor/sdk import (#228).
+	// Re-import so vendor-env side effects run before @cursor/sdk loads.
 	vi.resetModules();
 	const { loadCursorSdk } = await import("../src/cursor-sdk-runtime.js");
 	await loadCursorSdk();

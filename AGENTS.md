@@ -82,7 +82,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `src/cursor-native-replay-routing.ts` owns canonical native replay disposition (`queue_replay` / `inactive_trace` / `transcript_trace`) and context-tool partitioning for drain.
 - `src/cursor-native-replay-trace.ts` owns inactive native replay trace formatting (`title: summary`).
 - `src/cursor-pi-context.ts` owns the stock/transcript Pi context boundary; it uses Pi's required public replay helpers, not a local replay implementation.
-- `src/cursor-context-tools.ts` owns request tool snapshots at provider stream start (legacy tools or replayed transcript declarations), distinct from the registry-owned bridge snapshot.
+- `src/cursor-context-tools.ts` owns request tool snapshots at provider stream start (tools replayed from transcript declarations or shorthand `systemPrompt`/`tools` contexts), distinct from the registry-owned bridge snapshot.
 - `src/cursor-display-text.ts` owns shared single-line sanitization and 240-char truncation for replay/trace display.
 - `src/cursor-native-tool-display-replay.ts` owns replay card rendering and diff/preview formatting.
 - `src/cursor-native-tool-display-tools.ts` owns native/replay tool definition factories and replay execute wrappers.

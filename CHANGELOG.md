@@ -2,6 +2,19 @@
 
 **Release preparation is not a publication receipt:** confirm the exact version, source and artifact integrity in npm/GitHub publication records before relying on availability. No issue is closed by preparation alone.
 
+## 0.5.9 - 2026-11-02
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Recheck unreported Cursor reviews in automatic releases (#402) ([c587ba6](https://github.com/fitchmultz/pi-cursor-sdk/commit/c587ba6594b8a63c49486c206a5349bdf0d9f5bc))
+
+### What's Changed
+* Recheck unreported Cursor reviews in automatic releases by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/402
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.8...v0.5.9
+
 ## 0.5.8 - 2026-11-02
 
 <!-- npm-release:unreleased:start -->

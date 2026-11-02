@@ -19,9 +19,9 @@ jobs:
     permissions:
       contents: write
     if: vars.NPM_RELEASE_ENABLED == 'true' && github.ref == 'refs/heads/main' && github.repository_owner == 'fitchmultz'
-    uses: fitchmultz/.github/.github/workflows/npm-release-plan.yml@b90ae50ca9d9157b84b6efd0d311e96fbe488f6d # reviewed Cursor qualification
+    uses: fitchmultz/.github/.github/workflows/npm-release-plan.yml@014601a6d554c5bd824ada5ed335a5505f758868 # main
     with:
-      automation-ref: b90ae50ca9d9157b84b6efd0d311e96fbe488f6d # reviewed Cursor qualification
+      automation-ref: 014601a6d554c5bd824ada5ed335a5505f758868 # main
 
   checks:
     needs: plan
@@ -36,9 +36,9 @@ jobs:
     if: needs.plan.outputs.release == 'true'
     permissions:
       contents: write
-    uses: fitchmultz/.github/.github/workflows/npm-release-prepare.yml@b90ae50ca9d9157b84b6efd0d311e96fbe488f6d # reviewed Cursor qualification
+    uses: fitchmultz/.github/.github/workflows/npm-release-prepare.yml@014601a6d554c5bd824ada5ed335a5505f758868 # main
     with:
-      automation-ref: b90ae50ca9d9157b84b6efd0d311e96fbe488f6d # reviewed Cursor qualification
+      automation-ref: 014601a6d554c5bd824ada5ed335a5505f758868 # main
       source-ref: ${{ needs.plan.outputs.source }}
       release-source: ${{ needs.plan.outputs.release-source }}
       official-version: ${{ needs.plan.outputs.official-version }}
@@ -68,7 +68,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: fitchmultz/.github
-          ref: b90ae50ca9d9157b84b6efd0d311e96fbe488f6d # reviewed Cursor qualification
+          ref: 014601a6d554c5bd824ada5ed335a5505f758868 # main
           path: automation
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -110,9 +110,9 @@ jobs:
       actions: read
       contents: write
       id-token: write
-    uses: fitchmultz/.github/.github/workflows/npm-release-qualified.yml@b90ae50ca9d9157b84b6efd0d311e96fbe488f6d # reviewed Cursor qualification
+    uses: fitchmultz/.github/.github/workflows/npm-release-qualified.yml@014601a6d554c5bd824ada5ed335a5505f758868 # main
     with:
-      automation-ref: b90ae50ca9d9157b84b6efd0d311e96fbe488f6d # reviewed Cursor qualification
+      automation-ref: 014601a6d554c5bd824ada5ed335a5505f758868 # main
       source-ref: ${{ needs.plan.outputs.source }}
       release-source: ${{ needs.plan.outputs.release-source }}
       official-version: ${{ needs.plan.outputs.official-version }}

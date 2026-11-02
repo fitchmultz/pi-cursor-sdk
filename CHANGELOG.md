@@ -2,6 +2,19 @@
 
 **Release preparation is not a publication receipt:** confirm the exact version, source and artifact integrity in npm/GitHub publication records before relying on availability. No issue is closed by preparation alone.
 
+## 0.5.8 - 2026-11-02
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Raise the Pi floor to 1.5.0 (#400) ([10d8523](https://github.com/fitchmultz/pi-cursor-sdk/commit/10d85236a00a59b8422e17a530412aff6c715236))
+
+### What's Changed
+* Raise the Pi floor to 1.5.0 by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/400
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.7...v0.5.8
+
 ## 0.5.7 - 2026-11-01
 
 <!-- npm-release:unreleased:start -->

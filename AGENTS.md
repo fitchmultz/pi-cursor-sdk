@@ -81,8 +81,8 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `src/cursor-native-tool-display-registration.ts` owns native replay tool registration and model-scoped activation.
 - `src/cursor-native-replay-routing.ts` owns canonical native replay disposition (`queue_replay` / `inactive_trace` / `transcript_trace`) and context-tool partitioning for drain.
 - `src/cursor-native-replay-trace.ts` owns inactive native replay trace formatting (`title: summary`).
-- `src/cursor-pi-context.ts` owns the stock/transcript Pi context boundary; it uses Pi 0.87.1's required public replay helpers, not a local replay implementation.
-- `src/cursor-context-tools.ts` owns request tool snapshots at provider stream start (legacy tools or replayed transcript declarations), distinct from the registry-owned bridge snapshot.
+- `src/cursor-pi-context.ts` owns the stock/transcript Pi context boundary; it uses Pi's required public replay helpers, not a local replay implementation.
+- `src/cursor-context-tools.ts` owns request tool snapshots at provider stream start (tools replayed from transcript declarations or shorthand `systemPrompt`/`tools` contexts), distinct from the registry-owned bridge snapshot.
 - `src/cursor-display-text.ts` owns shared single-line sanitization and 240-char truncation for replay/trace display.
 - `src/cursor-native-tool-display-replay.ts` owns replay card rendering and diff/preview formatting.
 - `src/cursor-native-tool-display-tools.ts` owns native/replay tool definition factories and replay execute wrappers.
@@ -113,7 +113,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 ## Operating rules
 
 - Prefer the smallest change that preserves the current pi user contract.
-- This package requires Node 24+ and official Pi 0.87.1+. Current locked development Pi packages are 1.1.0 snapshots; development Pi/TypeBox dependencies are reproducible build inputs, not qualification targets or user runtime upgrades. Compatibility requires latest stable official Pi and current `fitchmultz/pi` main, resolving version/commit once per workflow run and retaining exact SDK/CLI evidence; optional Pi and TypeBox peer ranges stay `"*"` per Pi guidance.
+- This package requires Node 24+ and official Pi 1.5.0+. Current locked development Pi packages are 1.5.0 snapshots; development Pi/TypeBox dependencies are reproducible build inputs, not qualification targets or user runtime upgrades. Compatibility requires latest stable official Pi and current `fitchmultz/pi` main, resolving version/commit once per workflow run and retaining exact SDK/CLI evidence; optional Pi and TypeBox peer ranges stay `"*"` per Pi guidance.
 - Treat Cursor SDK model metadata as the source of truth for model IDs, parameters, variants, thinking controls, and context variants. Do not hardcode new model-specific behavior unless it is a documented fallback.
 - HARD REPO RULE: never guess what the Cursor SDK outputs, expects, or does. Always verify Cursor SDK behavior against the installed `@cursor/sdk` package and/or the official TypeScript SDK docs at `https://cursor.com/docs/sdk/typescript` before making claims or implementation changes.
 - Contract-test external behavior before relying on it: when code depends on Cursor SDK/pi runtime payloads, timing, lifecycle, errors, usage accounting, or tool/event shapes, add or update a focused test that asserts the observed installed-package/docs/captured-fixture contract and fails if that contract drifts. Do not replace this with mocks based on guesses.

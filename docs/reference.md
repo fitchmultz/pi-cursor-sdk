@@ -49,11 +49,11 @@ If pi started without a key, run `/cursor-refresh-models` after `/login` to refr
 ## Requirements
 
 - Node.js 24+
-- This package requires official Pi 0.87.1 or later. The latest stable official Pi and current `fitchmultz/pi` main are required compatibility targets, resolved once per workflow run; locked development Pi packages are reproducible snapshots, not validation targets
+- This package requires official Pi 1.5.0 or later. The latest stable official Pi and current `fitchmultz/pi` main are required compatibility targets, resolved once per workflow run; locked development Pi packages are reproducible snapshots, not validation targets
 - optional Pi and TypeBox peer metadata uses `"*"` ranges per Pi package guidance
 - a Cursor SDK API key saved through `/login`, available as `CURSOR_API_KEY`, or passed with pi's `--api-key`
 
-No global `@cursor/sdk` install is required. This package depends on exact `@cursor/sdk@1.0.40`, so normal package installation brings in that SDK. Its required Zod peer is supplied directly at patched version `4.6.6`, including for installers that do not auto-install peers. The bundled MCP bridge closure retains its own newer nested Zod `4.6.7` copies. This intentional locked layout keeps the SDK peer unbundled and reachable under Pi's managed npm installation; see [packaging verification](development.md#zod-peer-and-bridge-packaging). The extension intentionally does not bundle `@cursor/sdk` or its platform packages, because packing from one maintainer OS can ship the wrong optional SDK binary for another OS. The SDK has used its current single-file/new-chunk package layout since 1.0.28. Pi hosts that pass transcript-only provider contexts are supported through Pi 0.87.1's required public replay helpers.
+No global `@cursor/sdk` install is required. This package depends on exact `@cursor/sdk@1.0.40`, so normal package installation brings in that SDK. Its required Zod peer is supplied directly at patched version `4.6.6`, including for installers that do not auto-install peers. The bundled MCP bridge closure retains its own newer nested Zod `4.6.7` copies. This intentional locked layout keeps the SDK peer unbundled and reachable under Pi's managed npm installation; see [packaging verification](development.md#zod-peer-and-bridge-packaging). The extension intentionally does not bundle `@cursor/sdk` or its platform packages, because packing from one maintainer OS can ship the wrong optional SDK binary for another OS. The SDK has used its current single-file/new-chunk package layout since 1.0.28. Pi hosts that pass transcript-only provider contexts are supported through Pi's required public replay helpers.
 
 ## Install
 
@@ -149,7 +149,7 @@ The discovered catalog is cached at `~/.pi/agent/cursor-sdk-model-list.json` (wr
 
 Only an accepted native generation can update the catalog, selection metadata, cache, and fallback warning. An effective no-auth refresh removes only the extension's valid regular-file orphaned catalog. Cancelled, superseded, or shut-down refreshes cannot install late results. SDK 1.0.37 catalog requests have no public caller-abort option, so cancellation rejects their late publication rather than promising to stop the underlying request.
 
-Known host limitation: official Pi 1.0.4 and 1.1.0 have a demonstrated startup refresh-admission/readiness race that can temporarily leave fallback models and an incorrect missing-key warning despite a matching authenticated cache. The shared-owner repair is merged in `fitchmultz/pi` via [#190](https://github.com/fitchmultz/pi/pull/190); this is not an official-host fix. See [#337](https://github.com/fitchmultz/pi-cursor-sdk/pull/337). It is separate from Cursor service authentication failures and the compiled-loader repair.
+Known host limitation: official Pi has a startup refresh-admission/readiness race, demonstrated on 1.0.4 and 1.1.0 and unchanged in the 1.5.0 refresh code, that can temporarily leave fallback models and an incorrect missing-key warning despite a matching authenticated cache. The shared-owner repair is merged in `fitchmultz/pi` via [#190](https://github.com/fitchmultz/pi/pull/190) and remains fork-only after the fork's Pi 1.5.0 sync; this is not an official-host fix. See [#337](https://github.com/fitchmultz/pi-cursor-sdk/pull/337). It is separate from Cursor service authentication failures and the compiled-loader repair.
 
 ```bash
 # Cache lifetime in milliseconds (default 86400000 = 24h).

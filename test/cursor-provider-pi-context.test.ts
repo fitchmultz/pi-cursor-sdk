@@ -14,19 +14,13 @@ import { __testUtils } from "../src/cursor-provider.js";
 import { buildCursorPrompt, computeCursorContextFingerprint, shouldBootstrapCursorContext } from "../src/context.js";
 import { getActiveContextToolNames } from "../src/cursor-context-tools.js";
 import { resolveCursorPiContext } from "../src/cursor-pi-context.js";
-import { getPackageDir, type BuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
-import { pathToFileURL } from "node:url";
 import { resolveCursorFacingSystemPrompt } from "../src/cursor-agents-context.js";
 import { resolveCursorSkillSystemPrompt } from "../src/cursor-skill-tool.js";
+import { loadInstalledPiBuildSystemPrompt } from "./helpers/pi-system-prompt.js";
 
-// Contract test of host serialization, not an extension runtime dependency.
-const { buildSystemPrompt } = await import(pathToFileURL(`${getPackageDir()}/dist/core/system-prompt.js`).href) as {
-	buildSystemPrompt(options: BuildSystemPromptOptions): string;
-};
+const buildSystemPrompt = loadInstalledPiBuildSystemPrompt();
 
 // Deliberately run through the installed Pi runtime, not a hand-normalized mock.
-// The optional exports are absent on supported stock Pi 0.84/0.85.
-const transcriptHost = "getCurrentSystemPrompt" in ai;
 const tool = { name: "audit_tool", description: "Synthetic tool", parameters: Type.Object({}) };
 const user = { role: "user" as const, content: "LATEST", timestamp: 1 };
 
@@ -67,7 +61,7 @@ describe("installed Pi provider context boundary", () => {
 		const { received, send } = await boundary();
 		const input = { systemPrompt: "SYSTEM_SENTINEL", tools: [tool], messages: [user] };
 		expect((await send(input)).stopReason).toBe("stop");
-		expect(Object.keys(received[0]).sort()).toEqual(transcriptHost ? ["messages"] : ["messages", "systemPrompt", "tools"]);
+		expect(Object.keys(received[0])).toEqual(["messages"]);
 		expect(sdkSend.mock.calls[0][0].text).toContain("SYSTEM_SENTINEL");
 		expect(getActiveContextToolNames(received[0])).toEqual(new Set(["audit_tool"]));
 		const fingerprint = computeCursorContextFingerprint(received[0]);
@@ -251,16 +245,14 @@ describe("installed Pi provider context boundary", () => {
 		if (!active) { expect(call).toBeUndefined(); return; }
 		expect(call?.name).toBe("read");
 		const messages: unknown[] = [...input.messages, first, { role: "toolResult", toolCallId: call!.id, toolName: "read", content: [{ type: "text", text: "RECORDED" }], isError: false, timestamp: 3 }];
-		if (transcriptHost) {
-			messages.push({ role: "system", content: "", sections: { note: "NEXT" }, timestamp: 4 });
-			expect(__testUtils.hasTrailingUserMessagesAfterToolResults({ messages: [...messages, user] } as ai.Context)).toBe(true);
-		}
+		messages.push({ role: "system", content: "", sections: { note: "NEXT" }, timestamp: 4 });
+		expect(__testUtils.hasTrailingUserMessagesAfterToolResults({ messages: [...messages, user] } as ai.Context)).toBe(true);
 		const final = await send({ ...input, messages } as ai.Context);
 		expect(final.stopReason, final.errorMessage).toBe("stop");
 		expect(sdkSend).toHaveBeenCalledTimes(1);
 	});
 
-	it.skipIf(!transcriptHost)("replays sections/content and removals using the actual host helpers", async () => {
+	it("replays sections/content and removals using the actual host helpers", async () => {
 		const sdkSend = mockSend();
 		const { received, send } = await boundary();
 		const messages = [

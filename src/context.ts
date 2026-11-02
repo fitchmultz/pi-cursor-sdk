@@ -139,22 +139,14 @@ function formatToolCall(toolCall: ToolCall): string {
 
 function sanitizeSystemPromptForCursor(systemPrompt: string): string {
 	let sanitized = systemPrompt;
-	// Transcript-era Pi wraps its built-in tool catalog/rules in XML sections.
+	// Pi wraps its built-in tool catalog and rules in XML sections.
 	sanitized = sanitized.replace(
-		/<tools>\n[\s\S]*?\n\nIn addition to the tools above, you may have access to other custom tools depending on the project\.\n<\/tools>/g,
+		/<tools>\n[\s\S]*?\n\nAdditional tools may be available\.\n<\/tools>/g,
 		"Pi tool catalog omitted: Cursor can call only Cursor SDK tools exposed in this run.",
 	);
 	sanitized = sanitized.replace(
 		/<rules>\n[\s\S]*?\n<\/rules>\n\n(?=<docs>\nPi documentation )/g,
 		"<rules>\n- Be concise in your responses.\n- Show file paths clearly when working with files.\n</rules>\n\n",
-	);
-	sanitized = sanitized.replace(
-		/Available tools:\n[\s\S]*?\n\nIn addition to the tools above, you may have access to other custom tools depending on the project\.\n\n/g,
-		"Pi tool catalog omitted: Cursor can call only Cursor SDK tools exposed in this run.\n\n",
-	);
-	sanitized = sanitized.replace(
-		/Guidelines:\n[\s\S]*?\n\nPi documentation /g,
-		"Guidelines:\n- Be concise in your responses.\n- Show file paths clearly when working with files.\n\nPi documentation ",
 	);
 	// Keep the Agent Skills catalog. Cursor-specific skill activation wording is normalized
 	// by cursor-skill-tool.ts before this prompt reaches the Cursor SDK provider.

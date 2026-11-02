@@ -314,10 +314,11 @@ describe("Cursor fast preference persistence", () => {
 		expect(getEffectiveFastForModelId("composer-2.5")).toBe(false);
 	});
 
-	it("contracts Pi append failure as a possible in-memory partial commit", () => {
+	it("contracts Pi append failure as either an in-memory partial commit or a clean rollback", () => {
 		const manager = SessionManager.create(tmpAgentDir, tmpAgentDir, { id: "fast-append-contract" });
 		manager.appendMessage({ role: "user", content: "hello", timestamp: 1 });
 		manager.appendMessage(makeAssistantMessage("ready"));
+		const before = manager.getBranch();
 		const sessionFile = manager.getSessionFile()!;
 		const savedSessionFile = `${sessionFile}.saved`;
 		renameSync(sessionFile, savedSessionFile);
@@ -330,13 +331,18 @@ describe("Cursor fast preference persistence", () => {
 			rmSync(sessionFile, { recursive: true });
 			renameSync(savedSessionFile, sessionFile);
 		}
-		expect(manager.getBranch()).toEqual(expect.arrayContaining([
-			expect.objectContaining({
+		// Official Pi rolls the failed entry back; the maintained fork keeps it in memory.
+		// persistFastPreference must hold for both observed host outcomes.
+		const after = manager.getBranch();
+		if (after.length === before.length) {
+			expect(after).toEqual(before);
+		} else {
+			expect(after).toEqual([...before, expect.objectContaining({
 				type: "custom",
 				customType: "cursor-fast-state",
 				data: { modelId: "composer-2", fast: false },
-			}),
-		]));
+			})]);
+		}
 	});
 
 });

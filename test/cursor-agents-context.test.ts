@@ -1,6 +1,3 @@
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
@@ -11,9 +8,8 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 	};
 });
 
-import type { BeforeAgentStartEvent, BuildSystemPromptOptions, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { BeforeAgentStartEvent, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Context } from "@earendil-works/pi-ai";
-import * as piAi from "@earendil-works/pi-ai";
 import {
 	CURSOR_PRESERVE_PI_AGENTS_MD_ENV,
 	PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX,
@@ -26,7 +22,7 @@ import { registerCursorAgentsContextDedup } from "../src/cursor-agents-context-r
 import { buildCursorPrompt } from "../src/context.js";
 import { CURSOR_SETTING_SOURCES_ENV } from "../src/cursor-setting-sources.js";
 import { createEventHarness, makeModel } from "./helpers/pi-harness.js";
-import { buildPiSystemPromptWithContextFiles, makeSystemPromptOptions } from "./helpers/pi-system-prompt.js";
+import { buildPiSystemPromptWithContextFiles, loadInstalledPiBuildSystemPrompt, makeSystemPromptOptions } from "./helpers/pi-system-prompt.js";
 
 const GLOBAL_AGENTS_PATH = "/Users/me/.pi/agent/AGENTS.md";
 const GLOBAL_CLAUDE_PATH = "/Users/me/.pi/agent/CLAUDE.md";
@@ -40,25 +36,6 @@ const NESTED_UNDER_AGENT_CLAUDE_PATH = `${DEFAULT_AGENT_DIR}/my-project/CLAUDE.m
 const GLOBAL_FILE = { path: GLOBAL_AGENTS_PATH, content: "Global guidance" };
 const PROJECT_FILE = { path: PROJECT_AGENTS_PATH, content: "Project guidance" };
 const PROJECT_CLAUDE_FILE = { path: PROJECT_CLAUDE_PATH, content: "Project claude guidance" };
-
-type PiBuildSystemPrompt = (options: BuildSystemPromptOptions) => string;
-let cachedBuildSystemPrompt: PiBuildSystemPrompt | undefined;
-
-function loadInstalledPiBuildSystemPrompt(): PiBuildSystemPrompt {
-	if (cachedBuildSystemPrompt) return cachedBuildSystemPrompt;
-	const piMain = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
-	const piPackageRoot = dirname(dirname(piMain));
-	const require = createRequire(piMain);
-	cachedBuildSystemPrompt = require(join(piPackageRoot, "dist/core/system-prompt.js")).buildSystemPrompt as PiBuildSystemPrompt;
-	return cachedBuildSystemPrompt;
-}
-
-function getProjectContextSection(systemPrompt: string): string {
-	const start = systemPrompt.indexOf("\n\n<project_context>");
-	const close = "</project_context>\n";
-	const end = systemPrompt.indexOf(close, start) + close.length;
-	return systemPrompt.slice(start, end);
-}
 
 beforeEach(() => {
 	delete process.env[CURSOR_PRESERVE_PI_AGENTS_MD_ENV];
@@ -110,15 +87,9 @@ describe("installed Pi context deduplication", () => {
 describe("pi project_context serialization helpers", () => {
 	it("serializes context blocks and sections in pi's project_context shape", () => {
 		expect(serializePiProjectInstructionsBlock(PROJECT_FILE)).toBe(
-			'<project_instructions path="/repo/AGENTS.md">\nProject guidance\n</project_instructions>\n\n',
+			'<project_instructions path="/repo/AGENTS.md">\nProject guidance\n</project_instructions>',
 		);
 		expect(serializePiProjectContextSection([PROJECT_FILE])).toBe(
-			'\n\n<project_context>\n\nProject-specific instructions and guidelines:\n\n<project_instructions path="/repo/AGENTS.md">\nProject guidance\n</project_instructions>\n\n</project_context>\n',
-		);
-	});
-
-	it("serializes the self-contained transcript project_context section", () => {
-		expect(serializePiProjectContextSection([PROJECT_FILE], "transcript")).toBe(
 			'<project_context>\nProject-specific instructions and guidelines:\n\n<project_instructions path="/repo/AGENTS.md">\nProject guidance\n</project_instructions>\n</project_context>',
 		);
 	});
@@ -129,8 +100,7 @@ describe("pi project_context serialization helpers", () => {
 			contextFiles: [GLOBAL_FILE, PROJECT_FILE],
 			selectedTools: [],
 		});
-		const format = "getCurrentSystemPrompt" in piAi ? "transcript" : "legacy";
-		expect(getProjectContextSection(prompt).trim()).toBe(serializePiProjectContextSection([GLOBAL_FILE, PROJECT_FILE], format).trim());
+		expect(prompt).toContain(`\n\n${serializePiProjectContextSection([GLOBAL_FILE, PROJECT_FILE])}\n\n`);
 	});
 });
 

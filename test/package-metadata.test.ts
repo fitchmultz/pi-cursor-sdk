@@ -183,16 +183,6 @@ describe("package metadata cutover baselines", () => {
 		expect(lockPackageVersion("@connectrpc/connect-node")).toBeUndefined();
 	});
 
-	it("patches only the frozen development Pi owner's Undici dependency", () => {
-		expect(packageJson.dependencies.undici).toBeUndefined();
-		expect(packageJson.devDependencies["@earendil-works/pi-coding-agent"]).toBe("1.1.0");
-		expect(packageJson.overrides).toEqual({
-			"@earendil-works/pi-coding-agent@1.1.0": { undici: "8.12.3" },
-		});
-		expect(packageLock.packages["node_modules/@earendil-works/pi-coding-agent"]?.dependencies?.undici).toBe("8.10.2");
-		expect(packageLock.packages["node_modules/undici"]).toMatchObject({ version: "8.12.3", dev: true });
-	});
-
 	it("packs an isolated MCP/Hono closure that beats a hostile host @hono/node-server", () => {
 		const tempRoot = mkdtempSync(join(tmpdir(), "pi-cursor-sdk-hono-bundle-"));
 		try {

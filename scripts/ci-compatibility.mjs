@@ -16,7 +16,7 @@ CI resolves latest stable official Pi and maintained fork main once; supplied id
 --select-only installs the selected official graph for subsequent native platform checks and keeps
               its temporary host directory, which node_modules links into.
 
-Manual qualification: node scripts/ci-compatibility.mjs [--working-tree] [--official-only] [--versions 0.87.1,0.99.1,1.0.3]
+Manual qualification: node scripts/ci-compatibility.mjs [--working-tree] [--official-only] [--versions 1.5.0]
 Default manual invocation requires a clean checkout and checks official minimum/latest and current fork offline.
 --working-tree  Build an isolated snapshot of tracked and nonignored new files, without committing.
 --official-only Skip the fork clone/build.
@@ -25,7 +25,7 @@ Manual selection flags cannot be combined with --automation.
 
 Examples:
   node scripts/ci-compatibility.mjs --automation ../automation
-  node scripts/ci-compatibility.mjs --working-tree --official-only --versions 0.87.1,0.99.1,1.0.3
+  node scripts/ci-compatibility.mjs --working-tree --official-only --versions 1.5.0
 Exit codes: 0 success/help; 1 qualification or invalid argument failure.`);
   process.exit(0);
 }
@@ -202,7 +202,7 @@ try {
     if (!versions) {
       const latest = JSON.parse(run("npm", ["view", "@earendil-works/pi-coding-agent", "dist-tags.latest", "--json"], source, true));
       assert.match(latest, /^\d+\.\d+\.\d+$/, "Official Pi latest must be a stable release");
-      versions = ["0.87.1", latest];
+      versions = ["1.5.0", latest];
     }
     const gitExtension = join(root, "git-consumer");
     if (args.includes("--working-tree")) {

@@ -15,6 +15,7 @@ import {
 	planCursorSessionSend,
 } from "../src/cursor-session-send-policy.js";
 import type { Context, UserMessage, AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
+import { loadInstalledPiBuildSystemPrompt } from "./helpers/pi-system-prompt.js";
 
 const TOOL_TAIL_GUARD = [
 	"Shell: use explicit `cd` to repo path for project commands; session cwd may differ from tool args.",
@@ -37,45 +38,26 @@ describe("buildCursorPrompt", () => {
 	});
 
 	it("omits pi tool catalogs while preserving local skill catalogs for Cursor-facing system instructions", () => {
+		const prompt = loadInstalledPiBuildSystemPrompt()({
+			cwd: "/repo",
+			selectedTools: ["custom_private_tool", "read"],
+			toolSnippets: { custom_private_tool: "private local tool", read: "read files" },
+			promptGuidelines: ["Use custom_private_tool for private work"],
+			contextFiles: [{ path: "/repo/AGENTS.md", content: "Project instruction stays." }],
+			skills: [{
+				name: "private-skill", description: "private local skill", filePath: "/skills/private-skill/SKILL.md", baseDir: "/skills/private-skill",
+				sourceInfo: { source: "test", path: "/skills/private-skill/SKILL.md", scope: "temporary", origin: "top-level" },
+				disableModelInvocation: false,
+			}],
+		});
 		const ctx: Context = {
-			systemPrompt: [
-				"You are an expert coding assistant.",
-				"",
-				"Available tools:",
-				"- custom_private_tool: private local tool",
-				"- read: read files",
-				"",
-				"In addition to the tools above, you may have access to other custom tools depending on the project.",
-				"",
-				"Guidelines:",
-				"- Use custom_private_tool for private work",
-				"- Be concise in your responses",
-				"",
-				"Pi documentation (read only when needed):",
-				"- Main documentation: /pi/README.md",
-				"",
-				"<project_context>",
-				"Project instruction stays.",
-				"</project_context>",
-				"",
-				"The following skills provide specialized instructions for specific tasks.",
-				"Use the read tool to load a skill's file when the task matches its description.",
-				"When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
-				"",
-				"<available_skills>",
-				"  <skill><name>private-skill</name><description>private local skill</description></skill>",
-				"</available_skills>",
-				"Current date: 2026-05-20",
-				"Current working directory: /repo",
-				"Semantic code intelligence priority:",
-				"- Prefer custom_private_tool for symbols",
-			].join("\n"),
+			systemPrompt: `${prompt}\n\nSemantic code intelligence priority:\n- Prefer custom_private_tool for symbols`,
 			messages: [],
 		};
 		const result = buildCursorPrompt(ctx);
 		expect(result.text).toContain("Pi tool catalog omitted");
 		expect(result.text).toContain("Project instruction stays.");
-		expect(result.text).toContain("Current date: 2026-05-20");
+		expect(result.text).toContain("<cwd>\n/repo\n</cwd>");
 		expect(result.text).not.toContain("custom_private_tool");
 		expect(result.text).toContain("private-skill");
 		expect(result.text).not.toContain("Semantic code intelligence priority");

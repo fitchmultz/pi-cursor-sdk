@@ -17,8 +17,6 @@ export const CURSOR_PRESERVE_PI_AGENTS_MD_ENV = "PI_CURSOR_PRESERVE_PI_AGENTS_MD
 /** Opening tag prefix pi `buildSystemPrompt()` uses for each context file (path attribute only). */
 export const PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX = '<project_instructions path="';
 const PI_PROJECT_INSTRUCTIONS_CLOSE = "</project_instructions>";
-const PI_PROJECT_CONTEXT_OPEN = "\n\n<project_context>\n\nProject-specific instructions and guidelines:\n\n";
-const PI_PROJECT_CONTEXT_CLOSE = "</project_context>\n";
 
 function normalizeContextPath(filePath: string): string {
 	return filePath.replace(/\\/g, "/");
@@ -109,27 +107,21 @@ function shouldSuppressPiAgentsContext(
 	return contextFiles.some((file) => shouldRemovePiAgentsContextFile(file, settingSources, agentDir));
 }
 
-/** Exact pi `buildSystemPrompt()` serialization for one context file block (including trailing blank line). */
+/** Exact pi `buildSystemPrompt()` serialization for one context file block. */
 export function serializePiProjectInstructionsBlock(file: PiAgentsContextFile): string {
-	return `${PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX}${file.path}">\n${file.content}\n${PI_PROJECT_INSTRUCTIONS_CLOSE}\n\n`;
+	return `${PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX}${file.path}">\n${file.content}\n${PI_PROJECT_INSTRUCTIONS_CLOSE}`;
 }
 
-/** The two supported Pi project-context serializations; legacy includes outer spacing. */
-export function serializePiProjectContextSection(
-	contextFiles: readonly PiAgentsContextFile[],
-	format: "legacy" | "transcript" = "legacy",
-): string {
+/** Exact pi `buildSystemPrompt()` serialization for the project_context section. */
+export function serializePiProjectContextSection(contextFiles: readonly PiAgentsContextFile[]): string {
 	if (contextFiles.length === 0) return "";
-	if (format === "transcript") {
-		return [
-			"<project_context>",
-			"Project-specific instructions and guidelines:",
-			"",
-			contextFiles.map((file) => serializePiProjectInstructionsBlock(file).trimEnd()).join("\n\n"),
-			"</project_context>",
-		].join("\n");
-	}
-	return `${PI_PROJECT_CONTEXT_OPEN}${contextFiles.map(serializePiProjectInstructionsBlock).join("")}${PI_PROJECT_CONTEXT_CLOSE}`;
+	return [
+		"<project_context>",
+		"Project-specific instructions and guidelines:",
+		"",
+		contextFiles.map(serializePiProjectInstructionsBlock).join("\n\n"),
+		"</project_context>",
+	].join("\n");
 }
 
 /** Remove pi context blocks that overlap Cursor setting sources. */
@@ -150,16 +142,13 @@ export function removePiAgentsContextFromSystemPrompt(
 	}
 	if (!removedAny) return systemPrompt;
 
-	// Match only the exact known files in either supported serialization; never
-	// strip arbitrary user-authored XML or neighboring custom sections.
-	for (const format of ["legacy", "transcript"] as const) {
-		const originalSection = serializePiProjectContextSection(contextFiles, format);
-		const start = systemPrompt.indexOf(originalSection);
-		if (start < 0) continue;
-		const replacementSection = serializePiProjectContextSection(retainedContextFiles, format);
-		return systemPrompt.slice(0, start) + replacementSection + systemPrompt.slice(start + originalSection.length);
-	}
-	return systemPrompt;
+	// Match only the exact known files; never strip arbitrary user-authored XML
+	// or neighboring custom sections.
+	const originalSection = serializePiProjectContextSection(contextFiles);
+	const start = systemPrompt.indexOf(originalSection);
+	if (start < 0) return systemPrompt;
+	const replacementSection = serializePiProjectContextSection(retainedContextFiles);
+	return systemPrompt.slice(0, start) + replacementSection + systemPrompt.slice(start + originalSection.length);
 }
 
 export function resolveCursorFacingSystemPrompt(

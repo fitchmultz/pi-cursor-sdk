@@ -2,6 +2,20 @@
 
 **Release preparation is not a publication receipt:** confirm the exact version, source and artifact integrity in npm/GitHub publication records before relying on availability. No issue is closed by preparation alone.
 
+## 0.5.10 - 2026-11-03
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Merge pull request #404 from fitchmultz/npm-version-queue-1 ([e9d8b51](https://github.com/fitchmultz/pi-cursor-sdk/commit/e9d8b513bd7e6ecb6ced66ff56b0b4e9a4bd4bf1))
+
+### What's Changed
+* Coalesce queued npm version runs by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/404
+* Restore queue: max and the final newline in npm-version.yml by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/405
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.9...v0.5.10
+
 ## 0.5.9 - 2026-11-02
 
 <!-- npm-release:unreleased:start -->

@@ -23,7 +23,7 @@ permissions:
 concurrency:
   group: npm-version-${{ github.repository }}
   cancel-in-progress: false
-  queue: max
+  queue: 1
 
 jobs:
   reconcile:

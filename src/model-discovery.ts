@@ -285,6 +285,16 @@ export function getCursorModelMetadata(modelId: string): CursorModelMetadata | u
 	return metadataByPiModelId.get(modelId);
 }
 
+/** Plain snapshot so another extension copy can install the serving catalog's capabilities. */
+export function snapshotCursorModelMetadata(): CursorModelMetadata[] {
+	return [...metadataByPiModelId.values()].map((entry) => structuredClone(entry));
+}
+
+export function replaceCursorModelMetadata(entries: readonly CursorModelMetadata[]): void {
+	metadataByPiModelId.clear();
+	for (const entry of entries) metadataByPiModelId.set(entry.piModelId, structuredClone(entry));
+}
+
 function setParam(params: ModelParameterValue[], id: string, value: string): void {
 	const existing = params.find((param) => param.id === id);
 	if (existing) {

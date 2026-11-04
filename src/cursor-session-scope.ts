@@ -91,7 +91,10 @@ export function getCursorSessionScopeSnapshot(pi?: object): CursorTurnScope {
 }
 
 export function hasLiveCursorSessions(): boolean {
-	return scopes.size > 0;
+	// Registration inserts a scope before session_start. A session-less bootstrap
+	// (PI WEB) must not keep process-global HTTP/1 configured after the real session ends.
+	for (const record of scopes.values()) if (record.sessionGeneration > 0) return true;
+	return false;
 }
 
 /** Runtime ownership key; persisted identities are captured separately. */

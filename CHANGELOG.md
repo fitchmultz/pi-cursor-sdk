@@ -5,6 +5,10 @@
 ## 0.5.10 - 2026-11-03
 
 <!-- npm-release:unreleased:start -->
+### Fixed
+
+- Serve Cursor requests in hosts that share one ModelRuntime and register providers only from a session-less bootstrap load, such as PI WEB. Every request previously failed with "Cursor provider binding is not active" because the only accepted registration belonged to an extension instance that never started. A registration whose session never started now serves the bound, active session that issued the request receipt, with that session's scope, compaction/tree purpose, bridge, replay state and cloud recorder. Receipts are shared process-wide because Pi evaluates each extension instance with its own module graph. Unbound or shut-down sessions, receipt-less calls and shut-down registrations still fail closed, and a started registration still rejects sibling receipts. The turn runs in the session's own module, so its agent pool, settings and lifecycle stay with that session. Such sessions follow the native provider's catalog issue and model metadata, including after a composed wrapper or a later registration replaces the provider, so a live catalog refresh clears their startup "missing API key" fallback warning instead of repeating it. An unstarted registration does not keep the process-global HTTP/1 override after the last started session shuts down, and its offline refresh does not replace a live catalog with a missing-key fallback when composed auth is not on the refresh credential. Direct session dispose drops the catalog subscription.
+
 <!-- npm-release:unreleased:end -->
 
 - Merge pull request #404 from fitchmultz/npm-version-queue-1 ([e9d8b51](https://github.com/fitchmultz/pi-cursor-sdk/commit/e9d8b513bd7e6ecb6ced66ff56b0b4e9a4bd4bf1))
@@ -85,8 +89,6 @@ Cursor runtime behavior and runtime dependency versions are unchanged.
 ## 0.5.5
 
 ### Fixed
-
-- Serve Cursor requests in hosts that share one ModelRuntime and register providers only from a session-less bootstrap load, such as PI WEB. Every request previously failed with "Cursor provider binding is not active" because the only accepted registration belonged to an extension instance that never started. A registration whose session never started now serves the bound, active session that issued the request receipt, with that session's scope, compaction/tree purpose, bridge, replay state and cloud recorder. Receipts are shared process-wide because Pi evaluates each extension instance with its own module graph. Unbound or shut-down sessions, receipt-less calls and shut-down registrations still fail closed, and a started registration still rejects sibling receipts. Such sessions also follow the serving provider's catalog provenance, so a live catalog refresh clears their startup "missing API key" fallback warning instead of repeating it.
 
 - Stop a failed LOCAL Cursor run's shell commands and other native tool processes. SDK 1.0.40 leaves them running after a run fails, for example when it gives up resuming a reset connection, and `Run.cancel()` stops them only while the run is still running. The provider now cancels the run while the SDK records the failure, which the SDK does before it marks the run failed, and still reports the SDK's failure message as a Pi error. A separate SDK error code, when present, is not shown after this cancellation. Explicit Pi aborts and Cloud runs are unchanged (#384).
 

@@ -24,8 +24,8 @@ interface RequestReceipt {
 // Pi evaluates each extension instance with its own module graph. Hosts that share one
 // ModelRuntime keep the first instance's provider, so receipts must be visible process-wide.
 const REQUEST_OWNERS_KEY = Symbol.for("pi-cursor-sdk.provider-request-receipts.v1");
-const processState = globalThis as typeof globalThis & Record<symbol, unknown>;
-const requestOwners = (processState[REQUEST_OWNERS_KEY] ??= new WeakMap<object, RequestReceipt>()) as WeakMap<object, RequestReceipt>;
+const processState = globalThis as typeof globalThis & ProviderProcessState;
+const requestOwners = (processState[REQUEST_OWNERS_KEY] ??= new WeakMap<object, RequestReceipt>());
 interface CatalogChannel { published: boolean; issue?: CursorModelFallbackIssue; metadata?: readonly CursorModelMetadata[] }
 interface CatalogSubscriber {
 	stream: object;
@@ -40,8 +40,13 @@ interface CatalogSubscriber {
 // including when a sibling registration replaces the provider after session_start.
 const CATALOG_CHANNELS_KEY = Symbol.for("pi-cursor-sdk.provider-catalog-channels.v1");
 const CATALOG_SUBSCRIBERS_KEY = Symbol.for("pi-cursor-sdk.provider-catalog-subscribers.v1");
-const catalogChannels = (processState[CATALOG_CHANNELS_KEY] ??= new WeakMap<object, CatalogChannel>()) as WeakMap<object, CatalogChannel>;
-const catalogSubscribers = (processState[CATALOG_SUBSCRIBERS_KEY] ??= new Set<WeakRef<CatalogSubscriber>>()) as Set<WeakRef<CatalogSubscriber>>;
+interface ProviderProcessState {
+	[REQUEST_OWNERS_KEY]?: WeakMap<object, RequestReceipt>;
+	[CATALOG_CHANNELS_KEY]?: WeakMap<object, CatalogChannel>;
+	[CATALOG_SUBSCRIBERS_KEY]?: Set<WeakRef<CatalogSubscriber>>;
+}
+const catalogChannels = (processState[CATALOG_CHANNELS_KEY] ??= new WeakMap<object, CatalogChannel>());
+const catalogSubscribers = (processState[CATALOG_SUBSCRIBERS_KEY] ??= new Set<WeakRef<CatalogSubscriber>>());
 function catalogChannelFor(stream: object): CatalogChannel {
 	let channel = catalogChannels.get(stream);
 	if (!channel) catalogChannels.set(stream, channel = { published: false });

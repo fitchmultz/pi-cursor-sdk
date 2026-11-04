@@ -4,9 +4,23 @@
 
 ## Unreleased
 
+## 0.5.11 - 2026-11-04
+
+<!-- npm-release:unreleased:start -->
 ### Fixed
 
 - Serve Cursor requests in hosts that share one ModelRuntime and register providers only from a session-less bootstrap load, such as PI WEB. Every request previously failed with "Cursor provider binding is not active" because the only accepted registration belonged to an extension instance that never started. A registration whose session never started now serves the bound, active session that issued the request receipt, with that session's scope, compaction/tree purpose, bridge, replay state and cloud recorder. Receipts are shared process-wide because Pi evaluates each extension instance with its own module graph. Unbound or shut-down sessions, receipt-less calls and shut-down registrations still fail closed, and a started registration still rejects sibling receipts. The turn runs in the session's own module, so its agent pool, settings and lifecycle stay with that session. Such sessions follow the native provider's catalog issue and model metadata, including after a composed wrapper or a later registration replaces the provider, so a live catalog refresh clears their startup "missing API key" fallback warning instead of repeating it. Live LOCAL agent claims and HTTP/1 override ownership are process-wide across module copies. Same-file sessions cannot resume each other's live agents, and shutdown resets the transport only when no started live session remains, ignoring siblings marked stale by direct disposal. An unstarted registration does not keep the override alive, and its offline refresh does not replace a live catalog with a missing-key fallback when composed auth is not on the refresh credential. Catalog subscriptions use weak references so they do not retain disposed extension copies. The next catalog publication removes stale subscriptions without notifying disposed sessions.
+<!-- npm-release:unreleased:end -->
+
+- Merge pull request #390 from rickycabugawan/fix/shared-runtime-provider-binding ([85f4c5a](https://github.com/fitchmultz/pi-cursor-sdk/commit/85f4c5a18dbc311c4e66c3b78084dfb0398e2e00))
+
+### What's Changed
+* Fix shared-runtime Cursor provider ownership by @rickycabugawan in https://github.com/fitchmultz/pi-cursor-sdk/pull/390
+
+### New Contributors
+* @rickycabugawan made their first contribution in https://github.com/fitchmultz/pi-cursor-sdk/pull/390
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.10...v0.5.11
 
 ## 0.5.10 - 2026-11-03
 

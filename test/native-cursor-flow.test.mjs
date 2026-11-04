@@ -666,7 +666,8 @@ test("shared runtime requests require their actual session's registration once t
     const staleStream = a.session.modelRuntime.getProvider("cursor").streamSimple;
     await a.session.prompt("unstarted B registration serves A's own receipt");
     assert.equal(a.session.messages.at(-1).stopReason, "stop", a.session.messages.at(-1).errorMessage);
-    assert.equal(state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId).options.local.cwd, a.cwd);
+    const delegatedAgent = state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId);
+    assert.equal(delegatedAgent?.options.local.cwd, a.cwd);
     const beforeSends = state.sends.length;
     await b.session.bindExtensions({ mode: "rpc" });
     await a.session.prompt("A cannot enter B registration");
@@ -678,7 +679,8 @@ test("shared runtime requests require their actual session's registration once t
     assert.equal(state.sends.length, beforeSends);
     await b.session.prompt("correct B receipt and registration");
     assert.equal(b.session.messages.at(-1).stopReason, "stop");
-    assert.equal(state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId).options.local.cwd, b.cwd);
+    const registeredAgent = state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId);
+    assert.equal(registeredAgent?.options.local.cwd, b.cwd);
     await b.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
     await a.session.prompt("closed B registration is not A");
     assert.match(a.session.messages.at(-1).errorMessage, /binding is not active/);
@@ -690,7 +692,8 @@ test("shared runtime requests require their actual session's registration once t
     assert.notEqual(a.session.modelRuntime.getProvider("cursor").streamSimple, staleStream);
     await a.session.prompt("A recovered with its own request receipt");
     assert.equal(a.session.messages.at(-1).stopReason, "stop");
-    assert.equal(state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId).options.local.cwd, a.cwd);
+    const reloadedAgent = state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId);
+    assert.equal(reloadedAgent?.options.local.cwd, a.cwd);
   });
 });
 

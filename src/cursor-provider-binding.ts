@@ -4,11 +4,11 @@ import { cursorApiKeyAuth, normalizeCursorApiKey, resolveCursorCredentialApiKey 
 import { discoverModels, snapshotCursorModelMetadata, type CursorModelFallbackIssue, type CursorModelMetadata } from "./model-discovery.js";
 import { clearModelListCache } from "./model-list-cache.js";
 import { captureCursorCloudLifecycleRecorder } from "./cursor-cloud-lifecycle.js";
-import { captureCursorUsageRecorder, type CursorUsageRecorder } from "./cursor-usage-ledger.js";
+import { captureCursorUsageRecorder } from "./cursor-usage-ledger.js";
 import { getCursorNativeToolDisplayState } from "./cursor-native-tool-display-state.js";
 import { getRegisteredCursorPiToolBridge } from "./cursor-pi-tool-bridge.js";
 import { createCursorLazyStream } from "./cursor-provider-lazy.js";
-import { getCursorSessionScopeSnapshot } from "./cursor-session-scope.js";
+import { getCursorSessionScopeSnapshot, isCursorExtensionDisposed } from "./cursor-session-scope.js";
 import { captureCursorRequestProjection, resolveCursorRequestProvenance, type CursorRequestProvenance } from "./cursor-request-provenance.js";
 import type { CursorSdkOutputNoticeHandler } from "./cursor-sdk-output-filter.js";
 
@@ -41,20 +41,11 @@ interface CatalogSubscriber {
 const CATALOG_CHANNELS_KEY = Symbol.for("pi-cursor-sdk.provider-catalog-channels.v1");
 const CATALOG_SUBSCRIBERS_KEY = Symbol.for("pi-cursor-sdk.provider-catalog-subscribers.v1");
 const catalogChannels = (processState[CATALOG_CHANNELS_KEY] ??= new WeakMap<object, CatalogChannel>()) as WeakMap<object, CatalogChannel>;
-const catalogSubscribers = (processState[CATALOG_SUBSCRIBERS_KEY] ??= new Set<CatalogSubscriber>()) as Set<CatalogSubscriber>;
+const catalogSubscribers = (processState[CATALOG_SUBSCRIBERS_KEY] ??= new Set<WeakRef<CatalogSubscriber>>()) as Set<WeakRef<CatalogSubscriber>>;
 function catalogChannelFor(stream: object): CatalogChannel {
 	let channel = catalogChannels.get(stream);
 	if (!channel) catalogChannels.set(stream, channel = { published: false });
 	return channel;
-}
-function extensionWasDisposed(pi: BindingExtension): boolean {
-	if (typeof pi.getSessionName !== "function") return false;
-	try {
-		pi.getSessionName();
-		return false;
-	} catch (error) {
-		return error instanceof Error && error.message.includes("stale after session replacement or reload");
-	}
 }
 function closeBinding(binding: ProviderBinding): void {
 	binding.active = false;
@@ -120,7 +111,7 @@ export function registerCursorProviderBinding(
 			const headers = options?.headers;
 			const owner = headers && requestOwners.get(headers);
 			if (headers) requestOwners.delete(headers);
-			if (owner && extensionWasDisposed(owner.pi)) closeBinding(owner.binding);
+			if (owner && isCursorExtensionDisposed(owner.pi)) closeBinding(owner.binding);
 			if (binding.closed || (!binding.active && !owner)) throw inactiveError();
 			if (!owner) throw new Error("Cursor provider ownership is unavailable: this call has no native session request receipt. Bare modelRegistry.streamSimple calls are unsupported for Cursor; use the owning AgentSession's stream path or an independent child AgentSession.");
 			// A registrant that never started is a shared-runtime host's bootstrap instance
@@ -135,9 +126,10 @@ export function registerCursorProviderBinding(
 	};
 	const ownCatalog = catalogChannelFor(stream);
 	let onCatalog: CatalogListener | undefined;
-	let subscriber: CatalogSubscriber | undefined;
+	// strongAnchor is intentionally unread: this session closure keeps the weakly registered subscriber alive.
+	let subscriber: { strongAnchor: CatalogSubscriber; reference: WeakRef<CatalogSubscriber> } | undefined;
 	const unsubscribeServingCatalog = () => {
-		if (subscriber) catalogSubscribers.delete(subscriber);
+		if (subscriber) catalogSubscribers.delete(subscriber.reference);
 		subscriber = undefined;
 	};
 	const emitCatalog = (issue: CursorModelFallbackIssue | undefined, metadata: readonly CursorModelMetadata[]) => {
@@ -146,10 +138,15 @@ export function registerCursorProviderBinding(
 		ownCatalog.issue = issue;
 		ownCatalog.metadata = metadata;
 		onCatalog?.(issue, metadata);
-		for (const candidate of [...catalogSubscribers]) {
-			if (candidate.binding.closed || extensionWasDisposed(candidate.pi)) {
+		for (const reference of [...catalogSubscribers]) {
+			const candidate = reference.deref();
+			if (!candidate) {
+				catalogSubscribers.delete(reference);
+				continue;
+			}
+			if (candidate.binding.closed || isCursorExtensionDisposed(candidate.pi)) {
 				closeBinding(candidate.binding);
-				catalogSubscribers.delete(candidate);
+				catalogSubscribers.delete(reference);
 				continue;
 			}
 			if (candidate.stream === stream) continue;
@@ -168,8 +165,8 @@ export function registerCursorProviderBinding(
 			listener: (issue, metadata) => onCatalog?.(issue, metadata),
 			servingStream: () => nativeCursorStream(registry),
 		};
-		subscriber = nextSubscriber;
-		catalogSubscribers.add(nextSubscriber);
+		subscriber = { strongAnchor: nextSubscriber, reference: new WeakRef(nextSubscriber) };
+		catalogSubscribers.add(subscriber.reference);
 		const serving = nextSubscriber.servingStream();
 		if (serving && serving !== stream) {
 			const servingCatalog = catalogChannelFor(serving);

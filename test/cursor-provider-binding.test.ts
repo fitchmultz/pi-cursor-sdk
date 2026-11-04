@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { SessionManager, convertToLlm, createAgentSession, DefaultResourceLoader, ModelRuntime, SettingsManager, type AgentSession, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createAssistantMessageEventStream, InMemoryCredentialStore, type Context } from "@earendil-works/pi-ai";
 import type { CursorModelFallbackIssue } from "../src/model-discovery.js";
@@ -78,6 +78,7 @@ describe("canonical native request provenance", () => {
 describe("provider header receipts and operation membership", () => {
 	async function binding() {
 		const f = fixture(); const pi = createPiHarness(); registerCursorSessionScope(pi); registerCursorNativeToolDisplayState(pi); const register = registerCursorProviderBinding(pi); register([], () => {});
+		onTestFinished(async () => { await pi.runSessionShutdown({ reason: "quit" }); });
 		const ctx = createExtensionTestContext({ cwd: "/tmp/provenance-owner", sessionManager: { getBranch: () => f.manager.getBranch(), buildSessionProjection: () => f.manager.buildSessionProjection(), getSessionId: () => f.manager.getSessionId(), getSessionFile: () => undefined } });
 		await pi.invokeEventWithContext("session_start", { type: "session_start", reason: "startup" }, ctx);
 		const stream = pi._registered[0]!.config.streamSimple! as ReturnType<typeof createCursorLazyStream>;
@@ -146,6 +147,7 @@ describe("provider header receipts and operation membership", () => {
 				display: await import("../src/cursor-native-tool-display-state.js"),
 			};
 			const session = createPiHarness(); sessionCopy.scope.registerCursorSessionScope(session); sessionCopy.display.registerCursorNativeToolDisplayState(session); sessionCopy.binding.registerCursorProviderBinding(session)([], () => {});
+			onTestFinished(async () => { await session.runSessionShutdown({ reason: "quit" }); });
 			const ctx = createExtensionTestContext({ cwd: "/tmp/provenance-owner", sessionManager: { getBranch: () => f.manager.getBranch(), buildSessionProjection: () => f.manager.buildSessionProjection(), getSessionId: () => f.manager.getSessionId(), getSessionFile: () => undefined } });
 			await session.invokeEventWithContext("session_start", { type: "session_start", reason: "startup" }, ctx);
 			async function receipt() {
@@ -197,6 +199,7 @@ describe("provider header receipts and operation membership", () => {
 				const refresh = () => provider.refreshModels!({ allowNetwork: true, force: true, signal: new AbortController().signal, publish: async (publication) => { publication.update?.(); return true; } });
 				await refresh();
 				const session = createPiHarness(); const seen: (CursorModelFallbackIssue | undefined)[] = [];
+				onTestFinished(async () => { await session.runSessionShutdown({ reason: "quit" }); });
 				const sessionMods = await load();
 				sessionMods.binding.registerCursorProviderBinding(session)([], (issue, metadata) => {
 					seen.push(issue);
@@ -213,6 +216,7 @@ describe("provider header receipts and operation membership", () => {
 				await refresh();
 				expect(seen).toHaveLength(2);
 				const disposedSession = createPiHarness(); const disposedSeen: (CursorModelFallbackIssue | undefined)[] = [];
+				onTestFinished(async () => { await disposedSession.runSessionShutdown({ reason: "quit" }); });
 				let disposeProbe = false;
 				Object.assign(disposedSession, { getSessionName: () => { if (disposeProbe) throw new Error("This extension ctx is stale after session replacement or reload."); return "disposed"; } });
 				(await load()).binding.registerCursorProviderBinding(disposedSession)([], (issue) => { disposedSeen.push(issue); });
@@ -244,6 +248,7 @@ describe("provider header receipts and operation membership", () => {
 				const refreshCurrent = () => slot.provider?.refreshModels?.({ allowNetwork: true, force: true, signal: new AbortController().signal, publish: async (publication: { update?: () => void }) => { publication.update?.(); return true; } });
 				const modelRegistry = { getProvider: () => slot.provider && { ...slot.provider, streamSimple: () => undefined }, getRegisteredNativeProvider: () => slot.provider, refresh: async () => ({ aborted: false, errors: new Map() }) } as unknown as ExtensionContext["modelRegistry"];
 				const started = createPiHarness(); const seen: (CursorModelFallbackIssue | undefined)[] = [];
+				onTestFinished(async () => { await started.runSessionShutdown({ reason: "quit" }); });
 				(await load()).registerCursorProviderBinding(started)([], (issue) => { seen.push(issue); });
 				slot.provider = started._registered[0]!.provider;
 				nextIssue = { reason: "missing-api-key", message: "own startup" };
@@ -337,7 +342,7 @@ describe("provider header receipts and operation membership", () => {
 			expect(reopened.getEntries().filter(entry => entry.type === "compaction")).toHaveLength(1);
 			expect(reopened.getBranch().filter(entry => entry.type === "branch_summary")).toHaveLength(1);
 		} finally {
-			if (session) { await session.abort(); session.dispose(); }
+			if (session) { await session.abort(); await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }); session.dispose(); }
 			await rm(root, { recursive: true, force: true });
 		}
 	});

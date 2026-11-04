@@ -2,6 +2,21 @@
 
 **Release preparation is not a publication receipt:** confirm the exact version, source and artifact integrity in npm/GitHub publication records before relying on availability. No issue is closed by preparation alone.
 
+## 0.5.11 - 2026-11-04
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Merge pull request #390 from rickycabugawan/fix/shared-runtime-provider-binding ([85f4c5a](https://github.com/fitchmultz/pi-cursor-sdk/commit/85f4c5a18dbc311c4e66c3b78084dfb0398e2e00))
+
+### What's Changed
+* Fix shared-runtime Cursor provider ownership by @rickycabugawan in https://github.com/fitchmultz/pi-cursor-sdk/pull/390
+
+### New Contributors
+* @rickycabugawan made their first contribution in https://github.com/fitchmultz/pi-cursor-sdk/pull/390
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.10...v0.5.11
+
 ## 0.5.10 - 2026-11-03
 
 <!-- npm-release:unreleased:start -->

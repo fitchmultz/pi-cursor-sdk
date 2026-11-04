@@ -14,7 +14,11 @@ type CursorHttp1Sdk = {
 };
 
 let globalPreferenceAuthoritative = false;
-let configuredCursor: CursorHttp1Sdk["Cursor"] | undefined;
+const CONFIGURED_CURSOR_KEY = Symbol.for("pi-cursor-sdk.http1-configuration.v1");
+type Http1Configuration = { cursor?: CursorHttp1Sdk["Cursor"] };
+// Keep the configured SDK handle available to the last session's shutdown, even in another module copy.
+const processState = globalThis as typeof globalThis & { [CONFIGURED_CURSOR_KEY]?: Http1Configuration };
+const configuration = processState[CONFIGURED_CURSOR_KEY] ??= {};
 
 export function isCursorHttp1EntryData(value: unknown): value is CursorHttp1EntryData {
 	return typeof asRecord(value)?.enabled === "boolean";
@@ -37,9 +41,9 @@ export function setCursorHttp1GlobalPreferenceAuthoritative(authoritative: boole
 }
 
 export function clearCursorSdkHttp1(): void {
-	if (configuredCursor === undefined) return;
-	configuredCursor.configure({ local: { useHttp1ForAgent: null } });
-	configuredCursor = undefined;
+	if (configuration.cursor === undefined) return;
+	configuration.cursor.configure({ local: { useHttp1ForAgent: null } });
+	configuration.cursor = undefined;
 }
 
 export function configureCursorSdkHttp1(
@@ -48,11 +52,10 @@ export function configureCursorSdkHttp1(
 ): boolean | undefined {
 	if (setting.source !== "builtin") {
 		sdk.Cursor.configure({ local: { useHttp1ForAgent: setting.value } });
-		configuredCursor = sdk.Cursor;
+		configuration.cursor = sdk.Cursor;
 		return setting.value;
 	}
-	if (configuredCursor === sdk.Cursor) clearCursorSdkHttp1();
-	else configuredCursor = undefined;
+	if (configuration.cursor === sdk.Cursor) clearCursorSdkHttp1();
 	return undefined;
 }
 
@@ -60,6 +63,6 @@ export const __testUtils = {
 	reset(): void {
 		setStoredCursorHttp1Enabled(undefined);
 		globalPreferenceAuthoritative = false;
-		configuredCursor = undefined;
+		configuration.cursor = undefined;
 	},
 };

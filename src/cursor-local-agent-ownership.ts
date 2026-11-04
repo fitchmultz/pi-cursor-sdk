@@ -1,9 +1,11 @@
 import type { CursorSessionStoreIdentity } from "./cursor-session-store.js";
 
-// ponytail: process-local claims protect extension-owned handles and cleanup.
+// ponytail: process-wide claims shared across extension copies protect owned handles and cleanup.
 // Cross-process SDK ownership requires an upstream store/agent lease contract.
 // Unproven disposal retains the exact handle claim until process exit.
-const claims = new Set<string>();
+const CLAIMS_KEY = Symbol.for("pi-cursor-sdk.local-agent-claims.v1");
+const processState = globalThis as typeof globalThis & { [CLAIMS_KEY]?: Set<string> };
+const claims = processState[CLAIMS_KEY] ??= new Set<string>();
 
 export function claimCursorLocalAgent(identity: CursorSessionStoreIdentity, agentId: string): (() => void) | undefined {
 	const key = JSON.stringify([identity.stateRoot, agentId]);

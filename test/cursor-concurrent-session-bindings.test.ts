@@ -92,6 +92,15 @@ describe("owned session snapshots and cleanup", () => {
 		expect(configure).toHaveBeenLastCalledWith({ local: { useHttp1ForAgent: null } });
 	});
 
+	it("clears process-global transport when the only remaining registration never started", async () => {
+		const a = binding(); binding();
+		await start(a);
+		const configure = vi.fn();
+		configureCursorSdkHttp1({ Cursor: { configure } }, { value: true, source: "user", trustLevel: "user" });
+		await a.runSessionShutdown({ reason: "quit" });
+		expect(configure).toHaveBeenLastCalledWith({ local: { useHttp1ForAgent: null } });
+	});
+
 	it("disposes only B's previous pool when B changes scope", async () => {
 		const a = binding(); const b = binding();
 		await start(a); await start(b, scopeB);

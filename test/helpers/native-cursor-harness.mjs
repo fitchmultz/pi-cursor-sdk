@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire, registerHooks } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -64,7 +64,16 @@ export async function concurrentFixture(t, run) {
     assert.equal(url.hostname, "127.0.0.1", "offline native fixture must not access external services");
     return originalFetch(input, options);
   };
-  async function create(name, { cwd: inheritedCwd, tool, toolDescription, systemPrompt, model: inheritedModel, runtime, manager: inheritedManager, bind = true, preferences = [], flags = {}, compaction = {}, beforeExtensions = [], afterExtensions = [] } = {}) {
+  const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
+  async function copyExtension(name) {
+    const extensionPath = join(root, "extension-copies", name);
+    for (const path of ["dist", "shared", "package.json"]) {
+      await cp(join(repositoryRoot, path), join(extensionPath, path), { recursive: true });
+    }
+    await symlink(join(repositoryRoot, "node_modules"), join(extensionPath, "node_modules"), "junction");
+    return extensionPath;
+  }
+  async function create(name, { cwd: inheritedCwd, tool, toolDescription, systemPrompt, model: inheritedModel, runtime, manager: inheritedManager, bind = true, preferences = [], flags = {}, compaction = {}, beforeExtensions = [], afterExtensions = [], extensionPath = repositoryRoot } = {}) {
     const cwd = inheritedCwd ?? join(root, name);
     await mkdir(cwd, { recursive: true });
     const settingsManager = SettingsManager.inMemory({
@@ -73,7 +82,7 @@ export async function concurrentFixture(t, run) {
     const loader = new DefaultResourceLoader({
       cwd, agentDir: process.env.PI_CODING_AGENT_DIR, settingsManager,
       noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
-      additionalExtensionPaths: [...beforeExtensions, fileURLToPath(new URL("../../", import.meta.url)), ...afterExtensions],
+      additionalExtensionPaths: [...beforeExtensions, extensionPath, ...afterExtensions],
       systemPromptOverride: () => systemPrompt ?? `OWNER_${name}`,
     });
     await loader.reload();
@@ -100,7 +109,7 @@ export async function concurrentFixture(t, run) {
   try {
     await mkdir(process.env.PI_CODING_AGENT_DIR);
     await seedOfflineCatalog(process.env.PI_CODING_AGENT_DIR);
-    await run({ root, create });
+    await run({ root, create, copyExtension });
     assert.deepEqual(errors, []);
   } finally {
     try {

@@ -33,6 +33,64 @@ test("independent native managers reopening one persisted file survive terminal 
   });
 });
 
+test("separate extension graphs preserve live same-file agent claims and process-global transport cleanup", { timeout: 60000 }, async (t) => {
+  await concurrentFixture(t, async ({ create, copyExtension }) => {
+    process.env.PI_CURSOR_LOCAL_RESUME = "1";
+    process.env.PI_CURSOR_HTTP_1_1 = "1";
+    const bootstrap = await create("bootstrap", { bind: false, extensionPath: await copyExtension("bootstrap") });
+    const runtime = bootstrap.session.modelRuntime;
+    const provider = runtime.getRegisteredNativeProvider("cursor");
+    const registerNativeProvider = runtime.registerNativeProvider.bind(runtime);
+    // A session-less host freezes this registration and ignores session registrations.
+    runtime.registerNativeProvider = next => { if (next.id !== "cursor") registerNativeProvider(next); };
+    const a = await create("shared-graph-A", {
+      runtime, model: bootstrap.session.model, extensionPath: await copyExtension("owner-a"),
+    });
+    await a.session.prompt("record owned durable handle");
+    assert.equal(a.session.messages.at(-1).stopReason, "stop", a.session.messages.at(-1).errorMessage);
+    const handle = a.manager.getEntries().findLast(e => e.type === "custom" && e.customType === "cursor-sdk-agent-resume").data;
+    const reopen = {
+      runtime, cwd: a.cwd, model: a.session.model,
+      systemPrompt: "OWNER_shared-graph-A", toolDescription: "Owned by shared-graph-A",
+    };
+    const beforeResume = state.resumed.length;
+    const b = await create("shared-graph-B", {
+      ...reopen, manager: SessionManager.open(a.manager.getSessionFile()), extensionPath: await copyExtension("owner-b"),
+    });
+    assert.equal(runtime.getRegisteredNativeProvider("cursor"), provider);
+    await b.session.prompt("same-file sibling cannot resume the live owner");
+    assert.equal(b.session.messages.at(-1).stopReason, "stop", b.session.messages.at(-1).errorMessage);
+    const agentB = state.sends.at(-1).agentId;
+    assert.equal(state.resumed.length, beforeResume, "a live handle is never passed to Agent.resume across module copies");
+    assert.notEqual(agentB, handle.agentId);
+    const configuredBeforeShutdown = state.configured.length;
+    await a.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+    assert.ok(state.disposed.includes(handle.agentId));
+    assert.equal(state.disposed.includes(agentB), false);
+    assert.equal(state.configured.length, configuredBeforeShutdown, "a sibling still owns the process-global HTTP override");
+    await b.session.prompt("survive another module's shutdown");
+    assert.equal(b.session.messages.at(-1).stopReason, "stop", b.session.messages.at(-1).errorMessage);
+    assert.equal(state.sends.at(-1).agentId, agentB);
+    await retainNativeEvidence("native-shared-graph-owner", b.manager, b.cwd);
+    await b.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+    assert.deepEqual(state.configured.at(-1), { local: { useHttp1ForAgent: null } });
+    const c = await create("shared-graph-C", {
+      ...reopen, manager: SessionManager.open(b.manager.getSessionFile()), extensionPath: await copyExtension("owner-c"),
+    });
+    await c.session.prompt("a released handle remains resumable across module copies");
+    assert.equal(c.session.messages.at(-1).stopReason, "stop", c.session.messages.at(-1).errorMessage);
+    assert.equal(state.resumed.at(-1).agentId, agentB);
+    await retainNativeEvidence("native-shared-graph-resumed", c.manager, c.cwd);
+    const d = await create("disposed-graph-D", {
+      runtime, model: c.session.model, extensionPath: await copyExtension("disposed-d"),
+    });
+    d.session.dispose();
+    await c.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+    assert.deepEqual(state.configured.at(-1), { local: { useHttp1ForAgent: null } },
+      "a directly disposed sibling cannot keep the process-global override alive");
+  });
+});
+
 test("same-file sibling reload, tree navigation and shutdown leave a pending native bridge owned by its runtime", { timeout: 60000 }, async (t) => {
   await concurrentFixture(t, async ({ create }) => {
     const entered = Promise.withResolvers(), release = Promise.withResolvers();

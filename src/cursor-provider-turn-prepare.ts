@@ -283,6 +283,7 @@ async function prepareCursorLocalProviderTurn(
 		const sessionAgentAcquireParams = {
 			scope: params.scope,
 			bridge: params.bridge,
+			bridgeDeclaredTools: resolveCursorPiContext(context).tools,
 			apiKey: resolvedApiKey,
 			agentMode,
 			cwd,

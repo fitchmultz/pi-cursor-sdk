@@ -108,7 +108,17 @@ describe("cursor-tool-manifest", () => {
 		expect(prompt.text).toContain(text);
 	});
 
-	it("omits CodeMode routing when codemode_execute is not exposed", () => {
+	it("routes Pi's built-in codemode through its JSON bridge schema and native discovery helpers", () => {
+		const text = buildCursorToolManifestText({ bridgeSnapshot: snapshotWith(["codemode", "tool_search"]) });
+		expect(text).toContain('pi__codemode with {"code":"<JavaScript source>"}');
+		expect(text).toContain("searchTools");
+		expect(text).toContain("describeTool");
+		expect(text).toContain("tools.<Pi tool name>(args), not pi__* names");
+		expect(text).not.toContain("pi__codemode_search");
+		expect(text).not.toContain("Only Pi's active tools are callable");
+	});
+
+	it("omits CodeMode routing when neither implementation is exposed", () => {
 		const text = buildCursorToolManifestText({
 			piBridgeEnabled: true,
 			bridgeSnapshot: snapshotWith(["read", "codemode_search"]),

@@ -53,7 +53,7 @@ describe("cursor-session-agent local resume", () => {
 			resumeAgent,
 		};
 		// Independent pre-feature bytes: admitting this handle must not depend on the new key builder.
-		const poolKey = historicalPoolKey(scopeKey);
+		const poolKey = historicalPoolKey(scopeKey) + (lean ? "\0lean" : "");
 		resumeTestUtils.set({
 			scopeKey,
 			sessionFile: scopeKey,

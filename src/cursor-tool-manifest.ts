@@ -10,8 +10,18 @@ export const CURSOR_TOOL_MANIFEST_ENV = "PI_CURSOR_TOOL_MANIFEST";
  */
 export const CURSOR_HOST_TOOL_MANIFEST_SUMMARY =
 	"read/shell/search/edit/write and other host tools when Cursor exposes them";
+export const CURSOR_LEAN_TOOL_MANIFEST_SUMMARY =
+	"Cursor native tools and ambient MCP: disabled. Pi's model-declared tools are exposed directly through the bridge; nested tools follow Pi's codemode availability.";
 
 function buildCodeModeRoutingLines(snapshot: CursorPiToolBridgeSnapshot): string[] {
+	const builtinName = snapshot.piToolNameToMcpToolName.get("codemode");
+	if (builtinName) {
+		return [
+			`- Pi built-in codemode: call ${builtinName} with {"code":"<JavaScript source>"}. The MCP bridge uses JSON arguments, even though Pi's native tool description says raw JavaScript.`,
+			"- Inside scripts, call tools.<Pi tool name>(args), not pi__* names. Discover MCP tools with await searchTools(query), await describeTool(name), await describeNamespace(server), or ALL_TOOLS; use their declared schemas and text(value) or return to show results.",
+			"- A missing direct pi__* name does not imply a tool is unavailable inside codemode. Pi controls nested availability and permission checks; hidden tools remain unavailable.",
+		];
+	}
 	const executeName = snapshot.piToolNameToMcpToolName.get("codemode_execute");
 	if (!executeName) return [];
 	// CodeMode's catalog, not Pi's inactive set, determines indirect availability.
@@ -43,7 +53,7 @@ export function buildCursorToolManifestText(options: {
 	const lines = [
 		"Callable tool surfaces this run:",
 		...(isCursorLeanEnabled()
-			? ["- Cursor native tools and ambient MCP: disabled. Only Pi's active tools are callable through the bridge."]
+			? [`- ${CURSOR_LEAN_TOOL_MANIFEST_SUMMARY}`]
 			: [
 				`- Cursor host/MCP: ${CURSOR_HOST_TOOL_MANIFEST_SUMMARY}; configured MCP depends on Cursor settings.`,
 				"- Pi tool toggles affect pi tools/bridge exposure only; they do not disable Cursor host/configured MCP tools.",

@@ -80,14 +80,13 @@ async function compileToStaging(cwd, stagingDir) {
 			bundle: true,
 			packages: "external",
 			platform: "node",
-			// CommonJS keeps host imports inside Jiti's require mapping instead of native ESM.
-			format: "cjs",
+			// Native ESM reuses the host's package instances without re-evaluating
+			// their internal imports through Jiti's prefix aliases.
+			format: "esm",
 			target: "node22",
 			keepNames: true,
 			minifySyntax: true,
 			minifyWhitespace: true,
-			define: { "import.meta.url": "__cursorModuleUrl" },
-			banner: { js: 'var __cursorModuleUrl = require("node:url").pathToFileURL(__filename).href;' },
 			write: false,
 			allowOverwrite: true,
 		});

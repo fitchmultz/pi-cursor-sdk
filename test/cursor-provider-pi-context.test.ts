@@ -135,16 +135,14 @@ describe("installed Pi provider context boundary", () => {
 		expect(sdkSend.mock.calls[1][0].text).not.toContain("/fixture/private");
 	});
 
-	it("keeps the empty request snapshot distinct from the bridge's registry-owned surface", async () => {
+	it("does not expose registered tools omitted from the native request snapshot", async () => {
 		const sdkSend = mockSend();
 		registerBridgeForProviderTest({ active: [tool.name], tools: [createTestToolInfo(tool.name, tool.parameters)] });
 		const { received, send } = await boundary();
 		expect((await send({ systemPrompt: "SYSTEM_SENTINEL", tools: [], messages: [user] })).stopReason).toBe("stop");
 		expect(getActiveContextToolNames(received[0])).toEqual(new Set());
-		// The bridge intentionally uses pi.getActiveTools/getAllTools, not the
-		// provider replay allowlist (the established stock-Pi contract).
-		expect(mockedCreate.mock.calls[0][0]?.mcpServers?.pi_tools).toBeDefined();
-		expect(sdkSend.mock.calls[0][0].text).toContain("For exposed pi bridge tools");
+		expect(mockedCreate.mock.calls[0][0]?.mcpServers?.pi_tools).toBeUndefined();
+		expect(sdkSend.mock.calls[0][0].text).not.toContain("For exposed pi bridge tools");
 	});
 
 	it("preserves bridge filters and the callable manifest at the provider boundary", async () => {

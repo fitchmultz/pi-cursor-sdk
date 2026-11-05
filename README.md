@@ -104,8 +104,8 @@ pi --approve -e . --model cursor/grok-4.6
 
 After editing `src/`, run `npm run build` before the next `pi -e .` run, or pi loads the previous build.
 
-The build bundles local extension modules into a CommonJS `dist/index.js` for Pi's Jiti loader
-to reduce startup file I/O and preserve its host-module mapping.
+The build bundles local extension modules into an ESM `dist/index.js` for Pi's loader
+to reduce startup file I/O and reuse native host-module instances.
 Pi host peers and runtime dependencies, including the asset-bearing Cursor SDK, remain external.
 TypeScript compilation and bundling finish in staging before replacing the working build.
 
@@ -559,7 +559,9 @@ pi --model cursor/grok-4.6 \
 
 Lean mode restricts the local SDK agent to `tools: ["mcp"]` and supplies only the internal Pi bridge. It disables Cursor-native tools, including web search and subagents, and forces `local.settingSources: []` so ambient Cursor settings, plugins, skills, and MCP servers are not loaded. Active Pi builtins are exposed automatically, even if `PI_CURSOR_EXPOSE_BUILTIN_TOOLS=0` or `PI_CURSOR_PI_TOOL_BRIDGE=0` is set. An empty bridge produces `tools: []`, not a native-tool fallback.
 
-Pi keeps its own project instructions and skill catalog. The extension does not register replay wrappers, `cursor_ask_question`, or `cursor_activate_skill` in this mode. Web and MCP extensions need no special integration: their active tools become names such as `pi__web_search` and `pi__mcp`. Configure the search backend in your Pi web-search extension; lean mode does not install extensions or select a backend.
+Pi keeps its own project instructions and skill catalog. The extension does not register replay wrappers, `cursor_ask_question`, or `cursor_activate_skill` in this mode. Web and MCP extensions need no special integration: tools declared in the model request become bridge names such as `pi__web_search`. Configure the search backend in your Pi web-search extension; lean mode does not install extensions or select a backend.
+
+Pi's built-in CodeMode and MCP keep their native catalogs, permissions, and session persistence. Cursor calls `pi__codemode` with `{"code":"<JavaScript source>"}`; inside scripts, use Pi tool names rather than `pi__*` names. CodeMode `only` mode exposes nested tools through CodeMode instead of duplicating them as direct bridge tools. Pi's MCP exposure settings still control direct, nested, deferred, and hidden availability. See [Built-in CodeMode and MCP](./docs/cursor-tool-surfaces.md#built-in-codemode-and-mcp).
 
 This mode supports **local runtime only**. Cloud selection fails before agent creation because the installed SDK does not support Cloud tool allowlists. Set `PI_CURSOR_LEAN=0` and restart Pi to enable the legacy native-tool behavior below or use Cloud. Unset the flag to return to lean mode. Bridge latency has not been benchmarked against native tools.
 

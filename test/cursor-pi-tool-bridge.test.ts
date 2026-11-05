@@ -1191,6 +1191,25 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 		}
 	});
 
+	it("intersects projected declarations with active registered tools and signs their effective metadata", () => {
+		const schema = Type.Object({ code: Type.String() });
+		const pi = createBridgePiHarness({
+			active: ["codemode", "read"],
+			tools: [createToolInfo("codemode", "Original description", schema), createToolInfo("read"), createToolInfo("inactive")],
+		});
+		const declaredTools = [
+			{ name: "codemode", description: "Effective nested tool catalog", parameters: schema },
+			{ name: "inactive", description: "Inactive cannot be exposed", parameters: schema },
+			{ name: "unregistered", description: "Unregistered cannot be exposed", parameters: schema },
+		];
+		const snapshot = buildCursorPiToolBridgeSnapshot(pi, { declaredTools, exposeOverlappingBuiltins: true });
+		expect(snapshot.tools.map(tool => tool.piToolName)).toEqual(["codemode"]);
+		expect(snapshot.tools[0]).toMatchObject({ description: "Effective nested tool catalog", inputSchema: schema });
+		const changed = buildCursorPiToolBridgeSnapshot(pi, { declaredTools: [{ ...declaredTools[0], description: "Changed catalog" }] });
+		expect(buildCursorPiToolBridgeSurfaceSignature(snapshot)).not.toBe(buildCursorPiToolBridgeSurfaceSignature(changed));
+		expect(buildCursorPiToolBridgeSnapshot(pi, { declaredTools: [], exposeOverlappingBuiltins: true }).tools).toEqual([]);
+	});
+
 	it("changes the bridge surface signature when tool schema changes but the MCP name stays the same", () => {
 		const schema = Type.Object({ target: Type.String() });
 		const schemaV2 = Type.Object({ target: Type.String(), force: Type.Optional(Type.Boolean()) });

@@ -54,6 +54,9 @@ export function buildCursorPiToolBridgeSnapshot(
 ): CursorPiToolBridgeSnapshot {
 	const activeToolNames = new Set(pi.getActiveTools());
 	const allTools = pi.getAllTools();
+	const declaredTools = options.declaredTools === undefined
+		? undefined
+		: new Map(options.declaredTools.map(tool => [tool.name, tool]));
 	const usedMcpToolNames = new Set<string>();
 	const mcpToolNameToPiToolName = new Map<string, string>();
 	const piToolNameToMcpToolName = new Map<string, string>();
@@ -63,11 +66,13 @@ export function buildCursorPiToolBridgeSnapshot(
 
 	for (const tool of allTools) {
 		if (!activeToolNames.has(tool.name)) continue;
+		const declaration = declaredTools?.get(tool.name);
+		if (declaredTools && !declaration) continue;
 		if (isExcludedFromCursorBridgeExposure(tool.name) && isRegisteredCursorNativeToolName(tool.name, pi)) continue;
 		if (!exposeOverlappingBuiltins && isOverlappingCursorNativePiToolName(tool.name)) continue;
 
 		const mcpToolName = createMcpToolName(tool.name, usedMcpToolNames);
-		const description = tool.description || `Run pi tool ${tool.name}`;
+		const description = declaration?.description || tool.description || `Run pi tool ${tool.name}`;
 		mcpToolNameToPiToolName.set(mcpToolName, tool.name);
 		piToolNameToMcpToolName.set(tool.name, mcpToolName);
 		tools.push({
@@ -75,7 +80,7 @@ export function buildCursorPiToolBridgeSnapshot(
 			mcpToolName,
 			description,
 			promptGuidelines: tool.promptGuidelines,
-			inputSchema: normalizeMcpInputSchema(tool.parameters),
+			inputSchema: normalizeMcpInputSchema(declaration?.parameters ?? tool.parameters),
 			sourceInfo: tool.sourceInfo,
 		});
 	}

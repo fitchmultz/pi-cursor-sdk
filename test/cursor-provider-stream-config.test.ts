@@ -509,7 +509,7 @@ describe("streamCursor prompt and model config", () => {
 		expect(sentMessage.text).not.toContain("prefer pi__mcp");
 	});
 
-	it("keeps pi bridge prompt guidance when the actual bridge exposes tools even if context tools are empty", async () => {
+	it("omits pi bridge prompt guidance when the request declares no tools", async () => {
 		const previousManifest = process.env.PI_CURSOR_TOOL_MANIFEST;
 		delete process.env.PI_CURSOR_TOOL_MANIFEST;
 		registerBridgeForProviderTest({
@@ -540,11 +540,11 @@ describe("streamCursor prompt and model config", () => {
 		}
 
 		const sentMessage = mockSend.mock.calls[0]?.[0] as { text: string };
-		expect(sentMessage.text).toContain("For exposed pi bridge tools");
+		expect(sentMessage.text).not.toContain("For exposed pi bridge tools");
 		expect(sentMessage.text).not.toContain("Use pi__cursor_ask_question");
-		expect(sentMessage.text).toContain("Pi bridge: call exposed pi__* MCP names");
-		expect(sentMessage.text).toContain("prefer pi__mcp for MCP work and pi__subagent for delegation");
-		expect(sentMessage.text).toContain("pi__sem_reindex");
+		expect(sentMessage.text).not.toContain("Pi bridge: call exposed pi__* MCP names");
+		expect(sentMessage.text).not.toContain("prefer pi__mcp for MCP work and pi__subagent for delegation");
+		expect(sentMessage.text).not.toContain("pi__sem_reindex");
 	});
 
 	it("forwards latest user images to Cursor Agent.send", async () => {

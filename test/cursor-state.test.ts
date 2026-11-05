@@ -764,8 +764,8 @@ describe("Cursor runtime state", () => {
 			activeTools: ["read"],
 			initialTools: [createTestToolInfo("read")],
 		});
-		expect(formatCursorToolsDebugReport(pi, {})).toContain("Pi bridge exposure eligibility: no eligible pi__* tools.");
-		expect(formatCursorToolsDebugReport(pi, { PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" }))
+		expect(formatCursorToolsDebugReport(pi, { PI_CURSOR_LEAN: "0" })).toContain("Pi bridge exposure eligibility: no eligible pi__* tools.");
+		expect(formatCursorToolsDebugReport(pi, { PI_CURSOR_LEAN: "0", PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" }))
 			.toContain("Pi bridge exposure eligibility: pi__read.");
 	});
 

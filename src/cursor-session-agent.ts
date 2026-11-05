@@ -1,7 +1,7 @@
 import { isCursorLeanEnabled } from "./cursor-lean.js";
 import { createHash } from "node:crypto";
 import type { AgentModeOption, AgentOptions, LocalAgentOptions, LocalAgentStore, ModelSelection, SDKAgent, SettingSource } from "@cursor/sdk";
-import type { Context } from "@earendil-works/pi-ai";
+import type { Context, Tool } from "@earendil-works/pi-ai";
 import { normalizeCursorCustomStoreRoot } from "./cursor-custom-store-path.js";
 import { claimCursorLocalAgent } from "./cursor-local-agent-ownership.js";
 import {
@@ -134,6 +134,7 @@ function rethrowSupersededWhenReplacedByDifferentPoolIdentity(scopeKey: string, 
 interface SessionCursorAgentCreateParams {
 	scope?: CursorTurnScope;
 	bridge?: CursorPiToolBridge;
+	bridgeDeclaredTools?: readonly Tool[];
 	apiKey: string;
 	agentMode: AgentModeOption;
 	cwd: string;
@@ -220,9 +221,9 @@ function buildApiKeyPoolKeyFingerprint(apiKey: string): string {
 	return createHash("sha256").update(apiKey).digest("hex").slice(0, 16);
 }
 
-function buildBridgePoolKeySuffix(registeredBridge: CursorPiToolBridge | undefined): string {
+function buildBridgePoolKeySuffix(registeredBridge: CursorPiToolBridge | undefined, declaredTools?: readonly Tool[]): string {
 	if (!registeredBridge) return "bridge:absent";
-	return registeredBridge.getToolSurfaceSignature();
+	return registeredBridge.getToolSurfaceSignature(declaredTools);
 }
 
 function buildCustomSubagentPoolKeySuffix(agents: AgentOptions["agents"]): string[] {
@@ -253,7 +254,7 @@ function buildSessionAgentPoolKey(scopeKey: string, params: SessionCursorAgentCr
 				? "http1:on"
 				: "http1:off",
 		buildApiKeyPoolKeyFingerprint(params.apiKey),
-		buildBridgePoolKeySuffix("bridge" in params ? params.bridge : getRegisteredCursorPiToolBridge()),
+		buildBridgePoolKeySuffix("bridge" in params ? params.bridge : getRegisteredCursorPiToolBridge(), params.bridgeDeclaredTools),
 		...buildCustomSubagentPoolKeySuffix(params.agents),
 		...(isCursorLeanEnabled() ? ["lean"] : []),
 	].join("\0");
@@ -483,6 +484,7 @@ async function createSessionAgentEntry(
 		const registeredBridge = params.bridge;
 		if (registeredBridge) {
 			bridgeRun = await registeredBridge.createRun({
+				declaredTools: params.bridgeDeclaredTools,
 				onToolRequest: params.onBridgeToolRequest,
 				debugRecorder: params.debugRecorder,
 			});

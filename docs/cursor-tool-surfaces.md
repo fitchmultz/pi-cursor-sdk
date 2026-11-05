@@ -4,7 +4,15 @@ pi-cursor-sdk runs Cursor models through the local `@cursor/sdk` agent runtime b
 
 ## Pi-tools-only mode
 
-Lean mode is enabled by default. Only the Pi bridge is callable. Active Pi builtins are included automatically; native Cursor tools (including web search and subagents) and ambient Cursor MCP/settings are disabled. Pi's own instructions and skill catalog remain intact, and the extension does not add replay, question, or skill activation tools. Pi tool toggles control the entire exposed surface. Empty active tools mean no SDK tools.
+Lean mode is enabled by default. Only the Pi bridge is callable. Pi builtins declared in the model request are included automatically; native Cursor tools (including web search and subagents) and ambient Cursor MCP/settings are disabled. Pi's own instructions and skill catalog remain intact, and the extension does not add replay, question, or skill activation tools. Pi tool toggles and native request projection control direct bridge exposure. An empty request tool list means no bridge tools.
+
+### Built-in CodeMode and MCP
+
+Pi's built-in `codemode`, `tool_search`, and MCP extension keep their native execution and permission checks. The bridge intersects the model's tool declarations with Pi's active registry, preserving projected descriptions and schemas. In CodeMode `only` mode, nested tools such as `bash` are not separately exposed as direct `pi__*` tools; the `codemode` description retains Pi's nested catalog.
+
+Cursor calls `pi__codemode` with JSON arguments `{"code":"<JavaScript source>"}`, even though Pi's native description asks for raw JavaScript. Inside the script, use native Pi names such as `tools.bash(...)` and `tools.mcp__server__tool(...)`, not `pi__*` names. Use `await searchTools(query)`, `await describeTool(name)`, `await describeNamespace(server)`, or `ALL_TOOLS` for discovery, and `text(value)` or `return` for output.
+
+Pi's MCP exposure settings determine which tools are direct, nested, deferred, or hidden. Hidden tools stay unavailable. Nested calls still pass through Pi's normal permission pipeline, and Pi records nested calls and CodeMode store entries in its session. A missing direct bridge name does not imply a tool is unavailable inside CodeMode. Configure these built-ins and MCP servers in Pi, not Cursor's ambient MCP configuration.
 
 Lean mode overrides bridge/builtin opt-outs and `PI_CURSOR_SETTING_SOURCES`. It requires local runtime and rejects Cloud. Set `PI_CURSOR_LEAN=0` at startup to restore native tools or use Cloud; restart Pi when changing the flag. See [Pi-tools-only mode](../README.md#pi-tools-only-mode) for setup. The rest of this page describes legacy mode (`PI_CURSOR_LEAN=0`) unless stated otherwise.
 
@@ -25,8 +33,8 @@ Pi CLI tool toggles apply at the pi tool-registry boundary. `--no-tools`, `--too
 - **MCP `listTools`** (and pi's MCP catalog when present) lists **MCP servers only** — for example `pi_tools` with `pi__cursor_ask_question`. It does **not** enumerate Cursor SDK host tools such as `Read` or `Shell`.
 - **Bootstrap prompts** include a short **Cursor SDK tool boundary** block plus a compact **callable tool surfaces** manifest by default (disable manifest with `PI_CURSOR_TOOL_MANIFEST=0`). The manifest reminds the model that Cursor host/configured MCP tools are controlled by Cursor, while pi tool toggles only affect pi tools/bridge exposure; when bridge tools are exposed, it lists the current `pi__*` names. MCP `listTools` entries for bridged pi tools point back to the bootstrap prompt instead of repeating the full contract.
 - **Incremental prompts** omit the full boundary block but keep a short tail guard (including an explicit shell `cd` hint); the session agent retains prior bootstrap context. They also omit invariant Pi system instructions; a changed system prompt forces bootstrap with the new section.
-- **CodeMode routing:** when `codemode_execute` is bridged, the bootstrap manifest explains that tools can be callable through CodeMode even without a direct `pi__*` name. If `codemode_search` is also exposed, it directs the model to an exact `bash` lookup for shell access, followed by execution using the returned schema. It asks the model to do routine discovery without narration and reuse schemas already provided. CodeMode's catalog determines availability; a registered but inactive Pi tool is not automatically callable.
-- **In-session debug:** `/cursor-tools` prints bridge/manifest enablement, effective `PI_CURSOR_SETTING_SOURCES`, and current-registry exposure eligibility, including the builtin-exposure setting. It is not a live-run catalog or health check.
+- **CodeMode routing:** built-in `codemode` uses the routing above. The older extension tools `codemode_execute` and `codemode_search` remain supported: their manifest directs shell discovery through an exact `bash` lookup followed by execution using the returned schema. CodeMode's catalog determines nested availability; registration alone does not make a tool callable.
+- **In-session debug:** `/cursor-tools` prints bridge/manifest enablement, effective `PI_CURSOR_SETTING_SOURCES`, and current-registry exposure eligibility, including the builtin-exposure setting. Native request projection can further hide direct tools. This report is not a live-run catalog or health check.
 
 ## Diagnosing advertised but unused bridge tools
 

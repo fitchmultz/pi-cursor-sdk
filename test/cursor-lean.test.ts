@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getEffectiveCursorSettingSources } from "../src/cursor-setting-sources.js";
 import { resolveCursorPiToolBridgeBuiltinsEnabled, resolveCursorPiToolBridgeEnabled } from "../src/cursor-pi-tool-bridge-env.js";
-import { buildCursorLocalAgentOptions, __testUtils as sessionAgentTestUtils } from "../src/cursor-session-agent.js";
+import { acquireSessionCursorAgent, buildCursorLocalAgentOptions, __testUtils as sessionAgentTestUtils } from "../src/cursor-session-agent.js";
+import { __testUtils as scopeTestUtils } from "../src/cursor-session-scope.js";
+import { installCursorSessionStoreMock } from "./helpers/cursor-session-store.js";
 import { resolveCursorSkillSystemPrompt } from "../src/cursor-skill-tool.js";
 import { makeModel, makeContext, createBridgePiHarness, createBuiltinToolInfo } from "./helpers/pi-harness.js";
 import { Type } from "typebox";
@@ -40,14 +42,31 @@ describe("lean tool policy", () => {
 		const report = formatCursorToolsDebugReport(pi);
 		expect(report).toContain("PI_CURSOR_SETTING_SOURCES: none (PI_CURSOR_LEAN=1)");
 		expect(report).toContain("pi__read");
+		expect(report).toContain("Cursor native tools and ambient MCP: disabled");
+		expect(report).not.toContain("do not disable Cursor");
 	});
 
-	it("separates lean and normal pooled agents and persisted resume identities", () => {
-		const params = { apiKey: "test-key", agentMode: "agent" as const, cwd: "/tmp", modelSelection: { id: "test" } };
-		vi.stubEnv("PI_CURSOR_LEAN", "0");
-		const normal = sessionAgentTestUtils.buildSessionAgentPoolKey("scope", params);
-		vi.stubEnv("PI_CURSOR_LEAN", "1");
-		expect(sessionAgentTestUtils.buildSessionAgentPoolKey("scope", params)).not.toBe(normal);
+	it("separates lean and normal pooled agents and persisted resume identities", async () => {
+		installCursorSessionStoreMock();
+		scopeTestUtils.reset();
+		scopeTestUtils.set("/tmp", "/tmp/sessions/lean.jsonl");
+		const createAgent = vi.fn().mockImplementation(async () => ({
+			agentId: `agent-${createAgent.mock.calls.length}`,
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		}));
+		const params = { apiKey: "test-key", agentMode: "agent" as const, cwd: "/tmp", modelSelection: { id: "test" }, createAgent, bridge: undefined };
+		try {
+			vi.stubEnv("PI_CURSOR_LEAN", "0");
+			const normal = await acquireSessionCursorAgent(params);
+			vi.stubEnv("PI_CURSOR_LEAN", "1");
+			const lean = await acquireSessionCursorAgent(params);
+			expect(lean.poolKey).not.toBe(normal.poolKey);
+			expect(lean.agent).not.toBe(normal.agent);
+			expect(createAgent).toHaveBeenCalledTimes(2);
+		} finally {
+			await sessionAgentTestUtils.disposeAllSessionCursorAgents();
+			scopeTestUtils.reset();
+		}
 	});
 
 	it("preserves the normal defaults when disabled", () => {

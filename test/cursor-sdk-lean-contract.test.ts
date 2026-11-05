@@ -16,10 +16,10 @@ describe("installed SDK lean policy contract", () => {
 	});
 
 	it("expands mcp to only the observed MCP proto family, excluding web, shell and subagents", () => {
-		// SDK 1.0.27 bundles the public tools-option implementation in index.js.
+		// The installed SDK bundles the public tools-option implementation in index.js.
 		// Fail on packaging/vocabulary drift instead of accepting a guessed allowlist.
 		const source = readFileSync(join(sdkRoot, "dist/esm/index.js"), "utf8");
-		const module = source.split('"./src/agent/tools-option.ts"(e,t,n){')[1]?.split('},"./src/agent/transport.ts"')[0];
+		const module = source.split('"./src/agent/tools-option.ts"')[1]?.split('},"./src/agent/transport.ts"')[0];
 		expect(module).toBeDefined();
 		expect(module).toContain('"x-cursor-agent-allowed-tools"');
 		const group = module?.match(/mcp:(\[[^\]]+\])/);

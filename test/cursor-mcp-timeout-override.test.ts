@@ -243,7 +243,7 @@ describe("Cursor MCP timeout override", () => {
 				params: {
 					...captureProviderTestOwnership(makeModel(), makeContext()),
 					model: { id: "cursor/composer-2.5", provider: "cursor", api: "assistant" } as never,
-					context: {} as never,
+					context: makeContext(),
 					stream: { push: vi.fn() } as never,
 					partial: { content: [] } as never,
 					sdkEventDebugRef: {},

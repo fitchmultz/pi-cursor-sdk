@@ -228,6 +228,16 @@ export function attachCursorSdkEventDebugPiStreamTap(
 	};
 }
 
+/**
+ * Records are accepted while open or finalizing. Finalization waits for the stream capture the sink owns,
+ * then snapshots counts and flushes in one synchronous step; later records are neither written nor counted.
+ */
+type CursorSdkEventDebugFinalization =
+	| { readonly kind: "open" }
+	| { readonly kind: "finalizing"; readonly promise: Promise<void> }
+	| { readonly kind: "finalized" }
+	| { readonly kind: "failed"; readonly error: unknown };
+
 export class CursorSdkEventDebugSink {
 	readonly artifactDir: string;
 	readonly sessionDir?: string;
@@ -256,9 +266,8 @@ export class CursorSdkEventDebugSink {
 	private readonly jsonlBuffers = new Map<string, string[]>();
 	private readonly jsonlBufferBytes = new Map<string, number>();
 	private readonly truncatedJsonlFiles = new Set<string>();
-	private finalized = false;
-	private finalizationPromise: Promise<void> | undefined;
-	private waitResultRecorded = false;
+	private finalization: CursorSdkEventDebugFinalization = { kind: "open" };
+	private waitResult: "absent" | "written" | "failed" = "absent";
 	private streamCapturePromise: Promise<void> | undefined;
 	private readonly streamCaptureErrors: unknown[] = [];
 
@@ -298,7 +307,7 @@ export class CursorSdkEventDebugSink {
 			],
 		};
 		this.clearKnownArtifactFiles();
-		writeFileSync(join(this.artifactDir, ARTIFACTS.metadata), `${JSON.stringify(this.metadata, null, 2)}\n`);
+		this.writeJsonArtifact(ARTIFACTS.metadata, this.metadata);
 	}
 
 	recordProviderMeta(meta: Record<string, unknown>): void {
@@ -306,7 +315,7 @@ export class CursorSdkEventDebugSink {
 			...this.metadata,
 			providerMeta: meta,
 		};
-		writeFileSync(join(this.artifactDir, ARTIFACTS.metadata), `${JSON.stringify(this.metadata, null, 2)}\n`);
+		this.writeJsonArtifact(ARTIFACTS.metadata, this.metadata);
 	}
 
 	recordSendMeta(meta: CursorSdkEventDebugSendMeta): void {
@@ -314,15 +323,15 @@ export class CursorSdkEventDebugSink {
 			...this.metadata,
 			send: meta,
 		};
-		writeFileSync(join(this.artifactDir, ARTIFACTS.metadata), `${JSON.stringify(this.metadata, null, 2)}\n`);
+		this.writeJsonArtifact(ARTIFACTS.metadata, this.metadata);
 	}
 
 	recordSendPayload(payload: unknown): void {
-		writeFileSync(join(this.artifactDir, ARTIFACTS.sendPayload), `${JSON.stringify(payload, null, 2)}\n`);
+		this.writeJsonArtifact(ARTIFACTS.sendPayload, payload);
 	}
 
 	recordContextSnapshot(context: unknown): void {
-		writeFileSync(join(this.artifactDir, ARTIFACTS.contextSnapshot), `${JSON.stringify(context, null, 2)}\n`);
+		this.writeJsonArtifact(ARTIFACTS.contextSnapshot, context);
 	}
 
 	recordRunMeta(meta: CursorSdkEventDebugRunMeta): void {
@@ -330,7 +339,7 @@ export class CursorSdkEventDebugSink {
 			...this.metadata,
 			run: meta,
 		};
-		writeFileSync(join(this.artifactDir, ARTIFACTS.metadata), `${JSON.stringify(this.metadata, null, 2)}\n`);
+		this.writeJsonArtifact(ARTIFACTS.metadata, this.metadata);
 	}
 
 	recordOnDelta(update: InteractionUpdate): void {
@@ -385,11 +394,12 @@ export class CursorSdkEventDebugSink {
 	}
 
 	recordFinalPartial(partial: unknown): void {
-		writeFileSync(join(this.artifactDir, ARTIFACTS.finalPartial), `${JSON.stringify(partial, null, 2)}\n`);
+		this.writeJsonArtifact(ARTIFACTS.finalPartial, partial);
 		this.recordTimeline("finalPartial", "snapshot", partial);
 	}
 
 	recordError(label: string, error: unknown): void {
+		if (!this.acceptsRecords()) return;
 		this.counts.errors += 1;
 		const payload = {
 			label,
@@ -429,30 +439,29 @@ export class CursorSdkEventDebugSink {
 		if (typeof sdkRun.conversation === "function" && sdkRun.supports?.("conversation")) {
 			try {
 				const conversation = await sdkRun.conversation();
-				writeFileSync(join(this.artifactDir, ARTIFACTS.conversation), `${JSON.stringify(conversation, null, 2)}\n`);
+				this.writeJsonArtifact(ARTIFACTS.conversation, conversation);
 				this.recordProviderEvent("conversation_captured", { supported: true });
 			} catch (error) {
 				this.recordError("conversation", error);
 			}
 		} else {
-			writeFileSync(
-				join(this.artifactDir, ARTIFACTS.conversation),
-				`${JSON.stringify(
-					{
-						skipped: true,
-						reason: sdkRun.unsupportedReason?.("conversation") ?? "conversation unsupported",
-					},
-					null,
-					2,
-				)}\n`,
-			);
+			this.writeJsonArtifact(ARTIFACTS.conversation, {
+				skipped: true,
+				reason: sdkRun.unsupportedReason?.("conversation") ?? "conversation unsupported",
+			});
 		}
 	}
 
+	/** The first wait result is attempted once; a failed write is a capture error, not a recorded result. */
 	recordWaitResult(result: unknown): void {
-		if (this.waitResultRecorded) return;
-		this.waitResultRecorded = true;
-		writeFileSync(join(this.artifactDir, ARTIFACTS.waitResult), `${JSON.stringify(result, null, 2)}\n`);
+		if (this.waitResult !== "absent" || !this.acceptsRecords()) return;
+		try {
+			this.writeJsonArtifact(ARTIFACTS.waitResult, result);
+			this.waitResult = "written";
+		} catch (error) {
+			this.waitResult = "failed";
+			this.recordError("wait_result", error);
+		}
 	}
 
 	private capturePiSessionSnapshot(): { copied: boolean; sessionFile?: string; reason?: string } {
@@ -498,16 +507,32 @@ export class CursorSdkEventDebugSink {
 		}
 	}
 
-	async finalize(): Promise<void> {
-		this.finalizationPromise ??= this.finalizeOnce();
-		await this.finalizationPromise;
+	finalize(): Promise<void> {
+		switch (this.finalization.kind) {
+			case "open": {
+				const ownedStreamCapture = this.streamCapturePromise?.catch(() => undefined);
+				const promise = Promise.resolve(ownedStreamCapture).then(() => {
+					try {
+						this.writeFinalArtifacts();
+					} catch (error) {
+						this.finalization = { kind: "failed", error };
+						throw error;
+					}
+					this.finalization = { kind: "finalized" };
+				});
+				this.finalization = { kind: "finalizing", promise };
+				return promise;
+			}
+			case "finalizing":
+				return this.finalization.promise;
+			case "finalized":
+				return Promise.resolve();
+			case "failed":
+				return Promise.reject(this.finalization.error);
+		}
 	}
 
-	private async finalizeOnce(): Promise<void> {
-		if (this.finalized) return;
-		if (this.streamCapturePromise) {
-			await this.streamCapturePromise.catch(() => undefined);
-		}
+	private writeFinalArtifacts(): void {
 		const piSessionSnapshot = this.capturePiSessionSnapshot();
 		const summary = {
 			artifactDir: this.artifactDir,
@@ -535,7 +560,7 @@ export class CursorSdkEventDebugSink {
 			artifacts: Object.fromEntries(
 				Object.entries(ARTIFACTS).map(([key, name]) => [key, join(this.artifactDir, name)]),
 			),
-			waitResultRecorded: this.waitResultRecorded,
+			waitResultRecorded: this.waitResult === "written",
 			streamCaptureErrors: this.streamCaptureErrors.map((error) =>
 				error instanceof Error ? error.message : String(error),
 			),
@@ -548,30 +573,35 @@ export class CursorSdkEventDebugSink {
 		if (resolveCursorSdkEventDebugStderrEnabled(this.env)) {
 			process.stderr.write(`${CURSOR_SDK_EVENT_DEBUG_LOG_PREFIX} ${JSON.stringify(summary)}\n`);
 		}
-		this.finalized = true;
+	}
+
+	private acceptsRecords(): boolean {
+		return this.finalization.kind === "open" || this.finalization.kind === "finalizing";
+	}
+
+	private writeJsonArtifact(fileName: string, value: unknown): void {
+		if (!this.acceptsRecords()) return;
+		writeFileSync(join(this.artifactDir, fileName), `${JSON.stringify(value, null, 2)}\n`);
 	}
 
 	private appendProviderJsonl(phase: string, payload: unknown): void {
 		const elapsedMs = Date.now() - this.startedAt;
 		const record = { ts: new Date().toISOString(), elapsedMs, turn: this.turn, phase, payload };
-		this.bufferJsonl(ARTIFACTS.providerEvents, record);
-		this.counts.provider[phase] = (this.counts.provider[phase] ?? 0) + 1;
+		this.bufferJsonl(ARTIFACTS.providerEvents, record, this.counts.provider, phase);
 		this.recordTimeline("provider", phase, payload);
 	}
 
 	private appendCoordinatorJsonl(phase: string, payload: unknown): void {
 		const elapsedMs = Date.now() - this.startedAt;
 		const record = { ts: new Date().toISOString(), elapsedMs, turn: this.turn, phase, payload };
-		this.bufferJsonl(ARTIFACTS.coordinatorEvents, record);
-		this.counts.coordinator[phase] = (this.counts.coordinator[phase] ?? 0) + 1;
+		this.bufferJsonl(ARTIFACTS.coordinatorEvents, record, this.counts.coordinator, phase);
 		this.recordTimeline("coordinator", phase, payload);
 	}
 
 	private appendDrainJsonl(phase: string, payload: unknown): void {
 		const elapsedMs = Date.now() - this.startedAt;
 		const record = { ts: new Date().toISOString(), elapsedMs, turn: this.turn, phase, payload };
-		this.bufferJsonl(ARTIFACTS.drainEvents, record);
-		this.counts.drain[phase] = (this.counts.drain[phase] ?? 0) + 1;
+		this.bufferJsonl(ARTIFACTS.drainEvents, record, this.counts.drain, phase);
 		this.recordTimeline("drain", phase, payload);
 	}
 
@@ -585,9 +615,7 @@ export class CursorSdkEventDebugSink {
 			kind,
 			payload,
 		};
-		this.bufferJsonl(ARTIFACTS.timeline, record);
-		const timelineKey = `${layer}:${kind}`;
-		this.counts.timeline[timelineKey] = (this.counts.timeline[timelineKey] ?? 0) + 1;
+		this.bufferJsonl(ARTIFACTS.timeline, record, this.counts.timeline, `${layer}:${kind}`);
 	}
 
 	private appendJsonl(
@@ -604,15 +632,17 @@ export class CursorSdkEventDebugSink {
 			turn: this.turn,
 			[recordKey]: value,
 		};
-		this.bufferJsonl(fileName, record);
 		const type = countKey ?? eventType(value);
-		counts[type] = (counts[type] ?? 0) + 1;
+		this.bufferJsonl(fileName, record, counts, type);
 		const layer = fileName.replace(/\.jsonl$/, "");
 		this.recordTimeline(layer, type, value);
 	}
 
-	private bufferJsonl(fileName: string, record: unknown): void {
-		if (this.finalized || this.truncatedJsonlFiles.has(fileName)) return;
+	/** Counts every accepted event, including events past the file cap, and buffers its line until finalization. */
+	private bufferJsonl(fileName: string, record: unknown, counts: Record<string, number>, countKey: string): void {
+		if (!this.acceptsRecords()) return;
+		counts[countKey] = (counts[countKey] ?? 0) + 1;
+		if (this.truncatedJsonlFiles.has(fileName)) return;
 		const line = `${serializeCursorSdkEventDebugRecord(record)}\n`;
 		const marker = `${JSON.stringify({ type: "artifact_truncated", limitBytes: MAX_CURSOR_SDK_EVENT_DEBUG_JSONL_BYTES })}\n`;
 		const usedBytes = this.jsonlBufferBytes.get(fileName) ?? 0;

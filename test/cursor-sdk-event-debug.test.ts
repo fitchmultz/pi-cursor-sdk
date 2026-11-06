@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import {
 	CURSOR_SDK_EVENT_DEBUG_ENV,
 	CURSOR_SDK_EVENT_DEBUG_LOG_PREFIX,
@@ -19,6 +19,23 @@ import {
 	resolveCursorSettingSources,
 	serializeCursorSettingSources,
 } from "../shared/cursor-setting-sources.mjs";
+
+function createPinnedRunSink(prefix: string) {
+	const artifactDir = mkdtempSync(join(tmpdir(), prefix));
+	onTestFinished(() => rmSync(artifactDir, { recursive: true, force: true }));
+	const sink = CursorSdkEventDebugSink.maybeCreate({
+		cwd: "/repo",
+		modelId: "composer-2.5",
+		provider: "cursor",
+		env: {
+			PI_CURSOR_SDK_EVENT_DEBUG: "1",
+			PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR: artifactDir,
+		},
+	})!;
+	const artifactPath = (name: keyof typeof sdkEventDebugTestUtils.ARTIFACTS) =>
+		join(artifactDir, sdkEventDebugTestUtils.ARTIFACTS[name]);
+	return { sink, artifactPath };
+}
 
 describe("cursor sdk event debug sink", () => {
 	it("is disabled by default", () => {
@@ -235,6 +252,87 @@ describe("cursor sdk event debug sink", () => {
 		} finally {
 			rmSync(artifactDir, { recursive: true, force: true });
 		}
+	});
+
+	it("reports a failed wait-result write without replacing it with a later fallback result", async () => {
+		const { sink, artifactPath } = createPinnedRunSink("pi-cursor-sdk-event-debug-wait-result-");
+		// A directory at the artifact path makes the real wait-result write fail.
+		mkdirSync(artifactPath("waitResult"));
+		sink.recordWaitResult({ status: "finished" });
+		rmSync(artifactPath("waitResult"), { recursive: true });
+		sink.recordWaitResult({ status: "error", error: "fallback after the finished result" });
+		await sink.finalize();
+
+		expect(existsSync(artifactPath("waitResult"))).toBe(false);
+		expect(JSON.parse(readFileSync(artifactPath("summary"), "utf8"))).toMatchObject({
+			waitResultRecorded: false,
+			counts: { errors: 1 },
+		});
+		const [errorRecord] = readFileSync(artifactPath("errors"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+		expect(errorRecord.error.label).toBe("wait_result");
+	});
+
+	it("waits for its owned stream capture, then ignores records after finalization", async () => {
+		const { sink, artifactPath } = createPinnedRunSink("pi-cursor-sdk-event-debug-cutoff-");
+		let releaseLateStreamEvent!: () => void;
+		const lateStreamEventReleased = new Promise<void>((resolve) => {
+			releaseLateStreamEvent = resolve;
+		});
+		sink.attachRunStream({
+			id: "run-owned-stream",
+			stream: async function* () {
+				yield { type: "assistant", text: "early" };
+				await lateStreamEventReleased;
+				yield { type: "assistant", text: "late" };
+			},
+		});
+
+		const finalization = sink.finalize();
+		sink.recordProviderEvent("while_finalizing", {});
+		await new Promise((resolve) => setImmediate(resolve));
+		expect(existsSync(artifactPath("summary"))).toBe(false);
+
+		releaseLateStreamEvent();
+		await finalization;
+		const summary = readFileSync(artifactPath("summary"), "utf8");
+		const providerEvents = readFileSync(artifactPath("providerEvents"), "utf8");
+		expect(JSON.parse(summary)).toMatchObject({
+			counts: { stream: { assistant: 2 }, provider: { while_finalizing: 1 } },
+		});
+		expect(readFileSync(artifactPath("streamEvents"), "utf8")).toContain('"late"');
+
+		sink.recordProviderEvent("after_finalization", {});
+		sink.recordWaitResult({ status: "finished" });
+		sink.recordFinalPartial({ role: "assistant" });
+		await sink.finalize();
+
+		expect(readFileSync(artifactPath("summary"), "utf8")).toBe(summary);
+		expect(readFileSync(artifactPath("providerEvents"), "utf8")).toBe(providerEvents);
+		expect(existsSync(artifactPath("waitResult"))).toBe(false);
+		expect(existsSync(artifactPath("finalPartial"))).toBe(false);
+	});
+
+	it("keeps a failed finalization rejected without retrying or writing later records", async () => {
+		const { sink, artifactPath } = createPinnedRunSink("pi-cursor-sdk-event-debug-failed-finalize-");
+		// A directory at the summary path makes the real summary write fail.
+		mkdirSync(artifactPath("summary"));
+		sink.recordPiStreamEvent({ type: "text_delta", delta: "before" });
+
+		const failure = await sink.finalize().then(() => undefined, (error: unknown) => error);
+		expect(failure).toBeInstanceOf(Error);
+		const flushedPiStreamEvents = readFileSync(artifactPath("piStreamEvents"), "utf8");
+		expect(flushedPiStreamEvents).toContain('"before"');
+
+		sink.recordPiStreamEvent({ type: "text_delta", delta: "after" });
+		sink.recordWaitResult({ status: "finished" });
+		sink.recordFinalPartial({ role: "assistant" });
+		rmSync(artifactPath("summary"), { recursive: true });
+		await expect(sink.finalize()).rejects.toBe(failure);
+
+		expect(existsSync(artifactPath("summary"))).toBe(false);
+		expect(readFileSync(artifactPath("piStreamEvents"), "utf8")).toBe(flushedPiStreamEvents);
+		expect(existsSync(artifactPath("waitResult"))).toBe(false);
+		expect(existsSync(artifactPath("finalPartial"))).toBe(false);
 	});
 });
 

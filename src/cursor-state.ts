@@ -354,9 +354,10 @@ function notifyInvalidCursorModeIfCursorActive(
 	ctx: Pick<ExtensionContext, "hasUI" | "mode" | "ui" | "sessionManager">,
 	notifiedScopeKeys: Set<string>,
 ): void {
-	const modeResolution = resolveCursorAgentMode(cursorSettingsScopeForContext(ctx));
+	const settingsScopeKey = cursorSettingsScopeForContext(ctx);
+	const modeResolution = resolveCursorAgentMode(settingsScopeKey);
 	if (modeResolution.kind !== "invalid" || !ctx.hasUI || ctx.mode !== "tui") return;
-	const scopeKey = cursorSettingsScopeForContext(ctx) ?? getCursorSessionScopeKey();
+	const scopeKey = settingsScopeKey ?? getCursorSessionScopeKey();
 	if (notifiedScopeKeys.has(scopeKey)) return;
 	notifiedScopeKeys.add(scopeKey);
 	ctx.ui.notify(modeResolution.message, "error");

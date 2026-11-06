@@ -182,7 +182,7 @@ export class CursorProviderTurnRunner {
 			// entry must not release another request's run in handleOuterCatch().
 			if (!prepared && (error instanceof CursorLiveRunAbortError || options?.signal?.aborted)) {
 				const pending = cursorLiveRuns.getActiveForScope(this.params.scope.scopeKey);
-				if (pending && !pending.disposed) await cursorLiveRuns.release(pending);
+				if (pending) await cursorLiveRuns.release(pending);
 			}
 			await runFinalizer.applyTerminalEvent({ kind: "error", prepared: started ?? prepared, error });
 		} finally {

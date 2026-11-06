@@ -298,7 +298,7 @@ async function prepareCursorLocalProviderTurn(
 			useHttp1ForAgent,
 			debugRecorder: sdkEventDebug,
 			onBridgeToolRequest: (request: CursorPiBridgeToolRequest) => {
-				if (liveRunForBridgeQueue && !liveRunForBridgeQueue.disposed) {
+				if (liveRunForBridgeQueue?.resources.kind === "open") {
 					cursorLiveRuns.queueEvent(liveRunForBridgeQueue, { type: "bridge-tool", request });
 				} else {
 					queuedBridgeRequestsBeforeLiveRun.push(request);
@@ -457,7 +457,7 @@ async function prepareCursorLocalProviderTurn(
 		};
 	} finally {
 		if (!completed) {
-			if (liveRun && !liveRun.disposed) {
+			if (liveRun?.resources.kind === "open") {
 				await cursorLiveRuns
 					.release(liveRun)
 					.catch(() => abandonSessionCursorAgent(sessionAgentScopeKey).catch(() => {}));

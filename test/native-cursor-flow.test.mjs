@@ -90,6 +90,10 @@ test("registered Cursor provider preserves native bridge, replay, usage, queues,
     assert.ok(results.some((result) => result.toolName === "fixture_bridge" && !result.isError));
     assert.ok(results.some((result) => result.toolName === "read" && !result.isError && result.content.some((block) => block.text?.includes("recorded offline read"))), JSON.stringify({ active: session.getActiveToolNames(), tools: session.getAllTools().map((tool) => tool.name), results, errors }));
     await assert.rejects(readFile(join(root, "never-read.txt")), { code: "ENOENT" });
+    // The SDK finished with text behind the replayed read: replay must not end Pi's loop before that answer.
+    const finalTurn = session.messages.at(-1);
+    assert.equal(finalTurn.stopReason, "stop", JSON.stringify(finalTurn));
+    assert.match(finalTurn.content.map((block) => block.text ?? "").join(""), /OFFLINE_CURSOR_DONE_1/);
     const firstSend = state.sends[0].message.text;
     assert.match(firstSend, /NATIVE_CURSOR_FLOW_SYSTEM/);
     await session.prompt("incremental followup");

@@ -77,7 +77,6 @@ type CursorRuntimeControlsExtensionApi = Pick<
 
 const authoritativeGlobalFastPreferenceIds = new Set<string>();
 let globalFastPreferences = new Map<string, boolean>();
-const invalidCursorModeNotifiedSessionScopeKeys = new Set<string>();
 
 function isCursorAgentMode(value: unknown): value is AgentModeOption {
 	return value === "agent" || value === "plan";
@@ -351,12 +350,15 @@ function restoreCliCursorMode(raw: boolean | string | undefined, scopeKey?: stri
 	cli.mode = { kind: "invalid", raw: rawText, message };
 }
 
-function notifyInvalidCursorModeIfCursorActive(ctx: Pick<ExtensionContext, "hasUI" | "mode" | "ui" | "sessionManager">): void {
+function notifyInvalidCursorModeIfCursorActive(
+	ctx: Pick<ExtensionContext, "hasUI" | "mode" | "ui" | "sessionManager">,
+	notifiedScopeKeys: Set<string>,
+): void {
 	const modeResolution = resolveCursorAgentMode(cursorSettingsScopeForContext(ctx));
 	if (modeResolution.kind !== "invalid" || !ctx.hasUI || ctx.mode !== "tui") return;
 	const scopeKey = cursorSettingsScopeForContext(ctx) ?? getCursorSessionScopeKey();
-	if (invalidCursorModeNotifiedSessionScopeKeys.has(scopeKey)) return;
-	invalidCursorModeNotifiedSessionScopeKeys.add(scopeKey);
+	if (notifiedScopeKeys.has(scopeKey)) return;
+	notifiedScopeKeys.add(scopeKey);
 	ctx.ui.notify(modeResolution.message, "error");
 }
 
@@ -430,6 +432,7 @@ export function getEffectiveFastForModelId(modelId: string, scopeKey?: string): 
 export function registerCursorRuntimeControls(pi: CursorRuntimeControlsExtensionApi): void {
 	registerCursorSessionSettings(pi);
 	registerCursorCloudRuntimeControls(pi, { refreshStatus: updateCursorStatus });
+	const invalidModeNoticeScopes = new Set<string>();
 
 	pi.registerFlag("cursor-fast", {
 		description: "Force Cursor fast mode for this run when the selected Cursor model supports it",
@@ -656,7 +659,7 @@ export function registerCursorRuntimeControls(pi: CursorRuntimeControlsExtension
 			restoreCliCursorMode(pi.getFlag("cursor-mode"), scopeKey);
 		},
 		sync: (ctx) => {
-			if (isCursorModel(ctx.model)) notifyInvalidCursorModeIfCursorActive(ctx);
+			if (isCursorModel(ctx.model)) notifyInvalidCursorModeIfCursorActive(ctx, invalidModeNoticeScopes);
 			updateCursorStatus(ctx);
 		},
 	});
@@ -668,7 +671,6 @@ function resetCursorModeStateForTests(): void {
 	setStoredCursorHttp1Enabled(undefined);
 	getCursorSessionSettings().cli.mode = { kind: "unset" };
 	resetCursorRuntimeStateForTests();
-	invalidCursorModeNotifiedSessionScopeKeys.clear();
 	authoritativeGlobalFastPreferenceIds.clear();
 }
 

@@ -202,6 +202,23 @@ describe("Cursor runtime state", () => {
 		expect(ctx.ui.notify).toHaveBeenCalledWith('Invalid --cursor-mode "review". Use "agent" or "plan".', "error");
 		expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("cursor", "cursor:local · fast:off · mode invalid");
 		expect(() => getCursorProviderAgentModeOrThrow()).toThrow('Invalid --cursor-mode "review"');
+
+		await pi.invokeEventWithContext("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 0 }, ctx);
+		expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not rearm a sibling's invalid-mode notice when another registration shuts down", async () => {
+		const closing = createCursorRuntimeHarness({ modelId: "gpt-5.5@1m", cursorModeFlag: "review" });
+		const sibling = createCursorRuntimeHarness({ modelId: "gpt-5.5@1m", cursorModeFlag: "review" });
+		for (const { pi, ctx } of [closing, sibling]) {
+			await pi.invokeEventWithContext("session_start", { type: "session_start", reason: "startup" }, ctx);
+			expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
+		}
+
+		await closing.pi.invokeEventWithContext("session_shutdown", { type: "session_shutdown", reason: "quit" }, closing.ctx);
+		await sibling.pi.invokeEventWithContext("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 0 }, sibling.ctx);
+
+		expect(sibling.ctx.ui.notify).toHaveBeenCalledTimes(1);
 	});
 
 	it("reports invalid --cursor-mode from /cursor-mode status instead of soft defaulting", async () => {

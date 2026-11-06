@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Wait for bridge cleanup to finish when disposal and session shutdown overlap. All callers now wait for the loopback endpoint and listener to close.
+
 ## 0.5.11 - 2026-11-04
 
 <!-- npm-release:unreleased:start -->

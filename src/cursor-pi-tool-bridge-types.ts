@@ -67,6 +67,7 @@ export interface CursorPiToolBridgeRun {
 	setOnToolRequest(handler?: (request: CursorPiBridgeToolRequest) => void): void;
 	setDebugRecorder(recorder?: CursorSdkEventDebugRecorder): void;
 	cancel(reason: string): void;
+	/** Idempotent; every call settles only after the run's shared transport and endpoint cleanup does. */
 	dispose(): Promise<void>;
 }
 

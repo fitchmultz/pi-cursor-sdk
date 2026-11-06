@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Close a pending `cursor_ask_question` dialog when its turn is aborted. The tool now passes its abort signal to every pi select and text-input dialog, so an RPC `abort`, an extension's `ctx.abort()`, or the bridge's own abort (call deadline, Cursor-side cancellation, session shutdown) records the open question as cancelled, asks no later question and clears `pi-cursor-sdk:ask-question:blocked`. Previously the abort waited until someone answered the dialog. A listed option named exactly `Type a custom answer` now selects that option: the custom-answer entry is then shown as `Type a custom answer (2)`, and with `allowCustom: false` the option no longer opens text input. Answer details keep their existing fields.
+
 ## 0.5.11 - 2026-11-04
 
 <!-- npm-release:unreleased:start -->

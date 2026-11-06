@@ -12,7 +12,7 @@ import { attachJsonlLineReader } from "../../node_modules/@earendil-works/pi-cod
 const packageRoot = process.cwd();
 const piPackageRoot = resolve("node_modules/@earendil-works/pi-coding-agent");
 const piPackage = JSON.parse(readFileSync(join(piPackageRoot, "package.json"), "utf8")) as { bin: { pi: string } };
-const piCli = join(piPackageRoot, piPackage.bin.pi);
+export const piCli = join(piPackageRoot, piPackage.bin.pi);
 const trustManagerUrl = pathToFileURL(join(piPackageRoot, "dist/core/trust-manager.js")).href;
 const rpcFramingText = "RPC framing: x\u2028y\u2029z \uD83D\uDC08";
 const OS_ENV_KEYS = new Set(["PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TMPDIR", "TMP", "TEMP"]);
@@ -32,7 +32,8 @@ type MarkerEvent = {
 	acknowledgementSource?: string;
 };
 
-function isolatedPiEnv(homeDir: string, agentDir: string): NodeJS.ProcessEnv {
+/** Offline Pi child environment: OS essentials only, with a fresh HOME and agent directory. */
+export function isolatedPiEnv(homeDir: string, agentDir: string): NodeJS.ProcessEnv {
 	return {
 		...Object.fromEntries(Object.entries(process.env).filter(([name]) => OS_ENV_KEYS.has(name.toUpperCase()))),
 		HOME: homeDir,

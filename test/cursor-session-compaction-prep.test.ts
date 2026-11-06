@@ -64,7 +64,7 @@ describe("prepareCursorSessionForCompaction", () => {
 			await prepareCursorSessionForCompaction(scopeKey);
 			expect(await call).toBeInstanceOf(Error);
 			expect(bridgeRun.hasPendingToolCalls()).toBe(false);
-			expect(liveRun.disposed).toBe(true);
+			expect(liveRun.resources.kind).toBe("released");
 			expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
 			expect(sessionAgentTestUtils.sessionAgentsByScope.has(scopeKey)).toBe(false);
 			expect(sdkCancel).toHaveBeenCalledOnce();

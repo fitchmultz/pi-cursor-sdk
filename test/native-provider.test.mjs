@@ -33,7 +33,7 @@ test("native replay completes with the same JSON arguments as its streamed delta
   const args = { path: "README.md", offset: undefined, nested: { keep: false, omit: undefined } };
   cursorLiveRuns.queueEvent(run, { type: "tool", tool: { id: "json-replay-tool-1", toolName: "read", args,
     result: { content: [{ type: "text", text: "recorded result" }] } } });
-  cursorLiveRuns.markFinished(run, "");
+  cursorLiveRuns.settle(run, { kind: "finished", finalText: "" });
   try {
     assert.equal(await drainCursorLiveRunTurn(stream, partial, model,
       { messages: [], tools: [{ name: "read", description: "Read", parameters: Type.Object({ path: Type.String() }) }] },

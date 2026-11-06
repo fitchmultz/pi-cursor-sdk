@@ -65,14 +65,14 @@ describe("cursor pi tool bridge CallTool deadline", () => {
 			vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 			coordinator.requestIdleDispose(run);
 			await vi.advanceTimersByTimeAsync(75);
-			expect(run.disposed).toBe(false);
+			expect(run.resources.kind).toBe("open");
 			expect(cancel).not.toHaveBeenCalled();
 			vi.useRealTimers();
 			await bridge.resolveToolResults([{ role: "toolResult", toolCallId: request.piToolCallId, toolName: "bash",
 				content: [{ type: "text", text: "answer" }], isError: false, timestamp: Date.now() }]);
 			expect(await call).toMatchObject({ content: [{ type: "text", text: "answer" }] });
 			expect(transitions).toEqual([true, false]);
-			await vi.waitFor(() => expect(run.disposed).toBe(true));
+			await vi.waitFor(() => expect(run.resources.kind).toBe("released"));
 			expect(cancel).toHaveBeenCalledOnce();
 		} finally {
 			vi.useRealTimers();

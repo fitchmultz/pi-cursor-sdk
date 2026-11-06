@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Debug capture: `drain-events.jsonl` `turn_start` and `turn_end` records now report the live run's SDK result as `sdkOutcome` (`running`, `finished`, `cancelled` or `error`) instead of `done`. `done: true` used to mean finished, cancelled or failed.
+
 ## 0.5.11 - 2026-11-04
 
 <!-- npm-release:unreleased:start -->

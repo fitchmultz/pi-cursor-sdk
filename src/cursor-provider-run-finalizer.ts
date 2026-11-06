@@ -45,21 +45,14 @@ function applyLiveRunOutcome(
 	prepared: StartedCursorProviderTurn & LocalCursorProviderTurnPrepareResult & { runtime: LiveCursorProviderTurnRuntime },
 	context: CursorProviderTurnRunnerParams["context"],
 ): void {
-	if (prepared.runtime.liveRun.disposed) return;
 	const { liveRun } = prepared.runtime;
-	switch (classifyCursorRunEmission(outcome)) {
-		case "finished":
-			prepared.lifecycle.commitSend(context, prepared.meta.bootstrap);
-			if (prepared.meta.resumeNotice) liveRun.resumeNotice = prepared.meta.resumeNotice;
-			cursorLiveRuns.markFinished(liveRun, outcome.kind === "finished" ? outcome.finalText : "");
-			break;
-		case "cancelled":
-			cursorLiveRuns.markCancelled(liveRun, getCursorRunAbortMessage(outcome));
-			break;
-		case "failed":
-			cursorLiveRuns.markError(liveRun, outcome.kind === "error" ? outcome.errorMessage : "Cursor SDK run failed.");
-			break;
+	// A run released before the SDK settled was abandoned; its late outcome must not commit send state.
+	if (liveRun.resources.kind !== "open") return;
+	if (outcome.kind === "finished") {
+		prepared.lifecycle.commitSend(context, prepared.meta.bootstrap);
+		if (prepared.meta.resumeNotice) liveRun.resumeNotice = prepared.meta.resumeNotice;
 	}
+	cursorLiveRuns.settle(liveRun, outcome);
 }
 
 export interface CursorLiveRunCompletion {
@@ -113,13 +106,12 @@ export class CursorRunFinalizer {
 			.catch((error: unknown) => {
 				const aborted = error instanceof CursorLiveRunAbortError || runnerParams.options?.signal?.aborted === true;
 				this.safeCleanup(() => discardIncompleteTools({ status: aborted ? "cancelled" : "error" }));
-				if (!liveRun.disposed) {
-					if (aborted) cursorLiveRuns.markCancelled(liveRun, this.abortMessage());
-					else cursorLiveRuns.markError(
-						liveRun,
-						sanitizeCursorProviderError(error, this.params.resolvedApiKey() ?? runnerParams.options?.apiKey, "local"),
-					);
-				}
+				cursorLiveRuns.settle(liveRun, aborted
+					? { kind: "cancelled", abortMessage: this.abortMessage() }
+					: {
+						kind: "error",
+						errorMessage: sanitizeCursorProviderError(error, this.params.resolvedApiKey() ?? runnerParams.options?.apiKey, "local"),
+					});
 				this.safeCleanup(() => sdkEventDebug?.recordWaitResult({ status: aborted ? "cancelled" : "error", error: String(error) }));
 				this.safeCleanup(() => sdkEventDebug?.recordError("run_wait", error));
 			});
@@ -216,7 +208,7 @@ export class CursorRunFinalizer {
 			}),
 		));
 		const activeLiveRun = prepared?.runtime.liveRun;
-		if (activeLiveRun && !activeLiveRun.disposed) {
+		if (activeLiveRun?.resources.kind === "open") {
 			await cursorLiveRuns.release(activeLiveRun);
 		} else {
 			await prepared?.lifecycle.abandon();

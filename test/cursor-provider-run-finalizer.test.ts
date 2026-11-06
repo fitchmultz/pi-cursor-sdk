@@ -8,7 +8,7 @@ import { CursorSdkTurnCoordinator } from "../src/cursor-provider-turn-coordinato
 import type { LiveCursorProviderTurnRuntime, LocalCursorProviderTurnPrepareResult, StartedCursorProviderTurn } from "../src/cursor-provider-turn-types.js";
 import { installCursorSdkProcessErrorGuard } from "../src/cursor-sdk-process-error-guard.js";
 import type { CursorSdkEventDebugSink } from "../src/cursor-sdk-event-debug.js";
-import { createCursorLiveRunAccountingState } from "../src/cursor-live-run-accounting.js";
+import { cursorLiveRuns } from "../src/cursor-provider-live-run-drain.js";
 import { captureProviderTestOwnership, createProviderTestTurnUsage } from "./helpers/cursor-provider-ownership.js";
 import { asMockCursorRun } from "./helpers/cursor-provider-harness.js";
 import { collectAssistantEvents, makeAssistantMessage, makeContext, makeModel } from "./helpers/pi-harness.js";
@@ -90,12 +90,7 @@ describe("CursorRunFinalizer", () => {
 			...base,
 			runtime: {
 				kind: "live", turnCoordinator: base.runtime.turnCoordinator,
-				liveRun: {
-					id: "replay-1", agent: base.agent, sessionAgentScopeKey: "scope-1",
-					accounting: createCursorLiveRunAccountingState(0), pendingEvents: [], textDeltas: [],
-					emittedText: "", recordedToolDisplayIds: [], done: false, cancelled: false,
-					disposed: false, chainUserInputAfterCompletion: false,
-				},
+				liveRun: cursorLiveRuns.start({ id: "replay-1", agent: base.agent, sessionAgentScopeKey: "scope-1", promptInputTokens: 0 }),
 			},
 		};
 		const captureRunArtifacts = vi.fn(() => new Promise<void>(() => {}));
@@ -113,11 +108,15 @@ describe("CursorRunFinalizer", () => {
 			expect(mockAwaitFinalizeCursorRunOutcome).toHaveBeenCalledTimes(1);
 			expect(trackRunCompletion).toHaveBeenCalledTimes(1);
 			await expect(trackRunCompletion.mock.calls[0]?.[0]).resolves.toBeUndefined();
-			expect(prepared.runtime.liveRun).toMatchObject(aborted
-				? { done: true, cancelled: true, abortMessage: "Cancelled: prompt interrupted." }
-				: { done: true, errorMessage: "run wait failed" });
+			// A thrown wait() has no RunResult: the run keeps only the terminal kind and its message.
+			expect(prepared.runtime.liveRun.outcome).toEqual(aborted
+				? { kind: "cancelled", abortMessage: "Cancelled: prompt interrupted." }
+				: { kind: "error", errorMessage: "run wait failed" });
 			expect(captureRunArtifacts).not.toHaveBeenCalled();
-		} finally { guard.dispose(); }
+		} finally {
+			guard.dispose();
+			await cursorLiveRuns.release(prepared.runtime.liveRun);
+		}
 	});
 
 	it("allows the error terminal path after direct terminal handling throws before emitting", async () => {

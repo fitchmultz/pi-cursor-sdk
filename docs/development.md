@@ -4,7 +4,11 @@ Start with the [README](../README.md) for installation and the [Cursor SDK refer
 
 ## Maintainer cost-conscious verification
 
-Run offline/faux tests, native contracts, type checks, builds, and package checks first; preserve offline cross-platform CI. Reuse retained evidence for unchanged tested inputs. Real Cursor calls are only for the smallest meaningful changed-behavior check that needs real-service proof, on one representative environment. Docs/metadata-only changes need no paid testing. Do not replay full paid campaigns, run host matrices merely for matrix coverage, or automatically retry paid failures. Automated Cursor PR reviews continue unchanged.
+Choose offline checks that exercise the changed behavior and its affected callers. Run focused owner tests with `npm test -- test/cursor-state.test.ts`, for example, and select relevant native contracts, type checks, builds, and package checks. Reuse valid evidence for unchanged inputs. Do not rerun the full suite after every edit, review, commit, or push. Broaden verification when the focused checks cannot reach a credible regression. Required CI and offline cross-platform coverage remain unchanged.
+
+Each test must be able to catch a credible regression. Remove tests designed to always pass instead of counting them as verification. Prefer extending the existing owner test over adding a duplicate.
+
+Real Cursor calls are only for the smallest meaningful changed-behavior check that needs real-service proof, on one representative environment. Docs/metadata-only changes need no paid testing. Do not replay full paid campaigns, run host matrices merely for matrix coverage, or automatically retry paid failures. Automated Cursor PR reviews continue unchanged.
 
 No paid Cursor Cloud testing for generic PRs or releases. Only a PR or issue explicitly focused on Cursor Cloud may use a necessary focused Cloud check; incidental Cloud code changes do not qualify. Cloud product capabilities, offline contracts, and explicit smoke commands remain available. Even for Cloud-focused work, the multi-lane `npm run smoke:cloud` is optional, not an unconditional gate; selected checks retain run/evidence and agent/repository cleanup requirements.
 
@@ -85,7 +89,7 @@ This manual snapshot mode retains explicit older-host qualification for the adve
 
 This is offline compatibility proof, not Cursor authentication, desktop/cloud execution, visual, or all-platform live proof. Add only necessary changed-behavior live evidence under the [cost-conscious verification policy](#maintainer-cost-conscious-verification); the comprehensive paid matrix is optional, and paid Cloud testing is restricted to explicitly Cursor Cloud-focused PRs/issues. Older advertised Pi/Node floors require their own offline compatibility evidence.
 
-Run checks:
+Available full-suite commands:
 
 ```bash
 npm test

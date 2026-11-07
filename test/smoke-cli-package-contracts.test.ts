@@ -33,6 +33,7 @@ describe("smoke CLI and package contracts", () => {
 			expect(liveHelp!.stdout).toContain("--self-test");
 			expect(isolatedHelp!.status).toBe(0);
 			expect(isolatedHelp!.stdout).toContain("plan-strip");
+			expect(isolatedHelp!.stdout).toContain("--mode json");
 			expect(isolatedHelp!.stdout).toContain("PI_CURSOR_LEAN=0");
 			expect(isolatedHelp!.stdout).toContain("--self-test");
 		}
@@ -46,6 +47,7 @@ describe("smoke CLI and package contracts", () => {
 		expect(jsonlHelp.status).toBe(0);
 		expect(jsonlHelp.stdout).toContain("Validate assistant presence");
 		expect(jsonlHelp.stdout).toContain("--replay-errors");
+		expect(jsonlHelp.stdout).toContain("--require-native-read");
 		expect(sdkEventsHelp.status).toBe(0);
 		expect(sdkEventsHelp.stdout).toContain("Capture timestamped Cursor SDK event timelines");
 		expect(providerEventsHelp.status).toBe(0);
@@ -109,6 +111,16 @@ describe("smoke CLI and package contracts", () => {
 		expect(invalidVisualArgs.status).toBe(2);
 		expect(invalidVisualArgs.stderr).toContain("--expose-builtin-tools requires --bridge");
 	}, 90_000);
+
+	it("keeps both isolated native launches on the shared JSON/replay-proof path and leaves basic print alone", () => {
+		const source = readFileSync("scripts/isolated-cursor-smoke.sh", "utf8");
+		expect(source).toContain('"$PI_BIN" --mode json --approve "$@"');
+		expect(source).toContain('run_native_replay_probe "native replay" "$REPLAY_DIR"');
+		expect(source).toContain('run_native_replay_probe "plan-strip replay" "$PLAN_DIR"');
+		expect(source).toContain('validate_replay_jsonl "$session_dir" --require-native-read');
+		expect(source).toContain('validate_replay_jsonl "$BASIC_DIR"\n');
+		expect(source).toContain('"$PI_BIN" --approve --cursor-no-fast --model cursor/grok-4.6 --session-dir "$BASIC_DIR" --no-tools -p');
+	});
 
 	it("waits for final RPC settlement instead of a low-level run end", () => {
 		for (const path of [

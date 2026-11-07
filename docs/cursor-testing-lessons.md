@@ -288,12 +288,16 @@ Simulate plan-mode execute stripping with the repo fixture:
 
 It sets active tools to `read`, `bash`, `edit`, `write` on each `turn_start`. This is a **legacy native-replay** recipe, not a default-lean check: explicitly opt out of lean, disable the Pi bridge to isolate host replay, and enable replay display/registration. `PI_CURSOR_NATIVE_TOOLS` remains inherited; if it is `0`, preserve that restriction and report the native assertions unavailable rather than claiming resync coverage. Use `--mode json`: plain `-p` binds print mode, which deliberately disables replay registration even when `PI_CURSOR_REGISTER_NATIVE_TOOLS=1`. Run Pi with:
 
+Refuse an existing session directory before the launch: an old successful read must not satisfy a later attempt. Preserve old artifacts instead of silently reusing or deleting them. The chain validates only if the new Pi invocation succeeds.
+
 ```bash
+mkdir "$SMOKE_DIR/plan-strip" &&
 PI_CURSOR_LEAN=0 PI_CURSOR_PI_TOOL_BRIDGE=0 \
 PI_CURSOR_NATIVE_TOOL_DISPLAY=1 PI_CURSOR_REGISTER_NATIVE_TOOLS=1 \
 pi --approve -e . -e scripts/fixtures/plan-strip-shim --cursor-no-fast --model cursor/grok-4.6 \
   --mode json --session-dir "$SMOKE_DIR/plan-strip" \
-  -p 'After reset, read README.md and answer PLAN_STRIP_OK=yes.'
+  -p 'After reset, read README.md and answer PLAN_STRIP_OK=yes.' &&
+node scripts/validate-smoke-jsonl.mjs --replay-errors-only --require-native-read "$SMOKE_DIR/plan-strip"
 ```
 
 One-shot pass criteria:

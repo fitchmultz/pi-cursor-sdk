@@ -249,9 +249,12 @@ Pass criteria:
 
 ## 7. Native replay cards without the pi bridge
 
-Native replay requires an explicit opt-out of the default lean surface.
+Native replay requires an explicit opt-out of the default lean surface **and a registration-capable Pi mode**. Use `--mode json` for this one-shot check: plain `-p` binds print mode, which deliberately skips replay registration even when `PI_CURSOR_REGISTER_NATIVE_TOOLS=1`. Keep an inherited `PI_CURSOR_NATIVE_TOOLS=0` restriction intact; if native execution is disabled or the SDK reports no native read, record the native check as not exercised rather than passed.
+
+Require a new native-only directory so retained evidence cannot satisfy a later attempt. The command chain refuses an existing directory before launching Pi and validates only after a successful launch; keep old artifacts rather than deleting or retrying them automatically.
 
 ```bash
+mkdir "$SMOKE_DIR/native-replay" &&
 PI_CURSOR_SETTING_SOURCES=none \
 PI_CURSOR_LEAN=0 \
 PI_CURSOR_PI_TOOL_BRIDGE=0 \
@@ -259,17 +262,22 @@ PI_CURSOR_EXPOSE_BUILTIN_TOOLS=0 \
 PI_CURSOR_NATIVE_TOOL_DISPLAY=1 \
 PI_CURSOR_REGISTER_NATIVE_TOOLS=1 \
 pi --approve -e . --cursor-no-fast --model cursor/grok-4.6 \
-  --session-dir "$SMOKE_DIR/native-replay" \
+  --mode json --session-dir "$SMOKE_DIR/native-replay" \
   -p 'Native replay smoke. Use your Cursor file-reading capability to read ./README.md, then answer README_SEEN=yes if it contains pi-cursor-sdk.' \
   > "$SMOKE_DIR/native-replay.stdout.txt" \
-  2> "$SMOKE_DIR/native-replay.stderr.txt"
+  2> "$SMOKE_DIR/native-replay.stderr.txt" &&
+node scripts/validate-smoke-jsonl.mjs --replay-errors-only --require-native-read "$SMOKE_DIR/native-replay"
 ```
+
+The native-only validator requires positive persisted read evidence, not merely an answer marker or an error-free scan. Do not apply it to basic/bridge runs.
 
 Pass criteria:
 
-- stdout includes `README_SEEN=yes`.
-- Persisted JSONL shows an assistant `toolUse` turn with a replayed `read` tool call, a pi `read` `toolResult`, and a final assistant turn.
-- Native replay is display-only: it must not re-run Cursor-side mutations or create duplicate pi mutations.
+- The native-only validator exits `0`, establishing a correlated successful native read call/result pair rather than text-only or bridge-only output.
+- Structured stdout contains `README_SEEN=yes` in the final assistant text, not merely in an echoed prompt or tool arguments.
+- Persisted session JSONL contains an assistant `toolUse` turn with a structured `toolCall` named `read` for `README.md` and a native replay ID beginning `cursor-replay-`, followed by a `read` `toolResult` with `isError: false` whose **`toolCallId` equals that call's `id`**, then a final assistant turn. Bridge IDs (`cursor-pi-bridge-*`), prose, and an error-free replay scan are not substitutes for that actual call/result pair.
+- Claim only the observed native-read replay; this prompt does not establish shell/edit/write replay. JSON events/session records are not rendered-TUI evidence; use [section 4](#4-focused-visual-cardcolor-rendering-check) when card appearance is the changed behavior.
+- Native replay is display-only: it must not re-run Cursor-side mutations or create duplicate Pi mutations.
 
 ## 8. Diagnostics safety contract
 

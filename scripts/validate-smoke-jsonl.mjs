@@ -27,10 +27,11 @@ Options:
   -h, --help                    Show this help.
   --replay-errors               Also fail when JSONL contains native replay "Tool * not found" errors.
   --replay-errors-only          Scan only for native replay "Tool * not found" errors (skip usage checks).
+  --require-native-read         Also require a successful persisted native read call/result pair across the directory.
 
 Exit codes:
   0  every enforced invariant passed for the selected mode(s)
-  1  invalid arguments, unreadable directory, invalid JSONL, empty/no-assistant files, usage validation failures, or replay tool errors
+  1  invalid arguments, unreadable directory, invalid JSONL, empty/no-assistant files, usage/replay failures, or missing native read proof
   2  no JSONL files found under the smoke directory
 
 Enforced invariants (default mode):
@@ -42,6 +43,12 @@ Enforced invariants (default mode):
 Replay error scan (--replay-errors / --replay-errors-only):
   - no persisted error toolResult or error assistant message contains "Tool grep/cursor/find/ls not found"
   - successful tool/file reads that mention those strings in docs are ignored
+
+Native read proof (--require-native-read):
+  - at least one assistant toolCall named read with a cursor-replay- ID must precede a matching
+    read toolResult with the same toolCallId and isError=false in the same session file
+  - text-only, bridge-only, unmatched, error-only, and malformed JSONL cannot satisfy this proof
+  - invalid JSONL fails this mode even when --replay-errors-only skips usage checks
 
 Notes:
   - Prints one JSON summary line per scanned session file (usage mode) or one replay summary line (replay-only mode).
@@ -136,6 +143,27 @@ function scanReplayErrors(file, records) {
 	return hits;
 }
 
+function countNativeReadPairs(records) {
+	const pending = new Set();
+	let pairs = 0;
+	for (const record of records) {
+		const message = record?.type === "message" ? record.message : undefined;
+		if (message?.role === "assistant" && Array.isArray(message.content)) {
+			for (const block of message.content) {
+				if (
+					block?.type === "toolCall" && block.name === "read" &&
+					typeof block.id === "string" && block.id.startsWith("cursor-replay-")
+				) {
+					pending.add(block.id);
+				}
+			}
+		} else if (message?.role === "toolResult" && pending.delete(message.toolCallId)) {
+			if (message.toolName === "read" && message.isError === false) pairs += 1;
+		}
+	}
+	return pairs;
+}
+
 function main() {
 	const args = process.argv.slice(2);
 	if (args.includes("-h") || args.includes("--help")) {
@@ -145,6 +173,7 @@ function main() {
 
 	const replayErrorsOnly = args.includes("--replay-errors-only");
 	const replayErrors = replayErrorsOnly || args.includes("--replay-errors");
+	const requireNativeRead = args.includes("--require-native-read");
 	const positional = args.filter((arg) => !arg.startsWith("-"));
 
 	if (positional.length > 1) {
@@ -169,28 +198,39 @@ function main() {
 	}
 
 	let failures = 0;
+	let nativeReadPairCount = 0;
+	const finish = () => {
+		if (requireNativeRead && nativeReadPairCount === 0) {
+			console.error("validate-smoke-jsonl: no successful native read call/result pair found");
+			failures += 1;
+		}
+		process.exit(failures === 0 ? 0 : 1);
+	};
 	if (replayErrorsOnly) {
-		let replayHitCount = 0;
 		for (const file of files) {
-			const { records } = parseJsonlFile(file);
+			const { records, parseErrorCount } = parseJsonlFile(file);
 			const hits = scanReplayErrors(file, records);
-			replayHitCount += hits.length;
-			if (hits.length > 0) failures += 1;
+			const pairs = requireNativeRead ? countNativeReadPairs(records) : 0;
+			nativeReadPairCount += pairs;
+			if (hits.length > 0 || (requireNativeRead && parseErrorCount > 0)) failures += 1;
 			console.log(
 				JSON.stringify({
 					file: relative(smokeDir, file),
 					replayErrorCount: hits.length,
 					replayErrors: hits.slice(0, 5),
+					...(requireNativeRead ? { parseErrorCount, nativeReadPairCount: pairs } : {}),
 				}),
 			);
 		}
-		process.exit(failures === 0 ? 0 : 1);
+		finish();
 	}
 
 	for (const file of files) {
 		let summary;
 		try {
 			const { lineCount, records, parseErrorCount } = parseJsonlFile(file);
+			const pairs = requireNativeRead ? countNativeReadPairs(records) : 0;
+			nativeReadPairCount += pairs;
 			const messages = records.filter((record) => record.type === "message").map((record) => record.message);
 			const assistants = messages.filter((message) => message?.role === "assistant");
 			const usage = assistants.map((message) => message.usage).filter(Boolean);
@@ -213,6 +253,7 @@ function main() {
 				usageCount: usage.length,
 				badUsageCount: badUsage.length,
 				replayErrorCount: replayHits.length,
+				...(requireNativeRead ? { nativeReadPairCount: pairs } : {}),
 			};
 		} catch (error) {
 			failures += 1;
@@ -224,7 +265,7 @@ function main() {
 		console.log(JSON.stringify(summary));
 	}
 
-	process.exit(failures === 0 ? 0 : 1);
+	finish();
 }
 
 main();

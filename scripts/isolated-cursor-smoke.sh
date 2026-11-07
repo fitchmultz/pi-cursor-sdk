@@ -64,7 +64,9 @@ Prerequisites:
   Resolved node/npm/env paths from the parent shell are reused for pack-only work; live checks then resolve pi/rg.
   Pi and npm shims run with the resolved node directory first on PATH.
   Child pi runs clear Cursor SDK event-debug env. Live provider checks force PI_CURSOR_SETTING_SOURCES=none; install/list checks explicitly unset it.
-  Native/plan-strip replay checks set PI_CURSOR_LEAN=0 with native registration on and the pi bridge off; basic provider checks keep the lean default.
+  Native/plan-strip replay checks use --mode json with PI_CURSOR_LEAN=0, native registration on, and the pi bridge off.
+  They require a persisted successful cursor-replay- read call/result pair; the basic provider check stays plain print with the lean default.
+  Native/plan-strip session directories must be new; pre-existing evidence is rejected, not deleted.
 
 Options:
   -h, --help                    Show this help.
@@ -119,11 +121,23 @@ run_in_dir_capture_split() {
 
 validate_replay_jsonl() {
 	local dir="$1"
-	"$NODE_BIN" "$ROOT/scripts/validate-smoke-jsonl.mjs" --replay-errors-only "$dir"
+	shift
+	"$NODE_BIN" "$ROOT/scripts/validate-smoke-jsonl.mjs" --replay-errors-only "$@" "$dir"
+}
+
+# Share the exact native launch/validation path with the offline fake-Pi self-test.
+run_native_replay_probe() {
+	local label="$1" session_dir="$2" output_prefix="$3" prompt="$4"
+	shift 4
+	# Retained evidence must not satisfy a later run's positive replay proof.
+	mkdir "$session_dir" || fail "native replay requires a fresh session directory: $session_dir"
+	run_in_dir_capture_split "$label" "$PI_LIVE_TIMEOUT" "$PROJECT_DIR" "$output_prefix.stdout.txt" "$output_prefix.stderr.txt" "${PI_CURSOR_ENV[@]}" "${NATIVE_REPLAY_ENV[@]}" \
+		"$PI_BIN" --mode json --approve "$@" --cursor-no-fast --model cursor/grok-4.6 --session-dir "$session_dir" -p "$prompt"
+	validate_replay_jsonl "$session_dir" --require-native-read
 }
 
 run_self_test() {
-	local temp_dir bin_dir fake_pi fake_node fake_node_marker env_capture hostile_path captured_path node_dir name
+	local temp_dir bin_dir fake_pi fake_node fake_node_marker env_capture argv_capture invocation_capture hostile_path captured_path node_dir name
 	local old_path old_pi_bin old_pi_bin_was_set
 	local no_pi_bin fake_npm fake_npm_marker no_pi_repo no_pi_isolated no_pi_path no_pi_output_file no_pi_status
 	temp_dir="$(mktemp -d /tmp/pi-cursor-sdk-isolated-smoke-self-test.XXXXXX)"
@@ -135,10 +149,26 @@ run_self_test() {
 	fake_node="$bin_dir/node"
 	fake_node_marker="$temp_dir/fake-node-used"
 	env_capture="$temp_dir/fake-pi.env"
+	argv_capture="$temp_dir/fake-pi.argv.json"
+	invocation_capture="$temp_dir/fake-pi.invocations"
 	cat >"$fake_pi" <<EOF_SELFTEST_PI
 #!/usr/bin/env node
-import { writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+appendFileSync("$invocation_capture", "called\\n");
 writeFileSync("$env_capture", Object.entries(process.env).map(([key, value]) => key + "=" + (value ?? "")).join("\\n") + "\\n", "utf8");
+writeFileSync("$argv_capture", JSON.stringify(process.argv.slice(2)), "utf8");
+const args = process.argv.slice(2);
+const sessionIndex = args.indexOf("--session-dir");
+if (sessionIndex !== -1) {
+	const sessionDir = args[sessionIndex + 1];
+	mkdirSync(sessionDir, { recursive: true });
+	const records = [
+		{ type: "message", message: { role: "assistant", content: [{ type: "toolCall", name: "read", id: "cursor-replay-self-test" }] } },
+		{ type: "message", message: { role: "toolResult", toolName: "read", toolCallId: "cursor-replay-self-test", isError: false } },
+	];
+	writeFileSync(join(sessionDir, "session.jsonl"), records.map(record => JSON.stringify(record)).join("\\n") + "\\n");
+}
 EOF_SELFTEST_PI
 	cat >"$fake_node" <<EOF_SELFTEST_NODE
 #!/usr/bin/env bash
@@ -232,6 +262,29 @@ EOF_SELFTEST_NODE
 			fail "self-test failed: tool env leaked $name"
 		fi
 	done
+
+	(
+		PI_BIN="$fake_pi"
+		PI_CURSOR_ENV=( "${PI_NONE_ENV[@]}" )
+		PROJECT_DIR="$temp_dir/project"
+		mkdir -p "$PROJECT_DIR"
+		for name in native plan-strip; do
+			if [[ "$name" == "plan-strip" ]]; then
+				run_native_replay_probe "offline $name" "$temp_dir/$name-session" "$temp_dir/$name" "offline read probe" -e "$ROOT/scripts/fixtures/plan-strip-shim"
+			else
+				run_native_replay_probe "offline $name" "$temp_dir/$name-session" "$temp_dir/$name" "offline read probe"
+			fi
+			"$NODE_BIN" -e 'const assert=require("node:assert/strict");const fs=require("node:fs");const args=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));assert.deepEqual(args.slice(0,3),["--mode","json","--approve"]);assert.equal(args[args.indexOf("--session-dir")+1],process.argv[2]);assert.equal(args.includes("--no-tools"),false);assert.equal(args.includes("-p"),true);assert.equal(args.includes("-e"),process.argv[3]==="plan-strip");' "$argv_capture" "$temp_dir/$name-session" "$name" || fail "self-test failed: $name native launch arguments changed"
+			cp "$argv_capture" "$temp_dir/before-stale.argv.json"
+			cp "$invocation_capture" "$temp_dir/before-stale.invocations"
+			cp "$temp_dir/$name-session/session.jsonl" "$temp_dir/before-stale.session.jsonl"
+			if (run_native_replay_probe "offline stale $name" "$temp_dir/$name-session" "$temp_dir/stale-$name" "text-only rerun") >"$temp_dir/stale-result.txt" 2>&1; then
+				fail "self-test failed: $name reused old native replay evidence"
+			fi
+			grep -q 'requires a fresh session directory' "$temp_dir/stale-result.txt" || fail "self-test failed: $name did not reject stale session evidence"
+			"$NODE_BIN" -e 'const assert=require("node:assert/strict");const fs=require("node:fs");for(let i=1;i<process.argv.length;i+=2)assert.deepEqual(fs.readFileSync(process.argv[i]),fs.readFileSync(process.argv[i+1]));' "$argv_capture" "$temp_dir/before-stale.argv.json" "$temp_dir/$name-session/session.jsonl" "$temp_dir/before-stale.session.jsonl" "$invocation_capture" "$temp_dir/before-stale.invocations" || fail "self-test failed: $name stale refusal launched pi or changed old evidence"
+		done
+	)
 
 	no_pi_bin="$temp_dir/no-pi-bin"
 	fake_npm="$no_pi_bin/npm"
@@ -384,16 +437,12 @@ validate_replay_jsonl "$BASIC_DIR"
 
 log "check: native replay"
 REPLAY_DIR="$SESSION_ROOT/native-replay"
-mkdir -p "$REPLAY_DIR"
-run_in_dir_capture_split "native replay" "$PI_LIVE_TIMEOUT" "$PROJECT_DIR" "$ISOLATED/replay.stdout.txt" "$ISOLATED/replay.stderr.txt" "${PI_CURSOR_ENV[@]}" "${NATIVE_REPLAY_ENV[@]}" \
-	"$PI_BIN" --approve --cursor-no-fast --model cursor/grok-4.6 --session-dir "$REPLAY_DIR" -p 'Read ./README.md briefly, then answer README_SEEN=yes if it mentions pi-cursor-sdk.'
-validate_replay_jsonl "$REPLAY_DIR"
+run_native_replay_probe "native replay" "$REPLAY_DIR" "$ISOLATED/replay" \
+	'Read ./README.md briefly, then answer README_SEEN=yes if it mentions pi-cursor-sdk.'
 
 log "check: plan-strip shim (plan-mode execute reset)"
 PLAN_DIR="$SESSION_ROOT/plan-strip"
-mkdir -p "$PLAN_DIR"
-run_in_dir_capture_split "plan-strip replay" "$PI_LIVE_TIMEOUT" "$PROJECT_DIR" "$ISOLATED/plan.stdout.txt" "$ISOLATED/plan.stderr.txt" "${PI_CURSOR_ENV[@]}" "${NATIVE_REPLAY_ENV[@]}" \
-	"$PI_BIN" --approve -e "$SHIM_DIR" --cursor-no-fast --model cursor/grok-4.6 --session-dir "$PLAN_DIR" -p 'After reset, read README.md and answer PLAN_STRIP_OK=yes.'
-validate_replay_jsonl "$PLAN_DIR"
+run_native_replay_probe "plan-strip replay" "$PLAN_DIR" "$ISOLATED/plan" \
+	'After reset, read README.md and answer PLAN_STRIP_OK=yes.' -e "$SHIM_DIR"
 
 log "PASS isolated install smoke: $ISOLATED"

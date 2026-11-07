@@ -38,6 +38,8 @@ Inspect the session JSONL under the temp `--session-dir`:
 
 Common mistake: treating `cursor-replay-*` IDs or pi transcript tool labels as tools to invoke.
 
+For claimed successful native execution/replay, require an actual assistant `toolCall` with a `cursor-replay-*` ID and a later non-error `toolResult` with that same ID and tool name in the same session file. Narration, a final success marker, or an unpaired/failed call is not proof. For a selected native `read`, the existing validator's `--replay-errors-only --require-native-read` options enforce that read pair; they do not establish shell, edit, or other tool-category coverage.
+
 ## Bootstrap prompt
 
 First send (bootstrap) should include:

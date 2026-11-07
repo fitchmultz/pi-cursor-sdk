@@ -25,9 +25,72 @@ function writeSessionJsonl(smokeDir: string, name: string, lines: unknown[]): vo
 	writeFileSync(join(sessionDir, "session.jsonl"), `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
 }
 
+const nativeFixtureText = "NATIVE_READ_FIXTURE_CONTENT_MUST_STAY_PRIVATE";
+const validUsage = { input: 1, output: 1, totalTokens: 2, cacheRead: 0, cacheWrite: 0 };
+function readCall(id = "cursor-replay-offline-read") {
+	return { type: "message", message: { role: "assistant", usage: validUsage, content: [{ type: "toolCall", name: "read", id, arguments: { path: nativeFixtureText } }] } };
+}
+function readResult(id = "cursor-replay-offline-read", isError = false) {
+	return { type: "message", message: { role: "toolResult", toolName: "read", toolCallId: id, isError, content: [{ type: "text", text: nativeFixtureText }] } };
+}
+const textOnly = { type: "message", message: { role: "assistant", usage: validUsage, content: [{ type: "text", text: nativeFixtureText }] } };
+
 describe("validate-smoke-jsonl", () => {
 	afterEach(() => {
 		for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+	});
+
+	it.each([
+		{ name: "text-only", records: [textOnly] },
+		{ name: "bridge-only", records: [readCall("pi-tool-read"), readResult("pi-tool-read")] },
+		{ name: "unmatched-call", records: [readCall()] },
+		{ name: "unmatched-result", records: [readResult()] },
+		{ name: "wrong-result-id", records: [readCall(), readResult("cursor-replay-other")] },
+		{ name: "errored-result", records: [readCall(), readResult(undefined, true)] },
+		{ name: "missing-error-status", records: [readCall(), { type: "message", message: { ...readResult().message, isError: undefined } }] },
+		{ name: "wrong-result-tool", records: [readCall(), { type: "message", message: { ...readResult().message, toolName: "bash" } }] },
+		{ name: "non-assistant-call", records: [{ type: "message", message: { ...readCall().message, role: "user" } }, readResult()] },
+		{ name: "non-tool-call-block", records: [{ type: "message", message: { role: "assistant", content: [{ type: "text", name: "read", id: "cursor-replay-offline-read" }] } }, readResult()] },
+		{ name: "result-before-call", records: [readResult(), readCall()] },
+		{ name: "error-then-duplicate-success", records: [readCall(), readResult(undefined, true), readResult()] },
+	])("rejects $name as positive native-read proof without changing replay-error-only defaults", ({ name, records }) => {
+		const smokeDir = makeSmokeDir();
+		writeSessionJsonl(smokeDir, name, records);
+		expect(runValidator(smokeDir, ["--replay-errors-only"]).status).toBe(0);
+		const result = runValidator(smokeDir, ["--replay-errors-only", "--require-native-read"]);
+		expect(result.status).toBe(1);
+		expect(result.stderr).toContain("no successful native read call/result pair");
+		expect(result.stdout + result.stderr).not.toContain(nativeFixtureText);
+	});
+
+	it.each([{ options: [] }, { options: ["--replay-errors"] }, { options: ["--replay-errors-only"] }])("accepts a native read pair across the directory with additive options $options", ({ options }) => {
+		const smokeDir = makeSmokeDir();
+		writeSessionJsonl(smokeDir, "text-session", [textOnly]);
+		writeSessionJsonl(smokeDir, "native-session", [readCall(), readResult()]);
+		const result = runValidator(smokeDir, [...options, "--require-native-read"]);
+		expect(result.status, result.stderr).toBe(0);
+		const summaries = result.stdout.trim().split("\n").map((line) => JSON.parse(line));
+		expect(summaries.reduce((sum, summary) => sum + summary.nativeReadPairCount, 0)).toBe(1);
+		expect(result.stdout + result.stderr).not.toContain(nativeFixtureText);
+	});
+
+	it("does not match calls and results from different session files", () => {
+		const smokeDir = makeSmokeDir();
+		writeSessionJsonl(smokeDir, "call-session", [readCall()]);
+		writeSessionJsonl(smokeDir, "result-session", [readResult()]);
+		expect(runValidator(smokeDir, ["--replay-errors-only", "--require-native-read"]).status).toBe(1);
+	});
+
+	it("rejects malformed JSONL even alongside a valid native pair in replay-only proof mode", () => {
+		const smokeDir = makeSmokeDir();
+		writeSessionJsonl(smokeDir, "valid", [readCall(), readResult()]);
+		mkdirSync(join(smokeDir, "malformed"));
+		writeFileSync(join(smokeDir, "malformed", "session.jsonl"), "{not-json}\n");
+		expect(runValidator(smokeDir, ["--replay-errors-only"]).status).toBe(0);
+		const result = runValidator(smokeDir, ["--replay-errors-only", "--require-native-read"]);
+		expect(result.status).toBe(1);
+		expect(result.stdout).toContain('"parseErrorCount":1');
+		expect(result.stdout + result.stderr).not.toContain("{not-json}");
 	});
 
 	it("accepts assistant messages with valid usage", () => {

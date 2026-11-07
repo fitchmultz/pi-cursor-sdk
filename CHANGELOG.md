@@ -9,6 +9,51 @@
 - Keep the last working `dist/` when a build cannot publish its output. `npm run build` and the install-time `prepare` build now move the previous `dist/` aside, rename the new output into place, and delete the previous build only after `dist/` holds the new output. If the new output cannot be renamed into place, the previous build is restored and the build still fails with the original error; previously this failure left no `dist/` at all. If the restore also fails, the build reports the retained `dist.previous.*` directory instead of deleting it. The two renames are not an atomic swap: `dist/` is briefly absent between them. A build killed between the two renames leaves `dist/` absent until the next successful build and keeps the previous build in its uniquely named `dist.previous.*` directory, which is not restored or removed automatically.
 - Publish concurrent builds of one checkout one at a time, so one build's rollback can never put an older build over another build's output. Builds still compile in parallel, then take an OS file lock on `dist.lock` (an exclusive `node:sqlite` transaction) only to publish; the OS releases it if a build crashes, so a dead build never blocks the next one. A successful build now always publishes its own output and no longer prints "dist/ was published by a concurrent build". On Node 24 releases before 24.15, loading `node:sqlite` prints Node's ExperimentalWarning.
 
+## 0.5.18 - 2026-11-07
+
+<!-- npm-release:unreleased:start -->
+### Fixed
+
+- Report Cursor SDK event-debug wait results and finalization truthfully. `summary.json` reports `waitResultRecorded: true` only when `wait-result.json` was actually written; a failed write is listed in `errors.jsonl` as `wait_result` and is not replaced by a later fallback result. Finalization still waits for the run's stream capture, then stops recording: later records no longer write artifacts or change counts, and a failed finalization keeps its original error without retrying. Provider results are unchanged.
+<!-- npm-release:unreleased:end -->
+
+- fix: keep SDK debug finalization truthful and stable (#424) ([6102de6](https://github.com/fitchmultz/pi-cursor-sdk/commit/6102de6308a36b363144697b1c0d08a603412686))
+
+### What's Changed
+* fix: keep SDK debug finalization truthful and stable by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/424
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.17...v0.5.18
+
+## 0.5.17 - 2026-11-07
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- docs: clarify the shared HTTP transport record contract (#427) ([2a35e79](https://github.com/fitchmultz/pi-cursor-sdk/commit/2a35e79eca96ce7a2ac80ed1c26d3dc82c2fa4e0))
+
+### What's Changed
+* docs: explain shared Cursor transport ownership by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/427
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.16...v0.5.17
+
+## 0.5.16 - 2026-11-07
+
+<!-- npm-release:unreleased:start -->
+### Fixed
+
+- Wait for bridge cleanup to finish when disposal and session shutdown overlap. All callers now wait for the loopback endpoint and listener to close.
+<!-- npm-release:unreleased:end -->
+
+- fix: await shared bridge disposal completion (#415) ([48866be](https://github.com/fitchmultz/pi-cursor-sdk/commit/48866be20e20f904165fd858d0bcdb6a2f1c46d0))
+
+### What's Changed
+* fix: await shared bridge disposal completion by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/415
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.15...v0.5.16
+
 ## 0.5.15 - 2026-11-07
 
 <!-- npm-release:unreleased:start -->

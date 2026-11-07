@@ -51,6 +51,8 @@ export interface CursorPiBridgeToolRequest {
 	args: Record<string, unknown>;
 }
 
+export type CursorPiToolRequestHandler = (request: CursorPiBridgeToolRequest) => void;
+
 export interface CursorPiToolBridgeRun {
 	id: string;
 	enabled: boolean;
@@ -64,9 +66,10 @@ export interface CursorPiToolBridgeRun {
 	/** Synchronous changes; observer errors cannot affect settlement. Returns an idempotent unsubscribe. */
 	onPendingToolCallsChanged(listener: () => void): () => void;
 	isBridgeMcpToolCall(toolCall: unknown): boolean;
-	setOnToolRequest(handler?: (request: CursorPiBridgeToolRequest) => void): void;
+	setOnToolRequest(handler?: CursorPiToolRequestHandler): void;
 	setDebugRecorder(recorder?: CursorSdkEventDebugRecorder): void;
 	cancel(reason: string): void;
+	/** Idempotent; every call settles only after the run's shared transport and endpoint cleanup does. */
 	dispose(): Promise<void>;
 }
 
@@ -78,6 +81,6 @@ export interface CursorPiToolBridge {
 }
 
 export interface CursorPiToolBridgeRunOptions {
-	onToolRequest?: (request: CursorPiBridgeToolRequest) => void;
+	onToolRequest?: CursorPiToolRequestHandler;
 	debugRecorder?: CursorSdkEventDebugRecorder;
 }

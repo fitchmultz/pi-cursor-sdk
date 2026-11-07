@@ -4,9 +4,21 @@
 
 ## Unreleased
 
+## 0.5.18 - 2026-11-07
+
+<!-- npm-release:unreleased:start -->
 ### Fixed
 
 - Report Cursor SDK event-debug wait results and finalization truthfully. `summary.json` reports `waitResultRecorded: true` only when `wait-result.json` was actually written; a failed write is listed in `errors.jsonl` as `wait_result` and is not replaced by a later fallback result. Finalization still waits for the run's stream capture, then stops recording: later records no longer write artifacts or change counts, and a failed finalization keeps its original error without retrying. Provider results are unchanged.
+<!-- npm-release:unreleased:end -->
+
+- fix: keep SDK debug finalization truthful and stable (#424) ([6102de6](https://github.com/fitchmultz/pi-cursor-sdk/commit/6102de6308a36b363144697b1c0d08a603412686))
+
+### What's Changed
+* fix: keep SDK debug finalization truthful and stable by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/424
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.17...v0.5.18
 
 ## 0.5.17 - 2026-11-07
 

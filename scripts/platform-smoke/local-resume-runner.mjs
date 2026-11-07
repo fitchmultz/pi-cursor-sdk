@@ -74,7 +74,6 @@ export async function executeLocalResumeSuite(
 			shell: true,
 			timeout: 900_000,
 			allowEnv: ["CURSOR_API_KEY"],
-			captureStdoutPath: resolve(suiteDir, ".crabbox.remote.stdout.raw"),
 			sync: leaseSession?.sync,
 			config,
 		},

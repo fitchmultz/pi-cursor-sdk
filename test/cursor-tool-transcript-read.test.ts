@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CURSOR_REPLAY_ACTIVITY_TOOL_NAME, isExcludedFromCursorBridgeExposure } from "../src/cursor-tool-presentation-registry.js";
+import { CURSOR_REPLAY_ACTIVITY_TOOL_NAME } from "../src/cursor-tool-presentation-registry.js";
 import {
 	buildCursorPiToolDisplay,
 	formatCursorToolTranscript,
@@ -11,27 +11,18 @@ import {
 
 
 describe("formatCursorToolTranscript read and shell", () => {
-	it("defines shared bridge exclusions for only the neutral Cursor replay activity name", () => {
-		expect(isExcludedFromCursorBridgeExposure("cursor")).toBe(true);
-		expect(isExcludedFromCursorBridgeExposure("oldCursorEdit")).toBe(false);
-		expect(isExcludedFromCursorBridgeExposure("oldCursorWrite")).toBe(false);
-		expect(isExcludedFromCursorBridgeExposure("oldCursorMcp")).toBe(false);
-		expect(isExcludedFromCursorBridgeExposure("bash")).toBe(false);
-		expect(isExcludedFromCursorBridgeExposure("edit")).toBe(false);
-		expect(isExcludedFromCursorBridgeExposure("write")).toBe(false);
-	});
-
-	it("formats Cursor read results as a pi-like read transcript", () => {
+	it.each([["README.md", undefined], ["/repo/README.md", "/repo"]] as const)("formats Cursor read results as a pi-like read transcript (%s)", (path, cwd) => {
 		const transcript = formatCursorToolTranscript({
 			name: "read",
-			args: { path: "README.md" },
+			args: { path },
 			result: {
 				status: "success",
 				value: { content: "# pi-cursor-sdk\n\nA pi provider extension", totalLines: 3, fileSize: 42 },
 			},
-		});
+		}, { cwd });
 
 		expect(transcript).toBe("read README.md\n\n# pi-cursor-sdk\n\nA pi provider extension\n");
+		expect(transcript).not.toContain("/repo/README.md");
 	});
 
 	it("formats Cursor createPlan args as visible plan text", () => {
@@ -59,20 +50,23 @@ describe("formatCursorToolTranscript read and shell", () => {
 		const dir = mkdtempSync(join(tmpdir(), "cursor-tool-transcript-"));
 		try {
 			writeFileSync(join(dir, "README.md"), "# Local title\n\nLocal body\n");
-
-			const transcript = formatCursorToolTranscript(
-				{
-					name: "read",
-					args: { path: join(dir, "README.md") },
-					result: { status: "success", value: { content: "", totalLines: 3, fileSize: 26 } },
-				},
-				{ cwd: dir },
-			);
+			const toolCall = {
+				name: "read",
+				args: { path: join(dir, "README.md") },
+				result: { status: "success", value: { content: "", totalLines: 3, fileSize: 26 } },
+			};
+			const transcript = formatCursorToolTranscript(toolCall, { cwd: dir });
+			const display = buildCursorPiToolDisplay(toolCall, { cwd: dir });
+			const notice = "[local file preview at transcript time; Cursor read result content was unavailable]";
 
 			expect(transcript).toContain("read README.md");
-			expect(transcript).toContain("[local file preview at transcript time; Cursor read result content was unavailable]");
+			expect(transcript).toContain(notice);
 			expect(transcript).toContain("# Local title");
 			expect(transcript).toContain("Local body");
+			expect(display.args).toMatchObject({ localReadPreview: true });
+			expect(display.result.details).toMatchObject({ localReadPreview: true });
+			expect(display.result.content[0].text).toContain(notice);
+			expect(display.result.content[0].text).toContain("# Local title");
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -154,20 +148,6 @@ describe("formatCursorToolTranscript read and shell", () => {
 			rmSync(dir, { recursive: true, force: true });
 			rmSync(outsideDir, { recursive: true, force: true });
 		}
-	});
-
-	it("shortens absolute workspace paths to relative paths", () => {
-		const transcript = formatCursorToolTranscript(
-			{
-				name: "read",
-				args: { path: "/repo/README.md" },
-				result: { status: "success", value: { content: "# Title" } },
-			},
-			{ cwd: "/repo" },
-		);
-
-		expect(transcript).toContain("read README.md");
-		expect(transcript).not.toContain("/repo/README.md");
 	});
 
 	it("formats Cursor shell results as a pi-like bash transcript", () => {

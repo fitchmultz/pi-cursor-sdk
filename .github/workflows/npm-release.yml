@@ -19,9 +19,9 @@ jobs:
     permissions:
       contents: write
     if: vars.NPM_RELEASE_ENABLED == 'true' && github.ref == 'refs/heads/main' && github.repository_owner == 'fitchmultz'
-    uses: fitchmultz/.github/.github/workflows/npm-release-plan.yml@11d531f79564b555ebf75348d7275eaf0cb6d825 # main
+    uses: fitchmultz/.github/.github/workflows/npm-release-plan.yml@81643f314e88cba668cc68c2d06abcefcbba44ee # main
     with:
-      automation-ref: 11d531f79564b555ebf75348d7275eaf0cb6d825 # main
+      automation-ref: 81643f314e88cba668cc68c2d06abcefcbba44ee # main
 
   checks:
     needs: plan
@@ -31,15 +31,89 @@ jobs:
       official-version: ${{ needs.plan.outputs.official-version }}
       fork-ref: ${{ needs.plan.outputs.fork-ref }}
 
-  publish:
-    needs: [plan, checks]
+  prepare:
+    needs: plan
     if: needs.plan.outputs.release == 'true'
     permissions:
       contents: write
-      id-token: write
-    uses: fitchmultz/.github/.github/workflows/npm-release.yml@11d531f79564b555ebf75348d7275eaf0cb6d825 # main
+    uses: fitchmultz/.github/.github/workflows/npm-release-prepare.yml@81643f314e88cba668cc68c2d06abcefcbba44ee # main
     with:
-      automation-ref: 11d531f79564b555ebf75348d7275eaf0cb6d825 # main
+      automation-ref: 81643f314e88cba668cc68c2d06abcefcbba44ee # main
       source-ref: ${{ needs.plan.outputs.source }}
+      release-source: ${{ needs.plan.outputs.release-source }}
+      official-version: ${{ needs.plan.outputs.official-version }}
+      fork-ref: ${{ needs.plan.outputs.fork-ref }}
+
+  candidate:
+    needs: [plan, prepare]
+    if: needs.plan.outputs.release == 'true'
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/release-qualification.yml
+    with:
+      source-ref: ${{ needs.plan.outputs.source }}
+      release-source: ${{ needs.plan.outputs.release-source }}
+      official-version: ${{ needs.plan.outputs.official-version }}
+    secrets:
+      CURSOR_CATALOG_API_KEY: ${{ secrets.CURSOR_CATALOG_API_KEY }}
+      ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+
+  qualification:
+    name: Release qualification
+    needs: [plan, checks, prepare, candidate]
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: fitchmultz/.github
+          ref: 81643f314e88cba668cc68c2d06abcefcbba44ee # main
+          path: automation
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          check-latest: true
+          package-manager-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-candidate-${{ needs.plan.outputs.source }}
+          path: ${{ runner.temp }}/npm-candidate
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-fork-host-${{ needs.plan.outputs.source }}
+          path: ${{ runner.temp }}/fork-package
+      - name: Bind the successful checks to the retained candidate
+        env:
+          SOURCE_REF: ${{ needs.plan.outputs.source }}
+          RELEASE_SOURCE: ${{ needs.plan.outputs.release-source }}
+          OFFICIAL_VERSION: ${{ needs.plan.outputs.official-version }}
+          FORK_REF: ${{ needs.plan.outputs.fork-ref }}
+        run: |
+          node automation/scripts/npm-release.mjs qualify \
+            --artifact "$RUNNER_TEMP/npm-candidate" --fork "$RUNNER_TEMP/fork-package" \
+            --source-ref "$SOURCE_REF" --release-source "$RELEASE_SOURCE" \
+            --official-version "$OFFICIAL_VERSION" --fork-ref "$FORK_REF" \
+            --output "$RUNNER_TEMP/npm-release-qualification"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-release-qualification
+          path: ${{ runner.temp }}/npm-release-qualification
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [plan, qualification]
+    if: needs.plan.outputs.release == 'true'
+    permissions:
+      actions: read
+      contents: write
+      id-token: write
+    uses: fitchmultz/.github/.github/workflows/npm-release-qualified.yml@81643f314e88cba668cc68c2d06abcefcbba44ee # main
+    with:
+      automation-ref: 81643f314e88cba668cc68c2d06abcefcbba44ee # main
+      source-ref: ${{ needs.plan.outputs.source }}
+      release-source: ${{ needs.plan.outputs.release-source }}
       official-version: ${{ needs.plan.outputs.official-version }}
       fork-ref: ${{ needs.plan.outputs.fork-ref }}

@@ -12,7 +12,7 @@ import {
 	__testUtils as sessionAgentTestUtils,
 } from "../src/cursor-session-agent.js";
 import { createPiHarness, makeAssistantMessage, makeContext } from "./helpers/pi-harness.js";
-import { installCursorSessionStoreMock } from "./helpers/cursor-session-store.js";
+import { installCursorSessionStoreMock, sessionStoreBackedBy } from "./helpers/cursor-session-store.js";
 import { buildCursorSessionStateRoot } from "../src/cursor-session-store.js";
 
 // Independent historical persisted bytes, not the current production key builder.
@@ -90,7 +90,7 @@ describe("cursor-session-agent local resume", () => {
 				apiKey: "test-key",
 				model: { id: "composer-2.5" },
 				mode: "agent",
-				local: expect.objectContaining({ cwd: "/tmp/project", store: storeMock.stores[0] }),
+				local: expect.objectContaining({ cwd: "/tmp/project", store: sessionStoreBackedBy(storeMock.stores[0]) }),
 			}),
 		);
 		expect(createAgent).not.toHaveBeenCalled();
@@ -122,7 +122,9 @@ describe("cursor-session-agent local resume", () => {
 			manager.appendMessage({ role: "user", content: "ordinary request", timestamp: 1 });
 			await pi.runBeforeAgentStart({ cwd: root, sessionManager: sessionManager(manager) });
 			const lease = await acquireSessionCursorAgent(params);
+			expect(resumeTestUtils.state.pendingHandle).toBeUndefined();
 			lease.commitSend(makeContext(), true);
+			expect(pi.appendEntry).not.toHaveBeenCalled();
 			manager.appendMessage(makeAssistantMessage("ordinary answer"));
 			await pi.runTurnEnd({}, { cwd: root, sessionManager: sessionManager(manager) });
 			const file = manager.getSessionFile()!;
@@ -131,7 +133,18 @@ describe("cursor-session-agent local resume", () => {
 			expect(persisted).not.toContain("private definition prompt");
 			expect(persisted).not.toContain("private description");
 			const record = manager.getEntries().find(entry => entry.type === "custom" && entry.customType === CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE);
-			expect(record).toMatchObject({ data: { poolKey: lease.poolKey, agentId: lease.agent.agentId } });
+			expect(record).toMatchObject({
+				data: {
+					runtime: "local",
+					poolKey: lease.poolKey,
+					agentId: lease.agent.agentId,
+					sendState: {
+						bootstrapped: true,
+						contextFingerprint: computeCursorContextFingerprint(makeContext()),
+						incrementalSendCount: 0,
+					},
+				},
+			});
 
 			await sessionAgentTestUtils.disposeAllSessionCursorAgents();
 			resumeTestUtils.reset();
@@ -206,14 +219,14 @@ describe("cursor-session-agent local resume", () => {
 		const legacyLease = await acquireSessionCursorAgent(params);
 		expect(legacyLease.resumed).toBe(true);
 		expect(legacyLease.storeIdentity).toEqual({ version: 1, stateRoot: "/tmp/cursor-sdk-state/workspace" });
-		expect(resumeAgent.mock.calls[0][1]?.local?.store).toBe(storeMock.stores[0]);
+		expect(resumeAgent.mock.calls[0][1]?.local?.store).toEqual(sessionStoreBackedBy(storeMock.stores[0]));
 
 		sessionAgentTestUtils.invalidateSessionAgent(scopeKey);
 		const lease = await acquireSessionCursorAgent({ ...params, forceCreate: true });
 		lease.commitSend(context, true);
 
 		expect(createAgent).toHaveBeenCalledTimes(1);
-		expect(createAgent.mock.calls[0][0].local?.store).toBe(storeMock.stores[1]);
+		expect(createAgent.mock.calls[0][0].local?.store).toEqual(sessionStoreBackedBy(storeMock.stores[1]));
 		expect(storeMock.openedOptions).toEqual([
 			{ workspaceRef: "/tmp/project", stateRoot: toNamespacedPath("/tmp/cursor-sdk-state/workspace") },
 			{
@@ -323,15 +336,15 @@ describe("cursor-session-agent local resume", () => {
 				stateRoot: toNamespacedPath(buildCursorSessionStateRoot("/tmp/cursor-sdk-state/workspace", scopeKey)),
 			});
 			if (failure === "Agent.resume") {
-				expect(resumeAgent.mock.calls[0][1]?.local?.store).toBe(storeMock.stores[0]);
+				expect(resumeAgent.mock.calls[0][1]?.local?.store).toEqual(sessionStoreBackedBy(storeMock.stores[0]));
 				expect(resumeAgent.mock.calls[0][1]?.agents).toEqual(agents);
 			} else {
 				expect(resumeAgent).not.toHaveBeenCalled();
 			}
 			const createdStore = storeMock.stores[failure === "Agent.resume" ? 1 : 0];
-			expect(createAgent.mock.calls[0][0].local?.store).toBe(createdStore);
+			expect(lease.store).toEqual(sessionStoreBackedBy(createdStore));
+			expect(createAgent.mock.calls[0][0].local?.store).toBe(lease.store);
 			expect(createAgent.mock.calls[0][0].agents).toEqual(agents);
-			expect(lease.store).toBe(createdStore);
 			expect(lease.resumed).toBe(false);
 			expect(lease.resumeNotice).toContain("Could not resume prior Cursor agent");
 			expect(lease.sendState.bootstrapped).toBe(false);
@@ -381,7 +394,7 @@ describe("cursor-session-agent local resume", () => {
 		expect(storeMock.openedOptions[0].stateRoot).toContain("pi-sessions");
 		expect(storeMock.openedOptions[0].stateRoot).not.toBe(toNamespacedPath("/tmp/cursor-sdk-state/workspace"));
 		expect(resumeAgent).not.toHaveBeenCalled();
-		expect(createAgent.mock.calls[0][0].local?.store).toBe(storeMock.stores[0]);
+		expect(createAgent.mock.calls[0][0].local?.store).toEqual(sessionStoreBackedBy(storeMock.stores[0]));
 		expect(lease.resumeNotice).toBeUndefined();
 	});
 
@@ -466,43 +479,4 @@ describe("cursor-session-agent local resume", () => {
 		expect(enabled.agent).toBe(disabledAgain.agent);
 		expect(createAgent).toHaveBeenCalledTimes(1);
 	});
-
-	it("schedules a local resume handle only after a successful send commit", async () => {
-		const appendEntry = vi.fn();
-		const createAgent = vi.fn().mockResolvedValue({ agentId: "agent-1", [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined) });
-		const scopeKey = "/tmp/sessions/test.jsonl";
-		cursorSessionScopeTestUtils.set("/tmp/project", scopeKey);
-		resumeTestUtils.set({
-			appendEntry,
-			scopeKey,
-			sessionFile: scopeKey,
-			cwd: "/tmp/project",
-			branchPathHash: resumeTestUtils.EMPTY_BRANCH_HASH,
-			compactionGeneration: 0,
-		});
-		const context = makeContext([{ role: "user", content: "Hello", timestamp: 1 }]);
-
-		const lease = await acquireSessionCursorAgent({
-			apiKey: "test-key",
-			agentMode: "agent",
-			cwd: "/tmp/project",
-			modelSelection: { id: "composer-2.5" },
-			localResume: true,
-			createAgent,
-		});
-		lease.commitSend(context, true);
-
-		expect(appendEntry).not.toHaveBeenCalled();
-		expect(resumeTestUtils.state.pendingHandle).toMatchObject({
-			runtime: "local",
-			agentId: "agent-1",
-			poolKey: lease.poolKey,
-			sendState: expect.objectContaining({
-				bootstrapped: true,
-				contextFingerprint: computeCursorContextFingerprint(context),
-				incrementalSendCount: 0,
-			}),
-		});
-	});
-
 });

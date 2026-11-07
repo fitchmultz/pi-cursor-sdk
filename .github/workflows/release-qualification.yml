@@ -1,0 +1,129 @@
+name: Cursor release candidate qualification
+
+on:
+  workflow_call:
+    inputs:
+      source-ref:
+        description: Exact candidate source commit
+        required: true
+        type: string
+      release-source:
+        description: Original main commit covered by the version
+        required: true
+        type: string
+      official-version:
+        description: Official Pi version selected by the planner
+        required: true
+        type: string
+    secrets:
+      CURSOR_CATALOG_API_KEY:
+        required: true
+      ZAI_API_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    name: Review the retained Cursor candidate
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source-ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: fitchmultz/.github
+          ref: 81643f314e88cba668cc68c2d06abcefcbba44ee # main
+          path: automation
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: fitchmultz/pi-agent-skills
+          ref: 0a1d941264a683c186adad7f18c78b9439e82028 # main
+          path: skills
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          check-latest: true
+          package-manager-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-candidate-${{ inputs.source-ref }}
+          path: ${{ runner.temp }}/npm-candidate
+      - name: Install the reviewed npm and native consumer managers
+        run: |
+          PM="$(node -p 'require("./package.json").packageManager ?? require("./automation/package.json").packageManager')"
+          npm exec --yes --package="$PM" -- npm install --global "$PM"
+          npm install --global --no-audit --no-fund --allow-scripts=bun,pnpm pnpm@latest bun@latest
+          npm --version
+          pnpm --version
+          bun --version
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Recreate and verify the selected official Pi host
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OFFICIAL_VERSION: ${{ inputs.official-version }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { appendFileSync, readFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { isolatedEnvironment } from './automation/scripts/common.mjs';
+          import { prepareHost } from './automation/scripts/hosts.mjs';
+          const root = join(process.env.RUNNER_TEMP, 'review-host');
+          const selected = JSON.parse(readFileSync(join(process.env.RUNNER_TEMP, 'npm-candidate', 'release.json'))).hosts.official;
+          const host = await prepareHost(root, 'official', process.env.OFFICIAL_VERSION, isolatedEnvironment(join(process.env.RUNNER_TEMP, 'host-env')));
+          for (const field of ['version', 'indexSha256', 'cliSha256', 'runtimeLockSha256', 'runtimeGraphSha256']) {
+            assert.equal(host[field], selected[field], `Selected official host changed: ${field}`);
+          }
+          appendFileSync(process.env.GITHUB_PATH, `${join(root, 'node_modules', '.bin')}\n`);
+          appendFileSync(process.env.GITHUB_ENV, `REVIEW_PI=${host.cli}\n`);
+          NODE
+      - name: Check the live Cursor model catalog
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_CATALOG_API_KEY }}
+        run: node scripts/release-review.mjs catalog --receipt "$RUNNER_TEMP/cursor-review/catalog.json"
+      - name: Capture exact release and previous-publication evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_REF: ${{ inputs.source-ref }}
+          RELEASE_SOURCE: ${{ inputs.release-source }}
+        run: |
+          node scripts/release-review.mjs release-prepare \
+            --source "$SOURCE_REF" --release-source "$RELEASE_SOURCE" \
+            --artifact "$RUNNER_TEMP/npm-candidate" --catalog-receipt "$RUNNER_TEMP/cursor-review/catalog.json" \
+            --evidence "$RUNNER_TEMP/cursor-review/scope"
+      - name: Qualify affected Zod consumers against the retained candidate
+        run: |
+          node scripts/qualify-zod-installers.mjs \
+            --scope "$RUNNER_TEMP/cursor-review/scope/scope.json" \
+            --receipt "$RUNNER_TEMP/cursor-review/installers/review.json" --pi "$REVIEW_PI"
+      - name: Deep-review the exact source and package
+        env:
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          PI_RELEASE_REVIEW_SKILL: ${{ github.workspace }}/skills/skills/thermo-nuclear-code-quality-review/SKILL.md
+          SOURCE_REF: ${{ inputs.source-ref }}
+          RELEASE_SOURCE: ${{ inputs.release-source }}
+        run: |
+          node scripts/release-review.mjs release --source "$SOURCE_REF" --release-source "$RELEASE_SOURCE" \
+            --evidence "$RUNNER_TEMP/cursor-review/scope" --receipt "$RUNNER_TEMP/cursor-review/review.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: cursor-release-review-${{ inputs.source-ref }}
+          path: |
+            ${{ runner.temp }}/cursor-review/catalog.json*
+            ${{ runner.temp }}/cursor-review/scope/scope.json
+            ${{ runner.temp }}/cursor-review/installers/
+            ${{ runner.temp }}/cursor-review/review.json*
+          if-no-files-found: warn
+          retention-days: 7

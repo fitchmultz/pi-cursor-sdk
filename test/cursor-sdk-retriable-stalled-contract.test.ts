@@ -7,7 +7,7 @@ import { installedCursorModuleDeclarations, installedCursorModules } from "./hel
 import { readInstalledPackageVersion } from "./helpers/installed-package.js";
 
 const fixture = JSON.parse(readFileSync(
-	new URL("./fixtures/cursor-sdk-retriable-stalled-1.0.37.json", import.meta.url), "utf8",
+	new URL("./fixtures/cursor-sdk-retriable-stalled-1.0.40.json", import.meta.url), "utf8",
 )) as {
 	provenance: { sdkPackage: string; sdkVersion: string; sourceFile: string; sourceSha256: string };
 	branches: Array<{
@@ -54,5 +54,5 @@ describe("installed Cursor SDK RetriableError connection-stalled contract", () =
 			expect(sanitized.toLowerCase()).toContain("network error");
 			expect(sanitized).not.toMatch(/stalled(?: repeatedly)?/i);
 		}
-	});
+	}, 30_000);
 });

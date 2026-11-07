@@ -1,7 +1,7 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished } from "vitest";
 import type { BeforeAgentStartEvent, ExtensionContext, Skill } from "@earendil-works/pi-coding-agent";
 import {
 	CURSOR_ACTIVATE_SKILL_MCP_NAME,
@@ -72,44 +72,21 @@ describe("resolveCursorSkillSystemPrompt", () => {
 		"</available_skills>",
 	].join("\n");
 
-	it("replaces pi's raw read-based skill wording for Cursor models", () => {
-		const resolved = resolveCursorSkillSystemPrompt(
-			piSkillSection,
-			cursorModel,
-			{ ...createDefaultSystemPromptOptions("/repo"), skills: [skill] },
-		);
-
-		expect(resolved).toContain(CURSOR_ACTIVATE_SKILL_MCP_NAME);
-		expect(resolved).toContain("<name>global-skill</name>");
-		expect(resolved).not.toContain("Use the read tool to load a skill's file");
-	});
-
-	it("removes Pi skill metadata for cloud Cursor models", () => {
-		const resolved = resolveCursorSkillSystemPrompt(
-			piSkillSection,
-			cursorModel,
-			{ ...createDefaultSystemPromptOptions("/repo"), skills: [skill] },
-			"cloud",
-		);
-
-		expect(resolved).toContain("System prompt before skills.");
-		expect(resolved).not.toContain("<available_skills>");
-		expect(resolved).not.toContain(CURSOR_ACTIVATE_SKILL_MCP_NAME);
-		expect(resolved).not.toContain("/Users/me/.pi/agent/skills");
-	});
-
 	it("does not change prompts for non-Cursor models", () => {
 		expect(
 			resolveCursorSkillSystemPrompt(piSkillSection, otherModel, { ...createDefaultSystemPromptOptions("/repo"), skills: [skill] }),
 		).toBe(piSkillSection);
 	});
 
-	it("preserves the rewritten catalog through buildCursorPrompt sanitization", () => {
+	it("replaces pi's raw read-based skill wording and preserves the catalog through prompt sanitization", () => {
 		const resolved = resolveCursorSkillSystemPrompt(
 			piSkillSection,
 			cursorModel,
 			{ ...createDefaultSystemPromptOptions("/repo"), skills: [skill] },
 		);
+		expect(resolved).toContain(CURSOR_ACTIVATE_SKILL_MCP_NAME);
+		expect(resolved).toContain("<name>global-skill</name>");
+		expect(resolved).not.toContain("Use the read tool to load a skill's file");
 		const prompt = buildCursorPrompt({ systemPrompt: resolved, messages: [] });
 
 		expect(prompt.text).toContain(CURSOR_ACTIVATE_SKILL_MCP_NAME);
@@ -120,6 +97,7 @@ describe("resolveCursorSkillSystemPrompt", () => {
 describe("registerCursorSkillTool", () => {
 	it("adds a bridgeable activation tool for Cursor runs with visible pi skills", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "pi-cursor-skill-"));
+		onTestFinished(() => rm(dir, { recursive: true, force: true }));
 		const skillDir = join(dir, "global-skill");
 		await mkdir(join(skillDir, "references"), { recursive: true });
 		const skillPath = join(skillDir, "SKILL.md");
@@ -129,16 +107,14 @@ describe("registerCursorSkillTool", () => {
 		const pi = createPiHarness({ activeTools: ["read"] });
 		registerCursorSkillTool(pi);
 
-		const result = await pi.invokeEvent(
-			"before_agent_start",
-			{
-				type: "before_agent_start",
-				prompt: "hello",
-				systemPrompt: "System prompt.",
-				systemPromptOptions: { ...createDefaultSystemPromptOptions(dir), skills: [skill] },
-			} satisfies BeforeAgentStartEvent,
-			{ model: makeModel("composer-2.5"), cwd: dir },
-		);
+		const event = {
+			type: "before_agent_start",
+			messageType: "user",
+			prompt: "hello",
+			systemPrompt: "System prompt.",
+			systemPromptOptions: { ...createDefaultSystemPromptOptions(dir), skills: [skill] },
+		} satisfies BeforeAgentStartEvent & { messageType: "user" };
+		const result = await pi.invokeEvent("before_agent_start", event, { model: makeModel("composer-2.5"), cwd: dir });
 
 		expect(result?.systemPrompt).toContain(CURSOR_ACTIVATE_SKILL_MCP_NAME);
 		expect(pi._activeToolNames()).toContain(CURSOR_ACTIVATE_SKILL_TOOL_NAME);
@@ -154,54 +130,30 @@ describe("registerCursorSkillTool", () => {
 		expect(text).toContain("references/guide.md");
 	});
 
-	it("keeps the activation tool exposed through Cursor turn_start after prompt rewrite", async () => {
-		const skill = makeSkill({ name: "global-skill", description: "Global skill", filePath: "/repo/global-skill/SKILL.md" });
-		const pi = createPiHarness({ activeTools: ["read"] });
-		const model = makeModel("composer-2.5");
-		registerCursorSkillTool(pi);
-
-		await pi.invokeEvent(
-			"before_agent_start",
-			{
-				type: "before_agent_start",
-				prompt: "hello",
-				systemPrompt: "System prompt.",
-				systemPromptOptions: { ...createDefaultSystemPromptOptions("/repo"), skills: [skill] },
-			} satisfies BeforeAgentStartEvent,
-			{ model, cwd: "/repo" },
-		);
-		expect(pi._activeToolNames()).toContain(CURSOR_ACTIVATE_SKILL_TOOL_NAME);
-
-		await pi.runTurnStart({ model, cwd: "/repo" });
-
-		expect(pi._activeToolNames()).toContain(CURSOR_ACTIVATE_SKILL_TOOL_NAME);
-		expect(buildCursorPiToolBridgeSnapshot(pi).piToolNameToMcpToolName.get(CURSOR_ACTIVATE_SKILL_TOOL_NAME)).toBe(CURSOR_ACTIVATE_SKILL_MCP_NAME);
-	});
-
 	it("keeps the activation tool inactive and omits the catalog in cloud runtime", async () => {
 		process.env.PI_CURSOR_RUNTIME = "cloud";
 		const skill = makeSkill({ name: "global-skill", description: "Global skill", filePath: "/repo/global-skill/SKILL.md" });
 		const pi = createPiHarness({ activeTools: ["read"] });
 		registerCursorSkillTool(pi);
 
-		const result = await pi.invokeEvent(
-			"before_agent_start",
-			{
-				type: "before_agent_start",
-				prompt: "hello",
-				systemPrompt: [
-					"System prompt.",
-					"",
-					"The following skills provide specialized instructions for specific tasks.",
-					"<available_skills><skill><name>global-skill</name><location>/repo/global-skill/SKILL.md</location></skill></available_skills>",
-				].join("\n"),
-				systemPromptOptions: { ...createDefaultSystemPromptOptions("/repo"), skills: [skill] },
-			} satisfies BeforeAgentStartEvent,
-			{ model: makeModel("composer-2.5"), cwd: "/repo" },
-		);
+		const event = {
+			type: "before_agent_start",
+			messageType: "user",
+			prompt: "hello",
+			systemPrompt: [
+				"System prompt.",
+				"",
+				"The following skills provide specialized instructions for specific tasks.",
+				"<available_skills><skill><name>global-skill</name><location>/repo/global-skill/SKILL.md</location></skill></available_skills>",
+			].join("\n"),
+			systemPromptOptions: { ...createDefaultSystemPromptOptions("/repo"), skills: [skill] },
+		} satisfies BeforeAgentStartEvent & { messageType: "user" };
+		const result = await pi.invokeEvent("before_agent_start", event, { model: makeModel("composer-2.5"), cwd: "/repo" });
 
+		expect(result?.systemPrompt).toContain("System prompt.");
 		expect(result?.systemPrompt).not.toContain("<available_skills>");
 		expect(result?.systemPrompt).not.toContain("/repo/global-skill/SKILL.md");
+		expect(result?.systemPrompt).not.toContain(CURSOR_ACTIVATE_SKILL_MCP_NAME);
 		expect(pi._activeToolNames()).not.toContain(CURSOR_ACTIVATE_SKILL_TOOL_NAME);
 	});
 
@@ -211,16 +163,14 @@ describe("registerCursorSkillTool", () => {
 		registerCursorSkillTool(pi);
 		const model = { provider: "anthropic", id: "claude-sonnet-4-5" } as ExtensionContext["model"];
 
-		const result = await pi.invokeEvent(
-			"before_agent_start",
-			{
-				type: "before_agent_start",
-				prompt: "hello",
-				systemPrompt: "System prompt.",
-				systemPromptOptions: createDefaultSystemPromptOptions("/repo"),
-			} satisfies BeforeAgentStartEvent,
-			{ model, cwd: "/repo" },
-		);
+		const event = {
+			type: "before_agent_start",
+			messageType: "user",
+			prompt: "hello",
+			systemPrompt: "System prompt.",
+			systemPromptOptions: createDefaultSystemPromptOptions("/repo"),
+		} satisfies BeforeAgentStartEvent & { messageType: "user" };
+		const result = await pi.invokeEvent("before_agent_start", event, { model, cwd: "/repo" });
 
 		expect(result).toBeUndefined();
 		expect(pi._activeToolNames()).not.toContain(CURSOR_ACTIVATE_SKILL_TOOL_NAME);
@@ -229,16 +179,14 @@ describe("registerCursorSkillTool", () => {
 	it("does not expose the activation tool when no visible skills are available", async () => {
 		const pi = createPiHarness({ activeTools: ["read"] });
 		registerCursorSkillTool(pi);
-		await pi.invokeEvent(
-			"before_agent_start",
-			{
-				type: "before_agent_start",
-				prompt: "hello",
-				systemPrompt: "System prompt.",
-				systemPromptOptions: createDefaultSystemPromptOptions("/repo"),
-			} satisfies BeforeAgentStartEvent,
-			{ model: makeModel("composer-2.5"), cwd: "/repo" },
-		);
+		const event = {
+			type: "before_agent_start",
+			messageType: "user",
+			prompt: "hello",
+			systemPrompt: "System prompt.",
+			systemPromptOptions: createDefaultSystemPromptOptions("/repo"),
+		} satisfies BeforeAgentStartEvent & { messageType: "user" };
+		await pi.invokeEvent("before_agent_start", event, { model: makeModel("composer-2.5"), cwd: "/repo" });
 
 		expect(pi._activeToolNames()).not.toContain(CURSOR_ACTIVATE_SKILL_TOOL_NAME);
 	});

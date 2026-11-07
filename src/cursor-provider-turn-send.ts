@@ -4,6 +4,7 @@ import { createCursorCloudLifecyclePersistenceError } from "./cursor-cloud-lifec
 import { cursorLiveRuns } from "./cursor-provider-live-run-drain.js";
 import { consumeCursorLocalForceOverride } from "./cursor-runtime-state.js";
 import { recordCursorSessionAgentLineage } from "./cursor-session-agent-lineage.js";
+import { watchCursorLocalRunTerminalError } from "./cursor-local-run-terminal-error.js";
 import type { installCursorSdkProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
 import type {
 	CursorProviderTurnRunnerParams,
@@ -123,6 +124,7 @@ export async function sendCursorProviderTurn(sendParams: SendCursorProviderTurnP
 			recordCursorSessionAgentLineage(agent.agentId, params.scope.scopeKey);
 		}
 		const run = await runPromise;
+		if (prepared.runtimeTarget === "local") watchCursorLocalRunTerminalError(prepared.store, run);
 		sdkRun = run;
 		runtime.sdkRun = run;
 		try {

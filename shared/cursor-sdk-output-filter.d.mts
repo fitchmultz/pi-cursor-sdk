@@ -6,3 +6,5 @@ export declare function suppressCursorSdkOutput<T>(operation: () => T): T;
 export declare function withCursorSdkOutputNoticeHandler<T>(handler: CursorSdkOutputNoticeHandler | undefined, operation: () => T): T;
 export declare function isCursorSdkStartupNoise(text: string): boolean;
 export declare function installCursorSdkOutputFilter(): () => void;
+export declare function installCursorSdkProcessOutputFilter(): void;
+export declare const __testUtils: { resetProcessOutputFilter(): void };

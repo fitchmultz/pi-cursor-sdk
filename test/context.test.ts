@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { Type } from "typebox";
 import {
 	buildCursorPrompt,
@@ -9,80 +9,96 @@ import {
 	CURSOR_IMAGE_TOKEN_ESTIMATE,
 	estimateCursorContextTokens,
 	estimateCursorPromptMessageTokens,
-	getCursorToolTailGuardText,
 } from "../src/context.js";
 import {
 	buildCursorSessionSendPrompt,
 	planCursorSessionSend,
 } from "../src/cursor-session-send-policy.js";
 import type { Context, UserMessage, AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
+import { loadInstalledPiBuildSystemPrompt } from "./helpers/pi-system-prompt.js";
+
+afterEach(() => vi.unstubAllEnvs());
+
+const TOOL_TAIL_GUARD = [
+	"Shell: use explicit `cd` to repo path for project commands; session cwd may differ from tool args.",
+	"Exact-output requests: output exactly the requested text; no preamble or checks unless asked.",
+	"Tools: call available Cursor SDK/MCP tools; never print tool cards as assistant text.",
+	"Do not comment on GitHub issues or PRs unless the user asked.",
+	"For MCP work and delegation, prefer matching exposed pi__* tools using their listed names, schemas, and prompt guidelines; use Cursor-configured MCP or Cursor-native subagents only when the matching pi tool is not exposed or unavailable.",
+].join("\n");
 
 describe("buildCursorPrompt", () => {
-	it("includes system prompt", () => {
-		const ctx: Context = {
-			systemPrompt: "You are helpful.",
-			messages: [],
-		};
-		const result = buildCursorPrompt(ctx);
-		expect(result.text).toContain("System instructions from pi:");
-		expect(result.text).toContain("You are helpful.");
+	it("keeps MCP-only bootstrap and incremental plan guidance free of unavailable native tools", () => {
+		const context = { messages: [{ role: "user" as const, content: "inspect", timestamp: 1 }] };
+		for (const build of [buildCursorPrompt, buildCursorIncrementalPrompt]) {
+			const text = build(context, { nativeToolsEnabled: false, agentMode: "plan" }).text;
+			expect(text).toContain("native Shell and task/subagents are disabled");
+			expect(text).not.toContain("Shell: use explicit");
+			expect(text).not.toContain("Safe/read-only shell commands");
+			expect(text).not.toContain("Cursor-native subagents only");
+		}
 	});
 
 	it("omits pi tool catalogs while preserving local skill catalogs for Cursor-facing system instructions", () => {
+		const prompt = loadInstalledPiBuildSystemPrompt()({
+			cwd: "/repo",
+			selectedTools: ["custom_private_tool", "read"],
+			toolSnippets: { custom_private_tool: "private local tool", read: "read files" },
+			promptGuidelines: ["Use custom_private_tool for private work"],
+			contextFiles: [{ path: "/repo/AGENTS.md", content: "Project instruction stays." }],
+			skills: [{
+				name: "private-skill", description: "private local skill", filePath: "/skills/private-skill/SKILL.md", baseDir: "/skills/private-skill",
+				sourceInfo: { source: "test", path: "/skills/private-skill/SKILL.md", scope: "temporary", origin: "top-level" },
+				disableModelInvocation: false,
+			}],
+		});
 		const ctx: Context = {
-			systemPrompt: [
-				"You are an expert coding assistant.",
-				"",
-				"Available tools:",
-				"- custom_private_tool: private local tool",
-				"- read: read files",
-				"",
-				"In addition to the tools above, you may have access to other custom tools depending on the project.",
-				"",
-				"Guidelines:",
-				"- Use custom_private_tool for private work",
-				"- Be concise in your responses",
-				"",
-				"Pi documentation (read only when needed):",
-				"- Main documentation: /pi/README.md",
-				"",
-				"<project_context>",
-				"Project instruction stays.",
-				"</project_context>",
-				"",
-				"The following skills provide specialized instructions for specific tasks.",
-				"Use the read tool to load a skill's file when the task matches its description.",
-				"When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
-				"",
-				"<available_skills>",
-				"  <skill><name>private-skill</name><description>private local skill</description></skill>",
-				"</available_skills>",
-				"Current date: 2026-05-20",
-				"Current working directory: /repo",
-				"Semantic code intelligence priority:",
-				"- Prefer custom_private_tool for symbols",
-			].join("\n"),
+			systemPrompt: `${prompt}\n\nSemantic code intelligence priority:\n- Prefer custom_private_tool for symbols`,
 			messages: [],
 		};
 		const result = buildCursorPrompt(ctx);
 		expect(result.text).toContain("Pi tool catalog omitted");
 		expect(result.text).toContain("Project instruction stays.");
-		expect(result.text).toContain("Current date: 2026-05-20");
+		expect(result.text).toContain("<cwd>\n/repo\n</cwd>");
 		expect(result.text).not.toContain("custom_private_tool");
 		expect(result.text).toContain("private-skill");
 		expect(result.text).not.toContain("Semantic code intelligence priority");
 	});
 
-	it("formats user and assistant messages", () => {
-		const ctx: Context = {
-			messages: [
-				{ role: "user", content: "Hello", timestamp: 1 } satisfies UserMessage,
-				{ role: "assistant", content: [{ type: "text", text: "Hi there" }], api: "cursor-sdk", provider: "cursor", model: "test", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "stop", timestamp: 2 } satisfies AssistantMessage,
-			],
-		};
-		const result = buildCursorPrompt(ctx);
-		expect(result.text).toContain("User: Hello");
-		expect(result.text).toContain("Assistant: Hi there");
+	it.each([true, false])("uses captured lean policy for the installed Pi catalog and authoritative guidelines (lean=%s)", (leanEnabled) => {
+		// Deliberately disagree with the captured policy to catch environment rereads.
+		vi.stubEnv("PI_CURSOR_LEAN", leanEnabled ? "0" : "1");
+		const prompt = loadInstalledPiBuildSystemPrompt()({
+			cwd: "/repo",
+			selectedTools: ["private_audit"],
+			toolSnippets: { private_audit: "Audit private ticket records" },
+			promptGuidelines: ["Never disclose private ticket identifiers", "Use private_audit for ticket inspection"],
+			contextFiles: [{ path: "/repo/AGENTS.md", content: "Project confidentiality instructions remain authoritative." }],
+		});
+		expect(prompt).toContain("<tools>");
+		expect(prompt).toContain("<rules>");
+		expect(prompt).toContain("Never disclose private ticket identifiers");
+		const systemPrompt = `  ${prompt}\n\nSemantic code intelligence priority:\n- Inspect definitions before making changes.\n\nNever send customer records to external services.  `;
+		const result = buildCursorPrompt({ systemPrompt, messages: [] }, { leanEnabled });
+		expect(result.text).toContain("Project confidentiality instructions remain authoritative.");
+		if (leanEnabled) {
+			expect(result.text).toContain(`System instructions from pi:\n${systemPrompt.trim()}`);
+			expect(result.text).toContain("Never disclose private ticket identifiers");
+			expect(result.text).toContain("Use private_audit for ticket inspection");
+			expect(result.text).toContain("Semantic code intelligence priority:");
+			expect(result.text).toContain("Never send customer records to external services.");
+			expect(result.text).not.toContain("Pi tool catalog omitted");
+			expect(result.text).toContain("Pi tool catalogs and guidelines below retain Pi names, not direct SDK call names");
+			expect(result.text).toContain("For direct calls, use only the matching exposed MCP name and its listed schema");
+			expect(result.text).toContain("Cursor native tools (including task/subagents): disabled");
+		} else {
+			// Preserve the established native/hybrid sanitization behavior.
+			expect(result.text).toContain("Pi tool catalog omitted");
+			expect(result.text).not.toContain("private_audit");
+			expect(result.text).not.toContain("Never disclose private ticket identifiers");
+			expect(result.text).not.toContain("Semantic code intelligence priority:");
+			expect(result.text).not.toContain("Never send customer records to external services.");
+		}
 	});
 
 	it("defensively formats assistant string content", () => {
@@ -123,42 +139,6 @@ describe("buildCursorPrompt", () => {
 		const result = buildCursorPrompt(ctx);
 		expect(result.text).toContain("Final answer");
 		expect(result.text).not.toContain("internal thought");
-	});
-
-	it("formats tool results", () => {
-		const ctx: Context = {
-			messages: [
-				{ role: "user", content: "Run it", timestamp: 1 } satisfies UserMessage,
-				{
-					role: "toolResult",
-					toolCallId: "tc1",
-					toolName: "bash",
-					content: [{ type: "text", text: "output here" }],
-					isError: false,
-					timestamp: 2,
-				} satisfies ToolResultMessage,
-			],
-		};
-		const result = buildCursorPrompt(ctx);
-		expect(result.text).toContain("Historical tool result (bash, call tc1): output here");
-	});
-
-	it("formats tool errors", () => {
-		const ctx: Context = {
-			messages: [
-				{ role: "user", content: "Run it", timestamp: 1 } satisfies UserMessage,
-				{
-					role: "toolResult",
-					toolCallId: "tc1",
-					toolName: "bash",
-					content: [{ type: "text", text: "command failed" }],
-					isError: true,
-					timestamp: 2,
-				} satisfies ToolResultMessage,
-			],
-		};
-		const result = buildCursorPrompt(ctx);
-		expect(result.text).toContain("Historical tool error (bash, call tc1): command failed");
 	});
 
 	it("preserves real pi edit and write tool names in Cursor prompt labels", () => {
@@ -270,35 +250,22 @@ describe("buildCursorPrompt", () => {
 
 		const expected = 'Assistant: I will inspect the directory.\nHistorical tool request (bash, call tc1): {"command":"ls"}';
 		expect(estimateCursorPromptMessageTokens(assistant, { charsPerToken: 1 })).toBe(expected.length);
-		expect(expected).not.toContain("hidden reasoning");
 	});
 
-	it("estimates tool-result prompt-message tokens from replayed tool result text", () => {
+	it.each([
+		{ toolName: "bash", content: [{ type: "text" as const, text: "README.md" }], expected: "Historical tool result (bash, call tc1): README.md" },
+		{ toolName: "read_image", content: [{ type: "image" as const, data: "base64", mimeType: "image/png" }], expected: "Historical tool result (read_image, call tc1): [image omitted from transcript]" },
+	])("estimates tool-result prompt-message tokens from replayed $toolName content", ({ toolName, content, expected }) => {
 		const toolResult = {
 			role: "toolResult",
 			toolCallId: "tc1",
-			toolName: "bash",
-			content: [{ type: "text", text: "README.md" }],
+			toolName,
+			content,
 			isError: false,
 			timestamp: 3,
 		} satisfies ToolResultMessage;
 
-		expect(estimateCursorPromptMessageTokens(toolResult, { charsPerToken: 1 })).toBe("Historical tool result (bash, call tc1): README.md".length);
-	});
-
-	it("estimates tool-result image prompt content as the replay placeholder text", () => {
-		const toolResult = {
-			role: "toolResult",
-			toolCallId: "tc1",
-			toolName: "read_image",
-			content: [{ type: "image", data: "base64", mimeType: "image/png" }],
-			isError: false,
-			timestamp: 3,
-		} satisfies ToolResultMessage;
-
-		expect(estimateCursorPromptMessageTokens(toolResult, { charsPerToken: 1 })).toBe(
-			"Historical tool result (read_image, call tc1): [image omitted from transcript]".length,
-		);
+		expect(estimateCursorPromptMessageTokens(toolResult, { charsPerToken: 1 })).toBe(expected.length);
 	});
 
 	it("estimates context tokens from the budgeted Cursor prompt and latest user image reserve", () => {
@@ -390,7 +357,7 @@ describe("buildCursorPrompt", () => {
 		expect(computeCursorContextFingerprint(ctx)).toBe(fingerprint);
 	});
 
-	it("extracts images from latest user message only", () => {
+	it.each([false, true])("keeps historical images as text and extracts only latest user image bytes (latest image=%s)", (latestHasImage) => {
 		const ctx: Context = {
 			messages: [
 				{
@@ -403,46 +370,23 @@ describe("buildCursorPrompt", () => {
 				} satisfies UserMessage,
 				{
 					role: "user",
-					content: [
+					content: latestHasImage ? [
 						{ type: "text", text: "And this one" },
 						{ type: "image", data: "newbase64", mimeType: "image/jpeg" },
-					],
-					timestamp: 2,
-				} satisfies UserMessage,
-			],
-		};
-		const result = buildCursorPrompt(ctx);
-		expect(result.images).toHaveLength(1);
-		expect(result.images[0]).toEqual({ data: "newbase64", mimeType: "image/jpeg" });
-	});
-
-	it("explains that only latest user images are available as image bytes", () => {
-		const result = buildCursorPrompt({ messages: [{ role: "user", content: "test", timestamp: 1 }] });
-		expect(result.text).toContain("only latest user images are sent");
-		expect(result.text).toContain("ask to reattach prior images");
-	});
-
-	it("replaces historical images with placeholder text", () => {
-		const ctx: Context = {
-			messages: [
-				{
-					role: "user",
-					content: [
-						{ type: "text", text: "First" },
-						{ type: "image", data: "abc", mimeType: "image/png" },
-					],
-					timestamp: 1,
-				} satisfies UserMessage,
-				{
-					role: "user",
-					content: "Second",
+					] : "Second",
 					timestamp: 2,
 				} satisfies UserMessage,
 			],
 		};
 		const result = buildCursorPrompt(ctx);
 		expect(result.text).toContain("[image omitted from transcript]");
-		expect(result.images).toHaveLength(0);
+		expect(result.images).toEqual(latestHasImage ? [{ data: "newbase64", mimeType: "image/jpeg" }] : []);
+	});
+
+	it("explains that only latest user images are available as image bytes", () => {
+		const result = buildCursorPrompt({ messages: [{ role: "user", content: "test", timestamp: 1 }] });
+		expect(result.text).toContain("only latest user images are sent");
+		expect(result.text).toContain("ask to reattach prior images");
 	});
 
 	it("budgets transcript history while preserving system prompt and latest user request", () => {
@@ -523,15 +467,6 @@ describe("buildCursorPrompt", () => {
 		expect(result.text).not.toContain("large output");
 	});
 
-	it("appends answer instruction and tool tail guard", () => {
-		const ctx: Context = {
-			messages: [{ role: "user", content: "test", timestamp: 1 }],
-		};
-		const result = buildCursorPrompt(ctx);
-		expect(result.text).toContain("Answer the latest user request");
-		expect(result.text.endsWith(getCursorToolTailGuardText())).toBe(true);
-	});
-
 	it("places tool manifest after boundary and before system instructions when provided", () => {
 		const ctx: Context = {
 			systemPrompt: "Be helpful.",
@@ -540,6 +475,7 @@ describe("buildCursorPrompt", () => {
 		const manifest = "Callable tool surfaces this run:\n- sample";
 		const result = buildCursorPrompt(ctx, { toolManifest: manifest });
 		expect(result.text).toContain(manifest);
+		expect(result.text).toContain("See callable surfaces below.");
 		expect(result.text.indexOf("Cursor SDK tool boundary:")).toBeLessThan(result.text.indexOf(manifest));
 		expect(result.text.indexOf(manifest)).toBeLessThan(result.text.indexOf("System instructions from pi:"));
 	});
@@ -547,6 +483,7 @@ describe("buildCursorPrompt", () => {
 	it("omits tool manifest by default", () => {
 		const result = buildCursorPrompt({ messages: [{ role: "user", content: "test", timestamp: 1 }] });
 		expect(result.text).not.toContain("Callable tool surfaces this run:");
+		expect(result.text).not.toContain("See callable surfaces below.");
 	});
 
 	it("uses compact pi-bridge framing when bridge guidance is disabled", () => {
@@ -565,7 +502,7 @@ describe("buildCursorPrompt", () => {
 		expect(compactPrompt.text).not.toContain("Bridged pi tools:");
 		expect(compactPrompt.text).not.toContain("Use pi__cursor_ask_question");
 		expect(compactPrompt.text).not.toContain("Exposed pi__* bridge tools");
-		expect(compactPrompt.text).not.toContain("prefer pi__mcp");
+		expect(compactPrompt.text).not.toContain("prefer matching exposed pi__* tools");
 		expect(defaultPrompt.text.length - compactPrompt.text.length).toBeGreaterThan(100);
 
 		const planPrompt = buildCursorPrompt(ctx, { agentMode: "plan", includePiBridgeGuidance: false });
@@ -574,7 +511,7 @@ describe("buildCursorPrompt", () => {
 		const incrementalPlanPrompt = buildCursorIncrementalPrompt(ctx, { agentMode: "plan", includePiBridgeGuidance: false });
 		expect(incrementalPlanPrompt.text).toContain("Cursor SDK mode is plan for this run");
 		expect(incrementalPlanPrompt.text).not.toContain("Exposed pi__* bridge tools");
-		expect(incrementalPlanPrompt.text).not.toContain("prefer pi__mcp");
+		expect(incrementalPlanPrompt.text).not.toContain("prefer matching exposed pi__* tools");
 	});
 
 	it("keeps pi-bridge framing when context tools are present or unknown", () => {
@@ -608,36 +545,9 @@ describe("buildCursorPrompt", () => {
 		expect(result.text).toContain("Do not claim pi-side or WebSearch/WebFetch tools");
 		expect(result.text).toContain("Do not comment on GitHub issues or PRs unless the user asked");
 		expect(result.text).not.toContain("Use pi__cursor_ask_question");
-		expect(result.text).toContain("prefer pi__mcp for MCP work and pi__subagent for delegation");
+		expect(result.text).toContain("prefer matching exposed pi__* tools using their listed names, schemas, and prompt guidelines");
 		expect(result.text).not.toContain("Pi bridge contract:");
 		expect(result.text).not.toContain("do not use SwitchMode");
-	});
-
-	it("omits manifest pointer from boundary when tool manifest is disabled", () => {
-		const result = buildCursorPrompt({ messages: [{ role: "user", content: "test", timestamp: 1 }] });
-		expect(result.text).not.toContain("See callable surfaces below.");
-	});
-
-	it("points boundary readers to the manifest when tool manifest is present", () => {
-		const manifest = "Callable tool surfaces this run:\n- sample";
-		const result = buildCursorPrompt(
-			{ messages: [{ role: "user", content: "test", timestamp: 1 }] },
-			{ toolManifest: manifest },
-		);
-		expect(result.text).toContain("See callable surfaces below.");
-		expect(result.text).toContain(manifest);
-	});
-
-	it("includes shell cd hint in the tool tail guard", () => {
-		const tail = getCursorToolTailGuardText();
-		expect(tail).toContain("explicit `cd`");
-		expect(tail).toContain("session cwd may differ from tool args");
-		expect(tail).toContain("Exact-output requests");
-		const bootstrap = buildCursorPrompt({ messages: [{ role: "user", content: "test", timestamp: 1 }] });
-		const incremental = buildCursorIncrementalPrompt({ messages: [{ role: "user", content: "test", timestamp: 1 }] });
-		expect(bootstrap.text).toContain("explicit `cd`");
-		expect(incremental.text).toContain("explicit `cd`");
-		expect(incremental.text).toContain("prefer pi__mcp for MCP work and pi__subagent for delegation");
 	});
 
 	it("adds plan-mode guidance without disabling inspection tools", () => {
@@ -654,20 +564,6 @@ describe("buildCursorPrompt", () => {
 });
 
 describe("cursor session prompt assembly", () => {
-	it("bootstraps the first send with the full Cursor prompt", () => {
-		const context: Context = {
-			systemPrompt: "Be helpful.",
-			messages: [{ role: "user", content: "Hello", timestamp: 1 }],
-		};
-		const sendState = { bootstrapped: false, contextFingerprint: "", incrementalSendCount: 0 };
-		const plan = planCursorSessionSend(sendState, context);
-		const prompt = buildCursorSessionSendPrompt(context, {}, plan);
-
-		expect(plan.mode).toBe("bootstrap");
-		expect(prompt.text).toContain("Cursor SDK tool boundary:");
-		expect(prompt.text).toContain("User: Hello");
-	});
-
 	it("sends an incremental prompt after a bootstrapped session agent send", () => {
 		const priorContext: Context = {
 			systemPrompt: "Be helpful.",
@@ -695,6 +591,7 @@ describe("cursor session prompt assembly", () => {
 		expect(prompt.text).not.toContain("System instructions from pi:");
 		expect(prompt.text).not.toContain("Be helpful.");
 		expect(prompt.text).not.toContain("User: Hello");
+		expect(prompt.text.endsWith(TOOL_TAIL_GUARD)).toBe(true);
 	});
 
 	it("rebootstraps after branch shrink using shouldBootstrapCursorContext", () => {
@@ -714,23 +611,6 @@ describe("cursor session prompt assembly", () => {
 
 		expect(shouldBootstrapCursorContext(sendState, context)).toBe(true);
 		expect(planCursorSessionSend(sendState, context).mode).toBe("bootstrap");
-	});
-
-	it("rebootstraps when same-length history diverges", () => {
-		const priorContext: Context = {
-			messages: [{ role: "user", content: "Hello", timestamp: 1 }],
-		};
-		const editedContext: Context = {
-			messages: [{ role: "user", content: "Hello edited", timestamp: 1 }],
-		};
-		const sendState = {
-			bootstrapped: true,
-			contextFingerprint: computeCursorContextFingerprint(priorContext),
-			incrementalSendCount: 0,
-		};
-
-		expect(shouldBootstrapCursorContext(sendState, editedContext)).toBe(true);
-		expect(planCursorSessionSend(sendState, editedContext).mode).toBe("bootstrap");
 	});
 
 	it("rebootstraps with current system instructions when the system context diverges", () => {
@@ -755,18 +635,6 @@ describe("cursor session prompt assembly", () => {
 		expect(prompt.text).not.toContain("Previous invariant instruction.");
 	});
 
-	it("omits invariant bootstrap instructions from incremental prompts", () => {
-		const incremental = buildCursorIncrementalPrompt({
-			systemPrompt: "Be helpful.",
-			messages: [{ role: "user", content: "Follow up", timestamp: 3 }],
-		});
-		expect(incremental.text).not.toContain("Cursor SDK tool boundary:");
-		expect(incremental.text).not.toContain("System instructions from pi:");
-		expect(incremental.text).not.toContain("Be helpful.");
-		expect(incremental.text).toContain("Continue the conversation using Cursor SDK capabilities only");
-		expect(incremental.text).toContain(getCursorToolTailGuardText());
-	});
-
 	it("ends bootstrap and incremental prompts with the tool tail guard", () => {
 		const context: Context = {
 			systemPrompt: "Be helpful.",
@@ -774,7 +642,7 @@ describe("cursor session prompt assembly", () => {
 		};
 		const bootstrap = buildCursorPrompt(context);
 		const incremental = buildCursorIncrementalPrompt(context);
-		const tail = getCursorToolTailGuardText();
+		const tail = TOOL_TAIL_GUARD;
 
 		expect(bootstrap.text.endsWith(tail)).toBe(true);
 		expect(incremental.text.endsWith(tail)).toBe(true);
@@ -791,7 +659,7 @@ describe("cursor session prompt assembly", () => {
 
 		expect(incremental.text).not.toContain("Long pi system prompt.");
 		expect(incremental.text).toContain("User: Keep this exact follow-up request");
-		expect(incremental.text).toContain(getCursorToolTailGuardText());
+		expect(incremental.text).toContain(TOOL_TAIL_GUARD);
 	});
 
 	it("includes branch summaries from /tree navigation in bootstrap prompts", () => {
@@ -813,29 +681,13 @@ describe("cursor session prompt assembly", () => {
 		expect(prompt.text).toContain("summary of a branch that this conversation came back from");
 		expect(prompt.text).toContain("We explored approach A and decided against it.");
 		expect(prompt.text).toContain("User: Continue on approach B");
-	});
 
-	it("rebootstraps when /tree adds a branch summary to the active context", () => {
-		const priorContext: Context = {
-			messages: [{ role: "user", content: "Hello", timestamp: 1 }],
-		};
-		const treeContext: Context = {
-			messages: [
-				{ role: "user", content: "Hello", timestamp: 1 },
-				{
-					role: "branchSummary",
-					summary: "Abandoned branch details",
-					fromId: "entry-a",
-					timestamp: 2,
-				} as unknown as Context["messages"][number],
-			],
-		};
+		const treeContext = { messages: context.messages.slice(0, -1) };
 		const sendState = {
 			bootstrapped: true,
-			contextFingerprint: computeCursorContextFingerprint(priorContext),
+			contextFingerprint: computeCursorContextFingerprint({ messages: context.messages.slice(0, 1) }),
 			incrementalSendCount: 0,
 		};
-
 		expect(shouldBootstrapCursorContext(sendState, treeContext)).toBe(true);
 		expect(planCursorSessionSend(sendState, treeContext).mode).toBe("bootstrap");
 	});

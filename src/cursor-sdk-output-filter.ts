@@ -1,5 +1,6 @@
 export {
-	CURSOR_SDK_STARTUP_NOISE_PATTERNS,
+	__testUtils,
+	installCursorSdkProcessOutputFilter,
 	withCursorSdkOutputNoticeHandler,
 	installCursorSdkOutputFilter,
 	isCursorSdkOutputSuppressed,

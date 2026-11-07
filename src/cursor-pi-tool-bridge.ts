@@ -1,18 +1,12 @@
 import { spawnSync } from "node:child_process";
 import {
-	CURSOR_PI_TOOL_BRIDGE_DEBUG_ENV,
 	CURSOR_PI_TOOL_BRIDGE_DIAGNOSTIC_PREFIX,
 	type CursorPiToolBridgeDiagnosticEvent,
 	serializeCursorPiToolBridgeDiagnostic,
 } from "./cursor-pi-tool-bridge-diagnostics.js";
-import {
-	CURSOR_PI_TOOL_BRIDGE_BUILTINS_ENV,
-	CURSOR_PI_TOOL_BRIDGE_CALL_TIMEOUT_MS_ENV,
-	CURSOR_PI_TOOL_BRIDGE_ENV,
-} from "./cursor-pi-tool-bridge-env.js";
 import { bridgeToolExecutionAbortTracker } from "./cursor-pi-tool-bridge-abort.js";
-import { isCursorPiBridgeToolCallId, MCP_SERVER_NAME } from "./cursor-pi-tool-bridge-constants.js";
-import { LOOPBACK_HOST, CursorPiToolBridgeRegistry } from "./cursor-pi-tool-bridge-server.js";
+import { isCursorPiBridgeToolCallId } from "./cursor-pi-tool-bridge-constants.js";
+import { CursorPiToolBridgeRegistry } from "./cursor-pi-tool-bridge-server.js";
 import type {
 	CursorPiToolBridge,
 	CursorPiToolBridgeExtensionApi,
@@ -34,9 +28,6 @@ export type {
 export type { CursorPiToolBridgeDiagnosticEvent } from "./cursor-pi-tool-bridge-diagnostics.js";
 export { resolveCursorPiToolBridgeDebugEnabled } from "./cursor-pi-tool-bridge-diagnostics.js";
 export {
-	CURSOR_PI_TOOL_BRIDGE_BUILTINS_ENV,
-	CURSOR_PI_TOOL_BRIDGE_CALL_TIMEOUT_MS_ENV,
-	CURSOR_PI_TOOL_BRIDGE_ENV,
 	resolveCursorPiToolBridgeBuiltinsEnabled,
 	resolveCursorPiToolBridgeCallTimeoutMs,
 	resolveCursorPiToolBridgeEnabled,
@@ -145,13 +136,7 @@ export function getRegisteredCursorPiToolBridge(pi?: object): CursorPiToolBridge
 }
 
 export const __testUtils = {
-	CURSOR_PI_TOOL_BRIDGE_ENV,
-	CURSOR_PI_TOOL_BRIDGE_BUILTINS_ENV,
-	CURSOR_PI_TOOL_BRIDGE_CALL_TIMEOUT_MS_ENV,
-	CURSOR_PI_TOOL_BRIDGE_DEBUG_ENV,
 	CURSOR_PI_TOOL_BRIDGE_DIAGNOSTIC_PREFIX,
-	LOOPBACK_HOST,
-	MCP_SERVER_NAME,
 	createRegistry(
 		pi: CursorPiToolBridgeSnapshotApi,
 		env: Record<string, string | undefined> = process.env,
@@ -168,7 +153,6 @@ export const __testUtils = {
 		return bridgeToolExecutionAbortTracker.getActiveCount();
 	},
 	buildWindowsBridgeBashAbortCommandForTests: buildWindowsBridgeBashAbortCommand,
-	installWindowsBridgeBashAbortMarkerForTests: installWindowsBridgeBashAbortMarker,
 	emitBridgeToolExecutionProcessAbortSignalForTests(signal: NodeJS.Signals) {
 		bridgeToolExecutionAbortTracker.emitProcessAbortSignalForTests(signal);
 	},

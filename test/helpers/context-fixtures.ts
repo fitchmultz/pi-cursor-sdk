@@ -135,6 +135,10 @@ function createMinimalExtensionContextInternal(overrides: ExtensionContextOverri
 		executeTool: vi.fn(async () => {
 			throw new Error("Nested tool execution requires a native session in this test harness.");
 		}),
+		// The fork exposes this on tool contexts; keep the fixture a superset of official Pi.
+		runInBackground: vi.fn(() => {
+			throw new Error("Background tool runs require a native session in this test harness.");
+		}),
 	};
 	return {
 		...base,

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import ts from "@typescript/typescript6";
 import { resolveInstalledPackageRoot } from "./helpers/installed-package.js";
 import {
@@ -26,7 +26,7 @@ function grok47Fixture(): ModelListItem {
 }
 
 describe("buildCursorModelSelection", () => {
-	beforeEach(() => {
+	it("uses selected context, pi thinking, and fast state", () => {
 		register([
 			{
 				id: "gpt-5.4",
@@ -58,39 +58,7 @@ describe("buildCursorModelSelection", () => {
 					},
 				],
 			},
-			{
-				id: "claude-opus-4-7",
-				displayName: "Opus 4.7",
-				parameters: [
-					{ id: "thinking", displayName: "Thinking", values: [{ value: "false" }, { value: "true" }] },
-					{ id: "context", displayName: "Context", values: [{ value: "1m" }, { value: "300k" }] },
-					{
-						id: "effort",
-						displayName: "Effort",
-						values: [
-							{ value: "low" },
-							{ value: "medium" },
-							{ value: "high" },
-							{ value: "xhigh" },
-						],
-					},
-				],
-				variants: [
-					{
-						params: [
-							{ id: "thinking", value: "true" },
-							{ id: "context", value: "1m" },
-							{ id: "effort", value: "xhigh" },
-						],
-						displayName: "Opus 4.7",
-						isDefault: true,
-					},
-				],
-			},
 		]);
-	});
-
-	it("uses selected context, pi thinking, and fast state", () => {
 		expect(buildCursorModelSelection("gpt-5.4@272k", "xhigh", true)).toEqual({
 			id: "gpt-5.4",
 			params: [
@@ -101,30 +69,12 @@ describe("buildCursorModelSelection", () => {
 		});
 	});
 
-	it("turns Claude thinking off and omits effort when pi thinking is off", () => {
-		expect(buildCursorModelSelection("claude-opus-4-7@300k", "off")).toEqual({
-			id: "claude-opus-4-7",
-			params: [
-				{ id: "thinking", value: "false" },
-				{ id: "context", value: "300k" },
-			],
-		});
-	});
-
-	it("turns Claude thinking on and maps effort when pi thinking is enabled", () => {
-		expect(buildCursorModelSelection("claude-opus-4-7@1m", "high")).toEqual({
-			id: "claude-opus-4-7",
-			params: [
-				{ id: "thinking", value: "true" },
-				{ id: "context", value: "1m" },
-				{ id: "effort", value: "high" },
-			],
-		});
-	});
-
-	it("maps generated Gemini reasoning_effort controls without changing catalog defaults", () => {
-		const gemini = FALLBACK_MODEL_ITEMS.find(({ id }) => id === "gemini-3.8-flash");
-		if (!gemini) throw new Error("gemini-3.8-flash fallback fixture missing");
+	it.each([
+		{ id: "gemini-3.8-flash", defaultEffort: "high" },
+		{ id: "gemini-4-argon", defaultEffort: "medium" },
+	])("maps generated $id reasoning_effort controls without changing catalog defaults", ({ id, defaultEffort }) => {
+		const gemini = FALLBACK_MODEL_ITEMS.find((item) => item.id === id);
+		if (!gemini) throw new Error(`${id} fallback fixture missing`);
 		const original = structuredClone(gemini);
 		const [model] = register([gemini]);
 
@@ -150,24 +100,47 @@ describe("buildCursorModelSelection", () => {
 		for (const level of ["off", "minimal", "xhigh", "max"] as const) {
 			expect(buildCursorModelSelection(gemini.id, level)).toEqual({
 				id: gemini.id,
-				params: [{ id: "reasoning_effort", value: "high" }],
+				params: [{ id: "reasoning_effort", value: defaultEffort }],
 			});
 		}
-		expect(getCursorModelMetadata(gemini.id)?.defaultParams).toEqual([{ id: "reasoning_effort", value: "high" }]);
+		expect(getCursorModelMetadata(gemini.id)?.defaultParams).toEqual([{ id: "reasoning_effort", value: defaultEffort }]);
 		expect(gemini).toEqual(original);
 	});
 
-	it("retains the installed SDK catalog and optional selection-params declaration contract", () => {
+	it("maps generated Muse Wonder contexts and reasoning without mutating its catalog defaults", () => {
+		const muse = FALLBACK_MODEL_ITEMS.find(({ id }) => id === "muse-wonder-1.0");
+		if (!muse) throw new Error("muse-wonder-1.0 fallback fixture missing");
+		const original = structuredClone(muse);
+		register([muse]);
+		expect(getCursorModelMetadata(`${muse.id}@1m`)?.defaultParams).toEqual([
+			{ id: "context", value: "1m" },
+			{ id: "reasoning_effort", value: "xhigh" },
+		]);
+		for (const context of ["300k", "1m"]) {
+			for (const effort of ["minimal", "low", "medium", "high", "xhigh", "max"] as const) {
+				expect(buildCursorModelSelection(`${muse.id}@${context}`, effort, true)).toEqual({
+					id: muse.id,
+					params: [
+						{ id: "context", value: context },
+						{ id: "reasoning_effort", value: effort },
+					],
+				});
+			}
+		}
+		expect(muse).toEqual(original);
+	});
+
+	it("retains the installed SDK catalog, optional params and max-mode declaration contract", () => {
 		const path = join(resolveInstalledPackageRoot("@cursor/sdk"), "dist/esm/options.d.ts");
 		const ast = ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true);
 		const shapes = Object.fromEntries(ast.statements.filter(ts.isInterfaceDeclaration).map((node) => [
 			node.name.text,
 			node.members.map((member) => member.getText(ast)),
 		]));
-		expect(shapes.ModelParameterValue).toEqual(["id: string;", "value: string;"]);
-		expect(shapes.ModelSelection).toEqual(["id: string;", "params?: ModelParameterValue[];"]);
+		expect(shapes.ModelParameterValue).toEqual(expect.arrayContaining(["id: string;", "value: string;"]));
+		expect(shapes.ModelSelection).toEqual(expect.arrayContaining(["id: string;", "params?: ModelParameterValue[];", "maxMode?: boolean;"]));
 		expect(shapes.ModelVariant).toEqual(expect.arrayContaining([
-			"params: ModelParameterValue[];", "isDefault?: boolean;",
+			"params: ModelParameterValue[];", "isDefault?: boolean;", "isMaxMode?: boolean;",
 		]));
 		expect(shapes.ModelListItem).toEqual(expect.arrayContaining([
 			"id: string;", "aliases?: string[];", "parameters?: ModelParameterDefinition[];", "variants?: ModelVariant[];",

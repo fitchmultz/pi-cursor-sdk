@@ -74,10 +74,12 @@ describe("captured session-agent storage compatibility", () => {
 
 	it.each(["creating", "busy"] as const)("an A %s waiter cannot lease B's same-key replacement", async (phase) => {
 		const options = params();
+		const enteredCreate = Promise.withResolvers<void>();
 		let finish: (value?: unknown) => void = () => {};
 		const held = new Promise(resolve => { finish = resolve; });
 		const lateDispose = vi.fn(async () => {});
 		if (phase === "creating") options.createAgent.mockImplementationOnce(async () => {
+			enteredCreate.resolve();
 			await held;
 			return { agentId: "late-A", [Symbol.asyncDispose]: lateDispose };
 		});
@@ -89,7 +91,8 @@ describe("captured session-agent storage compatibility", () => {
 			waiting = acquireSessionCursorAgent({ ...options, storeRoot: join(root, "A") });
 		}
 		const observed = waiting.catch(error => error);
-		await vi.waitFor(() => expect(options.createAgent).toHaveBeenCalledTimes(1));
+		if (phase === "creating") await enteredCreate.promise;
+		expect(options.createAgent).toHaveBeenCalledTimes(1);
 		const b = await acquireSessionCursorAgent({ ...options, storeRoot: join(root, "B") });
 		finish();
 		const outcome = await observed;
@@ -106,15 +109,17 @@ describe("captured session-agent storage compatibility", () => {
 	it("captures fileless persistence before delayed open even when config/scope become persistent", async () => {
 		const mock = installCursorSessionStoreMock(() => { throw new Error("fileless must not derive persistent root"); });
 		const originalOpen = mock.openSqliteStore.getMockImplementation()!;
+		const enteredOpen = Promise.withResolvers<void>();
 		let release: () => void = () => {};
 		mock.openSqliteStore.mockImplementationOnce(async options => {
-			await new Promise<void>(resolve => { release = resolve; });
+			await new Promise<void>(resolve => { release = resolve; enteredOpen.resolve(); });
 			return originalOpen(options);
 		});
 		scopes.set(root, undefined, "fileless");
 		const options = { ...params(), storeRoot: "unusable-relative" };
 		const pending = acquireSessionCursorAgent(options);
-		await vi.waitFor(() => expect(mock.openSqliteStore).toHaveBeenCalledOnce());
+		await enteredOpen.promise;
+		expect(mock.openSqliteStore).toHaveBeenCalledOnce();
 		scopes.set(root, scopeKey);
 		options.storeRoot = join(root, "now-persistent");
 		release();

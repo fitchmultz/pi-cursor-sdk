@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CURSOR_REPLAY_ACTIVITY_TOOL_NAME } from "../src/cursor-tool-presentation-registry.js";
 import { buildCursorPiToolDisplay, formatCursorToolTranscript } from "../src/cursor-tool-transcript.js";
-import { readMcpDisplayResult } from "../src/cursor-tool-result-display-readers.js";
 import { getCursorDisplayDetailSummary } from "./helpers/cursor-display-details.js";
 
 
@@ -29,7 +28,7 @@ describe("formatCursorToolTranscript MCP and web", () => {
 	});
 
 	it("prefers text MCP summary over earlier non-text blocks", () => {
-		const display = buildCursorPiToolDisplay({
+		const toolCall = {
 			name: "mcp",
 			args: { toolName: "image_service" },
 			result: {
@@ -37,17 +36,19 @@ describe("formatCursorToolTranscript MCP and web", () => {
 				value: {
 					content: [
 						{ type: "image", mimeType: "image/png", data: "base64-image-data" },
-						{ text: { text: "useful text preview" } },
+						{ text: { text: "useful text preview\nsecond line" } },
 					],
 				},
 			},
-		});
-
+		};
+		const display = buildCursorPiToolDisplay(toolCall);
 		expect(display.args.activitySummary).toBe("image_service · useful text preview");
+		expect(display.result.content[0].text).toBe("image_service\n\nuseful text preview\nsecond line");
+		expect(formatCursorToolTranscript(toolCall)).toBe("image_service\n\nuseful text preview\nsecond line\n");
 	});
 
 	it("summarizes Cursor MCP non-text content without dumping raw payloads", () => {
-		const display = buildCursorPiToolDisplay({
+		const toolCall = {
 			name: "mcp",
 			args: { toolName: "image_service" },
 			result: {
@@ -59,20 +60,9 @@ describe("formatCursorToolTranscript MCP and web", () => {
 					],
 				},
 			},
-		});
-		const transcript = formatCursorToolTranscript({
-			name: "mcp",
-			args: { toolName: "image_service" },
-			result: {
-				status: "success",
-				value: {
-					content: [
-						{ type: "image", mimeType: "image/png", data: "base64-image-data" },
-						{ type: "resource", uri: "file:///secret.txt", blob: "raw-resource-payload" },
-					],
-				},
-			},
-		});
+		};
+		const display = buildCursorPiToolDisplay(toolCall);
+		const transcript = formatCursorToolTranscript(toolCall);
 
 		expect(display.result.content[0].text).toContain("[image image/png omitted]");
 		expect(display.result.content[0].text).toContain("[resource omitted]");
@@ -82,83 +72,24 @@ describe("formatCursorToolTranscript MCP and web", () => {
 		expect(transcript).not.toContain("base64-image-data");
 	});
 
-	it("uses one MCP display model for mixed text and non-text body/preview", () => {
-		const result = {
-			status: "success" as const,
-			value: {
-				content: [
-					{ type: "image", mimeType: "image/png", data: "raw-image" },
-					{ text: { text: "first line\nsecond line" } },
-				],
-			},
-		};
-
-		expect(readMcpDisplayResult(result)).toMatchObject({
-			isToolError: false,
-			text: "first line\nsecond line",
-			nonTextSummary: "[image image/png omitted]",
-			body: "first line\nsecond line",
-			preview: "first line",
-		});
-		expect(formatCursorToolTranscript({ name: "mcp", args: { toolName: "mixed" }, result })).toContain("first line\nsecond line");
-	});
-
-	it("uses one MCP display model for empty content fallback", () => {
+	it("renders empty MCP content without inventing a preview", () => {
 		const result = { status: "success" as const, value: { content: [] } };
 
-		expect(readMcpDisplayResult(result)).toMatchObject({
-			isToolError: false,
-			text: "",
-			nonTextSummary: "",
-			body: '{"content":[]}',
-		});
-		expect(readMcpDisplayResult(result).preview).toBeUndefined();
-		expect(formatCursorToolTranscript({ name: "mcp", args: { toolName: "empty" }, result })).toContain('{"content":[]}');
+		const toolCall = { name: "mcp", args: { toolName: "empty" }, result };
+		const display = buildCursorPiToolDisplay(toolCall);
+		expect(display.args.activitySummary).toBe("empty");
+		expect(display.result.content[0].text).toBe('empty\n\n{"content":[]}');
+		expect(formatCursorToolTranscript(toolCall)).toBe('empty\n\n{"content":[]}\n');
 	});
 
-	it("uses one MCP display model for tool-level isError", () => {
+	it("preserves tool-level MCP errors in output and summaries", () => {
 		const result = { status: "success" as const, value: { isError: true, content: [{ text: "failed remotely" }] } };
 
-		expect(readMcpDisplayResult(result)).toMatchObject({
-			isToolError: true,
-			body: "[tool error]\nfailed remotely",
-			preview: "failed remotely",
-		});
-		expect(formatCursorToolTranscript({ name: "mcp", args: { toolName: "remote" }, result })).toContain("[tool error]\nfailed remotely");
-	});
-
-	it("labels completed Cursor web search MCP activity instead of generic Cursor MCP", () => {
-		const toolCall = {
-			name: "mcp",
-			args: { toolName: "WebSearch", args: { search_term: "pi extension" } },
-			result: { status: "success", value: { content: [{ text: { text: "result snippet" } }], isError: false } },
-		};
+		const toolCall = { name: "mcp", args: { toolName: "remote" }, result };
 		const display = buildCursorPiToolDisplay(toolCall);
-		const transcript = formatCursorToolTranscript(toolCall);
-
-		expect(display).toMatchObject({
-			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-			args: { query: "pi extension", activityTitle: "Cursor web search", activitySummary: "pi extension" },
-			result: { details: { variant: "activity", sourceToolName: "webSearch", title: "Cursor web search" } },
-		});
-		expect(display.args.activityTitle).not.toBe("Cursor MCP");
-		expect(transcript).toContain("web search pi extension");
-		expect(transcript).not.toContain("WebSearch\n");
-	});
-
-	it("labels completed Cursor web fetch host activity with bounded URL summary", () => {
-		const toolCall = {
-			name: "web_fetch",
-			args: { url: "https://example.com/docs" },
-			result: { status: "success", value: { content: [{ text: { text: "docs page" } }], isError: false } },
-		};
-		const display = buildCursorPiToolDisplay(toolCall);
-
-		expect(display).toMatchObject({
-			toolName: CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-			args: { url: "https://example.com/docs", activityTitle: "Cursor web fetch", activitySummary: "https://example.com/docs" },
-			result: { details: { variant: "activity", sourceToolName: "webFetch", title: "Cursor web fetch" } },
-		});
+		expect(display.args.activitySummary).toBe("remote · failed remotely");
+		expect(display.result.content[0].text).toBe("remote\n\n[tool error]\nfailed remotely");
+		expect(formatCursorToolTranscript(toolCall)).toBe("remote\n\n[tool error]\nfailed remotely\n");
 	});
 
 	it("formats completed semSearch activity with bounded results text", () => {
@@ -187,16 +118,19 @@ describe("formatCursorToolTranscript MCP and web", () => {
 		expect(transcript).not.toContain('"results"');
 	});
 
-	it("formats semSearch errors without dumping raw payloads", () => {
+	it.each([
+		["semSearch", { query: "missing index" }, "semSearch missing index", "semantic index unavailable", "query"],
+		["recordScreen", { mode: "START_RECORDING" }, "recordScreen start recording", "screen capture unavailable", "mode"],
+	] as const)("formats %s errors without dumping raw payloads", (name, args, header, message, rawKey) => {
 		const transcript = formatCursorToolTranscript({
-			name: "semSearch",
-			args: { query: "missing index" },
-			result: { status: "error", error: { message: "semantic index unavailable" } },
+			name,
+			args,
+			result: { status: "error", error: { message } },
 		});
 
-		expect(transcript).toContain("semSearch missing index");
-		expect(transcript).toContain("semantic index unavailable");
-		expect(transcript).not.toContain('"query"');
+		expect(transcript).toContain(header);
+		expect(transcript).toContain(message);
+		expect(transcript).not.toContain(`"${rawKey}"`);
 	});
 
 	it("formats completed recordScreen activity with mode, path, and duration", () => {
@@ -247,18 +181,6 @@ describe("formatCursorToolTranscript MCP and web", () => {
 		expect(transcript).not.toContain('"recordingDurationMs"');
 	});
 
-	it("formats recordScreen errors without dumping raw payloads", () => {
-		const transcript = formatCursorToolTranscript({
-			name: "recordScreen",
-			args: { mode: "START_RECORDING" },
-			result: { status: "error", error: { message: "screen capture unavailable" } },
-		});
-
-		expect(transcript).toContain("recordScreen start recording");
-		expect(transcript).toContain("screen capture unavailable");
-		expect(transcript).not.toContain('"mode"');
-	});
-
 	it("shows Cursor generateImage output paths without dumping image data", () => {
 		const display = buildCursorPiToolDisplay(
 			{
@@ -288,5 +210,6 @@ describe("formatCursorToolTranscript MCP and web", () => {
 		});
 		expect(display.result.content[0].text).toContain("Saved image: /Users/example/.cursor/projects/repo/assets/badge.png");
 		expect(display.result.content[0].text).not.toContain("base64-image-data");
+		expect(display.result.details).not.toHaveProperty("title");
 	});
 });

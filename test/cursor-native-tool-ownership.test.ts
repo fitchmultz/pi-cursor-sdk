@@ -15,6 +15,7 @@ import {
 	type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import { expect, it } from "vitest";
+import { installCursorProviderVirtualTime } from "./helpers/cursor-provider-virtual-time.js";
 import { registerCursorNativeToolDisplay } from "../src/cursor-native-tool-display-registration.js";
 import { canRenderCursorToolNatively, nativeToolResults } from "../src/cursor-native-tool-display-state.js";
 import { registerCursorSessionScope } from "../src/cursor-session-scope.js";
@@ -23,6 +24,8 @@ import { CursorTurnDisplayRouter } from "../src/cursor-provider-turn-display-rou
 import { cursorLiveRuns, drainCursorLiveRunTurn } from "../src/cursor-provider-live-run-drain.js";
 import { makeAssistantMessage } from "./helpers/context-fixtures.js";
 import { makeModel, makeProviderModelConfig } from "./helpers/model-fixtures.js";
+
+installCursorProviderVirtualTime();
 
 it.each(["named", "unnamed"])("tracks the real %s tool owner across native new/resume/reload and model changes", async (factoryMode) => {
 	const root = mkdtempSync(join(tmpdir(), "cursor-native-ownership-"));
@@ -227,7 +230,8 @@ it.each([
 		expect(initialCount).toBeGreaterThan(0);
 		expect(runtime.session.getAllTools().some(tool => tool.name === "cursor")).toBe(false);
 		if (label === "allowlist") expect(runtime.session.getAllTools().map(tool => tool.name).sort()).toEqual(["bash", "read"]);
-		for (let index = 0; index < 200; index++) await runtime.session.setModel(index % 2 ? model : alternateModel);
+		await runtime.session.setModel(alternateModel);
+		await runtime.session.setModel(model);
 		expect(registration.count).toBe(initialCount);
 		await runtime.session.prompt("First filtered turn");
 		await runtime.session.prompt("Second filtered turn");

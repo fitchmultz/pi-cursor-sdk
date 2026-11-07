@@ -43,7 +43,7 @@ Exit codes:
   1  validation failure, timeout, AgentBusyError, or non-zero pi exit
 
 Notes:
-  - Runs pi in RPC mode with native tool replay enabled and the pi bridge disabled.
+  - Runs pi in RPC mode with PI_CURSOR_LEAN=0, native tool replay enabled, and the pi bridge disabled.
   - Sends steer after the replayed bash tool finishes execution (post toolResult boundary).
   - Prints a single JSON result line on success; errors go to stderr.`);
 }
@@ -164,6 +164,7 @@ function buildPiRpcEnv(baseEnv = process.env, nodePath = process.execPath) {
 		baseEnv,
 		nodePath,
 		settingSources: "none",
+		lean: false,
 		nativeToolDisplay: true,
 		registerNativeTools: true,
 		bridge: false,
@@ -284,11 +285,13 @@ async function runSelfTest() {
 			const hostileEnv = buildPiRpcEnv({
 				...Object.fromEntries(DEBUG_ENV_NAMES.map((name) => [name, join(tempDir, name)])),
 				PATH: hostilePath,
+				PI_CURSOR_LEAN: "1",
 				PI_CURSOR_REGISTER_NATIVE_TOOLS: "0",
 				PI_CURSOR_SETTING_SOURCES: "all",
 				PI_CURSOR_PI_TOOL_BRIDGE: "1",
 			});
 			if ((hostileEnv.PATH ?? "").split(delimiter)[0] !== dirname(process.execPath)) fail("self-test failed: sealed PATH should start with resolved node directory");
+			if (hostileEnv.PI_CURSOR_LEAN !== "0") fail("self-test failed: native replay must opt out of inherited lean mode");
 			if (hostileEnv.PI_CURSOR_REGISTER_NATIVE_TOOLS !== "1") fail("self-test failed: native registration should be forced on");
 			if (hostileEnv.PI_CURSOR_SETTING_SOURCES !== "none") fail("self-test failed: setting sources should be forced off");
 			if (hostileEnv.PI_CURSOR_PI_TOOL_BRIDGE !== "0") fail("self-test failed: bridge should be forced off");
@@ -333,11 +336,11 @@ async function main() {
 		printHelp();
 		return;
 	}
-	ensureBuilt();
 	if (process.argv.includes("--self-test")) {
 		await runSelfTest();
 		return;
 	}
+	ensureBuilt();
 
 	const sessionDir = process.env.SMOKE_SESSION_DIR ?? join("/tmp", `pi-cursor-steer-smoke-${Date.now()}`);
 	const piBin = resolvePiBin();

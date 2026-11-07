@@ -14,19 +14,13 @@ import { __testUtils } from "../src/cursor-provider.js";
 import { buildCursorPrompt, computeCursorContextFingerprint, shouldBootstrapCursorContext } from "../src/context.js";
 import { getActiveContextToolNames } from "../src/cursor-context-tools.js";
 import { resolveCursorPiContext } from "../src/cursor-pi-context.js";
-import { getPackageDir, type BuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
-import { pathToFileURL } from "node:url";
 import { resolveCursorFacingSystemPrompt } from "../src/cursor-agents-context.js";
 import { resolveCursorSkillSystemPrompt } from "../src/cursor-skill-tool.js";
+import { loadInstalledPiBuildSystemPrompt } from "./helpers/pi-system-prompt.js";
 
-// Contract test of host serialization, not an extension runtime dependency.
-const { buildSystemPrompt } = await import(pathToFileURL(`${getPackageDir()}/dist/core/system-prompt.js`).href) as {
-	buildSystemPrompt(options: BuildSystemPromptOptions): string;
-};
+const buildSystemPrompt = loadInstalledPiBuildSystemPrompt();
 
 // Deliberately run through the installed Pi runtime, not a hand-normalized mock.
-// The optional exports are absent on supported stock Pi 0.84/0.85.
-const transcriptHost = "getCurrentSystemPrompt" in ai;
 const tool = { name: "audit_tool", description: "Synthetic tool", parameters: Type.Object({}) };
 const user = { role: "user" as const, content: "LATEST", timestamp: 1 };
 
@@ -60,6 +54,7 @@ describe("installed Pi provider context boundary", () => {
 	afterEach(async () => {
 		await __testUtils.releaseAllPendingCursorLiveRunsForTests();
 		await __testUtils.resetSessionCursorAgents();
+		vi.unstubAllEnvs();
 	});
 
 	it("preserves system instructions, tool snapshots, and incremental reuse through ModelRuntime", async () => {
@@ -67,7 +62,7 @@ describe("installed Pi provider context boundary", () => {
 		const { received, send } = await boundary();
 		const input = { systemPrompt: "SYSTEM_SENTINEL", tools: [tool], messages: [user] };
 		expect((await send(input)).stopReason).toBe("stop");
-		expect(Object.keys(received[0]).sort()).toEqual(transcriptHost ? ["messages"] : ["messages", "systemPrompt", "tools"]);
+		expect(Object.keys(received[0])).toEqual(["messages"]);
 		expect(sdkSend.mock.calls[0][0].text).toContain("SYSTEM_SENTINEL");
 		expect(getActiveContextToolNames(received[0])).toEqual(new Set(["audit_tool"]));
 		const fingerprint = computeCursorContextFingerprint(received[0]);
@@ -135,14 +130,29 @@ describe("installed Pi provider context boundary", () => {
 		expect(sdkSend.mock.calls[1][0].text).not.toContain("/fixture/private");
 	});
 
-	it("does not expose registered tools omitted from the native request snapshot", async () => {
+	it.each([false, true])("separates the request snapshot from legacy registry exposure but projects it in lean mode (lean=%s)", async (lean) => {
+		vi.stubEnv("PI_CURSOR_LEAN", lean ? "1" : "0");
+		process.env.PI_CURSOR_TOOL_MANIFEST = "1";
 		const sdkSend = mockSend();
 		registerBridgeForProviderTest({ active: [tool.name], tools: [createTestToolInfo(tool.name, tool.parameters)] });
 		const { received, send } = await boundary();
 		expect((await send({ systemPrompt: "SYSTEM_SENTINEL", tools: [], messages: [user] })).stopReason).toBe("stop");
 		expect(getActiveContextToolNames(received[0])).toEqual(new Set());
-		expect(mockedCreate.mock.calls[0][0]?.mcpServers?.pi_tools).toBeUndefined();
-		expect(sdkSend.mock.calls[0][0].text).not.toContain("For exposed pi bridge tools");
+		const text = sdkSend.mock.calls[0][0].text;
+		if (lean) {
+			expect(mockedCreate.mock.calls[0][0]?.mcpServers?.pi_tools).toBeUndefined();
+			expect(mockedCreate.mock.calls[0][0]?.tools).toEqual([]);
+			expect(text).not.toContain("For exposed pi bridge tools");
+			expect(text).not.toContain("pi__audit_tool");
+		} else {
+			// Preserve stock Pi's registry-owned surface independently of the replay allowlist.
+			expect(mockedCreate.mock.calls[0][0]?.mcpServers?.pi_tools).toBeDefined();
+			expect(text).toContain("For exposed pi bridge tools");
+			expect(text).toContain("prefer matching exposed pi__* tools using their listed names, schemas, and prompt guidelines");
+			expect(text).toContain("Pi bridge: call exposed pi__* MCP names");
+			expect(text).toContain("pi__audit_tool");
+		}
+		expect(text).not.toContain("Use pi__cursor_ask_question");
 	});
 
 	it("preserves bridge filters and the callable manifest at the provider boundary", async () => {
@@ -243,16 +253,14 @@ describe("installed Pi provider context boundary", () => {
 		if (!active) { expect(call).toBeUndefined(); return; }
 		expect(call?.name).toBe("read");
 		const messages: unknown[] = [...input.messages, first, { role: "toolResult", toolCallId: call!.id, toolName: "read", content: [{ type: "text", text: "RECORDED" }], isError: false, timestamp: 3 }];
-		if (transcriptHost) {
-			messages.push({ role: "system", content: "", sections: { note: "NEXT" }, timestamp: 4 });
-			expect(__testUtils.hasTrailingUserMessagesAfterToolResults({ messages: [...messages, user] } as ai.Context)).toBe(true);
-		}
+		messages.push({ role: "system", content: "", sections: { note: "NEXT" }, timestamp: 4 });
+		expect(__testUtils.hasTrailingUserMessagesAfterToolResults({ messages: [...messages, user] } as ai.Context)).toBe(true);
 		const final = await send({ ...input, messages } as ai.Context);
 		expect(final.stopReason, final.errorMessage).toBe("stop");
 		expect(sdkSend).toHaveBeenCalledTimes(1);
 	});
 
-	it.skipIf(!transcriptHost)("replays sections/content and removals using the actual host helpers", async () => {
+	it("replays sections/content and removals using the actual host helpers", async () => {
 		const sdkSend = mockSend();
 		const { received, send } = await boundary();
 		const messages = [

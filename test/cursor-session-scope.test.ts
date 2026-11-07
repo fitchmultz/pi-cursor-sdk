@@ -4,10 +4,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	__testUtils as cursorSessionScopeTestUtils,
-	getCursorSessionCwd,
-	getCursorSessionName,
+	getCursorSessionScopeSnapshot,
 	getCursorSessionProjectTrusted,
-	MAX_CURSOR_SESSION_NAME_LENGTH,
 	registerCursorSessionScope,
 } from "../src/cursor-session-scope.js";
 import { createEventHarness } from "./helpers/pi-harness.js";
@@ -18,20 +16,7 @@ describe("cursor-session-scope cwd", () => {
 	});
 
 	it("falls back to process.cwd() before session_start", () => {
-		expect(getCursorSessionCwd()).toBe(process.cwd());
-	});
-
-	it("syncs cwd from session_start", async () => {
-		const sessionDir = mkdtempSync(join(tmpdir(), "pi-cursor-session-cwd-"));
-		try {
-			const pi = createEventHarness();
-			registerCursorSessionScope(pi);
-			await pi.runSessionStart({ cwd: sessionDir });
-
-			expect(getCursorSessionCwd()).toBe(sessionDir);
-		} finally {
-			rmSync(sessionDir, { recursive: true, force: true });
-		}
+		expect(getCursorSessionScopeSnapshot().cwd).toBe(process.cwd());
 	});
 
 	it("snapshots trust only from Pi trust-resolution provenance", async () => {
@@ -65,13 +50,16 @@ describe("cursor-session-scope cwd", () => {
 		expect(cursorSessionScopeTestUtils.isCliProjectTrustApproved([])).toBe(false);
 	});
 
-	it("syncs the normalized session name from session_start", async () => {
+	it.each([
+		["  Cloud handoff  ", "Cloud handoff"],
+		["x".repeat(120), `${"x".repeat(99)}…`],
+	])("normalizes and bounds session names from session_start (%#)", async (name, expected) => {
 		const pi = createEventHarness();
 		registerCursorSessionScope(pi);
 
-		await pi.runSessionStart({ sessionManager: { getSessionName: vi.fn(() => "  Cloud handoff  ") } });
+		await pi.runSessionStart({ sessionManager: { getSessionName: vi.fn(() => name) } });
 
-		expect(getCursorSessionName()).toBe("Cloud handoff");
+		expect(getCursorSessionScopeSnapshot(pi).sessionName).toBe(expected);
 	});
 
 	it("updates the normalized session name when session metadata changes", async () => {
@@ -83,22 +71,10 @@ describe("cursor-session-scope cwd", () => {
 			type: "session_info_changed",
 			name: "  Renamed\tsession\u001bwith\0controls\u0085  ",
 		});
-		expect(getCursorSessionName()).toBe("Renamed session with controls");
+		expect(getCursorSessionScopeSnapshot(pi).sessionName).toBe("Renamed session with controls");
 
 		await pi.invokeEvent("session_info_changed", { type: "session_info_changed", name: " \t\u001b\0 " });
-		expect(getCursorSessionName()).toBeUndefined();
-	});
-
-	it("bounds session names before exposing them to provider callers", async () => {
-		const pi = createEventHarness();
-		registerCursorSessionScope(pi);
-		await pi.runSessionStart({
-			sessionManager: { getSessionName: vi.fn(() => "x".repeat(MAX_CURSOR_SESSION_NAME_LENGTH + 20)) },
-		});
-
-		expect(MAX_CURSOR_SESSION_NAME_LENGTH).toBe(100);
-		expect(getCursorSessionName()).toHaveLength(MAX_CURSOR_SESSION_NAME_LENGTH);
-		expect(getCursorSessionName()?.endsWith("…")).toBe(true);
+		expect(getCursorSessionScopeSnapshot(pi).sessionName).toBeUndefined();
 	});
 
 	it("updates cwd on subsequent session_start events", async () => {
@@ -109,10 +85,10 @@ describe("cursor-session-scope cwd", () => {
 			registerCursorSessionScope(pi);
 
 			await pi.runSessionStart({ cwd: firstDir });
-			expect(getCursorSessionCwd()).toBe(firstDir);
+			expect(getCursorSessionScopeSnapshot(pi).cwd).toBe(firstDir);
 
 			await pi.runSessionStart({ cwd: secondDir });
-			expect(getCursorSessionCwd()).toBe(secondDir);
+			expect(getCursorSessionScopeSnapshot(pi).cwd).toBe(secondDir);
 		} finally {
 			rmSync(firstDir, { recursive: true, force: true });
 			rmSync(secondDir, { recursive: true, force: true });

@@ -1,10 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { buildCursorPrompt } from "../src/context.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildCursorIncrementalPrompt, buildCursorPrompt } from "../src/context.js";
 import {
 	buildCursorToolManifestText,
 	CURSOR_TOOL_MANIFEST_ENV,
 	resolveCursorToolManifestEnabled,
 } from "../src/cursor-tool-manifest.js";
+
+afterEach(() => vi.unstubAllEnvs());
 
 function bridgeTool(piToolName: string) {
 	return {
@@ -77,16 +79,11 @@ describe("cursor-tool-manifest", () => {
 		expect(text).not.toContain("pi__cursor_ask_question");
 	});
 
-	it("notes disabled bridge", () => {
-		const text = buildCursorToolManifestText({ piBridgeEnabled: false });
-		expect(text).toContain("Pi bridge: disabled");
-		expect(text).not.toContain("SwitchMode");
-	});
-
 	it("distinguishes disabled bridge from empty exposure", () => {
 		const disabled = buildCursorToolManifestText({ piBridgeEnabled: false });
 		const empty = buildCursorToolManifestText({ piBridgeEnabled: true, bridgeSnapshot: { tools: [], mcpToolNameToPiToolName: new Map(), piToolNameToMcpToolName: new Map() } });
-		expect(disabled).toContain("disabled");
+		expect(disabled).toContain("Pi bridge: disabled");
+		expect(disabled).not.toContain("SwitchMode");
 		expect(empty).toContain("no pi__* tools exposed");
 	});
 
@@ -136,19 +133,37 @@ describe("cursor-tool-manifest", () => {
 		expect(text).not.toContain("pi__codemode_search");
 	});
 
+	it("describes MCP-only without advertising host tools", () => {
+		const text = buildCursorToolManifestText({ nativeToolsEnabled: false });
+		expect(text).toContain("Cursor native tools (including task/subagents): disabled");
+		expect(text).toContain("configured MCP depends on Cursor settings");
+		expect(text).not.toContain("read/shell/search/edit/write");
+	});
+
+	it("honors the captured lean policy in manifests, bootstrap, and incremental prompts", () => {
+		vi.stubEnv("PI_CURSOR_LEAN", "1");
+		const legacyOptions = { leanEnabled: false, nativeToolsEnabled: true };
+		expect(buildCursorToolManifestText(legacyOptions)).toContain("Cursor host/MCP");
+		const context = { messages: [{ role: "user" as const, content: "inspect", timestamp: 1 }] };
+		for (const build of [buildCursorPrompt, buildCursorIncrementalPrompt]) {
+			const text = build(context, legacyOptions).text;
+			expect(text).toContain("Shell: use explicit");
+			expect(text).toContain("prefer matching exposed pi__* tools");
+			expect(text).not.toContain("ambient MCP are disabled");
+		}
+		vi.stubEnv("PI_CURSOR_LEAN", "0");
+		const leanOptions = { leanEnabled: true, nativeToolsEnabled: false };
+		expect(buildCursorToolManifestText(leanOptions)).toContain("Cursor native tools and ambient MCP: disabled");
+		for (const build of [buildCursorPrompt, buildCursorIncrementalPrompt]) {
+			const text = build(context, leanOptions).text;
+			expect(text).toContain("Only exposed pi__* tools are callable");
+			expect(text).not.toContain("Shell: use explicit");
+			expect(text).not.toContain("Cursor-native subagents only");
+		}
+	});
+
 	it("defaults manifest env to enabled", () => {
 		expect(resolveCursorToolManifestEnabled({})).toBe(true);
 		expect(resolveCursorToolManifestEnabled({ [CURSOR_TOOL_MANIFEST_ENV]: "0" })).toBe(false);
-	});
-
-	it("includes manifest in bootstrap prompts when provided", () => {
-		const manifest = buildCursorToolManifestText();
-		const prompt = buildCursorPrompt(
-			{ messages: [{ role: "user", content: "hi", timestamp: 1 }] },
-			{ toolManifest: manifest },
-		);
-		expect(prompt.text).toContain("Callable tool surfaces this run:");
-		expect(prompt.text).toContain("Cursor SDK tool boundary:");
-		expect(prompt.text).toContain("See callable surfaces below.");
 	});
 });

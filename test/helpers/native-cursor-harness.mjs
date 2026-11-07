@@ -1,16 +1,17 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire, registerHooks } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
-import { after } from "node:test";
+import { after, afterEach } from "node:test";
 import { Type } from "typebox";
-import { state, Cursor } from "../fixtures/native-cursor-sdk.mjs";
+import { state, Cursor, storeRootOf } from "../fixtures/native-cursor-sdk.mjs";
+import { __testUtils as outputFilterTestUtils } from "../../shared/cursor-sdk-output-filter.mjs";
 import { writeRawTestEvidence } from "./raw-test-evidence.mjs";
 
-export { state };
+export { state, storeRootOf };
 export const { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } = await import(
   process.env.PI_CURSOR_TEST_HOST ?? "@earendil-works/pi-coding-agent"
 );
@@ -21,6 +22,7 @@ const corePackage = JSON.parse(await readFile(corePackagePath, "utf8"));
 export const { Agent: PiAgent } = await import(pathToFileURL(join(dirname(corePackagePath), corePackage.exports["."].import)));
 
 export function setupNativeCursorHarness() {
+  afterEach(() => outputFilterTestUtils.resetProcessOutputFilter());
   // Only external Cursor transport/storage is substituted; Pi's loader,
   // registered provider, scheduler, persisted sessions and loopback MCP are real.
   const fixtureUrl = new URL("../fixtures/native-cursor-sdk.mjs", import.meta.url).href;
@@ -41,6 +43,12 @@ export async function seedOfflineCatalog(agentDir) {
 
 export async function concurrentFixture(t, run) {
   const root = await mkdtemp(join(tmpdir(), "cursor-native-owners-"));
+  const evidenceDirectory = process.env.PI_CURSOR_TEST_EVIDENCE_DIR;
+  if (evidenceDirectory) {
+    writeRawTestEvidence(evidenceDirectory, `fixture-root-${basename(root)}.json`, JSON.stringify({
+      root, retained: true, host: process.env.PI_CURSOR_TEST_HOST ?? "@earendil-works/pi-coding-agent",
+    }, null, 2));
+  }
   const previousEnv = { ...process.env };
   const sessions = [];
   const errors = [];
@@ -58,7 +66,16 @@ export async function concurrentFixture(t, run) {
     assert.equal(url.hostname, "127.0.0.1", "offline native fixture must not access external services");
     return originalFetch(input, options);
   };
-  async function create(name, { cwd: inheritedCwd, tool, toolDescription, systemPrompt, model: inheritedModel, runtime, manager: inheritedManager, bind = true, preferences = [], flags = {}, compaction = {}, beforeExtensions = [], afterExtensions = [] } = {}) {
+  const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
+  async function copyExtension(name) {
+    const extensionPath = join(root, "extension-copies", name);
+    for (const path of ["dist", "shared", "package.json"]) {
+      await cp(join(repositoryRoot, path), join(extensionPath, path), { recursive: true });
+    }
+    await symlink(join(repositoryRoot, "node_modules"), join(extensionPath, "node_modules"), "junction");
+    return extensionPath;
+  }
+  async function create(name, { cwd: inheritedCwd, tool, toolDescription, systemPrompt, model: inheritedModel, runtime, manager: inheritedManager, bind = true, preferences = [], flags = {}, compaction = {}, beforeExtensions = [], afterExtensions = [], extensionPath = repositoryRoot } = {}) {
     const cwd = inheritedCwd ?? join(root, name);
     await mkdir(cwd, { recursive: true });
     const settingsManager = SettingsManager.inMemory({
@@ -67,7 +84,7 @@ export async function concurrentFixture(t, run) {
     const loader = new DefaultResourceLoader({
       cwd, agentDir: process.env.PI_CODING_AGENT_DIR, settingsManager,
       noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
-      additionalExtensionPaths: [...beforeExtensions, fileURLToPath(new URL("../../", import.meta.url)), ...afterExtensions],
+      additionalExtensionPaths: [...beforeExtensions, extensionPath, ...afterExtensions],
       systemPromptOverride: () => systemPrompt ?? `OWNER_${name}`,
     });
     await loader.reload();
@@ -94,7 +111,7 @@ export async function concurrentFixture(t, run) {
   try {
     await mkdir(process.env.PI_CODING_AGENT_DIR);
     await seedOfflineCatalog(process.env.PI_CODING_AGENT_DIR);
-    await run({ root, create });
+    await run({ root, create, copyExtension });
     assert.deepEqual(errors, []);
   } finally {
     try {
@@ -115,7 +132,7 @@ export async function concurrentFixture(t, run) {
       globalThis.fetch = originalFetch;
       for (const key of Object.keys(process.env)) if (!(key in previousEnv)) delete process.env[key];
       Object.assign(process.env, previousEnv);
-      await rm(root, { recursive: true, force: true });
+      if (!evidenceDirectory) await rm(root, { recursive: true, force: true });
     }
   }
 }
@@ -138,7 +155,7 @@ export async function retainNativeEvidence(label, manager, cwd) {
       agentId: agent.agentId, disposed: agent.disposed,
       mode: agent.options.mode, tools: agent.options.tools,
       settingSources: agent.options.local.settingSources,
-      storeRoot: agent.options.local.store?.stateRoot,
+      storeRoot: storeRootOf(agent.options.local.store),
       mcpServers: Object.keys(agent.options.mcpServers ?? {}),
       subagentNames: Object.keys(agent.options.agents ?? {}),
     })),

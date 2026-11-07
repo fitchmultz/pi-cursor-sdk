@@ -363,7 +363,7 @@ function readCursorSdkConfigFile(path: string): CursorSdkConfig {
 	}
 }
 
-export function loadCursorSdkConfigForUpdate(path: string): Record<string, unknown> {
+function loadCursorSdkConfigForUpdate(path: string): Record<string, unknown> {
 	if (!existsSync(path)) return {};
 	let source: string;
 	try {
@@ -476,19 +476,6 @@ export function updateCursorSdkConfig(
 	});
 }
 
-export function saveCursorSdkUserConfig(config: CursorSdkConfig, path = getCursorSdkUserConfigPath()): void {
-	updateCursorSdkConfig(path, () => ({ ...config }), { newFileMode: 0o600 });
-}
-
-export function saveCursorSdkProjectConfig(cwd: string, config: CursorSdkConfig, configDirName = CONFIG_DIR_NAME): void {
-	const path = getCursorSdkProjectConfigPath(cwd, configDirName);
-	updateCursorSdkConfig(path, () => ({ ...config }));
-}
-
-export function mergeCursorSdkConfig(base: CursorSdkConfig, patch: CursorSdkConfig): CursorSdkConfig {
-	return mergeCursorSdkConfigForUpdate({ ...base }, patch) as CursorSdkConfig;
-}
-
 export function mergeCursorSdkConfigForUpdate(
 	base: Record<string, unknown>,
 	patch: CursorSdkConfig,
@@ -518,16 +505,6 @@ export function mergeCursorSdkConfigForUpdate(
 
 export function cursorFastDefaultsFromConfig(config: CursorSdkConfig | undefined): Map<string, boolean> {
 	return new Map(Object.entries(config?.fastDefaults ?? {}));
-}
-
-export function withCursorFastDefaults<T extends object>(
-	config: T,
-	fastDefaults: Map<string, boolean>,
-): T & { fastDefaults: Record<string, boolean> } {
-	return {
-		...config,
-		fastDefaults: Object.fromEntries([...fastDefaults.entries()].sort(([a], [b]) => a.localeCompare(b))),
-	};
 }
 
 function resolved<T>(source: CursorConfigSource, value: T, cappedBy?: CursorSafetyCap<T>): CursorResolvedSetting<T> {

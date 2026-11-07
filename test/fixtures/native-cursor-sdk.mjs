@@ -33,11 +33,19 @@ export const SqliteLocalAgentStore = {
     // Materialize the controlled store root so cleanup assertions exercise
     // extension-owned filesystem removal, not an already absent directory.
     await mkdir(options.stateRoot, { recursive: true });
-    const store = { ...options, dispose: async () => { store.disposed = true; } };
+    // Public LocalAgentStore components. The provider hands Agent.create/resume a wrapper over them,
+    // so storeRootOf() maps a passed store back to this opened store by component identity.
+    const store = { ...options, agents: {}, checkpoints: {}, runs: {}, runEvents: {}, dispose: async () => { store.disposed = true; } };
     state.stores.push(store);
     return store;
   },
 };
+export function storeRootOf(store) {
+  if (!store) return undefined;
+  const opened = state.stores.find((candidate) => candidate.agents === store.agents);
+  if (!opened) throw new Error("store was not opened through the offline fixture");
+  return opened.stateRoot;
+}
 export const createAgentPlatform = async () => ({ checkpointStore: { loadLatest: async () => undefined } });
 export const Agent = {
   archive: async (agentId) => {
@@ -164,6 +172,6 @@ export const Agent = {
 
 function assertStoredAgent(agentId, options) {
   if (!state.created.some(entry => entry.agentId === agentId &&
-    entry.options.local?.store?.stateRoot === options.local?.store?.stateRoot &&
+    storeRootOf(entry.options.local?.store) === storeRootOf(options.local?.store) &&
     entry.options.local?.cwd === options.local?.cwd)) throw new Error("offline agent not in selected store");
 }

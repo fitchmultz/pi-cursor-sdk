@@ -4,7 +4,7 @@ import { parseEnvBoolean } from "./cursor-env-boolean.js";
 export const CURSOR_API_KEY_ENV_VAR = "CURSOR_API_KEY";
 
 // Legacy no-auth availability policy only; never a configured models.json key.
-export const CURSOR_API_KEY_CONFIG_VALUE = "pi-cursor-sdk-cursor-api-key-placeholder";
+const CURSOR_API_KEY_CONFIG_VALUE = "pi-cursor-sdk-cursor-api-key-placeholder";
 
 const CURSOR_API_KEY_PLACEHOLDERS = new Set([
 	CURSOR_API_KEY_ENV_VAR,

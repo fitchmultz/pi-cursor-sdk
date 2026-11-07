@@ -21,6 +21,9 @@ export interface CursorPromptOptions {
 	agentMode?: AgentModeOption;
 	/** Compact callable-surface summary; included on bootstrap prompts when set. */
 	toolManifest?: string;
+	/** Captured by the turn owner before asynchronous work, when available. */
+	leanEnabled?: boolean;
+	nativeToolsEnabled?: boolean;
 	includePiBridgeGuidance?: boolean;
 	includePiAskQuestionGuidance?: boolean;
 }
@@ -31,15 +34,17 @@ const SECTION_SEPARATOR = "\n\n";
 
 export function getCursorPlanModeToolGuidanceText(
 	agentMode: AgentModeOption | undefined,
-	options: { includePiBridgeGuidance?: boolean } = {},
+	options: { includePiBridgeGuidance?: boolean; leanEnabled?: boolean; nativeToolsEnabled?: boolean } = {},
 ): string | undefined {
 	if (agentMode !== "plan") return undefined;
-	if (isCursorLeanEnabled()) {
+	if (options.leanEnabled ?? isCursorLeanEnabled()) {
 		return "Cursor SDK mode is plan for this run. Use exposed pi__* tools for inspection when needed; do not make changes without user approval.";
 	}
 	return [
 		"Cursor SDK mode is plan for this run. In pi-cursor-sdk, plan mode may still use available Cursor SDK/MCP tools for inspection when needed.",
-		"Safe/read-only shell commands that inspect or print information are allowed when Cursor chooses to call Shell; do not say Shell is blocked by plan mode and then call it anyway.",
+		options.nativeToolsEnabled === false
+			? "Only MCP tools exposed in this run are callable; native Shell and task/subagents are disabled."
+			: "Safe/read-only shell commands that inspect or print information are allowed when Cursor chooses to call Shell; do not say Shell is blocked by plan mode and then call it anyway.",
 		options.includePiBridgeGuidance === false
 			? undefined
 			: "Exposed pi__* bridge tools are also callable in plan mode when the user asks for them or they are needed to answer.",
@@ -47,38 +52,46 @@ export function getCursorPlanModeToolGuidanceText(
 }
 
 export function getCursorToolTailGuardText(
-	options: Pick<CursorPromptOptions, "agentMode"> & { includePlanModeGuidance?: boolean; includePiBridgeGuidance?: boolean } = {},
+	options: Pick<CursorPromptOptions, "agentMode" | "leanEnabled" | "nativeToolsEnabled"> & { includePlanModeGuidance?: boolean; includePiBridgeGuidance?: boolean } = {},
 ): string {
+	const leanEnabled = options.leanEnabled ?? isCursorLeanEnabled();
 	return [
-		isCursorLeanEnabled()
+		leanEnabled
 			? "For project shell commands, use explicit `cd` to the repo path."
-			: "Shell: use explicit `cd` to repo path for project commands; session cwd may differ from tool args.",
+			: options.nativeToolsEnabled === false
+				? undefined
+				: "Shell: use explicit `cd` to repo path for project commands; session cwd may differ from tool args.",
 		options.includePlanModeGuidance === false
 			? undefined
-			: getCursorPlanModeToolGuidanceText(options.agentMode, { includePiBridgeGuidance: options.includePiBridgeGuidance }),
+			: getCursorPlanModeToolGuidanceText(options.agentMode, { includePiBridgeGuidance: options.includePiBridgeGuidance, leanEnabled, nativeToolsEnabled: options.nativeToolsEnabled }),
 		"Exact-output requests: output exactly the requested text; no preamble or checks unless asked.",
 		"Tools: call available Cursor SDK/MCP tools; never print tool cards as assistant text.",
 		"Do not comment on GitHub issues or PRs unless the user asked.",
-		options.includePiBridgeGuidance === false ? undefined : getCursorPiBridgePreferenceText(),
+		options.includePiBridgeGuidance === false ? undefined : getCursorPiBridgePreferenceText({ leanEnabled, nativeToolsEnabled: options.nativeToolsEnabled }),
 	].filter((line): line is string => line !== undefined).join("\n");
 }
 
 function getCursorToolBoundaryText(
-	options: Pick<CursorPromptOptions, "agentMode" | "includePiAskQuestionGuidance"> & { hasToolManifest?: boolean; includePiBridgeGuidance?: boolean } = {},
+	options: Pick<CursorPromptOptions, "agentMode" | "includePiAskQuestionGuidance" | "leanEnabled" | "nativeToolsEnabled"> & { hasToolManifest?: boolean; includePiBridgeGuidance?: boolean } = {},
 ): string {
+	const leanEnabled = options.leanEnabled ?? isCursorLeanEnabled();
 	const includePiBridgeGuidance = options.includePiBridgeGuidance !== false;
-	const includePiAskQuestionGuidance = !isCursorLeanEnabled() && includePiBridgeGuidance && options.includePiAskQuestionGuidance === true;
+	const includePiAskQuestionGuidance = !leanEnabled && includePiBridgeGuidance && options.includePiAskQuestionGuidance === true;
 	const lines = [
 		"Cursor SDK tool boundary:",
 		"Call only Cursor SDK/MCP tools exposed in this run; pi history names, replay labels, and transcript names are not callable.",
+		leanEnabled || options.nativeToolsEnabled === false ? "Cursor native tools (including task/subagents): disabled. Only exposed MCP tools are callable." : undefined,
 		includePiBridgeGuidance
 			? "For exposed pi bridge tools, call pi__* MCP names, not pi card/history names."
 			: undefined,
-		isCursorLeanEnabled()
+		leanEnabled
+			? "Pi tool catalogs and guidelines below retain Pi names, not direct SDK call names. For direct calls, use only the matching exposed MCP name and its listed schema."
+			: undefined,
+		leanEnabled
 			? "Do not claim tool results unless the corresponding pi__* call completed."
 			: "Do not claim pi-side or WebSearch/WebFetch tools unless Cursor ran an equivalent tool.",
 		includePiAskQuestionGuidance ? "Use pi__cursor_ask_question only if the user asked to be prompted." : undefined,
-		getCursorPlanModeToolGuidanceText(options.agentMode, { includePiBridgeGuidance }),
+		getCursorPlanModeToolGuidanceText(options.agentMode, { includePiBridgeGuidance, leanEnabled, nativeToolsEnabled: options.nativeToolsEnabled }),
 		"Images: only latest user images are sent; ask to reattach prior images.",
 	].filter((line): line is string => line !== undefined);
 	if (options.hasToolManifest) {
@@ -88,7 +101,7 @@ function getCursorToolBoundaryText(
 }
 
 function getCursorBootstrapTailSections(
-	options: Pick<CursorPromptOptions, "agentMode" | "includePiBridgeGuidance">,
+	options: Pick<CursorPromptOptions, "agentMode" | "includePiBridgeGuidance" | "leanEnabled" | "nativeToolsEnabled">,
 	hasNewNativeUser = true,
 ): string[] {
 	return [
@@ -139,17 +152,22 @@ function formatToolCall(toolCall: ToolCall): string {
 	return `Historical tool request (${getCursorReplayPromptLabel(toolCall.name)}, call ${toolCall.id}): ${args}`;
 }
 
-function sanitizeSystemPromptForCursor(systemPrompt: string): string {
+function sanitizeSystemPromptForCursor(systemPrompt: string, leanEnabled: boolean): string {
+	// Lean executes Pi's projected tools through the bridge, so Pi's complete
+	// instructions remain authoritative. The boundary above translates call names;
+	// removing catalogs, guidelines, or appended policies would discard live rules.
+	if (leanEnabled) return systemPrompt.trim();
 	let sanitized = systemPrompt;
-	// Transcript-era Pi wraps its built-in tool catalog/rules in XML sections.
+	// Current Pi wraps its built-in tool catalog and rules in XML sections.
 	sanitized = sanitized.replace(
-		/<tools>\n[\s\S]*?\n\nIn addition to the tools above, you may have access to other custom tools depending on the project\.\n<\/tools>/g,
+		/<tools>\n[\s\S]*?\n\n(?:Additional tools may be available|In addition to the tools above, you may have access to other custom tools depending on the project)\.\n<\/tools>/g,
 		"Pi tool catalog omitted: Cursor can call only Cursor SDK tools exposed in this run.",
 	);
 	sanitized = sanitized.replace(
 		/<rules>\n[\s\S]*?\n<\/rules>\n\n(?=<docs>\nPi documentation )/g,
 		"<rules>\n- Be concise in your responses.\n- Show file paths clearly when working with files.\n</rules>\n\n",
 	);
+	// Also sanitize historical prompts retained by older Pi sessions.
 	sanitized = sanitized.replace(
 		/Available tools:\n[\s\S]*?\n\nIn addition to the tools above, you may have access to other custom tools depending on the project\.\n\n/g,
 		"Pi tool catalog omitted: Cursor can call only Cursor SDK tools exposed in this run.\n\n",
@@ -466,10 +484,13 @@ export function buildCursorSummaryPrompt(context: Context): CursorPrompt {
 }
 
 export function buildCursorPrompt(context: Context, options: CursorPromptOptions = {}): CursorPrompt {
+	const leanEnabled = options.leanEnabled ?? isCursorLeanEnabled();
 	const sectionsBeforeMessages: string[] = [getCursorToolBoundaryText({
 		agentMode: options.agentMode,
 		hasToolManifest: Boolean(options.toolManifest),
 		includePiBridgeGuidance: options.includePiBridgeGuidance,
+		leanEnabled,
+		nativeToolsEnabled: options.nativeToolsEnabled,
 		includePiAskQuestionGuidance: options.includePiAskQuestionGuidance,
 	})];
 	if (options.toolManifest) {
@@ -478,7 +499,7 @@ export function buildCursorPrompt(context: Context, options: CursorPromptOptions
 
 	const { systemPrompt } = resolveCursorPiContext(context);
 	if (systemPrompt) {
-		sectionsBeforeMessages.push(`System instructions from pi:\n${sanitizeSystemPromptForCursor(systemPrompt)}`);
+		sectionsBeforeMessages.push(`System instructions from pi:\n${sanitizeSystemPromptForCursor(systemPrompt, leanEnabled)}`);
 	}
 
 	const messages = normalizePiContextMessages(context.messages);
@@ -489,7 +510,7 @@ export function buildCursorPrompt(context: Context, options: CursorPromptOptions
 		})
 		.filter((section): section is { index: number; text: string } => section !== undefined);
 	const pending = options.nativeSourceRoles && getCursorPendingInput(messages, options.nativeSourceRoles);
-	const sectionsAfterMessages = getCursorBootstrapTailSections(options, !pending || pending.latestUserIndex >= 0);
+	const sectionsAfterMessages = getCursorBootstrapTailSections({ ...options, leanEnabled }, !pending || pending.latestUserIndex >= 0);
 	const images = extractLatestImages(messages, pending ? pending.latestUserIndex : getLatestUserMessageIndex(messages));
 	const imageTokenReserve = images.length * (options.imageTokenEstimate ?? 0);
 	const budgetOptions =

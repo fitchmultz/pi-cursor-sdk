@@ -9,11 +9,9 @@ import {
 	DISCARDED_INCOMPLETE_TOOL_CALL_REASON,
 	CursorSdkEventDebugSink,
 	attachCursorSdkEventDebugPiStreamTap,
-	hashCursorSdkCallId,
 	recordDiscardedIncompleteStartedToolCall,
 	resolveCursorSdkEventDebugBaseDir,
 	resolveCursorSdkEventDebugEnabled,
-	serializeDiscardedIncompleteStartedToolCall,
 	__testUtils as sdkEventDebugTestUtils,
 } from "../src/cursor-sdk-event-debug.js";
 import { backfillPiSessionSnapshot, parseDebugProviderEventsArgs } from "../scripts/debug-provider-events.mjs";
@@ -35,7 +33,7 @@ describe("cursor sdk event debug sink", () => {
 		);
 	});
 
-	it("records raw payloads to disk without stderr by default", async () => {
+	it.each([false, true])("records raw payloads to disk with stderr summary enabled=%s", async (stderrEnabled) => {
 		const artifactDir = mkdtempSync(join(tmpdir(), "pi-cursor-sdk-event-debug-"));
 		const stderrLines: string[] = [];
 		const originalWrite = process.stderr.write.bind(process.stderr);
@@ -52,6 +50,7 @@ describe("cursor sdk event debug sink", () => {
 				env: {
 					PI_CURSOR_SDK_EVENT_DEBUG: "1",
 					PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR: artifactDir,
+					...(stderrEnabled ? { PI_CURSOR_SDK_EVENT_DEBUG_STDERR: "1" } : {}),
 				},
 			});
 			expect(sink?.artifactDir).toBe(artifactDir);
@@ -113,7 +112,7 @@ describe("cursor sdk event debug sink", () => {
 			});
 			expect(readFileSync(join(artifactDir, sdkEventDebugTestUtils.ARTIFACTS.timeline), "utf8")).toContain('"layer":"display-decisions"');
 			expect(readFileSync(join(artifactDir, sdkEventDebugTestUtils.ARTIFACTS.finalPartial), "utf8")).toContain('"toolUse"');
-			expect(stderrLines.some((line) => line.includes(CURSOR_SDK_EVENT_DEBUG_LOG_PREFIX))).toBe(false);
+			expect(stderrLines.some((line) => line.includes(CURSOR_SDK_EVENT_DEBUG_LOG_PREFIX))).toBe(stderrEnabled);
 		} finally {
 			process.stderr.write = originalWrite;
 			rmSync(artifactDir, { recursive: true, force: true });
@@ -234,34 +233,6 @@ describe("cursor sdk event debug sink", () => {
 				sdkEventDebugTestUtils.ARTIFACTS.timeline,
 			]);
 		} finally {
-			rmSync(artifactDir, { recursive: true, force: true });
-		}
-	});
-
-	it("can opt in to stderr summary output", async () => {
-		const artifactDir = mkdtempSync(join(tmpdir(), "pi-cursor-sdk-event-debug-"));
-		const stderrLines: string[] = [];
-		const originalWrite = process.stderr.write.bind(process.stderr);
-		process.stderr.write = ((chunk: string | Uint8Array) => {
-			stderrLines.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
-			return true;
-		}) as typeof process.stderr.write;
-
-		try {
-			const sink = CursorSdkEventDebugSink.maybeCreate({
-				cwd: "/repo",
-				modelId: "composer-2.5",
-				provider: "cursor",
-				env: {
-					PI_CURSOR_SDK_EVENT_DEBUG: "1",
-					PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR: artifactDir,
-					PI_CURSOR_SDK_EVENT_DEBUG_STDERR: "1",
-				},
-			});
-			await sink?.finalize();
-			expect(stderrLines.some((line) => line.includes(CURSOR_SDK_EVENT_DEBUG_LOG_PREFIX))).toBe(true);
-		} finally {
-			process.stderr.write = originalWrite;
 			rmSync(artifactDir, { recursive: true, force: true });
 		}
 	});
@@ -529,25 +500,6 @@ describe("cursor sdk event debug session grouping", () => {
 });
 
 describe("discarded incomplete started tool calls", () => {
-	it("hashes call ids without exposing raw values", () => {
-		expect(hashCursorSdkCallId("secret-call-id-123")).toMatch(/^[a-f0-9]{8}$/);
-		expect(hashCursorSdkCallId("secret-call-id-123")).toBe(hashCursorSdkCallId("secret-call-id-123"));
-		expect(hashCursorSdkCallId("secret-call-id-123")).not.toBe("secret-call-id-123");
-	});
-
-	it("serializes discarded incomplete started tool calls with bounded fields", () => {
-		expect(
-			serializeDiscardedIncompleteStartedToolCall({
-				toolName: "read",
-				callId: "call-abc",
-			}),
-		).toEqual({
-			event: "discarded-incomplete-started-tool-call",
-			toolName: "read",
-			callIdHash: hashCursorSdkCallId("call-abc"),
-			reason: DISCARDED_INCOMPLETE_TOOL_CALL_REASON,
-		});
-	});
 
 	it("records discarded incomplete started tool calls to coordinator-events.jsonl without stderr by default", async () => {
 		const artifactDir = mkdtempSync(join(tmpdir(), "pi-cursor-sdk-discarded-debug-"));
@@ -576,10 +528,15 @@ describe("discarded incomplete started tool calls", () => {
 			await sink?.finalize();
 
 			const coordinatorEvents = readFileSync(join(artifactDir, sdkEventDebugTestUtils.ARTIFACTS.coordinatorEvents), "utf8");
-			expect(coordinatorEvents).toContain('"phase":"discarded-incomplete-started-tool-call"');
-			expect(coordinatorEvents).toContain('"toolName":"read"');
-			expect(coordinatorEvents).toContain(`"callIdHash":"${hashCursorSdkCallId("call-abc")}"`);
-			expect(coordinatorEvents).toContain(`"reason":"${DISCARDED_INCOMPLETE_TOOL_CALL_REASON}"`);
+			expect(JSON.parse(coordinatorEvents.trim())).toMatchObject({
+				phase: "discarded-incomplete-started-tool-call",
+				payload: {
+					event: "discarded-incomplete-started-tool-call",
+					toolName: "read",
+					callIdHash: "313d0c18",
+					reason: DISCARDED_INCOMPLETE_TOOL_CALL_REASON,
+				},
+			});
 			expect(coordinatorEvents).not.toContain("call-abc");
 			expect(stderrLines.some((line) => line.includes("discarded-incomplete-started-tool-call"))).toBe(false);
 		} finally {
@@ -604,7 +561,7 @@ describe("discarded incomplete started tool calls", () => {
 			expect(line.startsWith(`${CURSOR_SDK_EVENT_DEBUG_LOG_PREFIX} `)).toBe(true);
 			expect(line).toContain('"event":"discarded-incomplete-started-tool-call"');
 			expect(line).toContain('"toolName":"read"');
-			expect(line).toContain(`"callIdHash":"${hashCursorSdkCallId("call-abc")}"`);
+			expect(line).toContain('"callIdHash":"313d0c18"');
 			expect(line).toContain(`"reason":"${DISCARDED_INCOMPLETE_TOOL_CALL_REASON}"`);
 			expect(line).not.toContain("call-abc");
 		} finally {
@@ -680,7 +637,7 @@ describe("debug-provider-events maintainer probe", () => {
 		}
 	});
 
-	it("parses args and prompt file overrides", () => {
+	it("parses provider probe prompt and option overrides", () => {
 		expect(
 			parseDebugProviderEventsArgs(["--cwd", "/tmp/work", "--model", "cursor/composer-2.5", "--prompt", "hello"], {
 				CURSOR_API_KEY: "key",
@@ -693,18 +650,9 @@ describe("debug-provider-events maintainer probe", () => {
 		});
 	});
 
-	it("forwards explicit --setting-sources none to child pi env", () => {
+	it.each(["none", "  ,  "])("keeps disabled setting sources %j disabled through child env", (sources) => {
 		const args = parseDebugProviderEventsArgs(
-			["--prompt", "hello", "--setting-sources", "none"],
-			{ CURSOR_API_KEY: "key" },
-		);
-		expect(args.settingSources).toBeUndefined();
-		expect(serializeCursorSettingSources(args.settingSources)).toBe("none");
-	});
-
-	it("does not re-enable all when comma-only setting sources round-trip through child env", () => {
-		const args = parseDebugProviderEventsArgs(
-			["--prompt", "hello", "--setting-sources", "  ,  "],
+			["--prompt", "hello", "--setting-sources", sources],
 			{ CURSOR_API_KEY: "key" },
 		);
 		expect(args.settingSources).toBeUndefined();

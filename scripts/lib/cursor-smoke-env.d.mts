@@ -13,6 +13,7 @@ export declare function buildCursorSmokeEnv(options?: {
 	baseEnv?: Record<string, string | undefined>;
 	nodePath?: string;
 	settingSources?: string | null;
+	lean?: boolean;
 	nativeToolDisplay?: boolean;
 	registerNativeTools?: boolean;
 	bridge?: boolean;
@@ -24,6 +25,7 @@ export declare function buildCursorSmokeEnvPlan(options?: {
 	baseEnv?: Record<string, string | undefined>;
 	nodePath?: string;
 	settingSources?: string | null;
+	lean?: boolean;
 	nativeToolDisplay?: boolean;
 	registerNativeTools?: boolean;
 	bridge?: boolean;

@@ -142,6 +142,10 @@ interface SessionCursorAgentCreateParams {
 	settingSources?: SettingSource[];
 	localSafety?: CursorLocalSafetyOptions;
 	agents?: AgentOptions["agents"];
+	/** Captured by the turn owner before asynchronous acquisition, when available. */
+	leanEnabled?: boolean;
+	/** Captured by the turn owner before asynchronous acquisition. */
+	nativeToolsEnabled?: boolean;
 	useHttp1ForAgent?: boolean;
 	onBridgeToolRequest?: (request: CursorPiBridgeToolRequest) => void;
 	debugRecorder?: CursorSdkEventDebugRecorder;
@@ -155,7 +159,7 @@ interface SessionCursorAgentCreateParams {
 const sessionAgentsByScope = new Map<string, SessionCursorAgentPoolEntry>();
 const invalidatedScopeKeys = new Set<string>();
 const deadTransportScopeKeys = new Set<string>();
-let deadTransportAgentDisposeTimeoutMs = 3000;
+const DEAD_TRANSPORT_AGENT_DISPOSE_TIMEOUT_MS = 3000;
 const terminalDisposedScopeGenerations = new Map<string, number>();
 const scopeCreationGenerations = new Map<string, number>();
 const EMPTY_POOL_STATE: SessionCursorAgentPoolState = { status: "empty" };
@@ -172,11 +176,12 @@ export function buildCursorLocalAgentOptions(options: {
 	settingSources?: SettingSource[];
 	localSafety?: CursorLocalSafetyOptions;
 	store?: LocalAgentStore;
+	leanEnabled?: boolean;
 }): LocalAgentOptions {
 	return {
 		cwd: options.cwd,
 		...(options.store ? { store: options.store } : {}),
-		...(isCursorLeanEnabled() ? { settingSources: [] } : options.settingSources ? { settingSources: options.settingSources } : {}),
+		...((options.leanEnabled ?? isCursorLeanEnabled()) ? { settingSources: [] } : options.settingSources ? { settingSources: options.settingSources } : {}),
 		...(options.localSafety?.autoReview === true ? { autoReview: true } : {}),
 		...(options.localSafety?.sandboxEnabled === true ? { sandboxOptions: { enabled: true } } : {}),
 	};
@@ -254,9 +259,10 @@ function buildSessionAgentPoolKey(scopeKey: string, params: SessionCursorAgentCr
 				? "http1:on"
 				: "http1:off",
 		buildApiKeyPoolKeyFingerprint(params.apiKey),
-		buildBridgePoolKeySuffix("bridge" in params ? params.bridge : getRegisteredCursorPiToolBridge(), params.bridgeDeclaredTools),
+		buildBridgePoolKeySuffix("bridge" in params ? params.bridge : getRegisteredCursorPiToolBridge(), params.leanEnabled ? params.bridgeDeclaredTools : undefined),
 		...buildCustomSubagentPoolKeySuffix(params.agents),
-		...(isCursorLeanEnabled() ? ["lean"] : []),
+		// Omit default policy markers so historical durable keys stay stable.
+		...(params.leanEnabled ? ["lean"] : params.nativeToolsEnabled === false ? ["tools:mcp-only"] : []),
 	].join("\0");
 }
 
@@ -276,7 +282,7 @@ async function disposePoolEntry(entry: SessionCursorAgentPoolEntry, options?: { 
 		await (options?.deadTransport
 			? Promise.race([
 					disposal,
-					new Promise<void>((resolve) => setTimeout(resolve, deadTransportAgentDisposeTimeoutMs).unref?.()),
+					new Promise<void>((resolve) => setTimeout(resolve, DEAD_TRANSPORT_AGENT_DISPOSE_TIMEOUT_MS).unref?.()),
 				])
 			: disposal);
 	} catch {
@@ -484,7 +490,8 @@ async function createSessionAgentEntry(
 		const registeredBridge = params.bridge;
 		if (registeredBridge) {
 			bridgeRun = await registeredBridge.createRun({
-				declaredTools: params.bridgeDeclaredTools,
+				// Legacy mode keeps the registry-owned surface; lean follows Pi's projected loadout.
+				declaredTools: params.leanEnabled ? params.bridgeDeclaredTools : undefined,
 				onToolRequest: params.onBridgeToolRequest,
 				debugRecorder: params.debugRecorder,
 			});
@@ -514,17 +521,20 @@ async function createSessionAgentEntry(
 		sessionStore = storeSelection.sessionStore;
 		const resumeAttemptAllowed = storeSelection.resumeAttemptAllowed;
 		let resumeNotice = storeSelection.resumeFallback ? LOCAL_RESUME_FALLBACK_NOTICE : undefined;
-		const buildAgentOptions = () => ({
+		const buildAgentOptions = (): AgentOptions => ({
 			apiKey: params.apiKey,
 			model: params.modelSelection,
 			mode: params.agentMode,
-			...(isCursorLeanEnabled() ? { tools: bridgeRun ? ["mcp"] : [] } : {}),
 			local: buildCursorLocalAgentOptions({
 				cwd: params.cwd,
+				leanEnabled: params.leanEnabled,
 				settingSources: params.settingSources,
 				localSafety: params.localSafety,
 				store: sessionStore!.store,
 			}),
+			...(params.leanEnabled
+				? { tools: bridgeRun ? ["mcp"] : [] }
+				: params.nativeToolsEnabled === false ? { tools: ["mcp"] } : {}),
 			...(bridgeRun?.mcpServers ? { mcpServers: bridgeRun.mcpServers } : {}),
 			...(params.agents && Object.keys(params.agents).length ? { agents: params.agents } : {}),
 		});
@@ -589,7 +599,7 @@ export {
 } from "./cursor-session-send-policy.js";
 
 export function invalidateSessionAgent(
-	scopeKey: string = getCursorSessionScopeKey(),
+	scopeKey: string,
 	options?: { deadTransport?: boolean },
 ): void {
 	invalidatedScopeKeys.add(scopeKey);
@@ -597,7 +607,14 @@ export function invalidateSessionAgent(
 }
 
 export async function acquireSessionCursorAgent(input: SessionCursorAgentCreateParams): Promise<SessionCursorAgentLease> {
-	const params = { ...input, scope: input.scope ?? getCursorSessionScopeSnapshot(), bridge: "bridge" in input ? input.bridge : getRegisteredCursorPiToolBridge() };
+	const leanEnabled = input.leanEnabled ?? isCursorLeanEnabled();
+	const params = {
+		...input,
+		leanEnabled,
+		nativeToolsEnabled: leanEnabled ? false : input.nativeToolsEnabled,
+		scope: input.scope ?? getCursorSessionScopeSnapshot(),
+		bridge: "bridge" in input ? input.bridge : getRegisteredCursorPiToolBridge(),
+	};
 	const scopeKey = params.scope.scopeKey;
 	const persistentStore = params.scope.sessionFile !== undefined;
 	params.storeRoot = persistentStore && params.storeRoot !== undefined ? normalizeCursorCustomStoreRoot(params.storeRoot) : undefined;
@@ -730,11 +747,6 @@ export const __testUtils = {
 	resetSessionCursorAgent,
 	refreshSessionCursorAgentConfig,
 	disposeAllSessionCursorAgents,
-	setDeadTransportAgentDisposeTimeoutMs(ms: number): number {
-		const previous = deadTransportAgentDisposeTimeoutMs;
-		deadTransportAgentDisposeTimeoutMs = ms;
-		return previous;
-	},
 	SessionCursorAgentCreationSupersededError,
 	SessionCursorAgentScopeClosedError,
 };

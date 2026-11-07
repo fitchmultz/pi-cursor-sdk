@@ -8,6 +8,7 @@ import {
 	registerCursorPiToolBridge,
 	resolveCursorPiToolBridgeCallTimeoutMs,
 	type CursorPiToolBridgeRun,
+	type CursorPiBridgeToolRequest,
 } from "../src/cursor-pi-tool-bridge.js";
 import {
 	createBridgePiHarness,
@@ -26,6 +27,7 @@ async function waitForQueuedRequest(run: CursorPiToolBridgeRun) {
 
 describe("cursor pi tool bridge CallTool deadline", () => {
 	afterEach(async () => {
+		vi.useRealTimers();
 		delete process.env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS;
 		delete process.env.PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS;
 		await __testUtils.resetRegisteredBridgeForTests();
@@ -60,10 +62,12 @@ describe("cursor pi tool bridge CallTool deadline", () => {
 		try {
 			const call = client.callTool({ name: "pi__bash", arguments: { command: "held by human" } });
 			const request = await waitForQueuedRequest(bridge);
+			vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 			coordinator.requestIdleDispose(run);
-			await new Promise((resolve) => setTimeout(resolve, 75));
+			await vi.advanceTimersByTimeAsync(75);
 			expect(run.disposed).toBe(false);
 			expect(cancel).not.toHaveBeenCalled();
+			vi.useRealTimers();
 			await bridge.resolveToolResults([{ role: "toolResult", toolCallId: request.piToolCallId, toolName: "bash",
 				content: [{ type: "text", text: "answer" }], isError: false, timestamp: Date.now() }]);
 			expect(await call).toMatchObject({ content: [{ type: "text", text: "answer" }] });
@@ -71,6 +75,7 @@ describe("cursor pi tool bridge CallTool deadline", () => {
 			await vi.waitFor(() => expect(run.disposed).toBe(true));
 			expect(cancel).toHaveBeenCalledOnce();
 		} finally {
+			vi.useRealTimers();
 			unsubscribe();
 			await coordinator.release(run);
 			await client.close().catch(() => undefined);
@@ -94,19 +99,21 @@ describe("cursor pi tool bridge CallTool deadline", () => {
 		const client = new Client({ name: "pi-cursor-sdk-test", version: "1.0.0" });
 		const transport = new StreamableHTTPClientTransport(new URL(getCursorPiBridgeMcpUrl(run)));
 		await client.connect(transport);
+		const queued = Promise.withResolvers<CursorPiBridgeToolRequest>();
+		run.setOnToolRequest(queued.resolve);
 		try {
+			vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 			const callResult = client.callTool({ name: "pi__bash", arguments: { command: "sleep 30" } }).catch((error: unknown) => error);
-			const request = await waitForQueuedRequest(run);
+			const request = await queued.promise;
 			const abort = vi.fn();
 			await pi.runToolCall(
 				{ type: "tool_call", toolCallId: request.piToolCallId, toolName: "bash", input: request.args },
 				{ signal: new AbortController().signal, abort },
 			);
 
-			const result = await Promise.race([
-				callResult,
-				new Promise((resolve) => setTimeout(() => resolve("still pending"), 2_000)),
-			]);
+			await vi.advanceTimersByTimeAsync(500);
+			vi.useRealTimers();
+			const result = await callResult;
 			expect(result).toBeInstanceOf(Error);
 			expect((result as Error).message).toMatch(/timed out.*500 ?ms|MCP error/i);
 			expect(abort).toHaveBeenCalledOnce();
@@ -117,6 +124,7 @@ describe("cursor pi tool bridge CallTool deadline", () => {
 			expect(currentOwner).toHaveBeenCalledTimes(2);
 			detachCurrentOwner();
 		} finally {
+			vi.useRealTimers();
 			await client.close().catch(() => undefined);
 			await transport.close().catch(() => undefined);
 			await run.dispose();
@@ -170,9 +178,14 @@ describe("cursor pi tool bridge CallTool deadline", () => {
 		const client = new Client({ name: "pi-cursor-sdk-test", version: "1.0.0" });
 		const transport = new StreamableHTTPClientTransport(new URL(getCursorPiBridgeMcpUrl(run)));
 		await client.connect(transport);
+		const queued = Promise.withResolvers<CursorPiBridgeToolRequest>();
+		run.setOnToolRequest(queued.resolve);
 		try {
+			vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 			const callResult = client.callTool({ name: "pi__bash", arguments: { command: "sleep 30" } }).catch((error: unknown) => error);
-			const request = await waitForQueuedRequest(run);
+			const request = await queued.promise;
+			await vi.advanceTimersByTimeAsync(500);
+			vi.useRealTimers();
 			expect(await callResult).toBeInstanceOf(Error);
 
 			const hookResult = await pi.runToolCall({
@@ -184,6 +197,7 @@ describe("cursor pi tool bridge CallTool deadline", () => {
 
 			expect(hookResult).toEqual({ block: true, reason: "Cursor pi bridge tool call is no longer pending" });
 		} finally {
+			vi.useRealTimers();
 			await client.close().catch(() => undefined);
 			await transport.close().catch(() => undefined);
 			await run.dispose();

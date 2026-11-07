@@ -1,5 +1,7 @@
+import type { BeforeAgentStartEvent } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import { registerCursorModelLifecycle } from "../src/cursor-model-lifecycle.js";
+import { createDefaultSystemPromptOptions, createExtensionTestContext } from "./helpers/context-fixtures.js";
 import { createHarnessEventApi } from "./helpers/event-harness.js";
 import { makeModel } from "./helpers/model-fixtures.js";
 
@@ -29,8 +31,8 @@ describe("registerCursorModelLifecycle", () => {
 		]);
 	});
 
-	it("runs phase-specific session and before-agent handlers through the same registration", async () => {
-		const events = createHarnessEventApi();
+	it.each(["user", "custom"] as const)("runs phase-specific handlers for a %s start", async (messageType) => {
+		const events = { on: vi.fn() };
 		const calls: string[] = [];
 		registerCursorModelLifecycle(events, {
 			sessionStart: (_event, ctx) => {
@@ -46,8 +48,38 @@ describe("registerCursorModelLifecycle", () => {
 		});
 
 		const model = makeModel("cursor-model");
-		await events.runSessionStart({ model });
-		const result = await events.runBeforeAgentStart({ model });
+		const ctx = createExtensionTestContext({ model });
+		const sessionStart = events.on.mock.calls.find(([name]) => name === "session_start")![1];
+		const beforeAgentStart = events.on.mock.calls.find(([name]) => name === "before_agent_start")![1];
+		await sessionStart({ type: "session_start", reason: "startup" }, ctx);
+		const shared = {
+			type: "before_agent_start" as const,
+			systemPrompt: "",
+			systemPromptOptions: createDefaultSystemPromptOptions(ctx.cwd),
+		};
+		const userEvent = {
+			...shared,
+			messageType: "user",
+			prompt: "start",
+		} satisfies BeforeAgentStartEvent & { messageType: "user" };
+		const customEvent = {
+			...shared,
+			messageType: "custom" as const,
+			message: {
+				role: "custom" as const,
+				customType: "completion",
+				content: "Background command finished",
+				display: true,
+				timestamp: 0,
+			},
+		};
+		// Old hosts cannot emit this shape; new hosts must validate the complete event.
+		customEvent satisfies (
+			BeforeAgentStartEvent extends { messageType: string }
+				? BeforeAgentStartEvent
+				: Omit<BeforeAgentStartEvent, "prompt" | "images">
+		);
+		const result = await beforeAgentStart(messageType === "user" ? userEvent : customEvent, ctx);
 
 		expect(calls).toEqual([
 			"session:cursor-model",

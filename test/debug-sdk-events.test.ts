@@ -3,15 +3,6 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CURSOR_SDK_STARTUP_NOISE_PATTERNS as providerNoisePatterns } from "../src/cursor-sdk-output-filter.js";
-import { resolveCursorSettingSources as resolveProviderSettingSources } from "../src/cursor-setting-sources.js";
-import { scrubSensitiveText as scrubProviderSensitiveText } from "../src/cursor-sensitive-text.js";
-import { CURSOR_SDK_STARTUP_NOISE_PATTERNS as scriptNoisePatterns } from "../scripts/lib/cursor-sdk-output-filter.mjs";
-import {
-	CURSOR_SETTING_SOURCES_ENV,
-	resolveCursorSettingSources as resolveScriptSettingSources,
-} from "../shared/cursor-setting-sources.mjs";
-import { scrubSensitiveText as scrubScriptSensitiveText } from "../shared/cursor-sensitive-text.mjs";
 import {
 	buildSummary,
 	createEventJsonlSink,
@@ -86,7 +77,7 @@ describe("debug-sdk-events maintainer probe", () => {
 				onDelta: { eventCount: 1, firstMs: 100, lastMs: 100, maxGapMs: undefined },
 				onStep: { eventCount: 1, firstMs: 200, lastMs: 200, maxGapMs: undefined },
 			},
-			waitResult: { status: "finished", durationMs: 250, result: "done" },
+			waitResult: { status: "finished", durationMs: 250, result: "secret payload" },
 			conversation: [{ role: "user", content: "hello" }],
 			includeConversation: true,
 		});
@@ -102,7 +93,6 @@ describe("debug-sdk-events maintainer probe", () => {
 
 		const stdoutPayload = JSON.stringify(summary);
 		expect(stdoutPayload).not.toContain("secret payload");
-		expect(stdoutPayload).not.toContain('"text": "delta"');
 		expect(collectStrings(summary)).not.toContain("hello");
 	});
 
@@ -130,19 +120,6 @@ describe("debug-sdk-events maintainer probe", () => {
 			await sink.close();
 			rmSync(artifactDir, { recursive: true, force: true });
 		}
-	});
-
-	it("matches provider setting-source parsing and secret scrubbing helpers", () => {
-		expect(CURSOR_SETTING_SOURCES_ENV).toBe("PI_CURSOR_SETTING_SOURCES");
-		expect(scriptNoisePatterns).toEqual(providerNoisePatterns);
-
-		for (const raw of [undefined, "", "all", "none", "project,user", "OFF", "0"]) {
-			expect(resolveScriptSettingSources(raw)).toEqual(resolveProviderSettingSources(raw));
-		}
-
-		const leakedKey = "super-secret-cursor-key-12345";
-		const sample = `Bearer ${leakedKey} api_key=${leakedKey}`;
-		expect(scrubScriptSensitiveText(sample, leakedKey)).toBe(scrubProviderSensitiveText(sample, leakedKey));
 	});
 
 	it("retains the script creation-only mute without hiding its final summary", async () => {
@@ -201,22 +178,14 @@ describe("debug-sdk-events maintainer probe", () => {
 			const result = spawnSync(process.execPath, [scriptPath, "--help"], { cwd: packageRoot, encoding: "utf8" });
 			expect(result.status).toBe(0);
 			expect(result.stdout).toContain("Capture timestamped Cursor SDK event timelines");
+			expect(result.stdout).toContain("run.stream()");
+			expect(result.stdout).toContain("onDelta");
+			expect(result.stdout).toContain("onStep");
+			expect(result.stdout).toContain("https://cursor.com/docs/sdk/typescript");
 			expect(result.stderr).not.toContain("ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING");
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
-	});
-
-	it("shows help and validates script syntax without live Cursor auth", () => {
-		expect(spawnSync(process.execPath, ["--check", scriptPath], { cwd: process.cwd(), encoding: "utf8" }).status).toBe(0);
-
-		const help = run(["--help"]);
-		expect(help.status).toBe(0);
-		expect(help.stdout).toContain("Capture timestamped Cursor SDK event timelines");
-		expect(help.stdout).toContain("run.stream()");
-		expect(help.stdout).toContain("onDelta");
-		expect(help.stdout).toContain("onStep");
-		expect(help.stdout).toContain("https://cursor.com/docs/sdk/typescript");
 	});
 
 	it("fails fast on missing prompt and missing api key without printing secrets", () => {

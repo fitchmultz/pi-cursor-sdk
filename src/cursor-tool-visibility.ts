@@ -41,7 +41,3 @@ export function classifyCursorToolVisibility(toolCall: unknown): CursorToolVisib
 		fastLocalDiscovery: config?.fastLocalDiscovery ?? false,
 	};
 }
-
-export function isFastLocalDiscoveryTool(toolCall: unknown): boolean {
-	return classifyCursorToolVisibility(toolCall).fastLocalDiscovery;
-}

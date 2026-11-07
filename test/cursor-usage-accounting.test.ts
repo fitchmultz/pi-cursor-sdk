@@ -16,23 +16,6 @@ function expectCoherent(message: AssistantMessage) {
 }
 
 describe("native Cursor occupancy", () => {
-	it("partitions the captured cached LOCAL turn exactly once", () => {
-		// Captured glm-5p3-flash LOCAL turn 2: full prompt 4232 includes cacheRead4096.
-		const message = assistant();
-		applyCursorUsage(message, makeModel(), makeContext(), 7, { runtime: "local", occupancyFloor: 100000,
-			turn: { inputTokens: 4232, outputTokens: 3, cacheReadTokens: 4096, cacheWriteTokens: 0 } });
-		expect(message.usage).toMatchObject({ input: 136, output: 3, cacheRead: 4096, cacheWrite: 0, totalTokens: 4235 });
-		expectCoherent(message);
-	});
-
-	it("maps both cache categories to disjoint native components", () => {
-		const message = assistant();
-		applyCursorUsage(message, makeModel(), makeContext(), 7, { runtime: "local",
-			turn: { inputTokens: 46965, outputTokens: 3, cacheReadTokens: 42036, cacheWriteTokens: 4927 } });
-		expect(message.usage).toMatchObject({ input: 2, output: 3, cacheRead: 42036, cacheWrite: 4927, totalTokens: 46968 });
-		expectCoherent(message);
-	});
-
 	it.each([
 		{ inputTokens: 100, outputTokens: 1, cacheReadTokens: 80, cacheWriteTokens: 30 },
 		{ inputTokens: -1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },

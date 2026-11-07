@@ -54,7 +54,7 @@ SKIP_LIVE=1 npm run smoke:isolated
 npm run smoke:isolated -- --self-test
 ```
 
-`npm run smoke:isolated` follows the same smoke-runner env contract as live/visual/steering helpers: pack-only work resolves only `node`, `npm`, and `env` from the parent shell and does not require `pi`; live checks then resolve `pi` and `rg`. It runs pi/npm shims with the resolved Node directory first on `PATH`, clears Cursor SDK event-debug env, forces `PI_CURSOR_SETTING_SOURCES=none` for provider checks, and explicitly unsets `PI_CURSOR_SETTING_SOURCES` for install/list checks.
+`npm run smoke:isolated` keeps its basic provider check on the built-in lean default, but explicitly pins `PI_CURSOR_LEAN=0`, native registration on, and the pi bridge off for native/plan-strip replay checks. It follows the same smoke-runner env contract as live/visual/steering helpers: pack-only work resolves only `node`, `npm`, and `env` from the parent shell and does not require `pi`; live checks then resolve `pi` and `rg`. It runs pi/npm shims with the resolved Node directory first on `PATH`, clears Cursor SDK event-debug env, forces `PI_CURSOR_SETTING_SOURCES=none` for provider checks, and explicitly unsets `PI_CURSOR_SETTING_SOURCES` for install/list checks.
 
 Scan persisted sessions for native replay tool failures:
 
@@ -70,8 +70,8 @@ The replay scan flags only error `toolResult` / error assistant messages with `T
 Pass criteria:
 
 - `node --version` reports Node 24+.
-- `pi --version` reports official Pi 0.87.1 or the selected official-latest/current-`fitchmultz/pi` compatibility target.
-- `npm ls` shows exact `@cursor/sdk@1.0.37`; development `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` 1.1.0 with matching lockfile-resolved Pi cohort, nested host TypeBox 1.3.27 and root validation TypeBox 1.3.36; and the bundled bridge runtime closure `@modelcontextprotocol/server@2.3.1`, `@modelcontextprotocol/hono@2.0.2`, `hono@4.13.13`, and `@hono/node-server@2.1.3`. These locked development snapshots are not qualification targets; resolve latest stable official Pi and current `fitchmultz/pi` main once per workflow run.
+- `pi --version` reports official Pi 1.5.0 or the selected official-latest/current-`fitchmultz/pi` compatibility target.
+- `npm ls` shows exact `@cursor/sdk@1.0.40`; development `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` 1.5.0 with matching lockfile-resolved Pi cohort, nested host TypeBox 1.3.27 and root validation TypeBox 1.3.36; and the bundled bridge runtime closure `@modelcontextprotocol/server@2.3.1`, `@modelcontextprotocol/hono@2.0.2`, `hono@4.13.13`, and `@hono/node-server@2.1.3`. These locked development snapshots are not qualification targets; resolve latest stable official Pi and current `fitchmultz/pi` main once per workflow run.
 - `cursor/grok-4.6` appears in the model list.
 - No Cursor key or auth token is printed.
 - If neither `~/.pi/agent/auth.json` cursor auth nor `CURSOR_API_KEY` is available, stop and report the live smoke as blocked.
@@ -136,7 +136,7 @@ Pass criteria:
 
 ## 4. Focused visual card/color rendering check
 
-This is a visual debug menu for changed card/color behavior requiring new live evidence. Select only the relevant category below, or reuse a batched existing platform suite; do not execute the entire list by default. It requires offscreen TUI visual inspection, not only JSONL or code review. Use Node 24+, official Pi 0.87.1 or another current compatibility target, exact `@cursor/sdk@1.0.37`, a fresh temporary session dir, Cursor SDK `plan` mode, native replay enabled, and the checked-in visual runner. The runner resolves `pi` by directly walking the parent `PATH`, uses `process.execPath` for Node, and prepends that Node directory for both prereq checks and tmux launches so `#!/usr/bin/env node` shims use the validated Node. The default matrix is native replay only: native replay registration is forced on, settings sources are `none`, the pi bridge is off, overlapping built-in pi tools are not exposed, and inherited Cursor SDK event-debug artifact env is cleared. With `--event-debug`, debug capture writes to a deterministic directory under `VISUAL_DIR`.
+This is a visual debug menu for changed card/color behavior requiring new live evidence. Select only the relevant category below, or reuse a batched existing platform suite; do not execute the entire list by default. It requires offscreen TUI visual inspection, not only JSONL or code review. Use Node 24+, official Pi 1.5.0 or another current compatibility target, exact `@cursor/sdk@1.0.40`, a fresh temporary session dir, Cursor SDK `plan` mode, native replay enabled, and the checked-in visual runner. The runner resolves `pi` by directly walking the parent `PATH`, uses `process.execPath` for Node, and prepends that Node directory for both prereq checks and tmux launches so `#!/usr/bin/env node` shims use the validated Node. The default matrix is native replay only: `PI_CURSOR_LEAN=0` is forced so native replay registration and explicit bridge/builtin overrides remain effective, native replay registration is forced on, settings sources are `none`, the pi bridge is off, overlapping built-in pi tools are not exposed, and inherited Cursor SDK event-debug artifact env is cleared. With `--event-debug`, debug capture writes to a deterministic directory under `VISUAL_DIR`.
 
 ```bash
 VISUAL_DIR="$(mktemp -d /tmp/pi-cursor-sdk-1016-visual.XXXXXX)"
@@ -185,7 +185,7 @@ npm run smoke:visual -- "${VISUAL_ARGS[@]}" \
   --prompt 'Stay in Cursor plan mode. If Cursor exposes plan, todo, task, or mode activity for this request, use that capability to outline a tiny unit test without editing files. Otherwise answer with a concise numbered plan. Do not use shell or file mutation tools.'
 ```
 
-By default, `npm run smoke:visual` writes `.ansi`, `.txt`, `.html`, `.png`, and `.jsonl.path` artifacts. Check browser availability before a paid run. If PNG rendering fails but ANSI/HTML evidence was retained, render that retained evidence with the canonical browser/xterm path and save a PNG; do not repeat the model call merely to produce a screenshot. To visually audit bridge behavior or ambient Cursor settings, opt in with `--bridge`, `--bridge --expose-builtin-tools`, or `--setting-sources <value>` and label that evidence separately; do not count those opt-in runs as default native replay matrix proof.
+By default, `npm run smoke:visual` writes `.ansi`, `.txt`, `.html`, `.png`, and `.jsonl.path` artifacts. Check browser availability before a paid run. If PNG rendering fails but ANSI/HTML evidence was retained, render that retained evidence with the canonical browser/xterm path and save a PNG; do not repeat the model call merely to produce a screenshot. To visually audit bridge behavior or ambient Cursor settings, opt in with `--bridge`, `--bridge --expose-builtin-tools`, or `--setting-sources <value>` and label that evidence separately; these visual-runner overrides still keep `PI_CURSOR_LEAN=0`, and do not count as default native replay matrix proof. The platform bridge, abort, and HTTP/1.1 suites instead pin `PI_CURSOR_LEAN=1` to retain lean coverage.
 
 Expected proof for each category is defined in [Cursor Native Tool Visual Audit Workflow](./cursor-native-tool-visual-audit.md). Do not mark a category passed because the prompt was sent. A category passes only when the PNG shows the expected card and the JSONL shows the expected completed `toolCall` / `toolResult` pair with the expected `isError` state.
 
@@ -246,10 +246,15 @@ Pass criteria:
 
 ## 7. Native replay cards without the pi bridge
 
+Native replay requires an explicit opt-out of the default lean surface.
+
 ```bash
 PI_CURSOR_SETTING_SOURCES=none \
+PI_CURSOR_LEAN=0 \
 PI_CURSOR_PI_TOOL_BRIDGE=0 \
+PI_CURSOR_EXPOSE_BUILTIN_TOOLS=0 \
 PI_CURSOR_NATIVE_TOOL_DISPLAY=1 \
+PI_CURSOR_REGISTER_NATIVE_TOOLS=1 \
 pi --approve -e . --cursor-no-fast --model cursor/grok-4.6 \
   --session-dir "$SMOKE_DIR/native-replay" \
   -p 'Native replay smoke. Use your Cursor file-reading capability to read ./README.md, then answer README_SEEN=yes if it contains pi-cursor-sdk.' \
@@ -354,7 +359,7 @@ Script-enforced pass criteria:
 Additional manual usage checks for provider/accounting changes:
 
 - Each assistant message's disjoint input/cache/output components should sum to `totalTokens` and describe one coherent current context, not cumulative billed spend.
-- In split runs, earlier tool results can remain in later current-context estimates. Fresh, attributable LOCAL SDK usage takes precedence; late raw and billed facts remain in the separate ledger without rewriting emitted messages. See [context, compaction, and Cursor usage](../README.md#context-compaction-and-cursor-usage).
+- In split runs, earlier tool results can remain in later current-context estimates. Fresh, attributable LOCAL SDK usage takes precedence; late raw and billed facts remain in the separate ledger without rewriting emitted messages. See [context, compaction, and Cursor usage](reference.md#context-compaction-and-cursor-usage).
 
 ## 11. Standard local gates
 
@@ -391,7 +396,7 @@ Use this list to choose meaningful changed-behavior coverage, not to trigger a f
 - Native replay cards beyond read, especially shell/edit/write cards, when those renderers change.
 - Bridge question UI when `cursor_ask_question` changes.
 - MCP timeout override behavior (3600s `callTool` default, 10s initialize/listTools default, and SDK-default unknown protocol stacks) when timeout code changes.
-- SDK `semSearch` / `recordScreen` activity replay when those formatters change. There is no reliable local prompt that forces Cursor to call these built-in SDK tools on demand; regression is covered by `test/cursor-tool-transcript.test.ts`. Opportunistically confirm neutral `Cursor semantic search` / `Cursor screen recording` cards if a live run surfaces them.
+- SDK `semSearch` / `recordScreen` activity replay when those formatters change. There is no reliable local prompt that forces Cursor to call these built-in SDK tools on demand; regression is covered by `test/cursor-tool-transcript-mcp-web.test.ts`. Opportunistically confirm neutral `Cursor semantic search` / `Cursor screen recording` cards if a live run surfaces them.
 - Ambient Cursor setting-source behavior when startup filtering or local Cursor settings handling changes.
 - Model discovery aliases/context variants when model-discovery code or Cursor SDK versions change.
 

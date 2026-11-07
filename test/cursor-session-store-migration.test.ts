@@ -493,20 +493,6 @@ describe("installed SDK root migration with real SQLite", () => {
 		expect(existsSync(legacyRoot)).toBe(true);
 	});
 
-	it("uses the surviving MD5 owner when the SDK rename fails", async () => {
-		const old = buildCursorSessionStateRoot(legacyRoot, "session-a");
-		await seed(old);
-		vi.spyOn(fs, "renameSync").mockImplementation(() => { throw Object.assign(new Error("rename denied"), { code: "EACCES" }); });
-		syncBuiltinESMExports();
-		const selection = await select(old);
-		try {
-			expect(selection.resumeAttemptAllowed).toBe(true);
-			expect(selection.sessionStore.identity.stateRoot).toBe(old);
-		} finally { await selection.sessionStore.dispose(); }
-		expect(existsSync(currentRoot)).toBe(false);
-		await assertHistory(old);
-	});
-
 	it("shares the first root selection across concurrent scopes after a one-shot SDK rename failure", async () => {
 		const old = buildCursorSessionStateRoot(legacyRoot, "session-a");
 		await seed(old);
@@ -615,44 +601,60 @@ describe("installed SDK root migration with real SQLite", () => {
 		} finally { await selection.sessionStore.dispose(); }
 	});
 
-	it.each(["double-slash", "alternate-separators"] as const)("falls back from %s resume identities without walking above the prefix or changing history", async (kind) => {
+	it("falls back from malformed resume identities without walking above the prefix or changing history", async () => {
 		const current = buildCursorSessionStateRoot(currentRoot, "session-a");
 		await seed(current);
-		const recorded = malformedIdentity(buildCursorSessionStateRoot(legacyRoot, "session-a"), kind);
+		const requests = (["double-slash", "alternate-separators"] as const).map(kind => ({
+			cwd, scopeKey: "session-a", persistent: true,
+			resume: { identity: identity(malformedIdentity(buildCursorSessionStateRoot(legacyRoot, "session-a"), kind)), agentId },
+		}));
 		runIdentityChild(`
 			const { openCursorSessionStoreForScope } = await import(${JSON.stringify(new URL("../src/cursor-session-store.ts", import.meta.url).href)});
-			const selection = await openCursorSessionStoreForScope(${JSON.stringify({ cwd, scopeKey: "session-a", persistent: true, resume: { identity: identity(recorded), agentId } })});
-			assert.equal(selection.resumeAttemptAllowed, false);
-			assert.equal(selection.resumeFallback, true);
-			await selection.sessionStore.dispose();
+			for (const request of ${JSON.stringify(requests)}) {
+				const before = checks.length;
+				const selection = await openCursorSessionStoreForScope(request);
+				assert.equal(selection.resumeAttemptAllowed, false);
+				assert.equal(selection.resumeFallback, true);
+				await selection.sessionStore.dispose();
+				assert(checks.length > before);
+			}
 		`);
 		await assertHistory(current);
 	});
 
-	it.each(["double-slash", "alternate-separators"] as const)("durably rejects %s cleanup identities without walking above the prefix or deleting history", async (kind) => {
-		const manager = SessionManager.create(cwd, join(home, "pi-sessions"));
-		manager.appendMessage({ role: "user", content: "saved branch", timestamp: 1 });
-		const scopeKey = cursorSessionScopeKeyForManager(manager);
-		const old = buildCursorSessionStateRoot(legacyRoot, scopeKey);
-		await seed(old);
-		recordCleanupCandidate(manager, malformedIdentity(old, kind));
+	it("durably rejects malformed cleanup identities without walking above the prefix or deleting history", async () => {
+		const managers: SessionManager[] = [];
+		for (const kind of ["double-slash", "alternate-separators"] as const) {
+			const manager = SessionManager.create(cwd, join(home, "pi-sessions"));
+			manager.appendMessage({ role: "user", content: "saved branch", timestamp: 1 });
+			const old = buildCursorSessionStateRoot(legacyRoot, cursorSessionScopeKeyForManager(manager));
+			await seed(old);
+			recordCleanupCandidate(manager, malformedIdentity(old, kind));
+			managers.push(manager);
+		}
 		runIdentityChild(`
 			const { SessionManager } = await import("@earendil-works/pi-coding-agent");
 			const { runCursorSessionAgentCleanupCommand } = await import(${JSON.stringify(new URL("../src/cursor-session-agent-cleanup.ts", import.meta.url).href)});
-			const manager = SessionManager.open(${JSON.stringify(manager.getSessionFile())});
-			await runCursorSessionAgentCleanupCommand({
-				appendEntry: (type, data) => manager.appendCustomEntry(type, data),
-			}, "--yes", { cwd: ${JSON.stringify(cwd)}, sessionManager: manager, ui: { notify() {} } });
-			const result = manager.getEntries().at(-1).data;
-			assert.deepEqual(result.deletedAgentIds, []);
-			assert.equal(result.failedAgentIds[0].agentId, ${JSON.stringify(agentId)});
-			assert.equal(result.failedAgentIds[0].retryable, false);
+			for (const file of ${JSON.stringify(managers.map(manager => manager.getSessionFile()))}) {
+				const before = checks.length;
+				const manager = SessionManager.open(file);
+				await runCursorSessionAgentCleanupCommand({
+					appendEntry: (type, data) => manager.appendCustomEntry(type, data),
+				}, "--yes", { cwd: ${JSON.stringify(cwd)}, sessionManager: manager, ui: { notify() {} } });
+				const result = manager.getEntries().at(-1).data;
+				assert.deepEqual(result.deletedAgentIds, []);
+				assert.equal(result.failedAgentIds[0].agentId, ${JSON.stringify(agentId)});
+				assert.equal(result.failedAgentIds[0].retryable, false);
+				assert(checks.length > before);
+			}
 		`);
-		const persisted = SessionManager.open(manager.getSessionFile()!);
-		expect(persisted.getEntries().at(-1)).toMatchObject({ data: {
-			deletedAgentIds: [], failedAgentIds: [{ agentId, retryable: false }],
-		} });
-		await assertHistory(buildCursorSessionStateRoot(currentRoot, scopeKey));
+		for (const manager of managers) {
+			const persisted = SessionManager.open(manager.getSessionFile()!);
+			expect(persisted.getEntries().at(-1)).toMatchObject({ data: {
+				deletedAgentIds: [], failedAgentIds: [{ agentId, retryable: false }],
+			} });
+			await assertHistory(buildCursorSessionStateRoot(currentRoot, cursorSessionScopeKeyForManager(manager)));
+		}
 	});
 
 	it.each([

@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { createRequire } from "node:module";
+import { createRequire, isBuiltin } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { runInThisContext } from "node:vm";
@@ -82,6 +82,11 @@ async function discoverInstalledCursorModules() {
 		"@connectrpc/connect": await import(pathToFileURL(require.resolve("@connectrpc/connect")).href),
 		"@bufbuild/protobuf": await import(pathToFileURL(require.resolve("@bufbuild/protobuf")).href),
 	};
+	// ESM factories can use both named and default Node imports. Preserve the
+	// real namespace instead of presenting CommonJS require() as an ESM module.
+	for (const name of new Set(Object.keys(table).map(name => name.replace(/\?.*$/, "")).filter(isBuiltin))) {
+		externals[name] = await import(name);
+	}
 	// Reuse only unbound installed factories. Every caller gets fresh exports:
 	// logger evaluation captures console methods and color environment state.
 	return () => {
@@ -92,7 +97,10 @@ async function discoverInstalledCursorModules() {
 				if (matches.length !== 1) throw new Error(`Installed SDK module suffix is ambiguous or absent: ${name}`);
 				name = matches[0]!;
 			}
-			if (!name.startsWith(".")) return externals[name] ?? require(name.replace(/\?.*$/, ""));
+			if (!name.startsWith(".")) {
+				const external = name.replace(/\?.*$/, "");
+				return externals[external] ?? require(external);
+			}
 			if (cache[name]) return cache[name];
 			const factory = table![name];
 			if (!factory) throw new Error(`Installed SDK module missing: ${name}`);
@@ -107,6 +115,19 @@ async function discoverInstalledCursorModules() {
 			},
 			n: (value: any) => value?.__esModule ? () => value.default : () => value,
 			o: (target: object, key: string) => Object.hasOwn(target, key),
+			// Observe one discovered lexical binding in a fresh test-only factory.
+			// Its installed body runs unchanged; no SDK file or production export changes.
+			observeFactoryBinding: <T>(name: string, binding: string): T => {
+				if (!/^[A-Za-z_$][\w$]*$/.test(binding)) throw new Error("Invalid installed binding name");
+				const factory = table![name];
+				if (!factory) throw new Error(`Installed SDK module missing: ${name}`);
+				const source = factory.toString();
+				if (!source.endsWith("}")) throw new Error("Installed SDK factory changed");
+				const observed = runInThisContext(`({${source.slice(0, -1)}; return ${binding}; }})`, { filename: entry });
+				const module = { exports: {} };
+				cache[name] = module.exports;
+				return observed[name](module, module.exports, load) as T;
+			},
 			factorySource: (name: string): string => {
 				const factory = table![name];
 				if (!factory) throw new Error(`Installed SDK module missing: ${name}`);

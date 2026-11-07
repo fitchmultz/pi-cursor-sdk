@@ -1,5 +1,4 @@
 import {
-	CURSOR_KNOWN_NORMALIZED_TOOL_NAMES,
 	CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
 	getCursorReplayCallSummary,
 	getCursorToolActivityTitle,
@@ -416,8 +415,6 @@ const TOOL_DISPLAY_IMPLEMENTATIONS: Record<CursorNormalizedToolName, ToolDisplay
 		buildPiToolDisplay: (context) => buildActivityReplayDisplay("webFetch", context),
 	},
 };
-
-export const CURSOR_TOOL_DISPLAY_SPEC_KEYS = CURSOR_KNOWN_NORMALIZED_TOOL_NAMES;
 
 function getToolDisplaySpec(name: string): ToolDisplaySpec | undefined {
 	if (Object.hasOwn(TOOL_DISPLAY_IMPLEMENTATIONS, name)) return TOOL_DISPLAY_IMPLEMENTATIONS[name as CursorNormalizedToolName];

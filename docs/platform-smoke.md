@@ -186,6 +186,8 @@ Cloud product capabilities and offline contracts remain supported. Neither this 
 
 The optional comprehensive platform matrix includes these local-resume lanes: restart, safety, tool-surface, abort, tree, copy/switch, fallback, compaction, default/opt-out proof, and recorded-ID-only cleanup. Platform lanes run those scripts against the target's shared packed package path, then copy each lane's session JSONL, Cursor SDK debug metadata, runtime-launch record, and other bounded smoke artifacts into its canonical platform suite directory. The same scripts still load the source checkout by default when run directly as focused host-local inner-loop checks. Windows uses the intentionally short target-side evidence component `lr` so the Cursor SDK's derived SQLite path remains below legacy `MAX_PATH`; every suite removes and verifies that directory before use, failing closed on stale or locked evidence.
 
+Ordinary local-resume lanes pin `PI_CURSOR_LEAN=1`, enable the pi bridge and builtin tools, and disable native replay registration regardless of inherited shell settings. The tool-surface and cleanup lanes instead pin `PI_CURSOR_LEAN=0` for every launch in their native-to-bridge transition proof. Without that opt-out, lean forces the bridge and builtins on for both sides, so the legacy surface pins cannot change the resume pool key. This is test isolation, not a change to the product default.
+
 The smoke starts one sessionful local Cursor run with local resume enabled by default, records the SDK agent id from provider debug metadata, restarts pi against the same session, asks for the remembered marker, and verifies:
 
 - the first run records `localResume: true` and `resumedAgent: false`;
@@ -195,7 +197,7 @@ The smoke starts one sessionful local Cursor run with local resume enabled by de
 
 The safety lane verifies an original session resumes the same local agent after restart, then proves cloned-session copied resume entries and a fork before a future-marker prompt both create a new local `agent-*`. The forked earlier branch must not reveal the future marker.
 
-The tool-surface lane verifies same-session restart reuses the original local agent with the same bridge/tool surface, then enables the builtin pi tool bridge surface and verifies the old resume handle is rejected, a bridge run is created, a new local `agent-*` is used, and a new resume pool key is persisted.
+The tool-surface lane holds `PI_CURSOR_LEAN=0` throughout, verifies same-session restart reuses the original local agent with the same native/bridge-off surface, then enables the builtin pi tool bridge surface and verifies the old resume handle is rejected, a bridge run is created, a new local `agent-*` is used, and a new resume pool key is persisted.
 
 The abort lane verifies a completed bridge-enabled turn persists a local resume handle, an interrupted long-running bridge turn starts from that handle but does not append a new one, and the next same-surface restart uses a new local `agent-*` instead of resuming the pre-abort agent.
 
@@ -209,7 +211,7 @@ The compaction lane uses an isolated temp pi settings file with `compaction.keep
 
 The default/opt-out lane verifies the built-in local resume default resumes, then verifies `PI_CURSOR_LOCAL_RESUME=0` opts out and creates a new agent while bootstrapping the transcript.
 
-The cleanup lane verifies `/cursor-local-resume-cleanup --dry-run` reports only recorded superseded local `agent-*` IDs, `/cursor-local-resume-cleanup --yes` verifies and fsyncs intent before deleting exactly the old recorded ID and fsyncs the result afterward, the current recorded agent still resumes, and tree navigation to the old handle falls back instead of resuming the deleted agent.
+The cleanup lane first replaces a native/bridge-off agent with a bridge-enabled agent while holding `PI_CURSOR_LEAN=0`, then verifies `/cursor-local-resume-cleanup --dry-run` reports only recorded superseded local `agent-*` IDs, `/cursor-local-resume-cleanup --yes` verifies and fsyncs intent before deleting exactly the old recorded ID and fsyncs the result afterward, the current recorded agent still resumes, and tree navigation to the old handle falls back instead of resuming the deleted agent.
 
 ## Files and scripts
 
@@ -553,12 +555,15 @@ Required environment:
 
 ```text
 PI_CURSOR_SETTING_SOURCES=none
+PI_CURSOR_LEAN=0
 PI_CURSOR_NATIVE_TOOL_DISPLAY=1
 PI_CURSOR_REGISTER_NATIVE_TOOLS=1
 PI_CURSOR_PI_TOOL_BRIDGE=0
 PI_CURSOR_EXPOSE_BUILTIN_TOOLS=0
 PI_CURSOR_SDK_EVENT_DEBUG=1
 ```
+
+This lane explicitly opts out of default lean mode so native SDK tools and replay registration are available. Inherited `PI_CURSOR_LEAN=1` cannot override the scenario.
 
 Purpose:
 
@@ -626,11 +631,12 @@ Required environment:
 
 ```text
 PI_CURSOR_SETTING_SOURCES=none
+PI_CURSOR_LEAN=1
 PI_CURSOR_HTTP_1_1=1
 PI_CURSOR_NATIVE_TOOL_DISPLAY=1
-PI_CURSOR_REGISTER_NATIVE_TOOLS=1
-PI_CURSOR_PI_TOOL_BRIDGE=0
-PI_CURSOR_EXPOSE_BUILTIN_TOOLS=0
+PI_CURSOR_REGISTER_NATIVE_TOOLS=0
+PI_CURSOR_PI_TOOL_BRIDGE=1
+PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1
 PI_CURSOR_SDK_EVENT_DEBUG=1
 ```
 
@@ -638,6 +644,7 @@ Purpose:
 
 - prove the packed extension completes a real local provider turn through the SDK's opt-in HTTP/1.1/SSE transport on each selected OS;
 - prove the final TUI status visibly includes `cursor:local ... http1`;
+- keep the default lean tool policy while testing transport; native replay has its own explicit opt-out lane;
 - use offline contracts or valid retained default-transport evidence rather than adding unrelated live runs.
 
 Required final marker: `HTTP1_LIVE_OK`.
@@ -652,8 +659,9 @@ Required environment:
 
 ```text
 PI_CURSOR_SETTING_SOURCES=none
+PI_CURSOR_LEAN=1
 PI_CURSOR_NATIVE_TOOL_DISPLAY=1
-PI_CURSOR_REGISTER_NATIVE_TOOLS=1
+PI_CURSOR_REGISTER_NATIVE_TOOLS=0
 PI_CURSOR_PI_TOOL_BRIDGE=1
 PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1
 PI_CURSOR_PI_TOOL_BRIDGE_DEBUG=1
@@ -662,7 +670,7 @@ PI_CURSOR_SDK_EVENT_DEBUG=1
 
 Purpose:
 
-- prove pi bridge request routing;
+- prove pi bridge request routing under the default lean policy;
 - prove successful bridge tool card;
 - prove failed bridge tool card;
 - prove bridge shell card;
@@ -726,8 +734,9 @@ Required environment:
 
 ```text
 PI_CURSOR_SETTING_SOURCES=none
+PI_CURSOR_LEAN=1
 PI_CURSOR_NATIVE_TOOL_DISPLAY=1
-PI_CURSOR_REGISTER_NATIVE_TOOLS=1
+PI_CURSOR_REGISTER_NATIVE_TOOLS=0
 PI_CURSOR_PI_TOOL_BRIDGE=1
 PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1
 PI_CURSOR_PI_TOOL_BRIDGE_DEBUG=1
@@ -736,7 +745,7 @@ PI_CURSOR_SDK_EVENT_DEBUG=1
 
 Purpose:
 
-- prove long-running bridge cancellation;
+- prove long-running bridge cancellation under the default lean policy;
 - prove no orphan processes;
 - prove no false successful answer.
 

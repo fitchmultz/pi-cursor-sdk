@@ -4,8 +4,15 @@ import { basename, join } from "node:path";
 const require = createRequire(import.meta.url);
 const fs = require("node:fs");
 const fsPromises = require("node:fs/promises");
+const timersPromises = require("node:timers/promises");
 const originalRename = fsPromises.rename;
 const originalRm = fsPromises.rm;
+let elapsedMs = 0;
+
+// Advance the build's native retry clock without waiting on wall time.
+if (["late-winner", "rename-always"].includes(process.env.BUILD_SWAP_FAULT)) {
+	timersPromises.setTimeout = async (ms) => { elapsedMs += ms; };
+}
 
 const faults = {
 	"stale-rm"() {
@@ -17,17 +24,10 @@ const faults = {
 		};
 	},
 	"late-winner"() {
-		let firstRename = true;
 		fsPromises.rename = async (...args) => {
-			if (!firstRename) return originalRename(...args);
-			firstRename = false;
-			// The ref'd timer keeps the child alive so its marker proves publication
-			// happened after the old two-second poll window.
-			setTimeout(() => {
-				fs.mkdirSync(join(process.cwd(), "dist"), { recursive: true });
-				fs.writeFileSync(join(process.cwd(), "dist", "late-winner.txt"), "published");
-			}, 2_200);
-			throw new Error("synthetic late-winner race");
+			if (elapsedMs < 2_200) throw new Error("synthetic late-winner race");
+			fs.writeFileSync(join(args[0], "late-winner.txt"), String(elapsedMs));
+			return originalRename(...args);
 		};
 	},
 	"race-loss"() {
@@ -46,7 +46,7 @@ const faults = {
 	},
 	"rename-always"() {
 		fsPromises.rename = async () => {
-			throw new Error("synthetic permanent rename failure");
+			throw new Error(`synthetic permanent rename failure after ${elapsedMs}ms`);
 		};
 	},
 	"vanish-staging"() {

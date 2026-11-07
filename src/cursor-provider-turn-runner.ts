@@ -1,5 +1,7 @@
+import { assertCursorNativeToolsRuntime, resolveCursorNativeToolsEnabled } from "./cursor-native-tools.js";
+import { isCursorLeanEnabled } from "./cursor-lean.js";
 import { CursorLiveRunAbortError } from "./cursor-live-run-coordinator.js";
-import { drainExistingCursorLiveRunBeforeSend } from "./cursor-provider-live-run-drain.js";
+import { cursorLiveRuns, drainExistingCursorLiveRunBeforeSend } from "./cursor-provider-live-run-drain.js";
 import { installCursorSdkProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
 import type { CursorRuntime } from "./cursor-config.js";
 import { CursorSdkEventDebugSink } from "./cursor-sdk-event-debug.js";
@@ -68,6 +70,14 @@ export class CursorProviderTurnRunner {
 			this.throwIfAborted();
 			const { scope } = this.params;
 			const cwd = scope.cwd;
+
+			// Resolved once here, before any drain await, so the drain decision and the
+			// prepare dispatch below always act on the same config snapshot.
+			const resolvedConfig = resolveCursorProviderTurnConfig(cwd, scope.projectTrusted, scope.scopeKey);
+			this.runtimeTarget = resolvedConfig.runtime.value;
+			const leanEnabled = isCursorLeanEnabled();
+			const nativeToolsEnabled = resolveCursorNativeToolsEnabled(process.env, leanEnabled);
+			assertCursorNativeToolsRuntime(this.runtimeTarget, nativeToolsEnabled, leanEnabled);
 			this.sdkEventDebug = CursorSdkEventDebugSink.maybeCreate({
 				cwd,
 				modelId: model.id,
@@ -76,13 +86,9 @@ export class CursorProviderTurnRunner {
 			});
 			sdkEventDebugRef.current = this.sdkEventDebug;
 			this.sdkEventDebug?.recordContextSnapshot(context);
-			// Resolved once here, before any drain await, so the drain decision and the
-			// prepare dispatch below always act on the same config snapshot.
-			const resolvedConfig = resolveCursorProviderTurnConfig(cwd, scope.projectTrusted, scope.scopeKey);
-			this.runtimeTarget = resolvedConfig.runtime.value;
 			if (resolvedConfig.runtime.value === "local" && this.params.request.purpose === "normal") {
 				if (
-					(await drainExistingCursorLiveRunBeforeSend(stream, partial, model, context, options?.signal, this.sdkEventDebug, scope.scopeKey, this.params.request.occupancyFloor)) ===
+					(await drainExistingCursorLiveRunBeforeSend(stream, partial, model, context, options?.signal, this.sdkEventDebug, scope.scopeKey, this.params.request.occupancyFloor, nativeToolsEnabled)) ===
 					"stream_ended"
 				) {
 					return;
@@ -98,6 +104,8 @@ export class CursorProviderTurnRunner {
 				sdkEventDebug: this.sdkEventDebug,
 				throwIfAborted: () => this.throwIfAborted(),
 				resolvedConfig,
+				leanEnabled,
+				nativeToolsEnabled,
 			});
 
 			const usage = await this.params.usageRecorder.start({
@@ -173,6 +181,12 @@ export class CursorProviderTurnRunner {
 				displayOnlyTraceBlock: finalized.displayOnlyTraceBlock,
 			});
 		} catch (error) {
+			// This body owns the session turn lease; a queued request aborted before
+			// entry must not release another request's run in handleOuterCatch().
+			if (!prepared && (error instanceof CursorLiveRunAbortError || options?.signal?.aborted)) {
+				const pending = cursorLiveRuns.getActiveForScope(this.params.scope.scopeKey);
+				if (pending && !pending.disposed) await cursorLiveRuns.release(pending);
+			}
 			await runFinalizer.applyTerminalEvent({ kind: "error", prepared: started ?? prepared, error });
 		} finally {
 			await runFinalizer.cleanup(prepared, sendResult, liveCompletion);

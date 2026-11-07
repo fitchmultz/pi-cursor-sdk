@@ -1,45 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { Type } from "typebox";
+import { installCursorProviderVirtualTime } from "./helpers/cursor-provider-virtual-time.js";
 import {
 	resetCursorProviderTestState,
-	mockedCreate,
 	mockedMessagesList,
-	mockedCreateAgentPlatform,
 	makeModel,
 	makeContext,
-	makeAssistantMessage,
 	collectEvents,
 	collectTextDeltas,
 	collectThinkingDeltas,
-	getEventsOfType,
 	getDoneEvent,
-	getErrorEvent,
-	getTextEndEvent,
-	hasEventType,
 	isToolCallBlock,
-	isCursorToolStreamEvent,
-	getCreatedAgentOptions,
-	createMockAgentPlatform,
-	registerBridgeForProviderTest,
 	registerNativeToolDisplayForTest,
-	connectMcpClient,
-	createBuiltinToolInfo,
-	createTestToolInfo,
-	cursorModelItems,
 	type CursorDeltaHandler,
-	type CursorStepHandler,
 	type RegisteredTool,
 	mockCreatedAgent,
 	asMockCursorRun,
-	getPiToolsMcpUrlFromAgentCreateOptions,
 	textFromToolResultBlock,
 	createExtensionTestContext,
 } from "./helpers/cursor-provider-harness.js";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
-import { estimateCursorPromptMessageTokens } from "../src/context.js";
-import { __testUtils as nativeToolDisplayTestUtils } from "../src/cursor-native-tool-display-state.js";
-import type { Context } from "@earendil-works/pi-ai";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -50,8 +30,9 @@ function displayPathForExpect(path: string): string {
 
 describe("streamCursor native replay tool display", () => {
 	beforeEach(resetCursorProviderTestState);
+	installCursorProviderVirtualTime();
 
-it("replays Cursor grep activity through native grep display", async () => {
+	it("replays Cursor grep activity through native grep display", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		const registeredTools: RegisteredTool[] = [];
 		await registerNativeToolDisplayForTest(registeredTools);

@@ -34,7 +34,7 @@ describe("custom subagent config to ordinary provider turns", () => {
 				{ id: "reasoning", displayName: "Reasoning", values: [{ value: "none" }, { value: "high" }] },
 			], variants: [{ displayName: "Fixture", isDefault: true, params: [{ id: "fast", value: "true" }, { id: "reasoning", value: "none" }] }],
 		}]);
-		registerBridgeForProviderTest({ active: ["subagent"], tools: [createTestToolInfo("subagent", Type.Object({ task: Type.String() }), "Pi delegation")] });
+		registerBridgeForProviderTest({ active: ["delegate"], tools: [createTestToolInfo("delegate", Type.Object({ task: Type.String() }), "Pi delegation")] });
 		const send = vi.fn().mockResolvedValue({
 			id: "run-1", agentId: "agent-1", status: "finished", wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished", result: "done" }),
 			cancel: vi.fn(), supports: () => true, unsupportedReason: () => undefined,
@@ -50,7 +50,8 @@ describe("custom subagent config to ordinary provider turns", () => {
 				] },
 			} });
 			expect(mockedCreate.mock.calls[0][0].model).toEqual({ id: "fixture", params: [{ id: "fast", value: "true" }, { id: "reasoning", value: "none" }] });
-			expect(send.mock.calls[0][0].text).toContain("prefer pi__mcp for MCP work and pi__subagent for delegation");
+			expect(send.mock.calls[0][0].text).toContain("prefer matching exposed pi__* tools using their listed names, schemas, and prompt guidelines");
+			expect(send.mock.calls[0][0].text).not.toContain("pi__subagent");
 			expect(send.mock.calls[0][0].text).not.toContain("private child instructions");
 			const divergent = { ...makeContext(), systemPrompt: "Updated parent context" };
 			await collectEvents(streamCursor(makeModel("fixture:fast"), divergent, { apiKey: "test-key" }));

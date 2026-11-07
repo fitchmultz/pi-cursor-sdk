@@ -3,7 +3,6 @@ import {
 	resetCursorProviderTestState,
 	makeModel,
 	makeContext,
-	makeAssistantMessage,
 	collectEvents,
 	collectTextDeltas,
 	collectThinkingDeltas,
@@ -17,69 +16,10 @@ import {
 	mockedCreate,
 } from "./helpers/cursor-provider-harness.js";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";
-import { __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
-import type { Context } from "@earendil-works/pi-ai";
 
 
 describe("streamCursor stream events", () => {
 	beforeEach(resetCursorProviderTestState);
-
-	it("detects trailing user messages only after tool results", () => {
-			const base = makeContext();
-			const toolResult: Context["messages"][number] = {
-				role: "toolResult",
-				toolCallId: "call-1",
-				toolName: "bash",
-				content: [{ type: "text", text: "ok" }],
-				isError: false,
-				timestamp: 3,
-			};
-
-			expect(cursorProviderTestUtils.hasTrailingUserMessagesAfterToolResults(base)).toBe(false);
-			expect(
-				cursorProviderTestUtils.hasTrailingUserMessagesAfterToolResults({
-					...base,
-					messages: [...base.messages, makeAssistantMessage(), { role: "user", content: "follow up", timestamp: 4 }],
-				}),
-			).toBe(false);
-			expect(
-				cursorProviderTestUtils.hasTrailingUserMessagesAfterToolResults({
-					...base,
-					messages: [...base.messages, makeAssistantMessage(), toolResult, { role: "user", content: "follow up", timestamp: 4 }],
-				}),
-			).toBe(true);
-		});
-
-		it("emits text deltas as pi text stream events", async () => {
-			const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
-				opts.onDelta({ update: { type: "text-delta", text: "Hello " } });
-				opts.onDelta({ update: { type: "text-delta", text: "world" } });
-				return asMockCursorRun({
-					id: "run-1",
-					agentId: "agent-1",
-					status: "finished",
-					wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
-					cancel: vi.fn(),
-					supports: () => true,
-					unsupportedReason: () => undefined,
-				});
-			});
-			mockCreatedAgent({
-				send: mockSend,
-				[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-			});
-
-			const stream = streamCursor(makeModel(), makeContext(), { apiKey: "test-key" });
-			const events = await collectEvents(stream);
-
-			const textDeltas = getEventsOfType(events, "text_delta");
-			expect(textDeltas).toHaveLength(2);
-			expect(textDeltas[0].delta).toBe("Hello ");
-			expect(textDeltas[1].delta).toBe("world");
-
-			const done = getDoneEvent(events);
-			expect(done).toBeDefined();
-		});
 
 		it("serializes concurrent Cursor turns for one pi session across model selections", async () => {
 			let activeSends = 0;

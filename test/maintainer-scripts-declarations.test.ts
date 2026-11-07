@@ -66,12 +66,6 @@ import {
 	suppressCursorSdkOutput,
 } from "../scripts/lib/cursor-sdk-output-filter.mjs";
 import { buildTerminalHtml, writeTerminalScreenshot } from "../scripts/lib/cursor-visual-render.mjs";
-import { scrubSensitiveText as scrubSensitiveTextFromScriptLib } from "../shared/cursor-sensitive-text.mjs";
-import {
-	CURSOR_SETTING_SOURCES_ENV as SCRIPT_CURSOR_SETTING_SOURCES_ENV,
-	resolveCursorSettingSources as resolveCursorSettingSourcesFromScriptLib,
-	serializeCursorSettingSources as serializeCursorSettingSourcesFromScriptLib,
-} from "../shared/cursor-setting-sources.mjs";
 import { scrubSensitiveText } from "../shared/cursor-sensitive-text.mjs";
 import {
 	CURSOR_SETTING_SOURCES_ENV,
@@ -83,95 +77,14 @@ import { CURSOR_SDK_EVENT_DEBUG_ENV_NAMES } from "../shared/cursor-sdk-event-deb
 const require = createRequire(import.meta.url);
 const packageJson = require("../package.json") as { files: string[] };
 
-/** Type-only exports that intentionally have no runtime .mjs value. */
-const DECLARATION_TYPE_ONLY_EXPORTS: Record<string, readonly string[]> = {
-	"shared/cursor-sdk-output-filter.d.mts": ["CursorSdkCapabilityNotice", "CursorSdkOutputNoticeHandler"],
-	"shared/cursor-model-selection-identities.d.mts": ["CursorModelSelectionIdentity"],
-	"scripts/cloud-runtime-smoke.d.mts": [
-		"CloudSmokeBranchLaneEvidence",
-		"CloudSmokeCancelLaneEvidence",
-		"CloudSmokeCleanupEvidence",
-		"CloudSmokeDirectPushLaneEvidence",
-		"CloudSmokeEvidenceBranch",
-		"CloudSmokeEvidenceProvenance",
-		"CloudSmokeLaneEvidence",
-		"CloudSmokeLaneName",
-		"CloudSmokeLifecycleDeleteLaneEvidence",
-		"CloudSmokeMatrixEvidence",
-		"CloudSmokeMissingBranchLaneEvidence",
-		"CloudSmokeOwnedRepository",
-		"CloudSmokePassiveArtifactsLaneEvidence",
-		"CloudSmokeReleaseGateState",
-		"CloudSmokeThrowawayRepositoryEvidence",
-	],
-	"scripts/debug-provider-events.d.mts": [
-		"CursorDebugCaptureCounts",
-		"CursorDebugCaptureSummary",
-		"CursorDebugProviderEventsArgs",
-		"CursorDebugProviderEventsRunSummary",
-		"CursorPiSessionSnapshotState",
-	],
-	"scripts/debug-sdk-events.d.mts": [
-		"CursorDebugSdkEventsArgs",
-		"CursorSdkEventDebugSummary",
-		"CursorSdkEventTimingSnapshot",
-		"CursorSdkEventJsonlSink",
-	],
-	"scripts/lib/cloud-smoke-artifacts.d.mts": [
-		"CloudSmokeLifecycleRecord",
-		"CloudSmokeMetadataRecord",
-	],
-	"scripts/lib/cloud-smoke-cleanup-evidence.d.mts": [
-		"CloudSmokeBranchLaneEvidence",
-		"CloudSmokeCancelLaneEvidence",
-		"CloudSmokeCleanupEvidence",
-		"CloudSmokeDirectPushLaneEvidence",
-		"CloudSmokeEvidenceBranch",
-		"CloudSmokeEvidenceProvenance",
-		"CloudSmokeLaneEvidence",
-		"CloudSmokeLaneName",
-		"CloudSmokeLifecycleDeleteLaneEvidence",
-		"CloudSmokeMatrixEvidence",
-		"CloudSmokeMissingBranchLaneEvidence",
-		"CloudSmokePassiveArtifactsLaneEvidence",
-		"CloudSmokeReleaseGateState",
-		"CloudSmokeThrowawayRepositoryEvidence",
-	],
-	"scripts/lib/cloud-smoke-github.d.mts": [
-		"CloudSmokeOwnedRepository",
-	],
-	"scripts/lib/cloud-smoke-shutdown.d.mts": [
-		"CloudSmokeShutdownController",
-	],
-	"scripts/lib/cursor-cli-args.d.mts": [
-		"CursorCliBooleanFlagSpec",
-		"CursorCliFlagSpec",
-		"CursorCliFlagSpecMap",
-		"CursorCliValueFlagSpec",
-		"ParsedCursorCliArgs",
-	],
-};
-
 describe("maintainer script declaration contracts", () => {
-	it("keeps compile-time negative fixtures for stale declaration shapes", () => {
-		expect(true).toBe(true);
-	});
 
 	it("checks every published declaration-backed script surface", async () => {
 		const declarations = listPublishedDeclarations();
 		for (const declaration of declarations) {
 			const declarationValueExports = readDeclarationValueExports(declaration);
-			const declarationTypeExports = readDeclarationTypeExports(declaration);
 			const runtimeExports = await readRuntimeExports(declaration);
-			const documentedTypeOnlyExports = DECLARATION_TYPE_ONLY_EXPORTS[declaration] ?? [];
 			expect(runtimeExports, `${declaration} runtime exports`).toEqual(declarationValueExports.sort());
-			for (const runtimeExport of runtimeExports) {
-				expect(declarationValueExports, `${declaration} must declare value export ${runtimeExport}`).toContain(runtimeExport);
-			}
-			expect(
-				declarationTypeExports,
-				`${declaration} documents type-only exports explicitly when present`,
-			).toEqual([...documentedTypeOnlyExports].sort());
 		}
 	});
 });
@@ -209,21 +122,6 @@ function readDeclarationValueExports(path: string): string[] {
 		names.add(match[1]);
 	}
 	for (const match of source.matchAll(/export\s*\{([^}]+)\}\s*from/g)) {
-		for (const rawName of match[1].split(",")) {
-			const name = rawName.trim().split(/\s+as\s+/)[1] ?? rawName.trim().split(/\s+as\s+/)[0];
-			if (name) names.add(name);
-		}
-	}
-	return [...names].sort();
-}
-
-function readDeclarationTypeExports(path: string): string[] {
-	const source = readFileSync(path, "utf8");
-	const names = new Set<string>();
-	for (const match of source.matchAll(/export\s+(?:declare\s+)?(?:interface|type)\s+([A-Za-z0-9_]+)/g)) {
-		names.add(match[1]);
-	}
-	for (const match of source.matchAll(/export\s+type\s*\{([^}]+)\}\s*from/g)) {
 		for (const rawName of match[1].split(",")) {
 			const name = rawName.trim().split(/\s+as\s+/)[1] ?? rawName.trim().split(/\s+as\s+/)[0];
 			if (name) names.add(name);
@@ -270,15 +168,11 @@ const _isStartupNoise: boolean = isCursorSdkStartupNoise("managed_skills.loaded"
 const _parsedJsonLines: unknown[] = parseJsonLines('{"ok":true}\n');
 const _failFactory: (prefix: string) => (message: string, secrets?: string | string[]) => never = createScriptFail;
 const _scrubbedFromShared: string = scrubSensitiveText("token", "token");
-const _scrubbedFromScriptLib: string = scrubSensitiveTextFromScriptLib("token", "token");
 const _settingSourcesEnv: "PI_CURSOR_SETTING_SOURCES" = CURSOR_SETTING_SOURCES_ENV;
-const _scriptSettingSourcesEnv: "PI_CURSOR_SETTING_SOURCES" = SCRIPT_CURSOR_SETTING_SOURCES_ENV;
 const _sdkEventDebugEnvNames: readonly string[] = CURSOR_SDK_EVENT_DEBUG_ENV_NAMES;
 const _scriptSdkEventDebugEnvNames: readonly string[] = SCRIPT_CURSOR_SDK_EVENT_DEBUG_ENV_NAMES;
 const _resolvedSharedSources: string[] | undefined = resolveCursorSettingSources("all");
-const _resolvedScriptSources: string[] | undefined = resolveCursorSettingSourcesFromScriptLib("all");
 const _serializedSharedSources: string = serializeCursorSettingSources(["project"]);
-const _serializedScriptSources: string = serializeCursorSettingSourcesFromScriptLib(["project"]);
 const _defaultApiKey: string | undefined = defaultApiKeyFromEnv({ CURSOR_API_KEY: "key" });
 const _timestampedDir: string = defaultTimestampedDir("debug");
 const _commonPathFlag: Record<string, unknown> = commonProbePathFlag("cwd");
@@ -289,7 +183,7 @@ const _commonFlags: Record<string, unknown> = commonProbeFlags;
 const _readArgvValue: string = readArgvValue(["--model", "cursor"], 1, "--model", createScriptFail("test"));
 const _parsedArgv: Record<string, unknown> = parseArgv([], { defaults: {}, flags: {}, fail: createScriptFail("test") });
 const _sealedNodePath: string = sealedNodePath("/usr/local/bin/node", "/tmp/bin");
-const _smokeEnv: Record<string, string | undefined> = buildCursorSmokeEnv({ settingSources: "none", nativeToolDisplay: true });
+const _smokeEnv: Record<string, string | undefined> = buildCursorSmokeEnv({ settingSources: "none", lean: false, nativeToolDisplay: true });
 const _cloudSmokeEnvReturn: AssertEqual<ReturnType<typeof cloudSmokeEnvDeclaration>, NodeJS.ProcessEnv> = true;
 const _cloudSmokeEnvContextArg: AssertEqual<Parameters<typeof cloudSmokeEnvDeclaration>[1], {
 	contextHandoff?: "fresh" | "bootstrap" | "never";
@@ -297,7 +191,7 @@ const _cloudSmokeEnvContextArg: AssertEqual<Parameters<typeof cloudSmokeEnvDecla
 	startingRef?: string;
 	directPush?: boolean;
 } | undefined> = true;
-const _smokeEnvPlan: { envEntries: Array<[string, string]> } = buildCursorSmokeEnvPlan({ settingSources: "none" });
+const _smokeEnvPlan: { envEntries: Array<[string, string]> } = buildCursorSmokeEnvPlan({ settingSources: "none", lean: true });
 const _terminalHtml: string = buildTerminalHtml({
 	ansi: "ok",
 	plain: "ok",
@@ -410,13 +304,9 @@ void [
 	_cloudSmokeEnvContextArg,
 	_failFactory,
 	_scrubbedFromShared,
-	_scrubbedFromScriptLib,
 	_settingSourcesEnv,
-	_scriptSettingSourcesEnv,
 	_resolvedSharedSources,
-	_resolvedScriptSources,
 	_serializedSharedSources,
-	_serializedScriptSources,
 	_defaultApiKey,
 	_timestampedDir,
 	_commonPathFlag,

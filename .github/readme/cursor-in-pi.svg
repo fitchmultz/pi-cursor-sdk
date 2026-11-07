@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="600" viewBox="0 0 1600 600" role="img" aria-labelledby="title desc">
+  <title id="title">Cursor's local agent inside Pi</title>
+  <desc id="desc">Pi passes a selected model and prompt through pi-cursor-sdk to the local Cursor SDK agent. Streamed replies and recorded activity return to Pi. The agent uses Cursor-native tools and configured MCP servers, and can call active Pi tools through a loopback MCP bridge. Local describes the agent runtime; model requests go to Cursor.</desc>
+  <defs>
+    <linearGradient id="canvas" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#060A12"/><stop offset=".52" stop-color="#0B1120"/><stop offset="1" stop-color="#080C16"/>
+    </linearGradient>
+    <radialGradient id="blueBloom" cx=".2" cy=".25" r=".75">
+      <stop stop-color="#2563EB" stop-opacity=".18"/><stop offset="1" stop-color="#2563EB" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="violetBloom" cx=".8" cy=".4" r=".65">
+      <stop stop-color="#8B5CF6" stop-opacity=".14"/><stop offset="1" stop-color="#8B5CF6" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#172238" stop-opacity=".96"/><stop offset="1" stop-color="#0E1525" stop-opacity=".98"/>
+    </linearGradient>
+    <linearGradient id="focus" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#172554" stop-opacity=".82"/><stop offset="1" stop-color="#312E81" stop-opacity=".58"/>
+    </linearGradient>
+    <pattern id="dotGrid" width="28" height="28" patternUnits="userSpaceOnUse">
+      <circle cx="1.5" cy="1.5" r="1.2" fill="#94A3B8" fill-opacity=".08"/>
+    </pattern>
+    <filter id="shadow" x="-20%" y="-30%" width="140%" height="180%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#02040A" flood-opacity=".45"/>
+    </filter>
+    <marker id="arrowBlue" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M1 1 11 6 1 11Z" fill="#60A5FA"/>
+    </marker>
+    <marker id="arrowViolet" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M1 1 11 6 1 11Z" fill="#A78BFA"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M1 1 11 6 1 11Z" fill="#6EE7B7"/>
+    </marker>
+    <style>
+      .sans { font-family: Inter, ui-sans-serif, Arial, sans-serif; }
+      .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+      .heading { font-size: 32px; font-weight: 700; fill: #F8FAFC; }
+      .copy { font-size: 25px; fill: #AFBDD3; }
+      .chip { font-size: 19px; font-weight: 700; letter-spacing: 1px; }
+      .edge { fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+  </defs>
+
+  <!-- Opaque canvas and subtle depth use the fleet's dark SVG tokens. -->
+  <rect width="1600" height="600" fill="url(#canvas)"/>
+  <rect width="1600" height="600" fill="url(#blueBloom)"/>
+  <rect width="1600" height="600" fill="url(#violetBloom)"/>
+  <rect width="1600" height="600" fill="url(#dotGrid)"/>
+  <text x="64" y="72" class="sans" font-size="44" font-weight="720" fill="#F8FAFC">Cursor's agent loop, inside Pi</text>
+  <g transform="translate(1284 38)">
+    <rect width="252" height="42" rx="21" fill="#0C2424" stroke="#286452"/>
+    <text x="126" y="28" text-anchor="middle" class="mono chip" fill="#6EE7B7">LOCAL BY DEFAULT</text>
+  </g>
+
+  <!-- Request lane, return lane, and independent tool paths. -->
+  <path d="M424 290H510" class="edge" stroke="#60A5FA" marker-end="url(#arrowBlue)"/>
+  <path d="M1002 290H1080" class="edge" stroke="#A78BFA" marker-end="url(#arrowViolet)"/>
+  <path d="M1308 190V140H244V190" class="edge" stroke="#6EE7B7" marker-end="url(#arrowGreen)"/>
+  <text x="775" y="123" text-anchor="middle" class="sans" font-size="25" fill="#6EE7B7">Streamed replies + recorded activity</text>
+  <path d="M1308 374V446" class="edge" stroke="#A78BFA" marker-end="url(#arrowViolet)"/>
+  <path d="M1156 374V408H756V446" class="edge" stroke="#60A5FA" marker-end="url(#arrowBlue)"/>
+
+  <!-- Pi remains the user's session interface. -->
+  <g class="sans" filter="url(#shadow)">
+    <rect x="64" y="190" width="360" height="184" rx="24" fill="url(#glass)" stroke="#2A3851"/>
+    <rect x="88" y="214" width="46" height="38" rx="8" fill="#60A5FA" fill-opacity=".12"/>
+    <path d="m100 225 9 8-9 8m18 0h7" fill="none" stroke="#93C5FD" stroke-width="2.5" stroke-linecap="round"/>
+    <text x="152" y="247" class="heading">Pi</text>
+    <text x="88" y="299" class="copy">Choose a model. Ask.</text>
+    <text x="88" y="335" class="copy">Login · sessions · tool UI</text>
+  </g>
+
+  <!-- The extension is the central integration layer. -->
+  <g class="sans" filter="url(#shadow)">
+    <rect x="510" y="190" width="492" height="184" rx="26" fill="url(#focus)" stroke="#6D7DFF" stroke-opacity=".58"/>
+    <text x="542" y="247" class="heading" font-size="36">pi-cursor-sdk</text>
+    <text x="542" y="299" class="copy">Model + thinking controls</text>
+    <text x="542" y="335" class="copy">Prompt, bridge, and replay</text>
+  </g>
+
+  <!-- Cursor owns the SDK agent and native execution. -->
+  <g class="sans" filter="url(#shadow)">
+    <rect x="1080" y="190" width="456" height="184" rx="24" fill="url(#glass)" stroke="#44365F"/>
+    <text x="1110" y="247" class="heading">Local Cursor agent</text>
+    <text x="1110" y="299" class="copy">Runs the SDK agent loop</text>
+    <text x="1110" y="335" class="copy">Sends model requests to Cursor</text>
+  </g>
+
+  <!-- The two callable tool surfaces are distinct, not a sequence. -->
+  <g class="sans">
+    <rect x="510" y="446" width="492" height="114" rx="20" fill="url(#glass)" stroke="#2A3851"/>
+    <text x="538" y="485" class="heading" font-size="28">Active Pi tools</text>
+    <text x="538" y="531" class="copy">Via loopback MCP · when exposed</text>
+    <rect x="1080" y="446" width="456" height="114" rx="20" fill="url(#glass)" stroke="#2A3851"/>
+    <text x="1108" y="485" class="heading" font-size="28">Cursor tools + MCP</text>
+    <text x="1108" y="531" class="copy">Files · shell · edits · settings</text>
+  </g>
+</svg>

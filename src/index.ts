@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { discoverModels, type CursorModelFallbackIssue } from "./model-discovery.js";
+import { discoverModels, replaceCursorModelMetadata, type CursorModelFallbackIssue } from "./model-discovery.js";
 import { registerCursorRuntimeControls } from "./cursor-state.js";
 import { registerCursorNativeToolDisplay } from "./cursor-native-tool-display-registration.js";
 import { registerCursorPiToolBridge } from "./cursor-pi-tool-bridge.js";
@@ -15,6 +15,8 @@ import { registerCursorFallbackIssueWarning } from "./cursor-fallback-warning.js
 import { registerCursorAgentsContextDedup } from "./cursor-agents-context-registration.js";
 import { registerCursorOverflowNormalization } from "./cursor-provider-overflow.js";
 import { registerCursorSdkSessionProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
+import { installCursorSdkProcessOutputFilter } from "./cursor-sdk-output-filter.js";
+import { cursorLiveRuns } from "./cursor-provider-live-run-drain.js";
 import { prepareCursorSessionForCompaction } from "./cursor-session-compaction-prep.js";
 import { registerCursorUsageLedger } from "./cursor-usage-ledger.js";
 import { registerCursorUsageCommand } from "./cursor-usage-command.js";
@@ -37,10 +39,26 @@ type CursorExtensionApi =
 	& Parameters<typeof registerCursorUsageLedger>[0];
 
 export default async function (pi: CursorExtensionApi) {
+	installCursorSdkProcessOutputFilter();
 	// Session cwd must register before other session_start listeners that depend on it.
 	registerCursorSessionScope(pi);
 	registerCursorUsageLedger(pi);
 	registerCursorUsageCommand(pi);
+	pi.registerCommand("cursor-abort", {
+		description: "Abort this session's pending local Cursor run without undoing completed work",
+		handler: async (_args, ctx) => {
+			const run = cursorLiveRuns.getActiveForScope(getCursorSessionScopeSnapshot(pi).scopeKey);
+			if (run && !run.disposed) {
+				if (!ctx.isIdle() && ctx.model?.provider === "cursor") ctx.abort();
+				await cursorLiveRuns.release(run);
+			}
+			const message = run
+				? "Pending local Cursor run released. Retry under the current policy; already-executed work was not undone."
+				: "No pending local Cursor run in this session.";
+			if (ctx.hasUI) ctx.ui.notify(message, "info");
+			else process.stderr.write(`${message}\n`);
+		},
+	});
 	let fallbackIssue: CursorModelFallbackIssue | undefined;
 	const registerCursorProvider = registerCursorProviderBinding(pi);
 	const setFallbackWarning = registerCursorFallbackIssueWarning(pi);
@@ -85,9 +103,10 @@ export default async function (pi: CursorExtensionApi) {
 		},
 	});
 
-	registerCursorProvider(models, (issue) => {
+	registerCursorProvider(models, (issue, metadata) => {
 		fallbackIssue = issue;
 		setFallbackWarning(issue);
+		if (metadata) replaceCursorModelMetadata(metadata);
 	});
 	// Register last so session_shutdown cleanup remains protected until other Cursor handlers finish.
 	registerCursorSdkSessionProcessErrorGuard(pi);

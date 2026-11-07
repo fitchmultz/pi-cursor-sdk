@@ -9,7 +9,14 @@ const BRIDGE_ENDPOINT_TOKEN_PATTERN = "[^/\\s\"'<>]+";
 const BRIDGE_LOOPBACK_HOST_PATTERN = "127\\.0\\.0\\.1(?::\\d+)?";
 const BRIDGE_ENDPOINT_PATH_PATTERN = `${escapeRegExp(BRIDGE_ENDPOINT_ROOT)}/${BRIDGE_ENDPOINT_TOKEN_PATTERN}/mcp`;
 
+/** Necessary markers only, not credential validation. Skip impossible regex
+ * no-matches when either marker is absent; both-marker inputs remain unbounded. */
+export function hasCredentialUrlMarkers(text) {
+	return text.includes("@") && text.includes(":");
+}
+
 function scrubUrlUserInfo(text) {
+	if (!hasCredentialUrlMarkers(text)) return text;
 	return text
 		.replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/?#]*@(?=[^\s/?#]+)/gi, "$1[redacted]@")
 		.replace(/\b[^\s/:@]+:[^\s/]+@(?=[A-Za-z0-9.-]+(?::|\/|\s|$))/g, "[redacted]@");

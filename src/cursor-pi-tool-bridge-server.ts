@@ -7,6 +7,10 @@ import type {
 	CursorPiToolBridgeRunOptions,
 	CursorPiToolBridgeSnapshotApi,
 } from "./cursor-pi-tool-bridge-types.js";
+import {
+	resolveCursorPiToolBridgePortRange,
+	resolveCursorPiToolBridgeUrlHost,
+} from "./cursor-pi-tool-bridge-env.js";
 import { asRecord } from "./cursor-record-utils.js";
 import { CursorPiToolBridgeRunImpl } from "./cursor-pi-tool-bridge-run.js";
 import {
@@ -17,15 +21,54 @@ import {
 	resolveCursorPiToolBridgeEnabled,
 } from "./cursor-pi-tool-bridge-snapshot.js";
 
-export const LOOPBACK_HOST = "127.0.0.1";
+const LOOPBACK_HOST = "127.0.0.1";
 const HTTP_SERVER_CLOSE_GRACE_MS = 250;
+const EPHEMERAL_BIND_ATTEMPTS = 10;
+
+function listenOnce(server: HttpServer, port: number, host = LOOPBACK_HOST): Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		const onError = (error: Error) => {
+			server.off("listening", onListening);
+			reject(error);
+		};
+		const onListening = () => {
+			server.off("error", onError);
+			resolve();
+		};
+		server.once("error", onError);
+		server.once("listening", onListening);
+		server.listen({ port, host, ipv6Only: host === "::1" });
+	});
+}
+
+async function closeServers(servers: readonly HttpServer[]): Promise<void> {
+	await Promise.all(servers.map(async (server) => {
+		if (!server.listening) return;
+		await new Promise<void>((resolve, reject) => {
+			let settled = false;
+			const settle = (error?: Error): void => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(closeTimer);
+				if (error) reject(error);
+				else resolve();
+			};
+			const closeTimer = setTimeout(() => settle(), HTTP_SERVER_CLOSE_GRACE_MS);
+			closeTimer.unref?.();
+			server.close((error) => settle(error ?? undefined));
+			server.closeIdleConnections();
+			server.closeAllConnections();
+		});
+	}));
+}
 
 export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 	private readonly pi: CursorPiToolBridgeSnapshotApi;
 	private readonly env: Record<string, string | undefined>;
 	private readonly runs = new Set<CursorPiToolBridgeRunImpl>();
 	private readonly routes = new Map<string, CursorPiToolBridgeRunImpl>();
-	private httpServer?: HttpServer;
+	private httpServers: HttpServer[] = [];
+	private advertisedHost?: string;
 	private listenPromise?: Promise<void>;
 	private serverLifecycle = Promise.resolve();
 
@@ -60,7 +103,14 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 			: createEmptySnapshot();
 		const run = new CursorPiToolBridgeRunImpl(this, this.env, snapshot, bridgeEnabled && snapshot.tools.length > 0, options);
 		this.runs.add(run);
-		await run.start();
+		try {
+			await run.start();
+		} catch (error) {
+			try { await run.dispose(); }
+			catch { /* Preserve the original startup failure, not a secondary cleanup error. */ }
+			this.runs.delete(run);
+			throw error;
+		}
 		run.emitStartDiagnostics(bridgeEnabled);
 		return run;
 	}
@@ -77,8 +127,8 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 			await this.ensureHttpServer();
 			this.routes.set(pathname, run);
 			const address = this.getHttpServerAddress();
-			if (!address) throw new Error("Cursor pi tool bridge HTTP server is not listening");
-			return `http://${LOOPBACK_HOST}:${address.port}${pathname}`;
+			if (!address || !this.advertisedHost) throw new Error("Cursor pi tool bridge HTTP server is not listening");
+			return `http://${this.advertisedHost}:${address.port}${pathname}`;
 		});
 	}
 
@@ -97,7 +147,7 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 	}
 
 	getHttpServerAddress(): AddressInfo | undefined {
-		const address = asRecord(this.httpServer?.address());
+		const address = asRecord(this.httpServers[0]?.address());
 		if (typeof address?.port !== "number") return undefined;
 		return {
 			address: typeof address.address === "string" ? address.address : LOOPBACK_HOST,
@@ -126,7 +176,8 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 
 	private async ensureHttpServer(): Promise<void> {
 		this.listenPromise ??= this.startHttpServer().catch((error: unknown) => {
-			this.httpServer = undefined;
+			this.httpServers = [];
+			this.advertisedHost = undefined;
 			this.listenPromise = undefined;
 			throw error;
 		});
@@ -134,6 +185,9 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 	}
 
 	private async startHttpServer(): Promise<void> {
+		// A hostname is a listener policy, not a mutable per-run URL preference.
+		const advertisedHost = resolveCursorPiToolBridgeUrlHost(this.env);
+		const range = resolveCursorPiToolBridgePortRange(this.env);
 		const [{ getRequestListener }, { createMcpHonoApp }] = await Promise.all([
 			import("@hono/node-server"),
 			import("@modelcontextprotocol/hono"),
@@ -145,49 +199,39 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 			).get("parsedBody");
 			return this.handleHttpRequest(context.req.raw, parsedBody);
 		});
-		const server = createServer(getRequestListener(app.fetch, { overrideGlobalObjects: false }));
-		this.httpServer = server;
-		await new Promise<void>((resolve, reject) => {
-			const onError = (error: Error) => {
-				server.off("listening", onListening);
-				reject(error);
-			};
-			const onListening = () => {
-				server.off("error", onError);
-				resolve();
-			};
-			server.once("error", onError);
-			server.once("listening", onListening);
-			server.listen(0, LOOPBACK_HOST);
-		});
+		const listener = getRequestListener(app.fetch, { overrideGlobalObjects: false });
+		const attempts = range ? range.last - range.first + 1 : advertisedHost === "localhost" ? EPHEMERAL_BIND_ATTEMPTS : 1;
+		for (let attempt = 0; attempt < attempts; attempt += 1) {
+			const servers = [createServer(listener)];
+			try {
+				await listenOnce(servers[0]!, range ? range.first + attempt : 0);
+				if (advertisedHost === "localhost") {
+					const port = (servers[0]!.address() as AddressInfo).port;
+					const ipv6 = createServer(listener);
+					servers.push(ipv6);
+					// Own both explicit loopbacks before publishing any tokenized URL.
+					await listenOnce(ipv6, port, "::1");
+				}
+				this.httpServers = servers;
+				this.advertisedHost = advertisedHost;
+				return;
+			} catch (error) {
+				try { await closeServers(servers); }
+				catch { throw error; } // Never retry or replace the bind failure when rollback fails.
+				if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE" || (!range && advertisedHost !== "localhost")) throw error;
+			}
+		}
+		if (range) throw new Error(`Cursor pi tool bridge could not listen on any port in ${range.first}-${range.last} (all in use)`);
+		throw new Error("Cursor pi tool bridge could not own both localhost loopback listeners on an ephemeral port");
 	}
 
 	private async closeHttpServer(): Promise<void> {
 		await this.listenPromise?.catch(() => undefined);
-		const server = this.httpServer;
-		if (!server) return;
-		this.httpServer = undefined;
+		const servers = this.httpServers;
+		this.httpServers = [];
+		this.advertisedHost = undefined;
 		this.listenPromise = undefined;
-		await new Promise<void>((resolve, reject) => {
-			let settled = false;
-			let closeTimer: ReturnType<typeof setTimeout> | undefined;
-			const settle = (error?: Error): void => {
-				if (settled) return;
-				settled = true;
-				if (closeTimer) clearTimeout(closeTimer);
-				if (error) reject(error);
-				else resolve();
-			};
-
-			closeTimer = setTimeout(() => settle(), HTTP_SERVER_CLOSE_GRACE_MS);
-			closeTimer.unref?.();
-
-			server.close((error) => {
-				settle(error ?? undefined);
-			});
-			server.closeIdleConnections();
-			server.closeAllConnections();
-		});
+		await closeServers(servers);
 	}
 
 	private async handleHttpRequest(request: Request, parsedBody?: unknown): Promise<Response> {

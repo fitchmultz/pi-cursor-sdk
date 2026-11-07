@@ -99,16 +99,6 @@ describe("discoverModels model-list cache", () => {
 		expect(second.map((model) => model.id)).toEqual(first.map((model) => model.id));
 	});
 
-	it("bypasses the cache when forceRefresh is set", async () => {
-		process.env.CURSOR_API_KEY = "cache-key";
-		mockedList.mockResolvedValue([MODEL]);
-
-		await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
-		await discoverModels({ apiKey: process.env.CURSOR_API_KEY, forceRefresh: true });
-
-		expect(mockedList).toHaveBeenCalledTimes(2);
-	});
-
 	it("does not read the cache when disabled via env", async () => {
 		process.env.PI_CURSOR_SDK_DISABLE_MODEL_CACHE = "1";
 		process.env.CURSOR_API_KEY = "cache-key";

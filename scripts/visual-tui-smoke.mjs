@@ -58,7 +58,8 @@ Common options:
   --self-test                   Run the fake-PATH/env isolation probe without launching pi.
   -h, --help                    Show this help.
 
-Native replay isolation defaults:
+Native replay isolation defaults (including --bridge surface overrides):
+  PI_CURSOR_LEAN=0
   PI_CURSOR_NATIVE_TOOL_DISPLAY=1
   PI_CURSOR_REGISTER_NATIVE_TOOLS=1
   PI_CURSOR_SETTING_SOURCES=none
@@ -372,6 +373,7 @@ function buildLaunchPlan(options, commands, shell) {
 		baseEnv: process.env,
 		nodePath: commands.node,
 		settingSources: options.settingSources,
+		lean: false,
 		nativeToolDisplay: true,
 		registerNativeTools: true,
 		bridge: options.bridge,

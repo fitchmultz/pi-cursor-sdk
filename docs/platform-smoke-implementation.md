@@ -26,7 +26,7 @@ Meaningful gap closed: earlier card assertions could pass when the prompt mentio
 
 ## Registry visual classification
 
-The implementation must classify every `CURSOR_TOOL_PRESENTATION_SPECS` entry from `src/cursor-tool-presentation-registry.ts` as required or excluded for the optional comprehensive visual matrix. A validation check fails when a registry entry lacks classification.
+The implementation must classify every `CURSOR_TOOL_PRESENTATION_SPECS` entry from `src/cursor-tool-presentation-registry.ts` as required or excluded for the optional comprehensive visual matrix. `test/smoke-tooling.test.ts` fails when a registry tool name is missing from these lists or an excluded entry lacks a rationale.
 
 Required deterministic cards:
 
@@ -40,6 +40,7 @@ Required deterministic cards:
 
 Excluded from release visual matrix with required rationale:
 
+- `ls`: composer-2-5 does not route the deterministic source-enumeration step through the native `ls` surface reliably; the suite instead gates that behavior through a successful native `find` result for `src/cursor-provider.ts`.
 - `delete`: destructive and redundant with file mutation card coverage.
 - `readLints`: dependent on target diagnostics state.
 - `updateTodos`: model workflow dependent.
@@ -52,7 +53,7 @@ Excluded from release visual matrix with required rationale:
 - `webSearch`: network/search dependent.
 - `webFetch`: network dependent.
 
-Adding a registry entry requires adding it to the required or excluded list with rationale. `ls` is currently excluded from the required one-prompt matrix because composer-2-5 does not route the deterministic source-enumeration step through the native `ls` surface reliably; the suite instead gates that behavior through a successful native `find` result for `src/cursor-provider.ts`.
+Adding a registry entry requires adding it to the required or excluded list with rationale.
 
 ## Platform command rendering
 

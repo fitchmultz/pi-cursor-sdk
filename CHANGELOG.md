@@ -1,10 +1,181 @@
 # Changelog
 
+**Release preparation is not a publication receipt:** confirm the exact version, source and artifact integrity in npm/GitHub publication records before relying on availability. No issue is closed by preparation alone.
+
 ## Unreleased
 
 ### Changed
 
+- Default to local Pi-tools-only (lean) mode: expose active, request-declared Pi tools through the bridge, including Pi built-ins and CodeMode routing, while disabling Cursor-native tools, ambient Cursor settings/MCP, and extension replay/question/skill wrappers. Pi instructions, skills, and project context remain intact. Set `PI_CURSOR_LEAN=0` at startup and restart Pi to restore the legacy hybrid surface or use Cursor Cloud; lean mode rejects Cloud before agent creation. The separate legacy `PI_CURSOR_NATIVE_TOOLS=0` MCP-only opt-out and `/cursor-abort` recovery remain available.
+
+## 0.5.12 - 2026-11-06
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- test: compare native replay renders by visible text (#420) ([650d89f](https://github.com/fitchmultz/pi-cursor-sdk/commit/650d89f1c6c34518f47a0407f682c677bd74f31c))
+
+### What's Changed
+* test: compare native replay renders by visible text by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/420
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.11...v0.5.12
+
+## 0.5.11 - 2026-11-04
+
+<!-- npm-release:unreleased:start -->
+### Fixed
+
+- Serve Cursor requests in hosts that share one ModelRuntime and register providers only from a session-less bootstrap load, such as PI WEB. Every request previously failed with "Cursor provider binding is not active" because the only accepted registration belonged to an extension instance that never started. A registration whose session never started now serves the bound, active session that issued the request receipt, with that session's scope, compaction/tree purpose, bridge, replay state and cloud recorder. Receipts are shared process-wide because Pi evaluates each extension instance with its own module graph. Unbound or shut-down sessions, receipt-less calls and shut-down registrations still fail closed, and a started registration still rejects sibling receipts. The turn runs in the session's own module, so its agent pool, settings and lifecycle stay with that session. Such sessions follow the native provider's catalog issue and model metadata, including after a composed wrapper or a later registration replaces the provider, so a live catalog refresh clears their startup "missing API key" fallback warning instead of repeating it. Live LOCAL agent claims and HTTP/1 override ownership are process-wide across module copies. Same-file sessions cannot resume each other's live agents, and shutdown resets the transport only when no started live session remains, ignoring siblings marked stale by direct disposal. An unstarted registration does not keep the override alive, and its offline refresh does not replace a live catalog with a missing-key fallback when composed auth is not on the refresh credential. Catalog subscriptions use weak references so they do not retain disposed extension copies. The next catalog publication removes stale subscriptions without notifying disposed sessions.
+<!-- npm-release:unreleased:end -->
+
+- Merge pull request #390 from rickycabugawan/fix/shared-runtime-provider-binding ([85f4c5a](https://github.com/fitchmultz/pi-cursor-sdk/commit/85f4c5a18dbc311c4e66c3b78084dfb0398e2e00))
+
+### What's Changed
+* Fix shared-runtime Cursor provider ownership by @rickycabugawan in https://github.com/fitchmultz/pi-cursor-sdk/pull/390
+
+### New Contributors
+* @rickycabugawan made their first contribution in https://github.com/fitchmultz/pi-cursor-sdk/pull/390
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.10...v0.5.11
+
+## 0.5.10 - 2026-11-03
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Merge pull request #404 from fitchmultz/npm-version-queue-1 ([e9d8b51](https://github.com/fitchmultz/pi-cursor-sdk/commit/e9d8b513bd7e6ecb6ced66ff56b0b4e9a4bd4bf1))
+
+### What's Changed
+* Coalesce queued npm version runs by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/404
+* Restore queue: max and the final newline in npm-version.yml by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/405
+* Skip no-op releases and restate malformed remediation dispositions by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/407
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.9...v0.5.10
+
+## 0.5.9 - 2026-11-02
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Recheck unreported Cursor reviews in automatic releases (#402) ([c587ba6](https://github.com/fitchmultz/pi-cursor-sdk/commit/c587ba6594b8a63c49486c206a5349bdf0d9f5bc))
+
+### What's Changed
+* Recheck unreported Cursor reviews in automatic releases by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/402
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.8...v0.5.9
+
+## 0.5.8 - 2026-11-02
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Raise the Pi floor to 1.5.0 (#400) ([10d8523](https://github.com/fitchmultz/pi-cursor-sdk/commit/10d85236a00a59b8422e17a530412aff6c715236))
+
+### What's Changed
+* Raise the Pi floor to 1.5.0 by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/400
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.7...v0.5.8
+
+## 0.5.7 - 2026-11-01
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Reconcile queued version source commit [d82e5a3](https://github.com/fitchmultz/pi-cursor-sdk/commit/d82e5a391285c88079fc3e90983d985bae77af7c) (`Merge pull request #397 from fitchmultz/fix/npm12-manager-scripts`), which is already an ancestor of `v0.5.6` (`4dc13ea`).
+
+### Changed
+
+- Version-only metadata release (`package.json`, `package-lock.json`, and `CHANGELOG.md`). All functional and workflow changes from #397 already shipped in `0.5.6`; `v0.5.6...v0.5.7` contains no runtime, build, or dependency changes.
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.6...v0.5.7
+
+## 0.5.6 - 2026-11-01
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Merge pull request #395 from fitchmultz/task/npm-zod-release-gate ([49e7f8d](https://github.com/fitchmultz/pi-cursor-sdk/commit/49e7f8dbcfb6bf76b3f550f49ffd7d3f547cc9ab))
+
+### Changed
+
+- Gate automatic patch releases on exact-scope commit, PR, prospective-release, and retained-candidate reviews. Bind catalog and installer qualification to the candidate and retain npm and GitHub publication evidence (#393, #394, #395).
+- Approve Bun and pnpm's required setup scripts with npm 12's targeted `--allow-scripts=bun,pnpm` before the five-mode Node/Bun installer qualification (#397).
+
+### Fixed
+
+- Credit a complete source-file read for a byte-identical package copy after the reviewer opens the package path. The review receipt records SHA-256 provenance. Different package content still requires a complete read.
+
+Cursor runtime behavior and runtime dependency versions are unchanged.
+
+### What's Changed
+* Qualify exact review scopes before release (1/3) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/393
+* Bind prospective release reviews to the open PR (2/3) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/394
+* Gate automatic Cursor releases on exact-candidate review (3/3) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/395
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.5...v0.5.6
+
+## 0.5.5
+
+### Fixed
+
+- Stop a failed LOCAL Cursor run's shell commands and other native tool processes. SDK 1.0.40 leaves them running after a run fails, for example when it gives up resuming a reset connection, and `Run.cancel()` stops them only while the run is still running. The provider now cancels the run while the SDK records the failure, which the SDK does before it marks the run failed, and still reports the SDK's failure message as a Pi error. A separate SDK error code, when present, is not shown after this cancellation. Explicit Pi aborts and Cloud runs are unchanged (#384).
+
+- Upgrade the exact unbundled Cursor SDK and its optional platform packages from 1.0.37 to 1.0.40 for LOCAL Claude-format hook compatibility: the SDK now enables translation of nested `hookSpecificOutput` denial/rewrite output into the fields its tool adapters consume. It also improves Windows command-hook UTF-8 input and native exit-code propagation. This is not a Pi pre-execution hook, universal policy guarantee, or resolution of the original rtk report (#173).
+
+- Supply SDK 1.0.40's required Zod peer as a direct exact `zod@4.6.6` runtime dependency, with the bundled MCP bridge's newer nested `4.6.7` copies retained by npm's lockfile. This keeps the peer outside the tarball's bundle and reachable by the unbundled SDK under Pi's `--legacy-peer-deps` installation, without peer auto-installation, overrides or SDK patches (#380). A deduplicated root `4.6.7` copy instead gets bundled and breaks that installation.
+
+- Both the SDK's v4/v4-mini parsers and the bridge's v4 parsers now include the bounded-collection fix for [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5): array, set and map size bounds are checked before parsing elements. Zod 4.6.7 differs from 4.6.6 only in version metadata. The legacy `zod/v3` implementation is unchanged, and unconstrained collections still validate every element; this is not a universal resource cap or a claim of a demonstrated SDK exploit.
+
+- Stop `smoke:steering --self-test` from rebuilding `dist/` before its offline probe. The rebuild briefly removed `dist/` while the concurrent package test packed the checkout, producing an intermittent missing `dist/index.js` failure. Live steering runs still rebuild first (fitchmultz/.github#98).
+
+### Changed
+
+- Refresh the fallback catalog from the authenticated SDK 1.0.40 catalog-only observation on 2026-10-31: 49 models, adding DeepSeek V4.1 Flash 1017 (`deepseek-v41-flash-1017`) and recording `cyber=false` on Claude Opus 5.5 variants. All 48 prior model IDs and the 33 bundled checkpoint-derived entries remain; no Agent/model turn or Cloud run was performed.
+
+### Verification and limits
+
+- **User-visible rollout:** admitted user/project Claude hooks returning only nested denial/rewrite output can now affect tool execution where SDK 1.0.37 ignored that output; this is an intended behavior change, not just a test-harness repair.
+- Add installed-package contracts for actual Claude settings loading, UTF-8 hook input, nested denial/rewrite, conflicting/mismatched output guards and native exit-2 denial. These use test-only lexical observation, not a production SDK patch, public Agent/backend run or startup canary. Preserve the dated SDK 1.0.37 catalog and older captures at their actual identities; the other original backlog causes remain unqualified and both commit/PR attribution controls remain unavailable.
+
+## 0.5.4
+
+### Fixed
+
+- Identify 0.5.4 as the first candidate containing the native-tool opt-out and `/cursor-abort` from #372, and require an exact publication/installation check. Published npm 0.5.3 ignores that flag and lacks the command; a development version label is not proof of enforcement (#368).
+- Keep verified SDK bootstrap output filtered across detached rule/skill work and asynchronous reload gaps with a process-lifetime, versioned sink lease. Preserve unrelated output and expose bounded owner-scoped capability/hook warnings; unknown output is not universally suppressed (#367).
+- Isolate native auth/catalog fixtures from the official host's file-backed startup refresh-admission race. Use matching in-memory catalog state for extension-owned assertions; this is not an official-host startup repair (#357).
+- Skip credential-URL regex scans when required markers are absent, preserving the existing matching/redaction contract, including percent-encoded cases. Inputs containing both markers retain the existing regex behavior; no universal processing bound is claimed (#371).
+
+### Added
+
+- Add `/cursor-abort` as an explicit session-scoped release path for a pending local Cursor run after a native-tool policy mismatch. Ordinary mismatch remains restorable and never cancels implicitly; idle Pi abort has no active signal after the error has settled. Explicit active provider abort now also releases its captured scope's old pending run before preparation. Recovery never delivers stale Pi results, automatically sends a replacement turn, releases sibling scopes, or undoes already-executed work.
+
+- Add opt-in `PI_CURSOR_NATIVE_TOOLS=0` for MCP-only ordinary LOCAL agents using public SDK `tools: ["mcp"]`, excluding all other main tools including native task/subagents. Capture and forward the same policy for create/resume and split pooled/durable identities only on opt-out, and reject opposite-policy pending-run continuation before delivering Pi results; defaults and text-only summaries are unchanged. Cloud fails closed instead of ignoring the control. Keep Pi builtin exposure explicit, and document that native replay hooks/display flags cannot govern original execution, ambient configured MCP remains unless settings are disabled, and permitted Pi/MCP tools are not a sandbox (#368).
+
+- Add `PI_CURSOR_PI_TOOL_BRIDGE_HOST` (`localhost` or the default `127.0.0.1` in the bridge URL) and `PI_CURSOR_PI_TOOL_BRIDGE_PORT` (one port or an inclusive `N-M` range) so a Cursor team MCP allowlist such as `http://localhost:800*/mcp` can admit the pi tool bridge. The default still binds only `127.0.0.1`; opt-in `localhost` now requires owning both explicit loopbacks on the same port before advertising a URL, with partial-startup cleanup and lifetime-stable host policy. Unset settings keep the previous random-port behavior.
+
+### Changed
+
+- Refresh the fallback catalog from the authenticated SDK 1.0.37 catalog-only observation on 2026-10-22: 48 models, adding Gemini 4 Argon (`gemini-4-argon`) and Muse Wonder (`muse-wonder-1.0`) while preserving all 46 prior records. Keep the 33 bundled checkpoint-derived entries unchanged; no Agent/model turn or Cloud run was performed.
+- Prefer the currently exposed Pi tool capabilities, schemas and prompt guidelines instead of hardcoded historical MCP/delegation names. Dynamic registry mapping remains unchanged; this is not qualification of the original Windows bridge report (#206).
+- Rewrite the README around installation and everyday use, add a diagram of Cursor inside Pi, and move detailed configuration and maintainer procedures into linked reference pages.
 - Align locked development Pi snapshots and their resolved Pi cohort to 1.1.0 ([#353](https://github.com/fitchmultz/pi-cursor-sdk/pull/353)). This is development-only maintenance, not a user runtime Pi upgrade or a new npm publication. Node 24+, official Pi 0.87.1+, optional wildcard Pi/TypeBox peers, and exact unbundled Cursor SDK 1.0.37 remain unchanged; published 0.5.3 and historical qualification evidence retain their original source/version attribution.
+- Consolidate redundant tests and unused internal exports/wrappers while retaining native, installed-SDK and persistence boundary owners (#360, #363). Improve fixture contracts for user/custom start events without widening runtime APIs (#361). Make installed-SDK bootstrap-printer fixtures select and restore their terminal environment even under `TERM=dumb`, preserving ANSI and confinement assertions.
+- Use the reviewed automatic npm release workflow: an intentional versioned PR merged to main triggers qualification and publication without a new approval step. This candidate does not change publisher policy, authentication, protections or workflow pins (#362).
+
+### Security
+
+- Include the development-only Vite 8.3.1 → 8.3.4 lockfile update already merged in #369; no release-time dependency upgrade is added.
+
+### Verification and limits
+
+- The native-tool opt-out is the supported LOCAL SDK MCP-only tool surface, not interception of native replay or an OS sandbox. Configured MCP remains unless setting sources are narrowed, and permitted Pi/MCP tools can execute arbitrary work. Defaults and existing LOCAL text-only summary isolation remain unchanged; unsupported Cloud opt-out fails closed. No paid Cloud campaign is part of this release.
+- Runtime/source checks, package controls, catalog metadata, current-host offline CI and publication are distinct evidence. Preserve retained proof at its actual SDK/host/source identity. No original #173 hook rewrite, #206 Windows bridge readiness, #233 embedded loader, #247 idle recovery, #257 model narration or #339 signal-sender resolution is inferred from this candidate.
 
 ## 0.5.3 - 2026-10-07
 
@@ -86,7 +257,7 @@ These changes are carried into 0.5.2; this section does not record a successful 
 
 ### Breaking Changes
 
-- Bare `ctx.modelRegistry.complete(...)` and `ctx.modelRegistry.streamSimple(...)` calls are unsupported for Cursor models because they lack native session ownership receipts. Custom compaction and other integrations must use the owning AgentSession's stream path or an independent child AgentSession; bind/refresh/reload does not migrate bare calls. See [embedding migration guidance](README.md#embedded-sessions-report-concurrent-cursor-turns).
+- Bare `ctx.modelRegistry.complete(...)` and `ctx.modelRegistry.streamSimple(...)` calls are unsupported for Cursor models because they lack native session ownership receipts. Custom compaction and other integrations must use the owning AgentSession's stream path or an independent child AgentSession; bind/refresh/reload does not migrate bare calls. See [embedding migration guidance](docs/reference.md#embedded-sessions-report-concurrent-cursor-turns).
 
 ### Changed
 

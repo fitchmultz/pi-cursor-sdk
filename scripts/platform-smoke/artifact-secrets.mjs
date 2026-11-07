@@ -4,7 +4,7 @@
 
 import { isUtf8 } from "node:buffer";
 import { TextDecoder } from "node:util";
-import { scrubSensitiveText } from "../../shared/cursor-sensitive-text.mjs";
+import { hasCredentialUrlMarkers, scrubSensitiveText } from "../../shared/cursor-sensitive-text.mjs";
 
 export const SECRET_PATTERNS = [
 	[/Authorization:\s*Bearer\s+[A-Za-z0-9\-._~+/]{20,}=*/gi, "Authorization header", "Authorization: Bearer [REDACTED_BEARER_TOKEN]"],
@@ -15,6 +15,10 @@ export const SECRET_PATTERNS = [
 	[/\b[a-z][a-z0-9+.-]*:\/\/(?!\[redacted\]@)[^\s/?#]*@[^\s/?#]+/gi, "credential-bearing URL", "[REDACTED_CREDENTIAL_URL]"],
 	[/\b[^\s/:@]+:[^\s/]+@(?=[A-Za-z0-9.-]+(?::|\/|\s|$))/g, "credential-bearing SCP URL", "[REDACTED_CREDENTIAL_URL]"],
 ];
+
+function isCredentialUrlPattern(label) {
+	return label === "credential-bearing URL" || label === "credential-bearing SCP URL";
+}
 
 const AUTH_ASSIGNMENT_PATTERN = /(?:^|[^A-Za-z0-9_$])(?:authorization|api[_-]?key|apiKey|access[_-]?token|refresh[_-]?token|token)["']?\s*[:=]\s*/gim;
 const UNQUOTED_SECRET_CHARACTER = /^[A-Za-z0-9._~+/=-]$/;
@@ -65,7 +69,11 @@ export function redactSecrets(text) {
 	if (cursorKey && cursorKey.length > 10) {
 		redacted = redacted.split(cursorKey).join("[REDACTED_CURSOR_API_KEY]");
 	}
-	for (const [pattern, , replacement] of SECRET_PATTERNS) {
+	const credentialUrlPossible = hasCredentialUrlMarkers(redacted);
+	for (const [pattern, label, replacement] of SECRET_PATTERNS) {
+		// Global String.replace reset this state even on an impossible match.
+		pattern.lastIndex = 0;
+		if (!credentialUrlPossible && isCredentialUrlPattern(label)) continue;
 		redacted = redacted.replace(pattern, replacement);
 	}
 	return redacted;
@@ -195,13 +203,14 @@ export function scanForSecrets(value) {
 	)) {
 		violations.add("CURSOR_API_KEY literal found");
 	}
-	const patterns = SECRET_PATTERNS.filter(([, label]) =>
-		!binary || (label !== "credential-bearing URL" && label !== "credential-bearing SCP URL"));
+	const patterns = SECRET_PATTERNS.filter(([, label]) => !binary || !isCredentialUrlPattern(label));
 	const texts = buffer ? (binary ? binaryTextCandidates(buffer) : [buffer.toString("utf8")]) : [plainText];
 	for (const text of texts) {
 		if (authAssignmentSecretRanges(text).length > 0) violations.add("potential auth/token assignment");
+		const credentialUrlPossible = hasCredentialUrlMarkers(text);
 		for (const [pattern, label] of patterns) {
 			pattern.lastIndex = 0;
+			if (!credentialUrlPossible && isCredentialUrlPattern(label)) continue;
 			if (pattern.test(text)) violations.add(`potential ${label}`);
 		}
 	}

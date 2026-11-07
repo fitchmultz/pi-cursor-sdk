@@ -16,9 +16,9 @@ jobs:
   resolve:
     permissions:
       contents: read
-    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@11d531f79564b555ebf75348d7275eaf0cb6d825 # main
+    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@81643f314e88cba668cc68c2d06abcefcbba44ee # main
     with:
-      automation-ref: 11d531f79564b555ebf75348d7275eaf0cb6d825 # main
+      automation-ref: 81643f314e88cba668cc68c2d06abcefcbba44ee # main
       official-version: ${{ inputs.official-version }}
       fork-ref: ${{ inputs.fork-ref }}
 
@@ -49,12 +49,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: fitchmultz/.github
-          ref: 11d531f79564b555ebf75348d7275eaf0cb6d825 # main
+          ref: 81643f314e88cba668cc68c2d06abcefcbba44ee # main
           path: automation
           persist-credentials: false
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify release review contracts
+        run: node --test test/release-review*.test.mjs
       - name: Qualify both frozen latest host graphs and installed forms
         env:
+          # The shared host helpers read official installer assets through the GitHub API.
+          GH_TOKEN: ${{ github.token }}
           OFFICIAL_VERSION: ${{ needs.resolve.outputs.official-version }}
           FORK_REF: ${{ needs.resolve.outputs.fork-ref }}
           PI_COMPAT_EVIDENCE_DIR: ${{ runner.temp }}/cursor-hosts
@@ -98,17 +102,29 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: fitchmultz/.github
-          ref: 11d531f79564b555ebf75348d7275eaf0cb6d825 # main
+          ref: 81643f314e88cba668cc68c2d06abcefcbba44ee # main
           path: automation
           persist-credentials: false
       - run: npm ci --no-audit --no-fund
+      - name: Verify native release review contracts
+        run: node --test test/release-review.test.mjs test/release-review-npm.test.mjs test/release-review-github.test.mjs
       - name: Select the frozen latest official graph
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           OFFICIAL_VERSION: ${{ needs.resolve.outputs.official-version }}
           PI_COMPAT_EVIDENCE_DIR: ${{ runner.temp }}/native-host
         run: node scripts/ci-compatibility.mjs --automation automation --official-version "$OFFICIAL_VERSION" --select-only
       - run: npm run build
+      - name: Check native durable resume and sibling ownership
+        env:
+          PI_CURSOR_TEST_EVIDENCE_DIR: ${{ runner.temp }}/native-host/same-file-resume
+          TMPDIR: ${{ runner.temp }}/native-host
+          TMP: ${{ runner.temp }}/native-host
+          TEMP: ${{ runner.temp }}/native-host
+        run: |
+          node -e "require('node:fs').mkdirSync(process.env.TMPDIR, { recursive: true })"
+          node --test test/native-cursor-ownership.test.mjs
       - run: node -e "require('node-pty')"
       - run: npm run check:platform-smoke
       - run: npm test -- --testTimeout=15000
@@ -119,5 +135,6 @@ jobs:
         with:
           name: cursor-native-host-${{ matrix.os }}
           path: ${{ runner.temp }}/native-host
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 3

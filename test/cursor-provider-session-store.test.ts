@@ -4,12 +4,15 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, toNamespacedPath } from "node:path";
+import type { RunResult } from "@cursor/sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
 import { buildCursorSessionStateRoot } from "../src/cursor-session-store.js";
 import {
+	asMockCursorRun,
 	collectEvents,
+	getErrorEvent,
 	makeContext,
 	makeModel,
 	mockCreatedAgent,
@@ -18,7 +21,7 @@ import {
 	mockedMessagesList,
 	resetCursorProviderTestState,
 } from "./helpers/cursor-provider-harness.js";
-import { installCursorSessionStoreMock } from "./helpers/cursor-session-store.js";
+import { installCursorSessionStoreMock, sessionStoreBackedBy } from "./helpers/cursor-session-store.js";
 
 const changeDuringDrain = vi.hoisted(() => ({ root: undefined as string | undefined }));
 vi.mock("../src/cursor-provider-live-run-drain.js", async (importOriginal) => {
@@ -66,13 +69,38 @@ describe("streamCursor session store", () => {
 
 		await collectEvents(streamCursor(makeModel("gpt-5.5@1m"), makeContext(), { apiKey: "test-key" }));
 
-		const store = storeMock.stores[0];
+		const store = mockedCreate.mock.calls[0][0].local?.store;
 		expect(storeMock.openSqliteStore).toHaveBeenCalledWith({
 			workspaceRef: process.cwd(),
 			stateRoot: toNamespacedPath(buildCursorSessionStateRoot(workspace, scopeKey)),
 		});
-		expect(mockedCreate.mock.calls[0][0].local?.store).toBe(store);
+		expect(store).toEqual(sessionStoreBackedBy(storeMock.stores[0]));
 		expect(mockedMessagesList).toHaveBeenCalledWith("agent-1", expect.objectContaining({ store }));
 		expect(mockedCreateAgentPlatform).toHaveBeenCalledWith(expect.objectContaining({ localStore: store }));
+	});
+
+	it("cancels a local run when its session store records the SDK error and still reports that error", async () => {
+		installCursorSessionStoreMock();
+		const failure = "[permission_denied] offline terminal failure";
+		let cancelled = false;
+		const run = asMockCursorRun({
+			id: "run-failed",
+			agentId: "agent-1",
+			status: "running",
+			// SDK 1.0.40 order, proven against the installed SDK in cursor-local-run-terminal-error.test.ts:
+			// the error row is written while the run is still running, and cancel() then decides wait()'s status.
+			wait: vi.fn(async (): Promise<RunResult> => {
+				const store = mockedCreate.mock.calls[0][0].local!.store!;
+				await store.runs.update({ run: { runId: "run-failed", status: "error", error: failure } } as never);
+				return { id: "run-failed", status: cancelled ? "cancelled" : "error", ...(cancelled ? {} : { error: { message: failure } }) };
+			}),
+			cancel: vi.fn(async () => { cancelled = true; }),
+		});
+		mockCreatedAgent({ send: vi.fn().mockResolvedValue(run) });
+
+		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+
+		expect(run.cancel).toHaveBeenCalledTimes(1);
+		expect(getErrorEvent(events).error).toMatchObject({ stopReason: "error", errorMessage: expect.stringContaining(failure) });
 	});
 });

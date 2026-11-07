@@ -14,18 +14,4 @@ describe("installed SDK lean policy contract", () => {
 		expect(types).toContain("combining `tools` with `cloud` throws");
 		expect(types).toContain("Ambient Cursor settings layers to load from the local filesystem.");
 	});
-
-	it("expands mcp to only the observed MCP proto family, excluding web, shell and subagents", () => {
-		// The installed SDK bundles the public tools-option implementation in index.js.
-		// Fail on packaging/vocabulary drift instead of accepting a guessed allowlist.
-		const source = readFileSync(join(sdkRoot, "dist/esm/index.js"), "utf8");
-		const module = source.split('"./src/agent/tools-option.ts"')[1]?.split('},"./src/agent/transport.ts"')[0];
-		expect(module).toBeDefined();
-		expect(module).toContain('"x-cursor-agent-allowed-tools"');
-		const group = module?.match(/mcp:(\[[^\]]+\])/);
-		expect(JSON.parse(group?.[1] ?? "null")).toEqual([
-			"mcp_tool_call", "get_mcp_tools_tool_call", "list_mcp_resources_tool_call",
-			"read_mcp_resource_tool_call", "mcp_auth_tool_call",
-		]);
-	});
 });

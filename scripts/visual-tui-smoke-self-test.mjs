@@ -84,6 +84,7 @@ export function runVisualSmokeSelfTest(deps) {
 		};
 		const plan = buildLaunchPlan(baseOptions, { pi: fakePi, node: process.execPath, sealedPath: sealedHostilePath }, "/bin/sh");
 		const defaults = envMap(plan.envAssignments);
+		assertSelfTest(defaults.get("PI_CURSOR_LEAN") === "0", "native replay must opt out of the default lean policy");
 		assertSelfTest(defaults.get("PI_CURSOR_NATIVE_TOOL_DISPLAY") === "1", "native display must be forced on");
 		assertSelfTest(defaults.get("PI_CURSOR_REGISTER_NATIVE_TOOLS") === "1", "native tool registration must be forced on");
 		assertSelfTest(defaults.get("PI_CURSOR_SETTING_SOURCES") === "none", "setting sources must default to none");
@@ -101,6 +102,7 @@ export function runVisualSmokeSelfTest(deps) {
 			...process.env,
 			...Object.fromEntries(DEBUG_ENV_NAMES.map((name) => [name, join(tempDir, name)])),
 			PATH: hostilePath,
+			PI_CURSOR_LEAN: "1",
 			PI_CURSOR_REGISTER_NATIVE_TOOLS: "0",
 			PI_CURSOR_SETTING_SOURCES: "all",
 			PI_CURSOR_PI_TOOL_BRIDGE: "1",
@@ -111,6 +113,7 @@ export function runVisualSmokeSelfTest(deps) {
 		const capturedEnv = parseEnvCapture(envCapture);
 		assertSelfTest(!existsSync(fakeNodeMarker), "launch PATH should force the resolved node before hostile fake node");
 		assertSelfTest((capturedEnv.get("PATH") ?? "").split(delimiter)[0] === dirname(process.execPath), "captured PATH should start with resolved node directory");
+		assertSelfTest(capturedEnv.get("PI_CURSOR_LEAN") === "0", "captured env must override inherited lean mode for native replay");
 		assertSelfTest(capturedEnv.get("PI_CURSOR_NATIVE_TOOL_DISPLAY") === "1", "captured env should force native display on");
 		assertSelfTest(capturedEnv.get("PI_CURSOR_REGISTER_NATIVE_TOOLS") === "1", "captured env should force native registration on");
 		assertSelfTest(capturedEnv.get("PI_CURSOR_SETTING_SOURCES") === "none", "captured env should force settings off");
@@ -126,6 +129,7 @@ export function runVisualSmokeSelfTest(deps) {
 			"/bin/sh",
 		);
 		const optIns = envMap(optInPlan.envAssignments);
+		assertSelfTest(optIns.get("PI_CURSOR_LEAN") === "0", "bridge opt-in must still honor explicit surface pins");
 		assertSelfTest(optIns.get("PI_CURSOR_SETTING_SOURCES") === "all", "setting source opt-in must be reflected");
 		assertSelfTest(optIns.get("PI_CURSOR_PI_TOOL_BRIDGE") === "1", "bridge opt-in must be reflected");
 		assertSelfTest(optIns.get("PI_CURSOR_EXPOSE_BUILTIN_TOOLS") === "1", "built-in exposure opt-in must be reflected");
@@ -137,6 +141,7 @@ export function runVisualSmokeSelfTest(deps) {
 		const eventDebugProbe = run("/bin/sh", ["-c", optInPlan.script], { env: hostileEnv });
 		assertSelfTest(eventDebugProbe.status === 0, `fake-pi event-debug env capture exited ${eventDebugProbe.status}: ${eventDebugProbe.stderr?.toString() ?? ""}`);
 		const capturedEventDebugEnv = parseEnvCapture(envCapture);
+		assertSelfTest(capturedEventDebugEnv.get("PI_CURSOR_LEAN") === "0", "bridge launch must keep the lean opt-out");
 		assertSelfTest(capturedEventDebugEnv.get("PI_CURSOR_SDK_EVENT_DEBUG") === "1", "event debug should be explicitly enabled");
 		assertSelfTest(capturedEventDebugEnv.get("PI_CURSOR_SDK_EVENT_DEBUG_DIR") === join(tempDir, "self-test.cursor-sdk-events"), "event debug dir should be deterministic under out-dir");
 		assertSelfTest(!capturedEventDebugEnv.has("PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR"), "stale event debug run dir should be cleared");

@@ -97,7 +97,7 @@ describe("streamCursor local resume", () => {
 		const prompt = mockSend.mock.calls[0]?.[0] as { text?: string };
 		expect(prompt.text).toContain("User: Follow up");
 		expect(prompt.text).toContain("User: Hello");
-		expect(prompt.text).toContain("prefer pi__mcp for MCP work and pi__subagent for delegation");
+		expect(prompt.text).toContain("prefer matching exposed pi__* tools using their listed names, schemas, and prompt guidelines");
 	});
 
 	it.each([

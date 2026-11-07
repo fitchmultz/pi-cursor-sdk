@@ -161,8 +161,6 @@ export async function connectMcpClient(url: string) {
 	return { client, transport };
 }
 
-export const delayBeforeToolCompletion = () => new Promise((resolve) => setTimeout(resolve, 120));
-
 export async function collectEvents(stream: ReturnType<typeof streamCursor>): Promise<AssistantMessageEvent[]> {
 	return collectAssistantEvents(stream);
 }
@@ -380,6 +378,7 @@ export async function resetCursorProviderTestState(): Promise<void> {
 	registerCursorCloudLifecycleLedger(createPiHarness());
 	await cursorPiToolBridgeTestUtils.resetRegisteredBridgeForTests();
 	vi.clearAllMocks();
+	delete process.env.PI_CURSOR_NATIVE_TOOLS;
 	delete process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY;
 	delete process.env.PI_CURSOR_LIVE_RUN_IDLE_DISPOSE_MS;
 	delete process.env.PI_CURSOR_REGISTER_NATIVE_TOOLS;

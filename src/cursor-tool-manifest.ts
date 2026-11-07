@@ -44,18 +44,23 @@ export function resolveCursorToolManifestEnabled(
 
 export function buildCursorToolManifestText(options: {
 	bridgeSnapshot?: CursorPiToolBridgeSnapshot;
+	leanEnabled?: boolean;
+	nativeToolsEnabled?: boolean;
 	/** When false, bridge is off via PI_CURSOR_PI_TOOL_BRIDGE=0 (not merely empty). */
 	piBridgeEnabled?: boolean;
 	includePiBridgeGuidance?: boolean;
 } = {}): string {
+	const leanEnabled = options.leanEnabled ?? isCursorLeanEnabled();
 	const piBridgeEnabled = options.piBridgeEnabled ?? true;
 	const includePiBridgeGuidance = options.includePiBridgeGuidance !== false;
 	const lines = [
 		"Callable tool surfaces this run:",
-		...(isCursorLeanEnabled()
+		...(leanEnabled
 			? [`- ${CURSOR_LEAN_TOOL_MANIFEST_SUMMARY}`]
 			: [
-				`- Cursor host/MCP: ${CURSOR_HOST_TOOL_MANIFEST_SUMMARY}; configured MCP depends on Cursor settings.`,
+				options.nativeToolsEnabled === false
+					? "- Cursor native tools (including task/subagents): disabled (PI_CURSOR_NATIVE_TOOLS=0). MCP remains available; configured MCP depends on Cursor settings."
+					: `- Cursor host/MCP: ${CURSOR_HOST_TOOL_MANIFEST_SUMMARY}; configured MCP depends on Cursor settings.`,
 				"- Pi tool toggles affect pi tools/bridge exposure only; they do not disable Cursor host/configured MCP tools.",
 			]),
 	];

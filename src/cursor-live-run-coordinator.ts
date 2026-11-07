@@ -39,6 +39,8 @@ export interface CursorLiveSdkRun {
 export interface CursorLiveRun {
 	id: string;
 	agent: SDKAgent;
+	/** Effective ordinary main-loop policy captured when this SDK run was created. */
+	nativeToolsEnabled?: boolean;
 	bridgeRun?: CursorPiToolBridgeRun;
 	sessionBridgeRun?: CursorPiToolBridgeRun;
 	sessionAgentScopeKey: string;
@@ -65,6 +67,8 @@ export interface CursorLiveRun {
 export interface CursorLiveRunCreateParams {
 	id: string;
 	agent: SDKAgent;
+	/** Effective ordinary main-loop policy captured when this SDK run was created. */
+	nativeToolsEnabled?: boolean;
 	bridgeRun?: CursorPiToolBridgeRun;
 	sessionBridgeRun?: CursorPiToolBridgeRun;
 	sessionAgentScopeKey?: string;
@@ -293,6 +297,7 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 			const run: CursorLiveRun = {
 				id: params.id,
 				agent: params.agent,
+				nativeToolsEnabled: params.nativeToolsEnabled !== false,
 				bridgeRun: params.bridgeRun,
 				sessionBridgeRun: params.sessionBridgeRun,
 				sessionAgentScopeKey,

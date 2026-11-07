@@ -2,33 +2,12 @@ import { describe, expect, it } from "vitest";
 import { scrubPiToolDisplay, scrubSensitiveText } from "../src/cursor-sensitive-text.js";
 
 describe("cursor-sensitive-text", () => {
-	it("redacts loopback bridge MCP endpoint URLs", () => {
-		const endpointToken = "secret-endpoint-token-abc123";
-		const fullUrl = `http://127.0.0.1:54321/cursor-pi-tool-bridge/${endpointToken}/mcp`;
-		const scrubbed = scrubSensitiveText(`MCP connect failed: ${fullUrl}`);
-
-		expect(scrubbed).toBe("MCP connect failed: [redacted-bridge-endpoint]");
-		expect(scrubbed).not.toContain(endpointToken);
-		expect(scrubbed).not.toContain("127.0.0.1");
-		expect(scrubbed).not.toContain("/cursor-pi-tool-bridge/");
-	});
-
-	it("redacts bridge endpoint paths without a host", () => {
-		const endpointToken = "secret-endpoint-token-path";
-		const path = `/cursor-pi-tool-bridge/${endpointToken}/mcp`;
-		const scrubbed = scrubSensitiveText(`route not found: ${path}`);
-
-		expect(scrubbed).toBe("route not found: [redacted-bridge-endpoint]");
-		expect(scrubbed).not.toContain(endpointToken);
-	});
-
-	it("redacts host-only bridge endpoint references", () => {
-		const endpointToken = "secret-endpoint-token-host";
-		const hostPath = `127.0.0.1:8080/cursor-pi-tool-bridge/${endpointToken}/mcp`;
-		const scrubbed = scrubSensitiveText(`fetch failed for ${hostPath}`);
-
-		expect(scrubbed).toBe("fetch failed for [redacted-bridge-endpoint]");
-		expect(scrubbed).not.toContain(endpointToken);
+	it.each([
+		["MCP connect failed: http://127.0.0.1:54321/cursor-pi-tool-bridge/secret-endpoint-token-abc123/mcp", "MCP connect failed: [redacted-bridge-endpoint]"],
+		["route not found: /cursor-pi-tool-bridge/secret-endpoint-token-path/mcp", "route not found: [redacted-bridge-endpoint]"],
+		["fetch failed for 127.0.0.1:8080/cursor-pi-tool-bridge/secret-endpoint-token-host/mcp", "fetch failed for [redacted-bridge-endpoint]"],
+	])("redacts bridge endpoint references in %s", (input, expected) => {
+		expect(scrubSensitiveText(input)).toBe(expected);
 	});
 
 	it("still redacts API keys, bearer tokens, and field-style secrets", () => {

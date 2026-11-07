@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import test from "node:test";
+import test, { afterEach } from "node:test";
 import { createAssistantMessageEventStream, InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, resolveCliModel } from "@earendil-works/pi-coding-agent";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -14,6 +14,9 @@ import { buildCursorPrompt } from "../dist/context.js";
 import { resolveCursorPiContext } from "../dist/cursor-pi-context.js";
 import { cursorLiveRuns, drainCursorLiveRunTurn } from "../dist/cursor-provider-live-run-drain.js";
 import { __testUtils as replayState } from "../dist/cursor-native-tool-display-state.js";
+import { __testUtils as outputFilterTestUtils } from "../shared/cursor-sdk-output-filter.mjs";
+
+afterEach(() => outputFilterTestUtils.resetProcessOutputFilter());
 
 test("native replay completes with the same JSON arguments as its streamed delta", { timeout: 30_000 }, async () => {
   const stream = createAssistantMessageEventStream();
@@ -40,9 +43,11 @@ test("native replay completes with the same JSON arguments as its streamed delta
     for await (const event of stream) events.push(event);
     const delta = events.find((event) => event.type === "toolcall_delta");
     const completed = events.find((event) => event.type === "toolcall_end").toolCall;
-    assert.deepEqual(completed.arguments, { path: "README.md", nested: { keep: false } });
+    args.path = "changed after emission";
+    args.nested.keep = true;
+    assert.deepEqual(completed.arguments, { path: "README.md", nested: { keep: false } },
+      "later external argument mutation must not alter the persisted call");
     assert.deepEqual(completed.arguments, JSON.parse(delta.delta));
-    assert.notEqual(completed.arguments, args, "later external argument mutation must not alter the persisted call");
   } finally {
     await cursorLiveRuns.release(run);
     replayState.reset();
@@ -206,15 +211,8 @@ test("actual extension loader composes native Cursor auth and rejects a late ins
   });
   const settingsManager = SettingsManager.inMemory({ defaultTools: [], compaction: { enabled: false }, retry: { enabled: false } });
   const manager = SessionManager.create(root, join(root, "sessions"));
+  // Pi persists a new session at its first user message; nothing is sent to a model.
   manager.appendMessage({ role: "user", content: "Offline catalog selection fixture; do not send.", timestamp: 1 });
-  // Pi 0.87.1 persists new sessions only after an assistant message.
-  // Seed completed fixture data without sending to any model.
-  manager.appendMessage({
-    role: "assistant", content: [{ type: "text", text: "Offline catalog selection fixture completed." }],
-    api: "neutral-fixture", provider: "neutral-fixture", model: "neutral", stopReason: "stop", timestamp: 2,
-    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-  });
   const loader = new DefaultResourceLoader({
     cwd: root, agentDir, settingsManager,
     noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,

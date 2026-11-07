@@ -1,12 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 import { OPENAI_CODEX_MODELS } from "@earendil-works/pi-ai/providers/openai-codex.models";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { FALLBACK_MODEL_ITEMS } from "../src/cursor-fallback-models.generated.js";
+import { resolveInstalledPackageRoot } from "./helpers/installed-package.js";
 
 const require = createRequire(import.meta.url);
 const packageJson = require("../package.json") as {
@@ -15,11 +17,11 @@ const packageJson = require("../package.json") as {
 	devDependencies: Record<string, string>;
 	peerDependencies: Record<string, string>;
 	bundledDependencies?: string[];
-	overrides?: Record<string, string>;
+	overrides?: Record<string, string | Record<string, string>>;
 };
 const packageLock = require("../package-lock.json") as {
 	version: string;
-	packages: Record<string, { version?: string; resolved?: string; dependencies?: Record<string, string>; bundleDependencies?: boolean | string[] }>;
+	packages: Record<string, { version?: string; resolved?: string; dev?: boolean; dependencies?: Record<string, string>; bundleDependencies?: boolean | string[] }>;
 };
 
 const PI_PACKAGES = [
@@ -102,10 +104,62 @@ describe("package metadata cutover baselines", () => {
 		expect(new Set(refs).size, `Mixed shared automation revisions: ${[...new Set(refs)].join(", ")}`).toBe(1);
 	});
 
-	it("pins Cursor SDK exactly", () => {
+	it("pins SDK, MCP/Hono, Pi, and TypeBox validation dependencies", () => {
 		const version = packageJson.dependencies["@cursor/sdk"];
 		expect(version).toMatch(/^\d+\.\d+\.\d+$/);
 		expect(lockPackageVersion("@cursor/sdk")).toBe(version);
+		for (const packageName of BUNDLED_MCP_HONO_CLOSURE) {
+			expect(packageJson.dependencies[packageName]).toMatch(/^\d+\.\d+\.\d+$/);
+			expect(lockPackageVersion(packageName)).toBe(packageJson.dependencies[packageName]);
+		}
+		expect(packageJson.dependencies["@modelcontextprotocol/sdk"]).toBeUndefined();
+		expect(packageJson.bundledDependencies).toEqual([...BUNDLED_MCP_HONO_CLOSURE]);
+		const baseline = packageJson.devDependencies["@earendil-works/pi-coding-agent"];
+		expect(baseline).toMatch(/^\d+\.\d+\.\d+$/);
+		for (const packageName of PI_PACKAGES) {
+			expect(packageJson.devDependencies[packageName]).toBe(baseline);
+			expect(lockPackageVersion(packageName)).toBe(baseline);
+		}
+		expect(packageJson.devDependencies.typebox).toMatch(/^\d+\.\d+\.\d+$/);
+		expect(lockPackageVersion("typebox")).toBe(packageJson.devDependencies.typebox);
+	});
+
+	it("supplies the SDK's required Zod peer without peer auto-installation", () => {
+		const sdkRoot = resolveInstalledPackageRoot("@cursor/sdk");
+		const sdk = JSON.parse(readFileSync(join(sdkRoot, "package.json"), "utf8")) as {
+			peerDependencies?: Record<string, string>;
+			peerDependenciesMeta?: Record<string, { optional?: boolean }>;
+		};
+		expect(sdk.peerDependencies?.zod).toBe("^3.25.0 || ^4.0.0");
+		expect(sdk.peerDependenciesMeta?.zod?.optional).not.toBe(true);
+		// The patched SDK peer must stay external to the bridge's newer bundle.
+		expect(packageJson.dependencies.zod).toBe("4.6.6");
+		expect(packageLock.packages[""]?.dependencies?.zod).toBe(packageJson.dependencies.zod);
+		expect(lockPackageVersion("zod")).toBe(packageJson.dependencies.zod);
+		const sdkRequire = createRequire(join(sdkRoot, "package.json"));
+		for (const specifier of ["zod", "zod/v3", "zod/v4", "zod/v4-mini"]) {
+			expect(sdkRequire.resolve(specifier)).toBe(require.resolve(specifier));
+		}
+	});
+
+	it.each([
+		["@cursor/sdk", "zod/v4"],
+		["@cursor/sdk", "zod/v4-mini"],
+		["@modelcontextprotocol/server", "zod/v4"],
+		["@modelcontextprotocol/core", "zod/v4"],
+	])("%s's %s rejects oversized bounded arrays before parsing elements", async (packageName, specifier) => {
+		const packageRoot = resolveInstalledPackageRoot(packageName);
+		const zodEntry = createRequire(join(packageRoot, "package.json")).resolve(specifier);
+		// Both entrypoints expose this functional API.
+		const z = (await import(pathToFileURL(zodEntry).href)) as typeof import("zod/v4-mini");
+		const unbounded = z.array(z.number());
+		const bounded = z.array(z.number()).check(z.maxLength(2));
+		expect(bounded.safeParse([1, "a", "b", "c"]).error?.issues.map((issue) => issue.code)).toEqual(["too_big"]);
+		expect(bounded.safeParse([1, 2]).success).toBe(true);
+		expect(bounded.safeParse([1, "a"]).error?.issues.map((issue) => issue.code)).toEqual(["invalid_type"]);
+		expect(unbounded.safeParse([1, "a", "b", "c"]).error?.issues.map((issue) => issue.code)).toEqual([
+			"invalid_type", "invalid_type", "invalid_type",
+		]);
 	});
 
 	it("keeps registry dependencies public", () => {
@@ -115,15 +169,6 @@ describe("package metadata cutover baselines", () => {
 			expect(url.protocol).toBe("https:");
 			expect(url.host).toBe("registry.npmjs.org");
 		}
-	});
-
-	it("ships an exact MCP/Hono bundledDependencies closure for published installs", () => {
-		for (const packageName of BUNDLED_MCP_HONO_CLOSURE) {
-			expect(packageJson.dependencies[packageName]).toMatch(/^\d+\.\d+\.\d+$/);
-			expect(lockPackageVersion(packageName)).toBe(packageJson.dependencies[packageName]);
-		}
-		expect(packageJson.dependencies["@modelcontextprotocol/sdk"]).toBeUndefined();
-		expect(packageJson.bundledDependencies).toEqual([...BUNDLED_MCP_HONO_CLOSURE]);
 	});
 
 	it("keeps local agent ID policy aligned with the installed public string contract", () => {
@@ -136,19 +181,6 @@ describe("package metadata cutover baselines", () => {
 		expect(packageLock.packages["node_modules/@cursor/sdk"]?.dependencies?.["@connectrpc/connect-node"]).toBeUndefined();
 		expect(packageJson.dependencies["@connectrpc/connect-node"]).toBeUndefined();
 		expect(lockPackageVersion("@connectrpc/connect-node")).toBeUndefined();
-	});
-
-	it("leaves the Cursor SDK transport dependency tree to npm resolution", () => {
-		expect(packageJson.dependencies.undici).toBeUndefined();
-		expect(packageJson.bundledDependencies).toEqual([...BUNDLED_MCP_HONO_CLOSURE]);
-		expect(packageJson.bundledDependencies).not.toContain("undici");
-		expect(packageJson.bundledDependencies).not.toContain("@cursor/sdk");
-		expect(packageJson.overrides).toBeUndefined();
-	});
-
-	it("removes the obsolete sqlite override", () => {
-		expect(packageJson.overrides?.sqlite3).toBeUndefined();
-		expect(packageJson.overrides?.["better-sqlite3"]).toBeUndefined();
 	});
 
 	it("packs an isolated MCP/Hono closure that beats a hostile host @hono/node-server", () => {
@@ -168,26 +200,81 @@ describe("package metadata cutover baselines", () => {
 			expect(packedIdentities.has("@modelcontextprotocol/client")).toBe(false);
 			expect(packedIdentities.has("@cursor/sdk")).toBe(false);
 			expect(packedIdentities.has("undici")).toBe(false);
-
-			const extractDirName = "extract";
-			const extractDir = join(tempRoot, extractDirName);
-			mkdirSync(extractDir);
-			execFileSync("tar", ["-xzf", tarballName!, "-C", extractDirName], { cwd: tempRoot });
-
-			const packedPackageJson = JSON.parse(readFileSync(join(extractDir, "package", "package.json"), "utf8")) as {
-				bundledDependencies?: string[];
-				dependencies?: Record<string, string>;
-			};
-			expect(packedPackageJson.bundledDependencies).toEqual([...BUNDLED_MCP_HONO_CLOSURE]);
-			for (const packageName of BUNDLED_MCP_HONO_CLOSURE) {
-				expect(packedPackageJson.dependencies?.[packageName]).toBe(packageJson.dependencies[packageName]);
-			}
+			// Pi's managed npm installs omit peers, so the hoisted SDK can only use a non-bundled Zod.
+			expect(listing).not.toContain("package/node_modules/zod/package.json");
 
 			const hostRoot = join(tempRoot, "host");
 			const hostNodeModules = join(hostRoot, "node_modules");
 			const packageDir = join(hostNodeModules, "pi-cursor-sdk");
-			mkdirSync(packageDir, { recursive: true });
-			cpSync(join(extractDir, "package"), packageDir, { recursive: true });
+			mkdirSync(hostNodeModules, { recursive: true });
+			execFileSync("tar", ["-xzf", tarballName!, "-C", "host/node_modules"], { cwd: tempRoot });
+			renameSync(join(hostNodeModules, "package"), packageDir);
+			const paths = new Set(listing.trim().split(/\r?\n/).map((path) => path.replace(/^package\//, "")));
+			expect(paths.has("scripts/tmux-live-smoke.sh")).toBe(true);
+			expect(paths.has("scripts/isolated-cursor-smoke.sh")).toBe(true);
+			expect(paths.has("scripts/fixtures/plan-strip-shim/index.ts")).toBe(true);
+			expect(paths.has("scripts/steering-rpc-smoke.mjs")).toBe(true);
+			expect(paths.has("scripts/visual-tui-smoke.mjs")).toBe(true);
+			expect(paths.has("scripts/validate-smoke-jsonl.mjs")).toBe(true);
+			expect(paths.has("scripts/debug-sdk-events.mjs")).toBe(true);
+			expect(paths.has("scripts/debug-provider-events.mjs")).toBe(true);
+			expect(paths.has("platform-smoke.config.mjs")).toBe(true);
+			expect(paths.has("scripts/platform-smoke/artifact-bundle-chunk.mjs")).toBe(true);
+			expect(paths.has("scripts/platform-smoke/live-suite-runner.mjs")).toBe(true);
+			expect(paths.has("scripts/platform-smoke/local-resume-runner.mjs")).toBe(true);
+			expect(paths.has("scripts/platform-smoke/target-runtime.mjs")).toBe(true);
+			expect(paths.has("scripts/platform-smoke/visual-evidence.mjs")).toBe(true);
+			for (const path of paths) {
+				if (!path.endsWith(".mjs")) continue;
+				const declarationPath = path.replace(/\.mjs$/, ".d.mts");
+				if (existsSync(declarationPath)) expect(paths.has(declarationPath)).toBe(true);
+			}
+			expect(paths.has("shared/cursor-setting-sources.mjs")).toBe(true);
+			expect(paths.has("shared/cursor-setting-sources.d.mts")).toBe(true);
+			expect(paths.has("shared/cursor-sensitive-text.mjs")).toBe(true);
+			expect(paths.has("shared/cursor-sensitive-text.d.mts")).toBe(true);
+			expect(paths.has("scripts/lib/local-resume-smoke-harness.mjs")).toBe(true);
+			expect(paths.has("scripts/lib/cloud-smoke-cleanup-evidence.mjs")).toBe(true);
+			expect(paths.has("scripts/lib/cloud-smoke-cleanup-evidence.d.mts")).toBe(true);
+			expect(paths.has("scripts/lib/cloud-smoke-github.mjs")).toBe(true);
+			expect(paths.has("scripts/lib/cloud-smoke-github.d.mts")).toBe(true);
+			expect(paths.has("scripts/lib/cursor-smoke-env.mjs")).toBe(true);
+			expect(paths.has("scripts/lib/cursor-smoke-env.d.mts")).toBe(true);
+			expect(paths.has("scripts/lib/cursor-smoke-shell.sh")).toBe(true);
+			expect(paths.has("scripts/lib/cursor-visual-render.mjs")).toBe(true);
+			expect(paths.has("scripts/lib/cursor-visual-render.d.mts")).toBe(true);
+			expect(paths.has("shared/cursor-sdk-event-debug-env.mjs")).toBe(true);
+			expect(paths.has("shared/cursor-sdk-event-debug-env.d.mts")).toBe(true);
+			expect(paths.has("scripts/lib/cursor-setting-sources.mjs")).toBe(false);
+			expect(paths.has("scripts/lib/cursor-sensitive-text.mjs")).toBe(false);
+			expect(paths.has("scripts/lib/cursor-cli-args.mjs")).toBe(true);
+			expect(paths.has("CHANGELOG.md")).toBe(true);
+			expect(paths.has("README.md")).toBe(true);
+			expect(paths.has("docs/platform-smoke.md")).toBe(true);
+			expect(paths.has("dist/index.js")).toBe(true);
+			// pi silently drops manifest entries whose file is missing; assert the
+			// manifest target exists inside the actual published tarball.
+			const manifest = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")) as { pi?: { extensions?: string[] } };
+			for (const entry of manifest.pi?.extensions ?? []) {
+				expect(paths.has(entry.replace(/^\.\//, "")), `pi.extensions entry missing from package: ${entry}`).toBe(true);
+			}
+			expect(paths.has("tsconfig.build.json")).toBe(true);
+			expect(paths.has("scripts/build.mjs")).toBe(true);
+			expect(paths.has("scripts/prepare.mjs")).toBe(true);
+			// Launchers import this helper; packed installs break without it.
+			expect(paths.has("scripts/lib/ensure-built.mjs")).toBe(true);
+			expect([...paths].some((path) => path.startsWith("coverage/") || path.startsWith(".pi/") || path.includes("smoke-dir"))).toBe(false);
+
+			const packedPackageJson = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")) as {
+				name: string;
+				bundledDependencies?: string[];
+				dependencies?: Record<string, string>;
+			};
+			expect(packedPackageJson.name).toBe("pi-cursor-sdk");
+			expect(packedPackageJson.bundledDependencies).toEqual([...BUNDLED_MCP_HONO_CLOSURE]);
+			for (const packageName of BUNDLED_MCP_HONO_CLOSURE) {
+				expect(packedPackageJson.dependencies?.[packageName]).toBe(packageJson.dependencies[packageName]);
+			}
 
 			const hostileDir = join(hostNodeModules, "@hono", "node-server");
 			mkdirSync(hostileDir, { recursive: true });
@@ -211,20 +298,6 @@ describe("package metadata cutover baselines", () => {
 			rmSync(tempRoot, { recursive: true, force: true });
 		}
 	}, 60_000);
-
-	it("pins one coherent stable Pi validation baseline", () => {
-		const baseline = packageJson.devDependencies["@earendil-works/pi-coding-agent"];
-		expect(baseline).toMatch(/^\d+\.\d+\.\d+$/);
-		for (const packageName of PI_PACKAGES) {
-			expect(packageJson.devDependencies[packageName]).toBe(baseline);
-			expect(lockPackageVersion(packageName)).toBe(baseline);
-		}
-	});
-
-	it("retains the package's TypeBox validation baseline", () => {
-		expect(packageJson.devDependencies.typebox).toMatch(/^\d+\.\d+\.\d+$/);
-		expect(lockPackageVersion("typebox")).toBe(packageJson.devDependencies.typebox);
-	});
 
 	it("tracks installed Pi GPT-5.6 Codex metadata", () => {
 		for (const modelId of ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"] as const) {

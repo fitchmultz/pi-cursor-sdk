@@ -14,6 +14,20 @@ import { CLOUD_LIFECYCLE_ENTRY_TYPE, CLOUD_LIFECYCLE_JOURNAL_PREFIX } from "../s
 
 setupNativeCursorHarness();
 
+// Capture beneath the process-owned sink by installing before extension
+// initialization. Keep capture installed until all fixture sessions shut down.
+async function captureNativeOutput(run) {
+  const stdout = process.stdout.write, stderr = process.stderr.write, retained = [];
+  const collect = (bytes, encoding, callback) => {
+    retained.push(Buffer.from(bytes).toString());
+    (typeof encoding === "function" ? encoding : callback)?.();
+    return true;
+  };
+  process.stdout.write = process.stderr.write = collect;
+  try { await run({ collect, retained }); }
+  finally { process.stdout.write = stdout; process.stderr.write = stderr; }
+}
+
 test("registered Cursor provider preserves native bridge, replay, usage, queues, tree, compaction, abort and reload", { timeout: 60000 }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), "cursor-native-flow-"));
   const agentDir = join(root, "agent");
@@ -137,19 +151,14 @@ test("registered Cursor provider preserves native bridge, replay, usage, queues,
 });
 
 test("native request receipts route bounded capability notices only to their owning persisted session", { timeout: 30000 }, async (t) => {
-  await concurrentFixture(t, async ({ create }) => {
+  await captureNativeOutput(({ retained }) => concurrentFixture(t, async ({ create }) => {
     const a = await create("notice-owner"), b = await create("notice-sibling");
     const proof = process.env.PI_CURSOR_BOOTSTRAP_PROOF_DIR;
     const capture = proof && JSON.parse(await readFile(join(proof, "sdk-capture-ansi.json"), "utf8"));
     const plugin = capture?.plugin ?? "[local-plugins-bootstrap] loadUserLocalPlugin outside rejected: symlink target /outside is outside /local-root {}\n";
     const parser = capture?.parserWarning ?? "shell-parser: tree-sitter natives are unavailable in this artifact; shell command analysis degrades to parsingFailed";
     state.outputByCwd.set(a.cwd, [{ stream: "stderr", bytes: plugin + plugin + parser + "\n" }]);
-    const stdout = process.stdout.write, stderr = process.stderr.write, retained = [];
-    const collect = (bytes, encoding, callback) => { retained.push(Buffer.from(bytes).toString()); (typeof encoding === "function" ? encoding : callback)?.(); return true; };
-    try {
-      process.stdout.write = process.stderr.write = collect;
-      await Promise.all([a.session.prompt("notice owner request"), b.session.prompt("notice sibling request")]);
-    } finally { process.stdout.write = stdout; process.stderr.write = stderr; }
+    await Promise.all([a.session.prompt("notice owner request"), b.session.prompt("notice sibling request")]);
     const persisted = await readFile(a.manager.getSessionFile(), "utf8");
     const notices = a.manager.getEntries().filter(e => e.type === "custom" && e.customType === "pi-cursor-sdk:capability-notice");
     assert.deepEqual(notices.map(e => e.data.kind), ["outsidePlugin", "parserUnavailable"]);
@@ -163,7 +172,49 @@ test("native request receipts route bounded capability notices only to their own
     assert.doesNotMatch(state.sends.at(-1).message.text, /Cursor skipped a local plugin|Cursor shell analysis is degraded/);
     await retainNativeEvidence("native-notice-owner", a.manager, a.cwd);
     await retainNativeEvidence("native-notice-sibling", b.manager, b.cwd);
-  });
+  }));
+});
+
+test("one process sink spans actual Pi reload awaits and keeps post-reload notices request-owned", { timeout: 60000 }, async (t) => {
+  await captureNativeOutput(({ retained }) => concurrentFixture(t, async ({ create }) => {
+    const owner = await create("reload-output");
+    const sink = process.stderr.write;
+    const loader = owner.session.resourceLoader;
+    const reload = loader.reload;
+    let gapObserved = false;
+    loader.reload = async function (...args) {
+      // AgentSession.reload has shut down/inactivated the old runtime here,
+      // but has not constructed or started the replacement extension runtime.
+      await new Promise(resolve => setImmediate(resolve));
+      gapObserved = true;
+      process.stdout.write("12:34:56.789 INFO  LocalCursorRulesService load completed\n");
+      return reload.apply(this, args);
+    };
+    try { await owner.session.reload(); }
+    finally { loader.reload = reload; }
+    assert.equal(gapObserved, true);
+    assert.equal(process.stderr.write, sink, "actual reloaded extension shares the original process sink");
+    assert.doesNotMatch(retained.join(""), /LocalCursorRulesService load completed/);
+    const plugin = "[local-plugins-bootstrap] loadUserLocalPlugin outside rejected: symlink target /outside is outside /local-root {}\n";
+    const parser = "shell-parser: tree-sitter natives are unavailable in this artifact; shell command analysis degrades to parsingFailed";
+    state.outputByCwd.set(owner.cwd, [{ stream: "stderr", bytes: plugin + parser + "\n" }]);
+    await owner.session.prompt("notices after actual extension reload");
+    const notices = owner.manager.getEntries().filter(e => e.type === "custom" && e.customType === "pi-cursor-sdk:capability-notice");
+    assert.deepEqual(notices.map(e => e.data.kind), ["outsidePlugin", "parserUnavailable"]);
+    assert.doesNotMatch(retained.join(""), /local-plugins-bootstrap|shell-parser:/);
+    assert.match(retained.join(""), /Cursor skipped a local plugin/);
+    loader.reload = async () => {
+      await new Promise(resolve => setImmediate(resolve));
+      process.stdout.write("12:34:56.789 INFO  AgentSkillsCursorRulesService load completed\n");
+      throw new Error("offline reload failure");
+    };
+    try { await assert.rejects(owner.session.reload(), /offline reload failure/); }
+    finally { loader.reload = reload; }
+    assert.equal(process.stderr.write, sink, "failed reload without a replacement startup keeps the process sink");
+    process.stderr.write("[hooks] unrelated reload failure remains visible\n");
+    assert.doesNotMatch(retained.join(""), /Service load completed/);
+    assert.match(retained.join(""), /unrelated reload failure remains visible/);
+  }));
 });
 
 for (const runtime of ["local", "cloud"]) {
@@ -393,7 +444,7 @@ for (const cleanup of ["answer", "abort", "shutdown", "deadline"]) {
     ? "real deferred bridged question survives idle abandonment and resumes the same SDK run"
     : `real pending bridge work still cleans up exactly once on ${cleanup}`;
   test(title, { timeout: 60000 }, async (t) => {
-    await concurrentFixture(t, async ({ root, create }) => {
+    await captureNativeOutput(({ collect, retained }) => concurrentFixture(t, async ({ root, create }) => {
       if (cleanup === "deadline") process.env.PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS = "500";
       // Configure the loaded extension, not a separate unbundled module instance.
       process.env.PI_CURSOR_LIVE_RUN_IDLE_DISPOSE_MS = "20";
@@ -418,9 +469,6 @@ for (const cleanup of ["answer", "abort", "shutdown", "deadline"]) {
       const parser = capture?.parserWarning ?? "shell-parser: tree-sitter natives are unavailable in this artifact; shell command analysis degrades to parsingFailed";
       state.waitOutputByCwd.set(owner.cwd, { ready: outputReady.promise, emitted: outputEmitted.resolve,
         bytes: [{ stream: "stderr", bytes: plugin + plugin + parser + "\n" }, ...(capture ? [{ stream: "stdout", bytes: capture.inventory }] : [])] });
-      const stdout = process.stdout.write, stderr = process.stderr.write, retained = [];
-      const collect = (bytes, encoding, callback) => { retained.push(Buffer.from(bytes).toString()); (typeof encoding === "function" ? encoding : callback)?.(); return true; };
-      process.stdout.write = process.stderr.write = collect;
       const running = owner.session.prompt("BRIDGE_FIXTURE");
       try {
         await entered.promise;
@@ -433,10 +481,12 @@ for (const cleanup of ["answer", "abort", "shutdown", "deadline"]) {
         assert.match(retained.join(""), /Cursor skipped a local plugin/);
         assert.match(retained.join(""), /Cursor shell analysis is degraded/);
         const send = state.sends[before.sends];
-        await delay(80, undefined, { signal: t.signal });
-        assert.equal(state.cancelled.includes(send.runId), false, "pending Pi execution is not idle abandonment");
-        assert.equal(state.disposed.includes(send.agentId), false);
-        assert.equal(state.bridgeResults.length, before.results);
+        if (cleanup !== "deadline") {
+          await delay(80, undefined, { signal: t.signal });
+          assert.equal(state.cancelled.includes(send.runId), false, "pending Pi execution is not idle abandonment");
+          assert.equal(state.disposed.includes(send.agentId), false);
+          assert.equal(state.bridgeResults.length, before.results);
+        }
         if (cleanup === "answer") answer.resolve();
         else if (cleanup === "abort") await owner.session.abort();
         else if (cleanup === "shutdown") await owner.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
@@ -471,14 +521,13 @@ for (const cleanup of ["answer", "abort", "shutdown", "deadline"]) {
           assert.ok(state.stores.filter(store => store.workspaceRef === owner.cwd).every(store => store.disposed));
         }
         await retainNativeEvidence(`pending-bridge-${cleanup === "answer" ? "idle" : cleanup}`, owner.manager, owner.cwd);
-        assert.equal(process.stdout.write, collect, "completion/cancellation restores stdout");
-        assert.equal(process.stderr.write, collect, "completion/cancellation restores stderr");
+        assert.equal(process.stderr.write, liveSink, "process sink survives provider completion/cancellation and session shutdown");
         const notices = owner.manager.getEntries().filter(e => e.type === "custom" && e.customType === "pi-cursor-sdk:capability-notice");
         assert.deepEqual(notices.map(e => e.data.kind), ["outsidePlugin", "parserUnavailable"]);
         assert.ok(notices.every(e => e.data.message.length < 200));
         assert.doesNotMatch(await readFile(owner.manager.getSessionFile(), "utf8"), /symlink target|natives are unavailable in this artifact/);
-      } finally { outputReady.resolve(); answer.resolve(); await running; process.stdout.write = stdout; process.stderr.write = stderr; }
-    });
+      } finally { outputReady.resolve(); answer.resolve(); await running; }
+    }));
   });
 }
 
@@ -600,15 +649,17 @@ for (const failure of ["cancel", "error"]) {
   });
 }
 
-test("shared runtime requests require their actual session's registration and an active binding", { timeout: 60000 }, async (t) => {
+test("shared runtime requests require their actual session's registration once that registration has started", { timeout: 60000 }, async (t) => {
   await concurrentFixture(t, async ({ create }) => {
     const a = await create("shared-A");
     await a.session.prompt("A before sharing");
     const b = await create("shared-B", { runtime: a.session.modelRuntime, bind: false });
     const staleStream = a.session.modelRuntime.getProvider("cursor").streamSimple;
+    await a.session.prompt("unstarted B registration serves A's own receipt");
+    assert.equal(a.session.messages.at(-1).stopReason, "stop", a.session.messages.at(-1).errorMessage);
+    const delegatedAgent = state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId);
+    assert.equal(delegatedAgent?.options.local.cwd, a.cwd);
     const beforeSends = state.sends.length;
-    await a.session.prompt("cannot use unbound B closure");
-    assert.match(a.session.messages.at(-1).errorMessage, /binding is not active/);
     await b.session.bindExtensions({ mode: "rpc" });
     await a.session.prompt("A cannot enter B registration");
     const ownershipError = a.session.messages.at(-1).errorMessage;
@@ -619,7 +670,8 @@ test("shared runtime requests require their actual session's registration and an
     assert.equal(state.sends.length, beforeSends);
     await b.session.prompt("correct B receipt and registration");
     assert.equal(b.session.messages.at(-1).stopReason, "stop");
-    assert.equal(state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId).options.local.cwd, b.cwd);
+    const registeredAgent = state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId);
+    assert.equal(registeredAgent?.options.local.cwd, b.cwd);
     await b.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
     await a.session.prompt("closed B registration is not A");
     assert.match(a.session.messages.at(-1).errorMessage, /binding is not active/);
@@ -631,7 +683,8 @@ test("shared runtime requests require their actual session's registration and an
     assert.notEqual(a.session.modelRuntime.getProvider("cursor").streamSimple, staleStream);
     await a.session.prompt("A recovered with its own request receipt");
     assert.equal(a.session.messages.at(-1).stopReason, "stop");
-    assert.equal(state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId).options.local.cwd, a.cwd);
+    const reloadedAgent = state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId);
+    assert.equal(reloadedAgent?.options.local.cwd, a.cwd);
   });
 });
 

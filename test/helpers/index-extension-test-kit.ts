@@ -11,6 +11,7 @@ import { __testUtils as cursorSessionScopeTestUtils } from "../../src/cursor-ses
 import { __testUtils as cursorSessionResumeTestUtils } from "../../src/cursor-session-agent-resume.js";
 import { __testUtils as cursorSessionLineageTestUtils } from "../../src/cursor-session-agent-lineage.js";
 import { __testUtils as cursorSdkProcessErrorGuardTestUtils } from "../../src/cursor-sdk-process-error-guard.js";
+import { __testUtils as cursorSdkOutputFilterTestUtils } from "../../src/cursor-sdk-output-filter.js";
 import { installCursorSessionStoreMock } from "./cursor-session-store.js";
 
 export {
@@ -25,13 +26,20 @@ const bindings: PiHarness[] = [];
 export function createExtensionPi(
 	initialTools?: PiHarnessOptions["initialTools"],
 ): PiHarness & CursorExtensionRegistrationPi {
-	const pi = createExtensionRegistrationPi(initialTools ? { initialTools } : undefined);
+	return createExtensionPiWithOptions(initialTools ? { initialTools } : undefined);
+}
+
+/** Option-based fixtures share the same failure-safe suite teardown tracking. */
+export function createExtensionPiWithOptions(options: PiHarnessOptions = {}): PiHarness & CursorExtensionRegistrationPi {
+	const pi = createExtensionRegistrationPi(options);
 	bindings.push(pi);
 	return pi;
 }
 
 export async function resetIndexExtensionTestState(): Promise<void> {
-	for (const pi of bindings.splice(0)) await pi.runSessionShutdown({ reason: "quit" });
+	try {
+		for (const pi of bindings.splice(0)) await pi.runSessionShutdown({ reason: "quit" });
+	} finally { cursorSdkOutputFilterTestUtils.resetProcessOutputFilter(); }
 	vi.clearAllMocks();
 	installCursorSessionStoreMock();
 	delete process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY;

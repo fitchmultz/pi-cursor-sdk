@@ -36,6 +36,7 @@ DEBUG_ENV_UNSETS=()
 TOOL_ENV=()
 PI_DEFAULT_ENV=()
 PI_NONE_ENV=()
+NATIVE_REPLAY_ENV=()
 SELF_TEST_TEMP_DIR=""
 
 print_help() {
@@ -63,6 +64,7 @@ Prerequisites:
   Resolved node/npm/env paths from the parent shell are reused for pack-only work; live checks then resolve pi/rg.
   Pi and npm shims run with the resolved node directory first on PATH.
   Child pi runs clear Cursor SDK event-debug env. Live provider checks force PI_CURSOR_SETTING_SOURCES=none; install/list checks explicitly unset it.
+  Native/plan-strip replay checks set PI_CURSOR_LEAN=0 with native registration on and the pi bridge off; basic provider checks keep the lean default.
 
 Options:
   -h, --help                    Show this help.
@@ -85,6 +87,7 @@ build_smoke_env_arrays() {
 	TOOL_ENV=( "$ENV_BIN" "${DEBUG_ENV_UNSETS[@]}" "PATH=$SEALED_PATH" )
 	PI_DEFAULT_ENV=( "$ENV_BIN" -i "${DEBUG_ENV_UNSETS[@]}" -u PI_CURSOR_SETTING_SOURCES HOME="$HOME_DIR" PATH="$SEALED_PATH" MISE_DISABLE=1 )
 	PI_NONE_ENV=( "$ENV_BIN" -i "${DEBUG_ENV_UNSETS[@]}" HOME="$HOME_DIR" PATH="$SEALED_PATH" MISE_DISABLE=1 PI_CURSOR_SETTING_SOURCES=none )
+	NATIVE_REPLAY_ENV=( PI_CURSOR_LEAN=0 PI_CURSOR_NATIVE_TOOL_DISPLAY=1 PI_CURSOR_REGISTER_NATIVE_TOOLS=1 PI_CURSOR_PI_TOOL_BRIDGE=0 PI_CURSOR_EXPOSE_BUILTIN_TOOLS=0 )
 }
 
 run_in_dir() {
@@ -174,6 +177,12 @@ EOF_SELFTEST_NODE
 	build_smoke_env_arrays
 	node_dir="$(dirname "$NODE_BIN")"
 
+	PI_CURSOR_LEAN=1 "${PI_NONE_ENV[@]}" "${NATIVE_REPLAY_ENV[@]}" "$fake_pi" --version
+	grep -qx 'PI_CURSOR_LEAN=0' "$env_capture" || fail "self-test failed: native replay did not opt out of lean mode"
+	grep -qx 'PI_CURSOR_REGISTER_NATIVE_TOOLS=1' "$env_capture" || fail "self-test failed: native replay did not enable native registration"
+	grep -qx 'PI_CURSOR_PI_TOOL_BRIDGE=0' "$env_capture" || fail "self-test failed: native replay did not disable the pi bridge"
+
+	PI_CURSOR_LEAN=0 \
 	PI_CURSOR_SETTING_SOURCES=all \
 	PI_CURSOR_SDK_EVENT_DEBUG=1 \
 	PI_CURSOR_SDK_EVENT_DEBUG_DIR="$temp_dir/debug-dir" \
@@ -187,6 +196,9 @@ EOF_SELFTEST_NODE
 	grep -qx "HOME=$HOME_DIR" "$env_capture" || fail "self-test failed: isolated HOME was not set"
 	grep -qx 'MISE_DISABLE=1' "$env_capture" || fail "self-test failed: MISE_DISABLE was not set"
 	grep -qx 'PI_CURSOR_SETTING_SOURCES=none' "$env_capture" || fail "self-test failed: live pi env did not force PI_CURSOR_SETTING_SOURCES=none"
+	if grep -q '^PI_CURSOR_LEAN=' "$env_capture"; then
+		fail "self-test failed: basic provider env must isolate inherited native mode and keep the lean default"
+	fi
 	for name in "${SMOKE_CURSOR_SDK_EVENT_DEBUG_ENV_NAMES[@]}"; do
 		if grep -q "^${name}=" "$env_capture"; then
 			fail "self-test failed: $name was not cleared"
@@ -373,14 +385,14 @@ validate_replay_jsonl "$BASIC_DIR"
 log "check: native replay"
 REPLAY_DIR="$SESSION_ROOT/native-replay"
 mkdir -p "$REPLAY_DIR"
-run_in_dir_capture_split "native replay" "$PI_LIVE_TIMEOUT" "$PROJECT_DIR" "$ISOLATED/replay.stdout.txt" "$ISOLATED/replay.stderr.txt" "${PI_CURSOR_ENV[@]}" PI_CURSOR_NATIVE_TOOL_DISPLAY=1 \
+run_in_dir_capture_split "native replay" "$PI_LIVE_TIMEOUT" "$PROJECT_DIR" "$ISOLATED/replay.stdout.txt" "$ISOLATED/replay.stderr.txt" "${PI_CURSOR_ENV[@]}" "${NATIVE_REPLAY_ENV[@]}" \
 	"$PI_BIN" --approve --cursor-no-fast --model cursor/grok-4.6 --session-dir "$REPLAY_DIR" -p 'Read ./README.md briefly, then answer README_SEEN=yes if it mentions pi-cursor-sdk.'
 validate_replay_jsonl "$REPLAY_DIR"
 
 log "check: plan-strip shim (plan-mode execute reset)"
 PLAN_DIR="$SESSION_ROOT/plan-strip"
 mkdir -p "$PLAN_DIR"
-run_in_dir_capture_split "plan-strip replay" "$PI_LIVE_TIMEOUT" "$PROJECT_DIR" "$ISOLATED/plan.stdout.txt" "$ISOLATED/plan.stderr.txt" "${PI_CURSOR_ENV[@]}" PI_CURSOR_NATIVE_TOOL_DISPLAY=1 \
+run_in_dir_capture_split "plan-strip replay" "$PI_LIVE_TIMEOUT" "$PROJECT_DIR" "$ISOLATED/plan.stdout.txt" "$ISOLATED/plan.stderr.txt" "${PI_CURSOR_ENV[@]}" "${NATIVE_REPLAY_ENV[@]}" \
 	"$PI_BIN" --approve -e "$SHIM_DIR" --cursor-no-fast --model cursor/grok-4.6 --session-dir "$PLAN_DIR" -p 'After reset, read README.md and answer PLAN_STRIP_OK=yes.'
 validate_replay_jsonl "$PLAN_DIR"
 

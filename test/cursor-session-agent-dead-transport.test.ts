@@ -33,15 +33,17 @@ describe("cursor-session-agent dead transport", () => {
 		};
 
 		const first = await acquireSessionCursorAgent(params);
-		const previousTimeout = sessionAgentTestUtils.setDeadTransportAgentDisposeTimeoutMs(25);
+		vi.useFakeTimers();
 		try {
 			sessionAgentTestUtils.invalidateSessionAgent(first.scopeKey, { deadTransport: true });
-			const second = await acquireSessionCursorAgent(params);
+			const acquire = acquireSessionCursorAgent(params);
+			await vi.advanceTimersByTimeAsync(3000);
+			const second = await acquire;
 			expect(second.created).toBe(true);
 			expect(second.agent).not.toBe(first.agent);
 			expect(hangingDispose).toHaveBeenCalledTimes(1);
 		} finally {
-			sessionAgentTestUtils.setDeadTransportAgentDisposeTimeoutMs(previousTimeout);
+			vi.useRealTimers();
 		}
 	});
 });

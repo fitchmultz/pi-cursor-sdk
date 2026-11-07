@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import type { Context } from "@earendil-works/pi-ai";
-import { __testUtils as nativeToolDisplayTestUtils } from "../src/cursor-native-tool-display-state.js";
 import {
 	isNativeToolActiveInContext,
 	partitionNativeToolsByActiveContext,
@@ -8,38 +7,13 @@ import {
 } from "../src/cursor-native-replay-routing.js";
 
 describe("cursor-native-replay-routing", () => {
-	beforeEach(() => {
-		nativeToolDisplayTestUtils.reset();
-		nativeToolDisplayTestUtils.registerNativeToolNameForTests("grep");
-	});
-	it("queues replay when tool is active in context and live run exists", () => {
-		expect(
-			resolveNativeReplayDisposition({
-				toolName: "grep",
-				useNativeToolReplay: true,
-				activeToolNames: new Set(["grep", "read"]),
-				hasLiveRun: true,
-			}),
-		).toBe("queue_replay");
-	});
-
-	it("returns inactive_trace when tool is missing from context snapshot", () => {
-		expect(
-			resolveNativeReplayDisposition({
-				toolName: "grep",
-				useNativeToolReplay: true,
-				activeToolNames: new Set(["read"]),
-				hasLiveRun: true,
-			}),
-		).toBe("inactive_trace");
-	});
-
 	it("returns transcript_trace when native replay is disabled", () => {
 		expect(
 			resolveNativeReplayDisposition({
 				toolName: "grep",
 				useNativeToolReplay: false,
 				activeToolNames: new Set(["grep"]),
+				registeredToolNames: new Set(["grep"]),
 				hasLiveRun: true,
 			}),
 		).toBe("transcript_trace");

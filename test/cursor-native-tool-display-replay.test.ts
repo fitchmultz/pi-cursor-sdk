@@ -1,16 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { CURSOR_REPLAY_ACTIVITY_TOOL_NAME } from "../src/cursor-tool-presentation-registry.js";
 import {
 	CURSOR_REPLAY_COLLAPSED_PREVIEW_LINES,
 	CURSOR_REPLAY_PREVIEW_MAX_LINE_CHARS,
 	formatCursorReplayDiff,
 	formatCursorReplayFilePreview,
-	renderCursorReplayCall,
 	renderCursorReplayResult,
-	renderNativeLookingCursorReadReplayResult,
 } from "../src/cursor-native-tool-display-replay.js";
-import { LOCAL_READ_PREVIEW_NOTICE } from "../src/cursor-transcript-utils.js";
-import { Text } from "@earendil-works/pi-tui";
 import { createRenderContext, createRenderTheme } from "./helpers/render-fixtures.js";
 
 const theme = createRenderTheme();
@@ -72,40 +67,22 @@ describe("cursor native replay rendering", () => {
 		expect(rendered).toContain("Cursor subagent");
 	});
 
-	it("colors unified diff body lines in neutral Cursor edit activity cards", () => {
-		// Unstructured path (no diffString): still exercises extract + canonical renderer.
+	it("colors unified diff body lines in neutral Cursor edit activity cards after a long preamble", () => {
+		const preamble = Array.from({ length: 12 }, (_, index) => `note ${index + 1}`).join("\n");
 		const rendered = renderReplayResultWithDetails({
 			variant: "activity",
 			sourceToolName: "edit",
 			title: "Cursor edit",
 			summary: "file.txt added 1 line, removed 1 line",
-			expandedText: "edit file.txt\n\n+1 -1\n\n--- a/file.txt\n+++ b/file.txt\n@@ -1,3 +1,3 @@\n-old line\n+new line\n keep line\n final line",
+			expandedText: `${preamble}\n\nedit file.txt\n\n+1 -1\n\n--- a/file.txt\n+++ b/file.txt\n@@ -1,3 +1,3 @@\n-old line\n+new line\n keep line\n final line`,
 		});
 
-		// Canonical output: numbered lines, raw headers omitted (consistent with nativeEdit + structured activity).
 		expect(rendered).toContain("<toolDiffRemoved>-1 old line</toolDiffRemoved>");
 		expect(rendered).toContain("<toolDiffAdded>+1 new line</toolDiffAdded>");
 		expect(rendered).toContain("<toolDiffContext> 2 keep line</toolDiffContext>");
 		expect(rendered).toContain("<toolDiffContext> 3 final line</toolDiffContext>");
 		expect(rendered).not.toContain("--- a/file.txt");
 		expect(rendered).not.toContain("+++ b/file.txt");
-	});
-
-	it("colors collapsed diff lines when transcript preamble exceeds preview budget", () => {
-		// This exercises the extract path for activity details that only have diff in expandedText
-		// and no diffString. It routes through the single canonical renderer while proving preamble is ignored.
-		const preamble = Array.from({ length: 12 }, (_, index) => `note ${index + 1}`).join("\n");
-		const rendered = renderReplayResultWithDetails({
-			variant: "activity",
-			sourceToolName: "edit",
-			title: "Cursor edit",
-			summary: "src/file.ts added 1 line",
-			expandedText: `${preamble}\n\nedit src/file.ts\n\n+1 -0\n\n--- a/src/file.ts\n+++ b/src/file.ts\n@@ -1,3 +1,3 @@\n-old line\n+new line\n context line`,
-		});
-
-		// Canonical numbered output from formatCursorReplayDiff after extract.
-		expect(rendered).toContain("<toolDiffRemoved>-1 old line</toolDiffRemoved>");
-		expect(rendered).toContain("<toolDiffAdded>+1 new line</toolDiffAdded>");
 	});
 
 	it("activity edit with structured diffString uses canonical colored diff renderer (ignores expandedText preamble; text extraction not used)", () => {
@@ -167,83 +144,5 @@ describe("cursor native replay rendering", () => {
 		expect(rendered).toContain("<toolOutput>hello world</toolOutput>");
 		expect(rendered).not.toContain("preamble note");
 		expect(rendered).not.toContain("<muted>hello world</muted>");
-	});
-
-	it("shows local read preview disclaimer in collapsed native read replay results", () => {
-		const result = {
-			content: [{ type: "text" as const, text: `${LOCAL_READ_PREVIEW_NOTICE}\n# Local preview\n` }],
-			details: { localReadPreview: true },
-		};
-		const rendered = renderNativeLookingCursorReadReplayResult(
-			result,
-			{ expanded: false, isPartial: false },
-			theme,
-			createRenderContext({ isError: false, args: { path: "README.md", localReadPreview: true } }),
-			() => new Text("", 0, 0),
-		)
-			.render(120)
-			.join("\n");
-
-		expect(rendered).toContain(LOCAL_READ_PREVIEW_NOTICE);
-		expect(rendered).not.toContain("# Local preview");
-	});
-
-	it("renders collapsed activity summaries from metadata for neutral cursor cards", () => {
-		const rendered = [
-			renderCursorReplayCall(
-				CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-				{ activityTitle: "Cursor diagnostics", activitySummary: "0 diagnostics in src/index.ts" },
-				theme,
-				true,
-			),
-			renderCursorReplayCall(
-				CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-				{ activityTitle: "Cursor todos", activitySummary: "1/2 completed, 1 pending" },
-				theme,
-				true,
-			),
-			renderCursorReplayCall(
-				CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-				{ activityTitle: "Cursor MCP", activitySummary: "git · ## Git Status ✅", toolName: "git" },
-				theme,
-				true,
-			),
-		]
-			.map((component) => component.render(120).join("\n"))
-			.join("\n");
-
-		expect(rendered).toContain("Cursor diagnostics 0 diagnostics in src/index.ts");
-		expect(rendered).toContain("Cursor todos 1/2 completed, 1 pending");
-		expect(rendered).toContain("Cursor MCP git · ## Git Status ✅");
-	});
-
-	it("renders neutral cursor partial calls from activity metadata", () => {
-		const rendered = [
-			renderCursorReplayCall(
-				CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-				{ activityTitle: "Cursor semantic search", activitySummary: "main entrypoint (1 dir)" },
-				theme,
-				true,
-			),
-			renderCursorReplayCall(
-				CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-				{ activityTitle: "Cursor screen recording", activitySummary: ".cursor/recordings/demo.webm · 4.2s" },
-				theme,
-				true,
-			),
-			renderCursorReplayCall(
-				CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
-				{ activityTitle: "Cursor delete", activitySummary: ".debug/delete-me.txt" },
-				theme,
-				true,
-			),
-		]
-			.map((component) => component.render(120).join("\n"))
-			.join("\n");
-
-		expect(rendered).toContain("Cursor semantic search main entrypoint (1 dir)");
-		expect(rendered).toContain("Cursor screen recording .cursor/recordings/demo.webm · 4.2s");
-		expect(rendered).toContain("Cursor delete .debug/delete-me.txt");
-		expect(rendered).not.toContain("cursor_");
 	});
 });

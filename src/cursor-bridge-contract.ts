@@ -2,28 +2,15 @@ import { isCursorLeanEnabled } from "./cursor-lean.js";
 
 export const CURSOR_PI_BRIDGE_MCP_TOOL_PREFIX = "pi__";
 export const CURSOR_PI_BRIDGE_PREFERENCE_TEXT =
-	"When exposed, prefer pi__mcp for MCP work and pi__subagent for delegation; use Cursor-configured MCP or Cursor-native subagents only when the matching pi__ tool is not exposed or unavailable.";
+	"For MCP work and delegation, prefer matching exposed pi__* tools using their listed names, schemas, and prompt guidelines; use Cursor-configured MCP or Cursor-native subagents only when the matching pi tool is not exposed or unavailable.";
 
-const CURSOR_PI_BRIDGE_CONTRACT_LINES = [
-	"Pi bridge contract:",
-	`${CURSOR_PI_BRIDGE_MCP_TOOL_PREFIX}* names are live Cursor MCP bridge tool names only when exposed in the current run.`,
-	`Call the ${CURSOR_PI_BRIDGE_MCP_TOOL_PREFIX}* MCP tool name, not the real pi tool name shown in pi history or transcripts.`,
-	CURSOR_PI_BRIDGE_PREFERENCE_TEXT,
-	"Bridged calls execute through normal pi tool flow, so pi shows the real pi tool name and returns a normal pi tool result.",
-	"Replay IDs, replay labels, and transcript tool names are display-only/context-only, not callable tools.",
-	"Cursor-native host tools, settings, plugins, and configured MCP servers are separate from the pi bridge.",
-] as const;
-
-export function getCursorPiBridgePreferenceText(): string {
-	return isCursorLeanEnabled()
-		? "Only exposed pi__* tools are callable. Cursor-native tools, subagents, web search, and ambient MCP are disabled."
+export function getCursorPiBridgePreferenceText(options: { leanEnabled?: boolean; nativeToolsEnabled?: boolean } = {}): string {
+	if (options.leanEnabled ?? isCursorLeanEnabled()) {
+		return "Only exposed pi__* tools are callable. Cursor-native tools, subagents, web search, and ambient MCP are disabled.";
+	}
+	return options.nativeToolsEnabled === false
+		? "Use only exposed pi__* MCP names for Pi work; native task/subagents are disabled."
 		: CURSOR_PI_BRIDGE_PREFERENCE_TEXT;
-}
-
-export function getCursorPiBridgeContractText(): string {
-	return CURSOR_PI_BRIDGE_CONTRACT_LINES.map((line) =>
-		line === CURSOR_PI_BRIDGE_PREFERENCE_TEXT ? getCursorPiBridgePreferenceText() : line,
-	).join("\n");
 }
 
 function formatPromptGuidelines(promptGuidelines: readonly string[] | undefined): string | undefined {

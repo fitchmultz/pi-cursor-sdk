@@ -5,10 +5,11 @@ import { acquireSessionCursorAgent, buildCursorLocalAgentOptions, __testUtils as
 import { __testUtils as scopeTestUtils } from "../src/cursor-session-scope.js";
 import { installCursorSessionStoreMock } from "./helpers/cursor-session-store.js";
 import { resolveCursorSkillSystemPrompt } from "../src/cursor-skill-tool.js";
-import { makeModel, makeContext, createBridgePiHarness, createBuiltinToolInfo } from "./helpers/pi-harness.js";
+import { makeModel, makeContext, createPiHarness, createExtensionTestContext, createBuiltinToolInfo } from "./helpers/pi-harness.js";
 import { Type } from "typebox";
 import { buildCursorPrompt, getCursorToolTailGuardText } from "../src/context.js";
-import { formatCursorToolsDebugReport } from "../src/cursor-state.js";
+import { registerCursorRuntimeControls } from "../src/cursor-state.js";
+import { registerCursorSessionScope } from "../src/cursor-session-scope.js";
 import { buildCursorToolManifestText } from "../src/cursor-tool-manifest.js";
 
 afterEach(() => vi.unstubAllEnvs());
@@ -31,15 +32,19 @@ describe("lean tool policy", () => {
 		})).toBe("Pi skill instructions");
 	});
 
-	it("keeps bootstrap, incremental guidance, and tool diagnostics consistent with lean mode", () => {
+	it("keeps bootstrap, incremental guidance, and tool diagnostics consistent with lean mode", async () => {
 		vi.stubEnv("PI_CURSOR_LEAN", "1");
 		const prompt = buildCursorPrompt(makeContext(), { agentMode: "plan" }).text;
 		expect(prompt).toContain("Only exposed pi__* tools are callable");
 		expect(prompt).not.toContain("Cursor-native subagents only when");
 		expect(prompt).not.toContain("pi__cursor_ask_question");
 		expect(getCursorToolTailGuardText()).toContain("Only exposed pi__* tools are callable");
-		const pi = createBridgePiHarness({ active: ["read"], tools: [createBuiltinToolInfo("read", Type.Object({}))] });
-		const report = formatCursorToolsDebugReport(pi);
+		const pi = createPiHarness({ activeTools: ["read"], initialTools: [createBuiltinToolInfo("read", Type.Object({}))] });
+		registerCursorSessionScope(pi);
+		registerCursorRuntimeControls(pi);
+		const ctx = createExtensionTestContext();
+		await pi.runCommand("cursor-tools", "", { ui: ctx.ui, hasUI: true });
+		const report = vi.mocked(ctx.ui.notify).mock.calls[0][0];
 		expect(report).toContain("PI_CURSOR_SETTING_SOURCES: none (PI_CURSOR_LEAN=1)");
 		expect(report).toContain("pi__read");
 		expect(report).toContain("Cursor native tools and ambient MCP: disabled");

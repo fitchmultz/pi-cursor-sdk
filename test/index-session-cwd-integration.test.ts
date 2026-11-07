@@ -67,7 +67,7 @@ import {
 	makeProviderModelConfig,
 } from "./helpers/pi-harness.js";
 
-import { createExtensionPi } from "./helpers/index-extension-test-kit.js";
+import { createExtensionPi, resetIndexExtensionTestState } from "./helpers/index-extension-test-kit.js";
 
 const mockedDiscover = vi.mocked(discoverModels);
 const mockedAgentCreate = vi.mocked(Agent.create);
@@ -91,10 +91,7 @@ describe("extension session cwd integration", () => {
 		]);
 	});
 
-	afterEach(async () => {
-		cursorSessionScopeTestUtils.reset();
-		await cursorPiToolBridgeTestUtils.resetRegisteredBridgeForTests();
-	});
+	afterEach(resetIndexExtensionTestState);
 
 	it("passes pi session cwd from extension registration through streamSimple to Agent.create", async () => {
 		const sessionDir = mkdtempSync(join(tmpdir(), "pi-cursor-index-agent-cwd-"));

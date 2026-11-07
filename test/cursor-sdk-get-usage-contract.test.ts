@@ -42,7 +42,7 @@ describe("installed Cursor SDK getUsage contract", () => {
 	});
 	it("attaches a no-op error listener before local shell snapshot writes and end", async () => {
 		const modules = await installedCursorModules();
-		const { declarations, execute } = installedCursorModuleDeclarations(modules.factorySource("../shell-exec/dist/index.js"));
+		const { declarations, execute } = installedCursorModuleDeclarations(modules.factorySource("../shell-exec/dist/api/index.js"));
 		const writers = [...declarations.values()].filter((node) => {
 			if (!ts.isFunctionDeclaration(node) || node.parameters.length !== 2) return false;
 			const stream = node.parameters[0]!.name.getText();

@@ -17,20 +17,21 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `src/cursor-provider-turn-emit.ts` owns live vs direct emission from finalized outcomes.
 - `src/cursor-provider-turn-types.ts` owns immutable turn phase data and explicit phase result types; phase-local cleanup stays inside the owning phase.
 - `src/cursor-provider-run-outcome.ts` owns the discriminated `CursorRunOutcome` model and terminal emission classification.
+- `src/cursor-local-run-terminal-error.ts` owns cancelling a failed LOCAL run from its SDK terminal error run-row write (before the SDK changes `run.status`, so native tool processes stop) and restoring the SDK error from the resulting cancelled wait result; session stores are wrapped at open.
 - `src/cursor-provider-run-finalizer.ts` owns live-run wait completion, outcome application, debug finalization, and SDK abort-suppression disposal.
 - `src/cursor-run-final-text.ts` owns final assistant text selection for run outcomes and live-run drain.
 - `src/cursor-provider-errors.ts` owns scrubbed Cursor SDK run failure detail, abort reason formatting, and provider error sanitization.
 - `src/cursor-provider-lazy.ts` owns the `streamSimple` wrapper that defers Cursor provider execution to invocation and converts provider runtime failures into stream errors; the provider module stays in Pi's static extension graph so host peers resolve through Pi's loader.
-- `src/cursor-session-scope.ts` owns SessionManager-bound runtime scope keys/generations separately from stable persistent session identity, cwd/name/trust and lifecycle registration for pools, cloud names and debug grouping.
-- `src/cursor-provider-binding.ts` owns public native Cursor auth/catalog publication, per-ExtensionAPI provider closures, and one-shot native header receipts capturing scope, usage origin, and canonical projection; `src/cursor-request-provenance.ts` resolves actual-request-equivalent source-ordered occupancy floors and operation-signal summary purpose without text/clocks or sibling scans.
+- `src/cursor-session-scope.ts` owns SessionManager-bound runtime scope keys/generations separately from stable persistent session identity, cwd/name/trust, process-wide started-session liveness and stale-extension detection, and lifecycle registration for pools, cloud names and debug grouping.
+- `src/cursor-provider-binding.ts` owns public native Cursor auth/catalog publication, per-ExtensionAPI provider closures, and one-shot process-wide native header receipts capturing scope, usage origin, canonical projection, operation purpose and owning session state (an unstarted registrant delegates the turn to the receipt owner's module, which follows the native provider's catalog issue and model metadata); `src/cursor-request-provenance.ts` resolves actual-request-equivalent source-ordered occupancy floors and operation-signal summary purpose without text/clocks or sibling scans.
 - `src/cursor-session-settings.ts` owns branch-scoped runtime/cloud acknowledgement, mode, fast, and HTTP preferences plus owner-scoped CLI snapshots/one-shot consumption across reload; SDK transport configuration and environment/user defaults remain process-global.
 - `src/cursor-custom-store-path.ts` owns native custom-root validation, trusted-system alias/private directory preparation, fixed SQLite leaf and before/after-open identity guards (pathname/Windows ACL ceilings are explicit).
 - `src/cursor-session-store.ts` owns captured default/custom-domain leases, exact custom-session and current/legacy default cwd/session-derived SQLite identity admission, contract-verified pre-migration layout safety, exact identity admission before bounded path walks, atomic derived cwd ownership through admission/open/disposal, temporary stores, and owned-prefix/removal guards (default-domain higher user-managed links allowed; persistent opens retain an active matching lease).
-- `src/cursor-http1.ts` owns branch-scoped local HTTP/1.1 session state, global-preference override tracking, and extension-owned SDK configuration/null reset.
+- `src/cursor-http1.ts` owns branch-scoped local HTTP/1.1 session state, global-preference override tracking, and the process-wide configured SDK handle/null reset.
 - `src/cursor-ripgrep-path.ts` owns shared SDK-relative platform package resolution and local-agent ripgrep initialization; `src/cursor-sdk-runtime.ts` initializes the native parser vendor path before shared SDK imports.
-- `src/cursor-session-agent.ts` owns runtime-scoped SDK agent pooling, durable transport-aware compatibility identity, send-state commits, busy tracking for in-flight SDK `run.wait()` work, and scoped acquire/dispose state; `src/cursor-local-agent-ownership.ts` owns atomic process-local exact store/agent claims shared with resume cleanup (release only on proven SDK disposal).
+- `src/cursor-session-agent.ts` owns runtime-scoped SDK agent pooling, durable transport-aware compatibility identity, send-state commits, busy tracking for in-flight SDK `run.wait()` work, and scoped acquire/dispose state; `src/cursor-local-agent-ownership.ts` owns atomic process-wide exact store/agent claims shared across extension copies and resume cleanup (release only on proven SDK disposal).
 - `src/cursor-session-agent-lineage.ts` owns non-resumable per-session local agent lineage custom entries independent of local resume.
-- `src/cursor-session-agent-lifecycle.ts` owns lazy session-agent lifecycle invalidation on model select, compaction, tree navigation, shutdown, and scope changes, including shutdown-time HTTP transport reset before module reload.
+- `src/cursor-session-agent-lifecycle.ts` owns lazy session-agent lifecycle invalidation on model select, compaction, tree navigation, shutdown, and scope changes, including shutdown-time HTTP transport reset when no started live session remains across module copies.
 - `src/cursor-session-compaction-prep.ts` owns `prepareCursorSessionForCompaction()` (release scoped live runs and reset the conversation pool) wired from `session_before_compact` in `src/index.ts`; isolated summary agents never commit ordinary resume handles.
 - `src/cursor-session-send-policy.ts` owns session send planning (`bootstrap` vs `incremental`), periodic agent rebootstrap threshold, and prompt mode selection.
 - `src/cursor-provider-live-run-drain.ts` owns live-run drain/replay mirroring, pre-send continuation, and native replay turn emission.
@@ -47,7 +48,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `shared/cursor-sdk-event-debug-env.mjs` owns canonical Cursor SDK event-debug env names; `src/cursor-sdk-event-debug-constants.ts` re-exports them and owns debug artifact base-dir resolution.
 - `src/cursor-sdk-event-debug-session.ts` owns debug session grouping, turn artifact directory allocation, and session manifest updates.
 - `src/cursor-agents-context.ts` owns Cursor-model suppression of pi `<project_context>` / `AGENTS.md` duplication and `PI_CURSOR_PRESERVE_PI_AGENTS_MD`; `src/cursor-agents-context-registration.ts` owns the static lifecycle registration for that suppression.
-- `src/cursor-sdk-output-filter.ts` suppresses Cursor SDK integrator bootstrap noise from pi's TUI.
+- `src/cursor-sdk-output-filter.ts` exposes the shared exact-frame SDK output filter. Extension initialization installs one process-lifetime lease, including detached rules/skills work and asynchronous reload gaps; the versioned process singleton shares sink ownership and async attribution across reevaluation, with canonical test-only reset.
 - `src/cursor-edit-diff.ts` owns canonical edit diff fallback resolution for replay/display paths.
 - `src/cursor-record-utils.ts` owns shared record/string-key parsing and neutral unknown-value stringification helpers used across bridge and transcript layers.
 - `src/cursor-partial-content-emitter.ts` owns shared thinking/text block emission for live-run drain and turn coordinator paths.
@@ -59,10 +60,11 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `src/cursor-usage-ledger.ts` owns unique public native origin claims, validated fsynced session-ID journals, raw/reported/terminal/billed facts and canonical branch views; `src/cursor-usage-command.ts` owns truthful `/cursor-usage` view/refresh/export/help with the default footer unchanged.
 - `src/cursor-provider-turn-summary.ts` owns fresh text-only LOCAL compaction/tree agents, ephemeral stores and disposal before terminal emission, independent of ordinary conversation tools/mode/resume.
 - `scripts/lib/cursor-smoke-env.mjs`, `scripts/lib/cursor-smoke-shell.sh`, and `scripts/lib/cursor-visual-render.mjs` own maintainer smoke PATH/env isolation and browser-rendered visual artifacts; smoke runners should consume these helpers instead of duplicating debug env names, sealed Node PATH logic, or xterm/Playwright rendering.
+- `scripts/release-review.mjs` and `scripts/lib/release-review-*.mjs` own exact-diff review, catalog, registry, package, and PR/issue evidence receipts; their commands are in `docs/development.md`.
 - `scripts/lib/cloud-smoke-github.mjs` owns throwaway GitHub repository identity, provisioning, and deletion proof; `scripts/lib/cloud-smoke-cleanup-evidence.mjs` owns Cloud agent cleanup, retained evidence/provenance, and release-gate resource coordination; `scripts/lib/cloud-smoke-shutdown.mjs` owns signal-safe detached-child shutdown; `scripts/lib/cloud-smoke-pi-runner.mjs` owns print/RPC child transport; `scripts/lib/cloud-smoke-artifacts.mjs` owns metadata and lifecycle artifact readers. `scripts/cloud-runtime-smoke.mjs` keeps concrete lane orchestration.
 - `scripts/platform-smoke/artifact-bundle-contract.mjs` owns the canonical platform artifact bundle path/size/shape contract; `scripts/platform-smoke/artifact-fs-safety.mjs` owns no-follow traversal, bounded reads, extraction preflight, and spill writes; `scripts/platform-smoke/artifact-anchored-extract.mjs` plus `artifact-openat-extract.c` own descriptor-relative POSIX extraction/rollback and fail-closed Windows-controller handling; `scripts/platform-smoke/artifact-secrets.mjs` owns bundle secret-scan/redaction; `scripts/platform-smoke/wrapped-line-match.mjs` owns terminal-wrap-aware line matching. Platform smoke scripts should consume these instead of duplicating fs-safety or redaction logic.
 - `src/cursor-tool-presentation-registry.ts` is the canonical typed registry for Cursor tool names, labels, visibility, lifecycle, replay metadata (legacy wrapper names, wrapper labels, side-effect policy, call-summary policy), web remapping, alias normalization, and bridge exclusions for internal replay wrappers only (`cursor`, `cursor_*`); sibling modules derive from it.
-- `src/cursor-transcript-tool-specs.ts` owns per-tool transcript formatters and pi display builders keyed by normalized tool name; its display implementation keys must match registry entries exactly (`CURSOR_TOOL_DISPLAY_SPEC_KEYS`).
+- `src/cursor-transcript-tool-specs.ts` owns per-tool transcript formatters and pi display builders; `TOOL_DISPLAY_IMPLEMENTATIONS` is a typed `Record<CursorNormalizedToolName, ToolDisplaySpec>` that requires every normalized tool key and rejects extra keys.
 - `src/cursor-pi-tool-bridge-types.ts` owns shared bridge/MCP type contracts.
 - `src/cursor-env-boolean.ts` owns canonical env boolean parsing (default and tri-state optional) for bridge diagnostics, flags, and native replay gating.
 - `src/cursor-live-run-coordinator.ts` owns live Cursor run registry/scope matching, queued events, drain leases, idle disposal timers, and release cleanup.
@@ -79,8 +81,8 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `src/cursor-native-tool-display-registration.ts` owns native replay tool registration and model-scoped activation.
 - `src/cursor-native-replay-routing.ts` owns canonical native replay disposition (`queue_replay` / `inactive_trace` / `transcript_trace`) and context-tool partitioning for drain.
 - `src/cursor-native-replay-trace.ts` owns inactive native replay trace formatting (`title: summary`).
-- `src/cursor-pi-context.ts` owns the stock/transcript Pi context boundary; it uses Pi 0.87.1's required public replay helpers, not a local replay implementation.
-- `src/cursor-context-tools.ts` owns request tool snapshots at provider stream start (legacy tools or replayed transcript declarations), distinct from the registry-owned bridge snapshot.
+- `src/cursor-pi-context.ts` owns the stock/transcript Pi context boundary; it uses Pi's required public replay helpers, not a local replay implementation.
+- `src/cursor-context-tools.ts` owns request tool snapshots at provider stream start (tools replayed from transcript declarations or shorthand `systemPrompt`/`tools` contexts), distinct from the registry-owned bridge snapshot.
 - `src/cursor-display-text.ts` owns shared single-line sanitization and 240-char truncation for replay/trace display.
 - `src/cursor-native-tool-display-replay.ts` owns replay card rendering and diff/preview formatting.
 - `src/cursor-native-tool-display-tools.ts` owns native/replay tool definition factories and replay execute wrappers.
@@ -94,10 +96,10 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `src/cursor-cloud-local-state.ts` owns canonical cloud starting-ref normalization, hermetic Git probes, remote identity/refspec validation, and reasoned local-state inspection.
 - `src/cursor-cloud-lifecycle.ts` owns session-branch cloud lifecycle ledger entries and explicit `/cursor-cloud` list/archive/delete command behavior.
 - `src/cursor-durable-fs.ts` owns no-follow regular-file opens, exclusive private creation, fsync, and bounded validated frame IO shared by usage journals, Cloud lifecycle and local cleanup; preserve descriptor/path identity guards.
-- `src/cursor-state.ts` owns Cursor fast/mode controls, `/cursor-http` session/user persistence, `/cursor-tools`, local config refresh/cleanup wiring, and stable state re-exports.
+- `src/cursor-state.ts` owns Cursor fast/mode controls, `/cursor-http` session/user persistence, `/cursor-tools`, and local config refresh/cleanup wiring.
 - `src/cursor-runtime-state.ts` owns effective Cursor config/runtime resolution, cloud/local runtime flags, runtime status helpers, cloud acknowledgement, and `/cursor-runtime` / `/cursor-cloud` wiring.
 - `src/context.ts`, `src/context-window-cache.ts`, and `src/bundled-context-windows.ts` handle prompt conversion and context-window caches.
-- `src/cursor-bridge-contract.ts` owns pi bridge MCP description helpers and the exported full bridge contract text (bootstrap/manifest carry the user-facing contract; MCP descriptions use a one-line pointer).
+- `src/cursor-bridge-contract.ts` owns pi bridge MCP naming, the model-facing bridge preference text, and concise MCP descriptions that point to the bootstrap tool-surface rules.
 - `src/cursor-tool-manifest.ts` owns bootstrap callable-surface manifest text (`PI_CURSOR_TOOL_MANIFEST`, default on).
 - `test/**/*.test.ts` contains Vitest coverage for provider registration, discovery, state, context, bridge, replay, and streaming behavior.
 - `test/native-cursor-ownership.test.mjs` owns native concurrent and same-file-manager lifecycle/resume/bridge ownership contracts, using the shared native harness and explicit compatibility CI routes.
@@ -111,12 +113,13 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 ## Operating rules
 
 - Prefer the smallest change that preserves the current pi user contract.
-- Package 0.5.3 requires Node 24+ and official Pi 0.87.1+. Current locked development Pi packages are 1.1.0 snapshots; development Pi/TypeBox dependencies are reproducible build inputs, not qualification targets or user runtime upgrades. Compatibility requires latest stable official Pi and current `fitchmultz/pi` main, resolving version/commit once per workflow run and retaining exact SDK/CLI evidence; optional Pi and TypeBox peer ranges stay `"*"` per Pi guidance.
+- This package requires Node 24+ and official Pi 1.5.0+. Current locked development Pi packages are 1.5.0 snapshots; development Pi/TypeBox dependencies are reproducible build inputs, not qualification targets or user runtime upgrades. Compatibility requires latest stable official Pi and current `fitchmultz/pi` main, resolving version/commit once per workflow run and retaining exact SDK/CLI evidence; optional Pi and TypeBox peer ranges stay `"*"` per Pi guidance.
 - Treat Cursor SDK model metadata as the source of truth for model IDs, parameters, variants, thinking controls, and context variants. Do not hardcode new model-specific behavior unless it is a documented fallback.
 - HARD REPO RULE: never guess what the Cursor SDK outputs, expects, or does. Always verify Cursor SDK behavior against the installed `@cursor/sdk` package and/or the official TypeScript SDK docs at `https://cursor.com/docs/sdk/typescript` before making claims or implementation changes.
 - Contract-test external behavior before relying on it: when code depends on Cursor SDK/pi runtime payloads, timing, lifecycle, errors, usage accounting, or tool/event shapes, add or update a focused test that asserts the observed installed-package/docs/captured-fixture contract and fails if that contract drifts. Do not replace this with mocks based on guesses.
 - CODE IS TRUTH: claims about behavior must be backed by current source code, installed dependency code/types, contract tests, or captured command output. If evidence is missing, say `unknown`; do not infer, soften, or fill gaps with assumptions.
 - Before every commit and before every push, run a thermo-nuclear/deep maintainability review on the exact diff being committed or pushed. One reviewer is sufficient; no local three-reviewer panel or multi-model quorum is required. Remediate every material finding and repeat the review until there are no remaining material findings. Do not commit or push without this review evidence.
+- `docs/development.md` documents the receipt-producing pre-commit and pre-push commands and their isolated reviewer environment.
 - Keep pi-native abstractions first: context is a model variant, thinking uses pi thinking metadata, and Cursor-only `fast` is extension state/status.
 - Preserve the default pi footer; use extension status only for Cursor-only state such as `cursor:local · fast:on`, `cursor:local · fast:off`, and `cursor:cloud · fast:n/a`.
 - Stop discovery once package scripts, README, config files, tests, and the relevant `src/` modules explain the task. Do not broad-search `node_modules` unless debugging a dependency API.
@@ -148,7 +151,7 @@ There is no lint or format script in `package.json` at this time.
 - Keep provider runtime code side-effect-light. Do not write secrets, and do not let cache or discovery failures break response streaming unless the run cannot proceed safely.
 - Add or update tests for behavior changes in `src/`. Prefer focused unit tests over live Cursor calls.
 - If dependency versions change, update `package-lock.json` with npm. Do not manually edit generated dependency output.
-- The bridge runtime closure is bundled and pinned to `@modelcontextprotocol/server@2.3.1`, `@modelcontextprotocol/hono@2.0.2`, `hono@4.13.13`, and `@hono/node-server@2.1.3`. `@cursor/sdk@1.0.37` remains an exact unbundled dependency.
+- The bridge runtime closure is bundled and pinned to `@modelcontextprotocol/server@2.3.1`, `@modelcontextprotocol/hono@2.0.2`, `hono@4.13.13`, and `@hono/node-server@2.1.3`. `@cursor/sdk@1.0.40` remains an exact unbundled dependency.
 - Do not commit `dist/`, `coverage/`, `.env*`, `.pi/`, or package tarballs.
 
 ## Validation and done criteria
@@ -201,6 +204,7 @@ When the user requests a PR review (including thermo-nuclear / deep maintainabil
 Before publishing any npm/GitHub release or tagging release-ready status:
 
 - Run a thermo-nuclear/deep maintainability review on the exact release diff, including docs, tests, package metadata, generated artifacts, and PR/issue closure notes.
+- Use the catalog, release-preparation, and release-review commands in `docs/development.md` to bind the review to the same candidate and run.
 - Remediate every finding, including polish. Repeat the review/fix loop until the reviewer reports no remaining findings.
 - This release review gate is in addition to offline verification and any necessary changed-behavior live proof selected under the owner cost policy; it does not require the comprehensive paid matrix.
 

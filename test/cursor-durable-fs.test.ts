@@ -12,22 +12,16 @@ afterEach(() => {
 });
 
 describe("cursor-durable-fs", () => {
-	it("opens an existing regular file and returns a usable descriptor", () => {
+	it("opens a usable descriptor and fsyncs an existing regular file", () => {
 		tempDir = mkdtempSync(join(tmpdir(), "cursor-durable-fs-regular-"));
 		const path = join(tempDir, "regular.txt");
 		writeFileSync(path, "hello");
 		const fd = openExistingRegularFileNoFollow(path, 0);
 		try {
-			expect(typeof fd).toBe("number");
+			expect(readFileSync(fd, "utf8")).toBe("hello");
 		} finally {
 			closeSync(fd);
 		}
-	});
-
-	it("fsyncs an existing regular file", () => {
-		tempDir = mkdtempSync(join(tmpdir(), "cursor-durable-fs-fsync-"));
-		const path = join(tempDir, "regular.txt");
-		writeFileSync(path, "hello");
 		expect(fsyncExistingRegularFile(path)).toBe(true);
 	});
 

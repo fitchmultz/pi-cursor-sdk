@@ -8,6 +8,18 @@ This document records maintainer testing lessons for `pi-cursor-sdk`. It complem
 
 For a **minimal one-session dogfood pass** (baseline env, one native + one bridge call, JSONL ID patterns, bootstrap manifest, edit diff card), use the [Cursor dogfood checklist](./cursor-dogfood-checklist.md) only when its selected changed behavior needs new live proof; do not follow it with a full paid matrix by default.
 
+## Smoke surface pins must include the lean policy
+
+Default local lean mode forces the pi bridge and builtin exposure on and disables native replay registration. Setting only `PI_CURSOR_PI_TOOL_BRIDGE=0` or `PI_CURSOR_REGISTER_NATIVE_TOOLS=1` therefore cannot select the legacy native surface. Native replay checks (`smoke:visual`, `smoke:steering`, isolated native/plan-strip checks, and the platform native matrix) explicitly pin `PI_CURSOR_LEAN=0`. The local-resume tool-surface and cleanup lanes hold that same opt-out across all launches so switching bridge/builtin pins really changes the pool key; changing lean between the two sides would only prove a lean-policy change instead.
+
+Do not globally opt smoke out of lean mode to fix a native lane. Ordinary local-resume lanes and the platform bridge, abort, and HTTP/1.1 suites pin `PI_CURSOR_LEAN=1` to isolate inherited native overrides while exercising the default policy. The isolated basic provider check clears inherited env and leaves lean unset, exercising the built-in default. Offline env/launcher contracts and fake-PATH self-tests cover these boundaries without Cursor calls; real native replay still requires its separate persisted JSONL and visual evidence when selected under the cost policy.
+
+## Durable store identity versus SDK pathname
+
+Persisted `storeIdentity.stateRoot` is a durable identity, while the SQLite-open boundary passes `toNamespacedPath(stateRoot)` to the SDK. On Windows, the SDK pathname can therefore have the `\\?\` prefix without changing the stored identity. Native resume tests must compare the SDK value exactly with `toNamespacedPath(handle.storeIdentity.stateRoot)` and verify both existing directories with `realpath`; do not strip arbitrary prefixes or weaken the stable-handle/live-sibling assertions.
+
+For native harness diagnostics, set `PI_CURSOR_TEST_EVIDENCE_DIR` before starting the test and use a fresh owned temp directory. Evidence-configured `concurrentFixture` runs retain their original fixture roots and write `fixture-root-*.json` metadata before execution; copied JSONL does not authorize deleting the original JSONL or its ancestors. The targeted macOS/Windows native ownership CI step runs the whole ownership test file, avoiding a name filter that could silently match no cases, and places both original roots and copied evidence under the existing `native-host` artifact directory. Runs without evidence configuration keep their existing teardown behavior.
+
 ## Core lesson: integration-shaped bugs beat unit mocks
 
 The native replay `Tool grep not found` failure was integration-shaped, not unit-shaped:
@@ -19,11 +31,11 @@ The native replay `Tool grep not found` failure was integration-shaped, not unit
 
 Passing hundreds of unit tests did not prove that chain was safe. Regression coverage now includes:
 
-- `test/index.test.ts` — `before_agent_start` and `turn_start` resync after plan-style strip
+- `test/index-registration.test.ts` — `before_agent_start` and `turn_start` resync after plan-style strip
 - `test/cursor-native-replay-stress.test.ts` — plan strip → resync → grep replay; inactive-tool trace fallbacks
 - `test/cursor-provider-replay-live-run.test.ts` — inactive replay tools emit trace instead of broken `toolUse`
 - `test/cursor-native-replay-trace.test.ts` — shared inactive replay trace formatting
-- `test/cursor-native-replay-routing.test.ts` — `resolveNativeReplayDisposition` and `partitionNativeToolsByActiveContext`
+- `test/cursor-native-replay-routing.test.ts` — disabled-replay disposition, absent-snapshot compatibility, and mixed active/inactive tool partitioning (other disposition behavior is exercised at the provider boundary above)
 - `test/validate-smoke-jsonl.test.ts` — replay scan semantics (real errors vs doc mentions in successful reads)
 
 When changing provider/runtime behavior, ask whether the bug spans **pi extension lifecycle**, **active tool state**, **provider streaming**, and **persisted JSONL**. If yes, add an integration-style unit test or live smoke coverage for that chain.
@@ -33,7 +45,7 @@ When changing provider/runtime behavior, ask whether the bug spans **pi extensio
 Native replay routing intentionally uses two layers:
 
 1. **Extension resync** (`before_agent_start`, `turn_start`) updates pi's active tool set via `syncRegisteredNativeCursorToolsForModel`. This fixes the common case where plan-mode execute strips `grep`/`find`/`cursor` before the next turn.
-2. **Provider routing** uses the **request tool snapshot** captured when `streamCursor()` starts (`getActiveContextToolNames` in `src/cursor-context-tools.ts`): legacy `context.tools` on stock Pi 0.84/0.85, or tools replayed by the host's public helpers on transcript-only Pi. An explicit empty snapshot is not an absent legacy snapshot. It does not read live `pi.getActiveTools()` mid-stream. The bridge intentionally retains its separate registry-owned surface.
+2. **Provider routing** uses the **request tool snapshot** captured when `streamCursor()` starts (`getActiveContextToolNames` in `src/cursor-context-tools.ts`): the current tools that `resolveCursorPiContext` replays with Pi's public helpers, from transcript-only host contexts or shorthand `systemPrompt`/`tools` contexts. A shorthand context without `tools` has no snapshot; an explicit empty snapshot is still a snapshot. It does not read live `pi.getActiveTools()` mid-stream. The bridge intentionally retains its separate registry-owned surface.
 
 `src/cursor-native-replay-routing.ts` centralizes provider-side routing against the same `context.tools` snapshot:
 
@@ -50,9 +62,15 @@ If resync runs but `context.tools` is still stale (e.g. only `read` listed), the
 
 ## Stock/transcript provider contract
 
-`test/cursor-provider-pi-context.test.ts` drives real `ModelRuntime` / `ModelRegistry` requests into `streamCursor`, with only Cursor SDK execution mocked. Run it against each supported host with all Pi peer imports pinned to that host (including nested native imports); a top-level package version alone is not resolution evidence. Cover official Pi 0.87.1, official latest, and current `fitchmultz/pi` main. The direct development Pi packages are locked 1.1.0 snapshots, not qualification targets; resolve latest stable official Pi and current `fitchmultz/pi` main once per workflow run. Their actual nested resolution is recorded with each check, including host TypeBox 1.3.27.
+`test/cursor-provider-pi-context.test.ts` drives real `ModelRuntime` / `ModelRegistry` requests into `streamCursor`, with only Cursor SDK execution mocked. Run it against each supported host with all Pi peer imports pinned to that host (including nested native imports); a top-level package version alone is not resolution evidence. Cover official Pi 1.5.0, official latest, and current `fitchmultz/pi` main. The direct development Pi packages are locked 1.5.0 snapshots, not qualification targets; resolve latest stable official Pi and current `fitchmultz/pi` main once per workflow run. Their actual nested resolution is recorded with each check, including host TypeBox 1.3.27.
 
 The test covers bootstrap/incremental prompts, empty-vs-absent request tools, native replay/drain, cloud fresh/bootstrap selection, and actual host prompt serialization for context files and skills. `test/native-cursor-flow.test.mjs` additionally exercises the compiled extension through the real loader and registered Cursor provider, substituting only the external SDK transport/storage. It verifies actual bridge tool execution, pending-work idle/abort/shutdown/deadline ownership, replay without file access, persisted usage/lineage, tree, compaction, queued steering, abort and reload/disposal. `test/native-cursor-prompt.test.mjs` owns genuine native input, hidden notices, required-budget input, current attachments, custom-only continuation, equivalent conversion, payload/order-changing rejection, and GitHub comment soft guidance across bootstrap/incremental/custom-only sends. `test/native-cursor-ownership.test.mjs` owns concurrent-session contracts, including independently reopened managers for the same file, pending bridge survival across sibling reload/tree/shutdown, durable-key stability and atomic live-handle exclusion. These owners use `test/helpers/native-cursor-harness.mjs` and run in the explicit `check:compat` list and manual official-host compatibility route; the native-platform Vitest job is not execution evidence for these Node test owners. Explicit `tools` is now an allowlist, not merely an initial active set; use `defaultTools` for a native fixture that allows replay wrappers to activate. `test/native-provider.test.mjs` additionally verifies canonical `SessionManager.appendContextEdit()` plus `refreshContext()`, unchanged raw history, and conversation filtering that preserves system instructions, the current tool declaration, and explicit tool removal (the focused native slice from #271). It is offline contract evidence. Add live proof only for changed behavior that still needs real-service evidence under the cost policy above; do not rerun unchanged live lanes or infer full live coverage from offline tests.
+
+### Native auth/catalog fixture boundary
+
+`test/cursor-native-auth-catalog.test.ts` uses public `ModelRuntime.create({ modelsPath: null })` for cases that do not exercise configuration files. Credentials and the Cursor catalog cache remain real; config-precedence and config-edit cases still use a temporary `models.json`. Seed startup credentials and the matching cache before creating the runtime.
+
+Official Pi, including 1.5.0, retains the [file-backed startup refresh-admission/readiness limitation](./cursor-model-ux-spec.md#source-of-truth): registration starts an unawaited refresh, and an asynchronous config load can supersede the awaited session refresh before its catalog publishes. This can return the bundled fallback despite an authenticated matching cache, including when auth/cache were seeded before runtime creation. The in-memory fixture isolates Cursor auth/publication assertions from that shared host defect; it does **not** qualify or repair official file-backed startup. The shared-owner repair in `fitchmultz/pi` [#190](https://github.com/fitchmultz/pi/pull/190) admits refresh ownership before config I/O and awaits replacement publication. File-backed startup proof must use that repaired host and retain its exact revision.
 
 ## Installed SDK vs native host evidence
 
@@ -71,6 +89,12 @@ A subsequent authenticated SDK 1.0.37 catalog-only refresh on 2026-10-07 returne
 SDK 1.0.37 does materially change its vendored transport/retry source: HTTP/2 ping verification gains bounded completion and listener cleanup, HTTP/1 and HTTP/2 response iteration awaits the iterator directly while preserving already-rejected sentinel errors, and local retry classification adds `UND_ERR_SOCKET` plus failure-kind budget selection. SDK-declared external ranges are unchanged; neither those ranges nor a new vendored patch identity proves the resolved host graph or service recovery. Requalify installed-source transport and first-send contracts against the actual package; none of this establishes #247's original auth cause, #339's signal sender, #173's rtk behavior, #233's Windows importer graph or #206's readiness.
 
 The 60-second MCP protocol default and lack of a public timeout option remain. SDK 1.0.37's internal `setToolCallRequestOptions`, `setToolCallOutputSchemaPassthrough` and `setListingDeadline` each occur only as definitions in the inspected ESM JavaScript, with no invocation found. They are not supported public setters or proof of readiness; preserve the extension's verified timeout compatibility path rather than adding private patches. The new public `computerUse` output variant uses the existing bounded generic replay fallback, not dedicated action/screenshot rendering or a new local execution option; see the [canonical replay matrix](./cursor-native-tool-replay.md#sdk-tooltype-replay-matrix).
+
+### SDK 1.0.40 hook maintenance boundary
+
+The 1.0.40 pin has a concrete compatibility/security reason beyond its version number. Both 1.0.37 and 1.0.40 load enabled Claude user/project hook settings, but only 1.0.40 enables nested `hookSpecificOutput` compatibility in the LOCAL hook runtime factory. A successful command hook returning only nested `permissionDecision: "deny"` or `updatedInput` otherwise leaves the top-level fields consumed by the adapters absent. SDK 1.0.40 also adds Windows native exit-code propagation and UTF-8 payload handling; exit 2 denotes denial, while other nonzero exits normally require `failClosed` to block.
+
+`test/cursor-sdk-hook-compatibility-contract.test.ts` reuses the installed-module harness to discover that factory structurally, observe its lexical binding in a test-only evaluation, load fresh project Claude settings, and execute a harmless Node hook child. It checks nested denial/rewrite, output precedence/event guards, UTF-8 stdin and native exit-2 handling. Original fixtures are retained when `PI_CURSOR_TEST_EVIDENCE_DIR` is set. Linux results do not qualify Windows PowerShell; the unchanged native Windows CI runs this contract too. The rewritten command is not executed, and neither a public Agent/model request nor Pi/rtk policy enforcement is tested. These checks do not close #173 or qualify #206/#233/#247/#257/#282/#339; SDK 1.0.40 still exposes neither commit nor PR attribution control (#302). Preserve all earlier package/canary/catalog observations at their actual versions and dates.
 
 ## Maintainer-only offline proof retention
 
@@ -238,7 +262,7 @@ For LOCAL summary isolation, inspect actual SDK create/send options and persiste
 
 `test/cursor-usage-ledger.test.ts` uses real public SessionManager custom entries and bounded filesystem journals. It protects restart, optional mirror failure, backward/equal snapshot clocks, revised/aggregate-only/large bills, linear compact-revision storage, unavailable-to-late observations, abandon without a billing fetch, late abort, owner/sibling switches, inherited cross-directory gaps, lost native claims, pricing tiers, torn-tail prefix export/native-fork recovery and malformed/symlink files. Export is a canonical view of facts and uncertainty, not an invented client-run billing join. A failed durable append must not advance recognized accounting.
 
-For supported official hosts without committing a repair, use `node scripts/ci-compatibility.mjs --working-tree --official-only --versions 0.87.1,0.99.1,1.0.3`. This hashes an isolated source snapshot, builds/packs it, tests package loading and runs real native session contracts. Keep matching host-peer resolution and exact source evidence; offline SDK transport substitution proves integration, not live service availability. See [context/accounting boundaries](./cursor-model-ux-spec.md#context-and-accounting-boundaries) for the operational ledger ceiling and public-API limits.
+For supported official hosts without committing a repair, use `node scripts/ci-compatibility.mjs --working-tree --official-only --versions 1.5.0`. This hashes an isolated source snapshot, builds/packs it, tests package loading and runs real native session contracts. Keep matching host-peer resolution and exact source evidence; offline SDK transport substitution proves integration, not live service availability. See [context/accounting boundaries](./cursor-model-ux-spec.md#context-and-accounting-boundaries) for the operational ledger ceiling and public-API limits.
 
 ### False-positive edge case (2026-05-23)
 
@@ -343,7 +367,7 @@ The script writes timestamped artifacts under `--out` (default `/tmp/pi-cursor-s
 
 Stdout prints artifact paths and summary counts only. Raw payloads stay on disk and may contain local paths, project text, tool args/results, or secrets — do not commit or share them.
 
-Hard repo rule: Cursor SDK behavior claims must come from the installed `@cursor/sdk` package and/or https://cursor.com/docs/sdk/typescript, not from memory or ad-hoc probes alone. Current validation targets Node 24+, exact `@cursor/sdk@1.0.37`, official Pi 0.87.1/latest, and current `fitchmultz/pi` main.
+Hard repo rule: Cursor SDK behavior claims must come from the installed `@cursor/sdk` package and/or https://cursor.com/docs/sdk/typescript, not from memory or ad-hoc probes alone. Current validation targets Node 24+, exact `@cursor/sdk@1.0.40`, official Pi 1.5.0/latest, and current `fitchmultz/pi` main.
 
 ## Pi provider SDK event capture
 

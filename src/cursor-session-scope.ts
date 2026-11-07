@@ -4,6 +4,7 @@ import type { ExtensionHandler, ProjectTrustHandler, SessionInfoChangedEvent, Se
 import { truncateCursorDisplayLine } from "./cursor-display-text.js";
 
 interface CursorSessionScopeExtensionApi {
+	getSessionName?(): string | undefined;
 	on(event: "project_trust", handler: ProjectTrustHandler): void;
 	on(event: "session_start", handler: ExtensionHandler<SessionStartEvent>): void;
 	on(event: "session_info_changed", handler: ExtensionHandler<SessionInfoChangedEvent>): void;
@@ -12,7 +13,7 @@ interface CursorSessionScopeExtensionApi {
 
 const ANONYMOUS_SESSION_SCOPE_KEY = "__anonymous__";
 const EPHEMERAL_SESSION_SCOPE_PREFIX = "__ephemeral__:";
-export const MAX_CURSOR_SESSION_NAME_LENGTH = 100;
+const MAX_CURSOR_SESSION_NAME_LENGTH = 100;
 
 type CursorSessionScopeChangeHandler = (previousScopeKey: string) => Promise<void> | void;
 
@@ -39,6 +40,9 @@ const state = {
 };
 type ScopeRecord = typeof state;
 const scopes = new Map<object, ScopeRecord>();
+const LIVE_SCOPES_KEY = Symbol.for("pi-cursor-sdk.live-session-scopes.v1");
+const processState = globalThis as typeof globalThis & { [LIVE_SCOPES_KEY]?: Set<WeakRef<CursorSessionScopeExtensionApi>> };
+const liveScopes = processState[LIVE_SCOPES_KEY] ??= new Set<WeakRef<CursorSessionScopeExtensionApi>>();
 const scopeChangeHandlers = new Map<object, CursorSessionScopeChangeHandler>();
 const scopeGenerations = new Map<string, number>([[ANONYMOUS_SESSION_SCOPE_KEY, 0]]);
 const projectTrustResolutionCwds = new Set<string>();
@@ -90,8 +94,25 @@ export function getCursorSessionScopeSnapshot(pi?: object): CursorTurnScope {
 	});
 }
 
+// Pi 1.5.0 AgentSession.dispose() invalidates ExtensionAPI calls; getSessionName then throws the stale-context error below.
+export function isCursorExtensionDisposed(pi: Pick<CursorSessionScopeExtensionApi, "getSessionName">): boolean {
+	if (typeof pi.getSessionName !== "function") return false;
+	try {
+		pi.getSessionName();
+		return false;
+	} catch (error) {
+		return error instanceof Error && error.message.includes("stale after session replacement or reload");
+	}
+}
+
 export function hasLiveCursorSessions(): boolean {
-	return scopes.size > 0;
+	let live = false;
+	for (const reference of liveScopes) {
+		const pi = reference.deref();
+		if (pi && !isCursorExtensionDisposed(pi)) live = true;
+		else liveScopes.delete(reference);
+	}
+	return live;
 }
 
 /** Runtime ownership key; persisted identities are captured separately. */
@@ -103,16 +124,8 @@ export function getCursorSessionScopeGeneration(scopeKey: string = getCursorSess
 	return scopeGenerations.get(scopeKey) ?? 0;
 }
 
-export function getCursorSessionCwd(): string {
-	return state.sessionCwd;
-}
-
 export function getCursorSessionProjectTrusted(pi?: object): boolean {
 	return pi ? scopes.get(pi)?.projectTrusted === true : state.projectTrusted;
-}
-
-export function getCursorSessionName(): string | undefined {
-	return state.sessionName;
 }
 
 function normalizeCursorSessionName(name: string | undefined): string | undefined {
@@ -147,6 +160,10 @@ function isCliProjectTrustApproved(args = process.argv.slice(2)): boolean {
 }
 
 function resetCursorSessionScope(): void {
+	for (const reference of liveScopes) {
+		const pi = reference.deref();
+		if (!pi || scopes.has(pi)) liveScopes.delete(reference);
+	}
 	Object.assign(state, {
 		sessionCwd: process.cwd(), sessionFile: undefined, sessionId: undefined,
 		sessionName: undefined, projectTrusted: false, sessionGeneration: 0,
@@ -174,6 +191,7 @@ export function registerCursorSessionScope(pi: CursorSessionScopeExtensionApi): 
 		runtimeOwner: undefined,
 	};
 	scopes.set(pi, record);
+	const liveScope = new WeakRef(pi);
 	const trustedCwds = new Set<string>();
 	pi.on("project_trust", (event) => {
 		trustedCwds.add(resolve(event.cwd));
@@ -194,6 +212,7 @@ export function registerCursorSessionScope(pi: CursorSessionScopeExtensionApi): 
 		);
 		Object.assign(record, state);
 		scopes.set(pi, record);
+		liveScopes.add(liveScope);
 		if (wasBound && previousScopeKey !== scopeKeyFor(record)) {
 			await scopeChangeHandlers.get(pi)?.(previousScopeKey);
 		}
@@ -203,6 +222,7 @@ export function registerCursorSessionScope(pi: CursorSessionScopeExtensionApi): 
 		Object.assign(state, record);
 	});
 	pi.on("session_shutdown", () => {
+		liveScopes.delete(liveScope);
 		scopes.delete(pi);
 		scopeChangeHandlers.delete(pi);
 	});

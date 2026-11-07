@@ -16,6 +16,7 @@ import {
 } from "./cursor-provider-run-outcome.js";
 import type { StartedCursorProviderTurn } from "./cursor-provider-turn-types.js";
 import { loadCursorSdk } from "./cursor-sdk-runtime.js";
+import { resolveCursorLocalRunTerminalError } from "./cursor-local-run-terminal-error.js";
 
 export async function cacheSdkContextWindow(
 	agentId: string,
@@ -157,6 +158,7 @@ export async function awaitFinalizeCursorRunOutcome(params: AwaitFinalizeCursorR
 	let waitResult: Awaited<ReturnType<typeof params.run.wait>>;
 	try {
 		waitResult = params.waitResult ?? (await params.run.wait());
+		waitResult = resolveCursorLocalRunTerminalError(params.run, waitResult, params.signal?.aborted === true);
 	} catch (error) {
 		await recordCursorProviderTerminalUsage(params.prepared, params.signal?.aborted ? "abort" : "error");
 		throw error;

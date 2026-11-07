@@ -48,6 +48,7 @@ describe("cursor live-run accounting", () => {
 		expect(firstConsumption.toolCallIds).toEqual([matchingFirst.toolCallId, matchingSecond.toolCallId]);
 		expect(firstConsumption.toolResults).toEqual([matchingFirst, matchingSecond]);
 		expect(firstConsumption.toolResultInputTokens).toBe(expectedToolResultInput);
+		expect(firstConsumption.state.consumedToolResultIds.has(nonmatching.toolCallId)).toBe(false);
 
 		const firstTurn = takeCursorLiveTurnInputTokens(firstConsumption.state, firstConsumption.toolResultInputTokens);
 		expect(firstTurn.sessionInputTokens).toBe(promptInputTokens + expectedToolResultInput);
@@ -77,21 +78,4 @@ describe("cursor live-run accounting", () => {
 		expect(second.sdkTurnUsage).toBeUndefined();
 	});
 
-	it("ignores nonmatching tool results without consuming them", () => {
-		const promptInputTokens = 25;
-		const toolResult = makeToolResult("unrelated-tool-1", "not for this live run");
-		const context: Context = {
-			systemPrompt: "",
-			messages: [toolResult],
-		};
-		const state = createCursorLiveRunAccountingState(promptInputTokens);
-		const consumption = consumeCursorLiveToolResults(state, context, () => false);
-
-		expect(consumption.toolResults).toEqual([]);
-		expect(consumption.toolResultInputTokens).toBe(0);
-		expect(consumption.state.consumedToolResultIds.has(toolResult.toolCallId)).toBe(false);
-
-		const firstTurn = takeCursorLiveTurnInputTokens(consumption.state, consumption.toolResultInputTokens);
-		expect(firstTurn.sessionInputTokens).toBe(promptInputTokens);
-	});
 });

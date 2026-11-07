@@ -1,7 +1,6 @@
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { resetCursorProviderTestState } from "./helpers/cursor-provider-harness.js";
 import {
 	createTrustIsolatedPackedFixture,
 	createTrustIsolatedRunRoot,
@@ -12,12 +11,10 @@ import {
 
 // Shard 1/4 of the former test/cursor-project-trust-contract.test.ts (split for
 // vitest file-level fork parallelism; all 24 scenarios/assertions across the
-// four shards are preserved verbatim; in-file concurrency is unsafe because
-// resetCursorProviderTestState mutates provider globals).
+// four shards are retained; this shard drives isolated child processes only).
 
 describe("non-interactive project trust CLI/provider contract", () => {
 	let fixtureRoot: string;
-	let packedPackageRoot: string;
 	let probeExtensionPath: string;
 	let runRoot: string;
 	let projectDir: string;
@@ -27,11 +24,10 @@ describe("non-interactive project trust CLI/provider contract", () => {
 	let runPi: ReturnType<typeof makeRunPi>;
 
 	beforeAll(() => {
-		({ fixtureRoot, packedPackageRoot, probeExtensionPath } = createTrustIsolatedPackedFixture());
+		({ fixtureRoot, probeExtensionPath } = createTrustIsolatedPackedFixture());
 	}, PROJECT_TRUST_FIXTURE_SETUP_TIMEOUT_MS);
 
-	beforeEach(async () => {
-		await resetCursorProviderTestState();
+	beforeEach(() => {
 		({ runRoot, projectDir, agentDir, homeDir, markerPath } = createTrustIsolatedRunRoot(fixtureRoot));
 		runPi = makeRunPi(() => ({ runRoot, projectDir, agentDir, homeDir, markerPath, probeExtensionPath }));
 		// Standalone extension config is not a Pi trust resource. No ancestor skills

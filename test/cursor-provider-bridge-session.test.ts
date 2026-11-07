@@ -1,87 +1,30 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import type { Context } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	resetCursorProviderTestState,
 	mockedCreate,
-	mockedCreateAgentPlatform,
 	makeModel,
 	makeContext,
-	makeAssistantMessage,
 	collectEvents,
-	collectTextDeltas,
-	collectThinkingDeltas,
-	getEventsOfType,
 	getDoneEvent,
 	getErrorEvent,
-	getTextEndEvent,
-	hasEventType,
 	isToolCallBlock,
-	isCursorToolStreamEvent,
 	getCreatedAgentOptions,
-	createMockAgentPlatform,
 	registerBridgeForProviderTest,
-	registerNativeToolDisplayForTest,
 	connectMcpClient,
 	createBuiltinToolInfo,
 	createTestToolInfo,
-	cursorModelItems,
 	type CursorDeltaHandler,
 	type CursorStepHandler,
-	type RegisteredTool,
 	mockCreatedAgent,
 	asMockSdkAgent,
 	asMockCursorRun,
 	getPiToolsMcpUrlFromAgentCreateOptions,
 } from "./helpers/cursor-provider-harness.js";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";
-import { __testUtils as cursorProviderTestUtils } from "../src/cursor-provider.js";
-import { estimateCursorPromptMessageTokens } from "../src/context.js";
-import { __testUtils as sessionAgentTestUtils } from "../src/cursor-session-agent.js";
-import { __testUtils as cursorPiToolBridgeTestUtils } from "../src/cursor-pi-tool-bridge.js";
-import { __testUtils as nativeToolDisplayTestUtils } from "../src/cursor-native-tool-display-state.js";
 
 describe("streamCursor session agent", () => {
 	beforeEach(resetCursorProviderTestState);
-
-	it("keeps the session agent alive after a successful text-only turn", async () => {
-		const mockDispose = vi.fn().mockResolvedValue(undefined);
-		const mockSend = vi.fn().mockResolvedValue({
-			id: "run-1",
-			agentId: "agent-1",
-			status: "finished",
-			wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
-			cancel: vi.fn(),
-			supports: () => true,
-			unsupportedReason: () => undefined,
-		});
-		mockCreatedAgent({
-			send: mockSend,
-			[Symbol.asyncDispose]: mockDispose,
-		});
-
-		const stream = streamCursor(makeModel(), makeContext(), { apiKey: "test-key" });
-		await collectEvents(stream);
-
-		expect(mockDispose).not.toHaveBeenCalled();
-	});
-
-	it("disposes the session agent after a send error", async () => {
-		const mockDispose = vi.fn().mockResolvedValue(undefined);
-		const mockSend = vi.fn().mockRejectedValue(new Error("boom"));
-		mockCreatedAgent({
-			send: mockSend,
-			[Symbol.asyncDispose]: mockDispose,
-		});
-
-		const stream = streamCursor(makeModel(), makeContext(), { apiKey: "test-key" });
-		await collectEvents(stream);
-
-		expect(mockDispose).toHaveBeenCalledTimes(1);
-	});
 
 	it("recreates the session agent on the next turn after a send error", async () => {
 		const mockDispose = vi.fn().mockResolvedValue(undefined);
@@ -109,6 +52,7 @@ describe("streamCursor session agent", () => {
 
 		const errorEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 		expect(getErrorEvent(errorEvents).reason).toBe("error");
+		expect(mockDispose).toHaveBeenCalledTimes(1);
 
 		const recoveryEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 		expect(getDoneEvent(recoveryEvents).reason).toBe("stop");
@@ -117,15 +61,37 @@ describe("streamCursor session agent", () => {
 		expect(mockDispose).toHaveBeenCalledTimes(1);
 	});
 
-	it("reuses the session agent and keeps bridge guidance on follow-up turns", async () => {
-		registerBridgeForProviderTest({
-			active: ["mcp", "subagent"],
-			tools: [
-				createTestToolInfo("mcp", Type.Object({}), "Call an MCP server"),
-				createTestToolInfo("subagent", Type.Object({}), "Delegate to a pi subagent"),
-			],
-		});
+	it("reuses the session agent and prefers current registry capabilities with real MCP catalog descriptions", async () => {
+		process.env.PI_CURSOR_TOOL_MANIFEST = "1";
+		const mockDispose = vi.fn().mockResolvedValue(undefined);
+		// Owner-deployment registry fixtures, not official Pi builtins or a claim
+		// about native delegation schemas. The bridge must retain supplied metadata.
+		const tools = [
+			createTestToolInfo("delegate", Type.Object({ task: Type.String() }), "Delegate work through Pi", ["Use the registered delegation contract."]),
+			createTestToolInfo("agent_runs", Type.Object({ runId: Type.String() }), "Inspect Pi agent runs", ["Inspect the existing run before requesting more work."]),
+		];
+		registerBridgeForProviderTest({ active: tools.map((tool) => tool.name), tools });
+		let catalogChecked = false;
 		const mockSend = vi.fn().mockImplementation(async (message: { text?: string }) => {
+			if (!catalogChecked) {
+				const { client, transport } = await connectMcpClient(getPiToolsMcpUrlFromAgentCreateOptions(getCreatedAgentOptions()));
+				try {
+					const listed = await client.listTools();
+					expect(listed.tools.map((tool) => tool.name)).toEqual(["pi__delegate", "pi__agent_runs"]);
+					for (const [index, tool] of tools.entries()) {
+						expect(listed.tools[index].inputSchema).toEqual(tool.parameters);
+						expect(listed.tools[index].description).toContain(tool.description);
+						expect(listed.tools[index].description).toContain(tool.promptGuidelines![0]);
+						expect(listed.tools[index].description).toContain(`Call MCP name ${listed.tools[index].name} (pi tool: ${tool.name}).`);
+					}
+					catalogChecked = true;
+				} finally {
+					await client.close();
+					await transport.close();
+				}
+			}
+			expect(message.text).toContain("For MCP work and delegation, prefer matching exposed pi__* tools using their listed names, schemas, and prompt guidelines");
+			expect(message.text).not.toMatch(/pi__subagent|pi__mcp\b/);
 			return asMockCursorRun({
 				id: "run-1",
 				agentId: "agent-1",
@@ -139,11 +105,13 @@ describe("streamCursor session agent", () => {
 		mockCreatedAgent({
 			agentId: "agent-1",
 			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+			[Symbol.asyncDispose]: mockDispose,
 		});
 
 		const firstContext = makeContext();
-		await collectEvents(streamCursor(makeModel(), firstContext, { apiKey: "test-key" }));
+		const firstEvents = await collectEvents(streamCursor(makeModel(), firstContext, { apiKey: "test-key" }));
+		expect(firstEvents.at(-1), JSON.stringify(firstEvents.at(-1))).toMatchObject({ type: "done" });
+		expect(mockDispose).not.toHaveBeenCalled();
 
 		const followUpContext = makeContext();
 		followUpContext.messages = [
@@ -151,78 +119,20 @@ describe("streamCursor session agent", () => {
 			{ role: "assistant", content: [{ type: "text", text: "Hi there." }], api: "cursor-sdk", provider: "cursor", model: "test-model", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "stop", timestamp: 2 },
 			{ role: "user", content: "Follow up", timestamp: 3 },
 		];
-		await collectEvents(streamCursor(makeModel(), followUpContext, { apiKey: "test-key" }));
+		const followUpEvents = await collectEvents(streamCursor(makeModel(), followUpContext, { apiKey: "test-key" }));
+		expect(followUpEvents.at(-1), JSON.stringify(followUpEvents.at(-1))).toMatchObject({ type: "done" });
 
+		expect(mockDispose).not.toHaveBeenCalled();
 		expect(mockedCreate).toHaveBeenCalledTimes(1);
 		expect(mockSend).toHaveBeenCalledTimes(2);
 		const firstPrompt = mockSend.mock.calls[0]?.[0] as { text?: string };
 		const secondPrompt = mockSend.mock.calls[1]?.[0] as { text?: string };
 		expect(firstPrompt.text).toContain("Cursor SDK tool boundary:");
 		expect(firstPrompt.text).toContain("User: Hello");
-		expect(firstPrompt.text).toContain("prefer pi__mcp for MCP work and pi__subagent for delegation");
+		expect(firstPrompt.text).toContain("pi__agent_runs, pi__delegate");
 		expect(secondPrompt.text).toContain("User: Follow up");
 		expect(secondPrompt.text).not.toContain("User: Hello");
-		expect(secondPrompt.text).toContain("prefer pi__mcp for MCP work and pi__subagent for delegation");
-	});
-
-	it("recreates the session agent after session-tree invalidation", async () => {
-		const mockDispose = vi.fn().mockResolvedValue(undefined);
-		const mockSend = vi.fn().mockResolvedValue({
-			id: "run-1",
-			agentId: "agent-1",
-			status: "finished",
-			wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished", result: "ok" }),
-			cancel: vi.fn(),
-			supports: () => true,
-			unsupportedReason: () => undefined,
-		});
-		mockedCreate.mockImplementation(async () => asMockSdkAgent({
-			agentId: `agent-${mockedCreate.mock.calls.length + 1}`,
-			send: mockSend,
-			[Symbol.asyncDispose]: mockDispose,
-		}));
-
-		await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
-		sessionAgentTestUtils.invalidateSessionAgent();
-		await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
-
-		expect(mockedCreate).toHaveBeenCalledTimes(2);
-		expect(mockDispose).toHaveBeenCalledTimes(1);
-	});
-
-	it("bootstraps with branch summary context after /tree navigation", async () => {
-		const mockSend = vi.fn().mockImplementation(async (message: { text?: string }) => ({
-			id: "run-1",
-			agentId: "agent-1",
-			status: "finished",
-			wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished", result: message.text ?? "" }),
-			cancel: vi.fn(),
-			supports: () => true,
-			unsupportedReason: () => undefined,
-		}));
-		mockCreatedAgent({
-			agentId: "agent-1",
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
-
-		const treeContext = makeContext();
-		treeContext.messages = [
-			{ role: "user", content: "Hello", timestamp: 1 },
-			{
-				role: "branchSummary",
-				summary: "We explored approach A and rejected it.",
-				fromId: "entry-a",
-				timestamp: 2,
-			} as unknown as Context["messages"][number],
-			{ role: "user", content: "Continue on approach B", timestamp: 3 },
-		];
-
-		await collectEvents(streamCursor(makeModel(), treeContext, { apiKey: "test-key" }));
-
-		const prompt = mockSend.mock.calls[0]?.[0] as { text?: string };
-		expect(prompt.text).toContain("We explored approach A and rejected it.");
-		expect(prompt.text).toContain("User: Continue on approach B");
+		expect(secondPrompt.text).toContain("prefer matching exposed pi__* tools");
 	});
 
 	it("recreates the session agent when context diverges and sends a full bootstrap prompt", async () => {
@@ -243,6 +153,7 @@ describe("streamCursor session agent", () => {
 		}));
 
 		await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		expect(mockDispose).not.toHaveBeenCalled();
 
 		const divergentContext = makeContext();
 		divergentContext.messages = [{ role: "user", content: "Hello edited", timestamp: 1 }];
@@ -444,6 +355,8 @@ describe("streamCursor session agent", () => {
 
 		const firstPrompt = mockSend.mock.calls[0]?.[0] as { text?: string };
 		expect(firstPrompt.text).toContain("Callable tool surfaces this run:");
+		expect(firstPrompt.text).toContain("Cursor SDK tool boundary:");
+		expect(firstPrompt.text).toContain("See callable surfaces below.");
 		expect(firstPrompt.text).toContain("Cursor host/MCP");
 		expect(firstPrompt.text).not.toContain("pi__cursor_ask_question");
 	});

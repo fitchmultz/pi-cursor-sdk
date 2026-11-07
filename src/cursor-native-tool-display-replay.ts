@@ -1,6 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import { basename } from "node:path";
-import { getLanguageFromPath, highlightCode, keyHint, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { getLanguageFromPath, highlightCode, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Image, Text, type Component } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { resolveCursorEditDiff } from "./cursor-edit-diff.js";
@@ -34,14 +34,12 @@ export type {
 } from "./cursor-replay-tool-details.js";
 export {
 	isCursorReplayNativeEditDetails,
-	isCursorReplayGenerateImageDetails,
-	isCursorReplayActivityDetails,
 	isCursorReplayNativeWriteDetails,
 	parseCursorReplayToolDetails,
 } from "./cursor-replay-tool-details.js";
 
 export const CURSOR_REPLAY_COLLAPSED_PREVIEW_LINES = 8;
-export const CURSOR_REPLAY_PREVIEW_MAX_CHARS = 4000;
+const CURSOR_REPLAY_PREVIEW_MAX_CHARS = 4000;
 export const CURSOR_REPLAY_PREVIEW_MAX_LINE_CHARS = 240;
 const CURSOR_REPLAY_HIGHLIGHT_MAX_CHARS = 12000;
 export const cursorReplayToolSchema = Type.Object({}, { additionalProperties: true });
@@ -75,7 +73,7 @@ function buildImageReplayComponent(text: string, imageData: string, mimeType: st
 	};
 }
 
-export function getCursorReplayPath(
+function getCursorReplayPath(
 	args: Record<string, unknown> | undefined,
 	details: Pick<CursorReplayNativeEditDetails, "path"> | Pick<CursorReplayNativeWriteDetails, "path"> | undefined,
 ): string {
@@ -282,7 +280,7 @@ function formatCursorReplayActivityPreview(
 	return stripHeader ? formatCursorReplayPreview(text, theme, maxLines, true) : formatMutedBlock(text, theme);
 }
 
-export function formatCursorReplayPreview(
+function formatCursorReplayPreview(
 	text: string,
 	theme: CursorReplayRenderTheme,
 	maxLines = CURSOR_REPLAY_COLLAPSED_PREVIEW_LINES,
@@ -330,7 +328,7 @@ function getCursorReplayCardTitle(toolName: CursorReplayToolName, args: Record<s
 	return "Cursor activity";
 }
 
-export function renderCursorReplayCall(
+function renderCursorReplayCall(
 	toolName: CursorReplayToolName,
 	args: Record<string, unknown> | undefined,
 	theme: CursorReplayRenderTheme,
@@ -424,14 +422,6 @@ function hasCursorReplayDisplayTitle(details: CursorReplayToolDetails | undefine
 	return isCursorReplayActivityDetails(details) || isCursorReplayGenerateImageDetails(details);
 }
 
-function formatCursorReplayExpandHint(): string {
-	try {
-		return keyHint("app.tools.expand", "to expand");
-	} catch {
-		return "Ctrl+O to expand";
-	}
-}
-
 function renderExpandableCursorReplayResult(
 	title: string,
 	details: CursorReplayExpandableResultDetails,
@@ -445,7 +435,7 @@ function renderExpandableCursorReplayResult(
 	const summary = details.summary ?? text.split("\n").find((line) => line.trim()) ?? "completed";
 	const expandedText = details.expandedText ?? (text.includes("\n") ? text : undefined);
 	const showExpandHint = expandedText && !options.expanded && shouldShowCursorReplayCollapsedExpandHint(details.sourceToolName);
-	const expandHint = showExpandHint ? theme.fg("dim", ` (${formatCursorReplayExpandHint()})`) : "";
+	const expandHint = showExpandHint ? theme.fg("dim", ` (${context.keyHint("app.tools.expand", "to expand")})`) : "";
 	let rendered = `${theme.fg("toolTitle", theme.bold(title))} ${theme.fg(isError ? "error" : "success", summary)}${expandHint}`;
 	if (expandedText && (options.expanded || !details.collapseDetailsByDefault)) {
 		const preview = formatCursorReplayActivityPreview(

@@ -25,6 +25,7 @@ describe("AbortSignal during native tool-batch drain", () => {
 	beforeEach(resetCursorProviderTestState);
 	afterEach(async () => {
 		vi.restoreAllMocks();
+		vi.useRealTimers();
 		await __testUtils.releaseAllPendingCursorLiveRunsForTests();
 		await __testUtils.resetSessionCursorAgents();
 	});
@@ -36,6 +37,8 @@ describe("AbortSignal during native tool-batch drain", () => {
 		const finishSdk = gate();
 		const cancel = vi.fn(async () => { finishSdk.resolve(); });
 		const removeListener = vi.spyOn(controller.signal, "removeEventListener");
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.spyOn(scheduler, "wait").mockImplementation(async (ms) => { vi.advanceTimersByTime(ms); });
 		mockCreatedAgent({
 			send: vi.fn(async (_message: unknown, options: SendOptions = {}) => {
 				await options.onDelta?.({ update: {

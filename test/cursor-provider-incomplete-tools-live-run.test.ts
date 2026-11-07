@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { installCursorProviderVirtualTime } from "./helpers/cursor-provider-virtual-time.js";
 import {
 	resetCursorProviderTestState,
-	mockedCreate,
 	makeModel,
 	makeContext,
 	collectEvents,
@@ -24,8 +24,12 @@ import { __testUtils as nativeToolDisplayTestUtils } from "../src/cursor-native-
 
 describe("streamCursor incomplete native replay tools", () => {
 	beforeEach(resetCursorProviderTestState);
+	installCursorProviderVirtualTime();
 
-	it("surfaces incomplete started Cursor tools on abort when a completed native replay tool is already queued", async () => {
+	it.each([
+		{ completedToolQueued: true, incompleteTool: "grep" },
+		{ completedToolQueued: false, incompleteTool: "read" },
+	])("surfaces incomplete $incompleteTool on abort (completed tool queued: $completedToolQueued)", async ({ completedToolQueued, incompleteTool }) => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		const registeredTools: RegisteredTool[] = [];
 		await registerNativeToolDisplayForTest(registeredTools);
@@ -33,20 +37,26 @@ describe("streamCursor incomplete native replay tools", () => {
 		const controller = new AbortController();
 		const mockDispose = vi.fn().mockResolvedValue(undefined);
 		const cancelRun = vi.fn().mockResolvedValue(undefined);
-		const runWait = vi.fn(() => new Promise<{ id: string; status: "finished"; result: string }>(() => {}));
+		const waitStarted = Promise.withResolvers<void>();
+		const runWait = vi.fn(() => {
+			waitStarted.resolve();
+			return new Promise<{ id: string; status: "finished"; result: string }>(() => {});
+		});
 		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
 			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "read", args: { path: "README.md" } }, callId: "c1" } });
-			opts.onDelta({
-				update: {
-					type: "tool-call-completed",
-					toolCall: {
-						name: "read",
-						result: { status: "success", value: { content: "# readme" } },
+			if (completedToolQueued) {
+				opts.onDelta({
+					update: {
+						type: "tool-call-completed",
+						toolCall: {
+							name: "read",
+							result: { status: "success", value: { content: "# readme" } },
+						},
+						callId: "c1",
 					},
-					callId: "c1",
-				},
-			});
-			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "grep", args: { pattern: "foo" } }, callId: "c2" } });
+				});
+				opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "grep", args: { pattern: "foo" } }, callId: "c2" } });
+			}
 			return {
 				id: "run-1",
 				agentId: "agent-1",
@@ -60,49 +70,12 @@ describe("streamCursor incomplete native replay tools", () => {
 		mockCreatedAgent({ send: mockSend, [Symbol.asyncDispose]: mockDispose });
 
 		const eventsPromise = collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key", signal: controller.signal }));
-		await vi.waitFor(() => expect(mockSend).toHaveBeenCalled());
+		await waitStarted.promise;
 		controller.abort();
 		const events = await eventsPromise;
 
 		expect(getErrorEvent(events).reason).toBe("aborted");
-		expect(collectThinkingDeltas(events)).toContain("Cursor grep did not complete");
-		expect(collectThinkingDeltas(events)).toContain("aborted");
-		expect(getEventsOfType(events, "toolcall_start")).toHaveLength(0);
-		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
-		expect(cancelRun).toHaveBeenCalled();
-		expect(mockDispose).toHaveBeenCalledTimes(1);
-	});
-
-	it("surfaces incomplete started Cursor tools when aborting a scoped native live run", async () => {
-		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
-		const registeredTools: RegisteredTool[] = [];
-		await registerNativeToolDisplayForTest(registeredTools);
-
-		const controller = new AbortController();
-		const mockDispose = vi.fn().mockResolvedValue(undefined);
-		const cancelRun = vi.fn().mockResolvedValue(undefined);
-		const runWait = vi.fn(() => new Promise<{ id: string; status: "finished"; result: string }>(() => {}));
-		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
-			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "read", args: { path: "README.md" } }, callId: "c1" } });
-			return {
-				id: "run-1",
-				agentId: "agent-1",
-				status: "running",
-				wait: runWait,
-				cancel: cancelRun,
-				supports: () => true,
-				unsupportedReason: () => undefined,
-			};
-		});
-		mockCreatedAgent({ send: mockSend, [Symbol.asyncDispose]: mockDispose });
-
-		const eventsPromise = collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key", signal: controller.signal }));
-		await vi.waitFor(() => expect(mockSend).toHaveBeenCalled());
-		controller.abort();
-		const events = await eventsPromise;
-
-		expect(getErrorEvent(events).reason).toBe("aborted");
-		expect(collectThinkingDeltas(events)).toContain("Cursor read did not complete");
+		expect(collectThinkingDeltas(events)).toContain(`Cursor ${incompleteTool} did not complete`);
 		expect(collectThinkingDeltas(events)).toContain("aborted");
 		expect(getEventsOfType(events, "toolcall_start")).toHaveLength(0);
 		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
@@ -116,10 +89,12 @@ describe("streamCursor incomplete native replay tools", () => {
 		await registerNativeToolDisplayForTest(registeredTools);
 
 		let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
+		const waitStarted = Promise.withResolvers<void>();
 		const runWait = vi.fn(
 			() =>
 				new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
 					resolveRun = resolve;
+					waitStarted.resolve();
 				}),
 		);
 		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
@@ -137,13 +112,15 @@ describe("streamCursor incomplete native replay tools", () => {
 		mockCreatedAgent({ send: mockSend });
 
 		const firstEventsPromise = collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
-		await vi.waitFor(() => expect(mockSend).toHaveBeenCalled());
+		await waitStarted.promise;
 		resolveRun({ id: "run-1", status: "finished", result: "done after incomplete MCP" });
 		const firstEvents = await firstEventsPromise;
 		const firstDone = getDoneEvent(firstEvents);
 		const toolCalls = firstDone.message.content.filter(isToolCallBlock);
 
 		expect(firstDone.reason).toBe("toolUse");
+		expect(collectTextDeltas(firstEvents)).toBe("");
+		expect(hasEventType(firstEvents, "toolcall_start")).toBe(true);
 		expect(toolCalls).toHaveLength(1);
 		expect(toolCalls[0]?.name).toBe("cursor");
 		expect(toolCalls[0]?.arguments).toMatchObject({
@@ -177,10 +154,12 @@ describe("streamCursor incomplete native replay tools", () => {
 		await registerNativeToolDisplayForTest(registeredTools);
 
 		let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
+		const waitStarted = Promise.withResolvers<void>();
 		const runWait = vi.fn(
 			() =>
 				new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
 					resolveRun = resolve;
+					waitStarted.resolve();
 				}),
 		);
 		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
@@ -216,7 +195,7 @@ describe("streamCursor incomplete native replay tools", () => {
 		mockCreatedAgent({ send: mockSend });
 
 		const firstEventsPromise = collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
-		await vi.waitFor(() => expect(mockSend).toHaveBeenCalled());
+		await waitStarted.promise;
 		resolveRun({ id: "run-1", status: "finished", result: "daily refresh complete" });
 		const firstDone = getDoneEvent(await firstEventsPromise);
 		const completedToolCall = firstDone.message.content.find(isToolCallBlock);
@@ -256,10 +235,12 @@ describe("streamCursor incomplete native replay tools", () => {
 		await registerNativeToolDisplayForTest(registeredTools);
 
 		let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
+		const waitStarted = Promise.withResolvers<void>();
 		const runWait = vi.fn(
 			() =>
 				new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
 					resolveRun = resolve;
+					waitStarted.resolve();
 				}),
 		);
 		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
@@ -277,7 +258,7 @@ describe("streamCursor incomplete native replay tools", () => {
 		mockCreatedAgent({ send: mockSend });
 
 		const firstEventsPromise = collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
-		await vi.waitFor(() => expect(mockSend).toHaveBeenCalled());
+		await waitStarted.promise;
 		resolveRun({ id: "run-1", status: "finished", result: "done after glob" });
 		const firstEvents = await firstEventsPromise;
 		const firstDone = getDoneEvent(firstEvents);
@@ -295,10 +276,12 @@ describe("streamCursor incomplete native replay tools", () => {
 		await registerNativeToolDisplayForTest(registeredTools);
 
 		let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
+		const waitStarted = Promise.withResolvers<void>();
 		const runWait = vi.fn(
 			() =>
 				new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
 					resolveRun = resolve;
+					waitStarted.resolve();
 				}),
 		);
 		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
@@ -316,7 +299,7 @@ describe("streamCursor incomplete native replay tools", () => {
 		mockCreatedAgent({ send: mockSend });
 
 		const firstEventsPromise = collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
-		await vi.waitFor(() => expect(mockSend).toHaveBeenCalled());
+		await waitStarted.promise;
 		resolveRun({ id: "run-1", status: "finished", result: "" });
 		const firstEvents = await firstEventsPromise;
 		const firstDone = getDoneEvent(firstEvents);

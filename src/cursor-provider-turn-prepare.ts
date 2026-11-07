@@ -60,6 +60,7 @@ import type {
 } from "./cursor-provider-turn-types.js";
 import type { CursorSdkEventDebugSink } from "./cursor-sdk-event-debug.js";
 import type { SessionCursorAgentLease } from "./cursor-session-agent.js";
+import { assertCursorNativeToolsRuntime } from "./cursor-native-tools.js";
 import { prepareCursorSummaryProviderTurn } from "./cursor-provider-turn-summary.js";
 
 export interface PrepareCursorProviderTurnParams {
@@ -70,9 +71,14 @@ export interface PrepareCursorProviderTurnParams {
 	throwIfAborted: () => void;
 	/** Snapshot resolved once by the runner before draining; reused unchanged through prepare. */
 	resolvedConfig: CursorResolvedSdkConfig;
+	/** Snapshotted before drain; direct prepare callers may omit to use the current default. */
+	leanEnabled?: boolean;
+	/** Snapshotted before drain/acquisition, never re-read during creation/resume. */
+	nativeToolsEnabled: boolean;
 }
 
 interface PrepareCursorProviderTurnContext extends PrepareCursorProviderTurnParams {
+	leanEnabled: boolean;
 	agentMode: AgentModeOption;
 	selection: ModelSelection;
 	fastEnabled: boolean | undefined;
@@ -253,7 +259,7 @@ async function prepareCursorCloudProviderTurn(
 async function prepareCursorLocalProviderTurn(
 	prepareParams: PrepareCursorProviderTurnContext,
 ): Promise<LocalCursorProviderTurnPrepareResult> {
-	const { params, cwd, resolvedApiKey, sdkEventDebug, throwIfAborted, resolvedConfig, agentMode, selection, fastEnabled, agents, customSubagentNames } = prepareParams;
+	const { params, cwd, resolvedApiKey, sdkEventDebug, throwIfAborted, resolvedConfig, agentMode, selection, fastEnabled, agents, customSubagentNames, leanEnabled, nativeToolsEnabled } = prepareParams;
 	const { model, context, options } = params;
 
 	let restoreCursorSdkOutputFilter: (() => void) | undefined;
@@ -283,6 +289,7 @@ async function prepareCursorLocalProviderTurn(
 		const sessionAgentAcquireParams = {
 			scope: params.scope,
 			bridge: params.bridge,
+			leanEnabled,
 			bridgeDeclaredTools: resolveCursorPiContext(context).tools,
 			apiKey: resolvedApiKey,
 			agentMode,
@@ -291,6 +298,7 @@ async function prepareCursorLocalProviderTurn(
 			settingSources,
 			localSafety,
 			agents,
+			nativeToolsEnabled,
 			localResume: resolvedConfig.local.resume.value,
 			storeRoot: resolvedConfig.local.storeRoot.value,
 			useHttp1ForAgent,
@@ -316,6 +324,8 @@ async function prepareCursorLocalProviderTurn(
 				...getCursorPromptOptions(model),
 				nativeSourceRoles: params.request.nativeSourceRoles,
 				agentMode,
+				leanEnabled,
+				nativeToolsEnabled,
 				includePiBridgeGuidance,
 				includePiAskQuestionGuidance: false,
 			};
@@ -325,6 +335,8 @@ async function prepareCursorLocalProviderTurn(
 			return {
 				...promptOptions,
 				toolManifest: buildCursorToolManifestText({
+					leanEnabled,
+					nativeToolsEnabled,
 					bridgeSnapshot: sessionAgentLease.bridgeRun?.snapshot,
 					piBridgeEnabled: resolveCursorPiToolBridgeEnabled(),
 					includePiBridgeGuidance,
@@ -375,6 +387,8 @@ async function prepareCursorLocalProviderTurn(
 			agentMode,
 			localForce: resolvedConfig.local.force.value,
 			localResume: resolvedConfig.local.resume.value,
+			...(leanEnabled ? { leanEnabled } : {}),
+			...(nativeToolsEnabled ? {} : { nativeToolsEnabled: false, tools: leanEnabled && !bridgeRun ? [] : ["mcp"] }),
 			resumedAgent: sessionAgentLease.resumed,
 			activeToolNames: activeToolNames ? [...activeToolNames] : [],
 			sessionAgentScopeKey,
@@ -388,6 +402,7 @@ async function prepareCursorLocalProviderTurn(
 			? cursorLiveRuns.start({
 					id: useNativeToolReplay ? nativeReplayId : bridgeRun?.id ?? nativeReplayId,
 					agent,
+					nativeToolsEnabled,
 					bridgeRun,
 					sessionBridgeRun,
 					sessionAgentScopeKey,
@@ -469,10 +484,8 @@ export async function prepareCursorProviderTurn(
 ): Promise<CursorProviderTurnPrepareResult> {
 	const { params, resolvedConfig } = prepareParams;
 	const { model, options } = params;
-
-	if (isCursorLeanEnabled() && resolvedConfig.runtime.value === "cloud") {
-		throw new Error("PI_CURSOR_LEAN requires local runtime: Cursor SDK tool restrictions are not supported on Cloud.");
-	}
+	const leanEnabled = prepareParams.leanEnabled ?? isCursorLeanEnabled();
+	assertCursorNativeToolsRuntime(resolvedConfig.runtime.value, prepareParams.nativeToolsEnabled, leanEnabled);
 	const fastEnabled = resolvedConfig.runtime.value === "cloud" ? undefined : getEffectiveFastForModelId(model.id, params.scope.scopeKey);
 	const selection = buildCursorModelSelection(model.id, options?.reasoning ?? "off", fastEnabled);
 	if (resolvedConfig.runtime.value === "local" && params.request.purpose !== "normal") {
@@ -481,7 +494,7 @@ export async function prepareCursorProviderTurn(
 	const agentMode = getCursorProviderAgentModeOrThrow(params.scope.scopeKey);
 	const agents = buildCursorCustomSubagentDefinitions(resolvedConfig.subagents.value);
 	const customSubagentNames = agents ? Object.keys(agents) : undefined;
-	const context: PrepareCursorProviderTurnContext = { ...prepareParams, agentMode, selection, fastEnabled, agents, customSubagentNames };
+	const context: PrepareCursorProviderTurnContext = { ...prepareParams, leanEnabled, agentMode, selection, fastEnabled, agents, customSubagentNames };
 
 	return resolvedConfig.runtime.value === "cloud"
 		? prepareCursorCloudProviderTurn(context)

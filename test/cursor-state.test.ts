@@ -90,6 +90,7 @@ function createCursorRuntimeHarness(options: {
 	mode?: ExtensionContext["mode"];
 	hasUI?: boolean;
 	cwd?: string;
+	sessionManager?: ExtensionContext["sessionManager"];
 } = {}) {
 	const pi = createPiHarness({
 		flagValues: {
@@ -111,7 +112,7 @@ function createCursorRuntimeHarness(options: {
 					api: (options.api ?? "cursor-sdk") as "cursor-sdk",
 				}
 			: undefined,
-		sessionManager: {
+		sessionManager: options.sessionManager ?? {
 			getBranch: vi.fn<ExtensionContext["sessionManager"]["getBranch"]>(() => options.branch ?? []),
 		},
 	});
@@ -202,6 +203,35 @@ describe("Cursor runtime state", () => {
 		expect(ctx.ui.notify).toHaveBeenCalledWith('Invalid --cursor-mode "review". Use "agent" or "plan".', "error");
 		expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("cursor", "cursor:local · fast:off · mode invalid");
 		expect(() => getCursorProviderAgentModeOrThrow()).toThrow('Invalid --cursor-mode "review"');
+
+		await pi.invokeEventWithContext("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 0 }, ctx);
+		expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps one invalid-mode notice per session scope across sibling shutdowns and same-manager re-registration", async () => {
+		const startup = createCursorRuntimeHarness({ modelId: "gpt-5.5@1m", cursorModeFlag: "review" });
+		const sibling = createCursorRuntimeHarness({ modelId: "gpt-5.5@1m", cursorModeFlag: "review" });
+		const manager = startup.ctx.sessionManager;
+		for (const { pi, ctx } of [startup, sibling]) {
+			await pi.invokeEventWithContext("session_start", { type: "session_start", reason: "startup" }, ctx);
+			expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
+		}
+
+		// Pi reload and in-memory fork start a new registration with the same public manager.
+		await startup.pi.invokeEventWithContext("session_shutdown", { type: "session_shutdown", reason: "reload" }, startup.ctx);
+		const reloaded = createCursorRuntimeHarness({ modelId: "gpt-5.5@1m", cursorModeFlag: "review", sessionManager: manager });
+		await reloaded.pi.invokeEventWithContext("session_start", { type: "session_start", reason: "reload" }, reloaded.ctx);
+		expect(reloaded.ctx.ui.notify).not.toHaveBeenCalled();
+
+		await reloaded.pi.invokeEventWithContext("session_shutdown", { type: "session_shutdown", reason: "fork" }, reloaded.ctx);
+		vi.mocked(manager.getSessionId).mockReturnValue("forked-session");
+		const forked = createCursorRuntimeHarness({ modelId: "gpt-5.5@1m", cursorModeFlag: "review", sessionManager: manager });
+		await forked.pi.invokeEventWithContext("session_start", { type: "session_start", reason: "fork" }, forked.ctx);
+		expect(forked.ctx.ui.notify).toHaveBeenCalledTimes(1);
+		expect(forked.ctx.ui.notify).toHaveBeenCalledWith('Invalid --cursor-mode "review". Use "agent" or "plan".', "error");
+
+		await sibling.pi.invokeEventWithContext("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 0 }, sibling.ctx);
+		expect(sibling.ctx.ui.notify).toHaveBeenCalledTimes(1);
 	});
 
 	it("reports invalid --cursor-mode from /cursor-mode status instead of soft defaulting", async () => {

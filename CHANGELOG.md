@@ -4,6 +4,45 @@
 
 ## Unreleased
 
+## 0.5.14 - 2026-11-07
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- refactor: keep invalid-mode notice receipts with the session manager (#411) ([152cae7](https://github.com/fitchmultz/pi-cursor-sdk/commit/152cae70cd05e216d1ba030615a35a050ae90626))
+
+### What's Changed
+* refactor: keep invalid-mode notice receipts with the session manager by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/411
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.13...v0.5.14
+
+## 0.5.13 - 2026-11-07
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- refactor: group shell-output state by call (#412) ([74804c7](https://github.com/fitchmultz/pi-cursor-sdk/commit/74804c764694433a1bfc0615d6ae08642da2c54b))
+
+### What's Changed
+* refactor: keep shell-output attribution in per-call records by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/412
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.12...v0.5.13
+
+## 0.5.12 - 2026-11-06
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- test: compare native replay renders by visible text (#420) ([650d89f](https://github.com/fitchmultz/pi-cursor-sdk/commit/650d89f1c6c34518f47a0407f682c677bd74f31c))
+
+### What's Changed
+* test: compare native replay renders by visible text by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/420
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.11...v0.5.12
+
 ## 0.5.11 - 2026-11-04
 
 <!-- npm-release:unreleased:start -->

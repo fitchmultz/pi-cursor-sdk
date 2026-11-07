@@ -112,13 +112,16 @@ describe("smoke CLI and package contracts", () => {
 		expect(invalidVisualArgs.stderr).toContain("--expose-builtin-tools requires --bridge");
 	}, 90_000);
 
-	it("keeps both isolated native launches on the shared JSON/replay-proof path and leaves basic print alone", () => {
-		const source = readFileSync("scripts/isolated-cursor-smoke.sh", "utf8");
+	it.each([
+		{ ending: "LF", eol: "\n" },
+		{ ending: "CRLF", eol: "\r\n" },
+	])("keeps both isolated native launches on the shared JSON/replay-proof path and leaves basic print alone ($ending)", ({ eol }) => {
+		const source = readFileSync("scripts/isolated-cursor-smoke.sh", "utf8").replace(/\r?\n/g, eol);
 		expect(source).toContain('"$PI_BIN" --mode json --approve "$@"');
 		expect(source).toContain('run_native_replay_probe "native replay" "$REPLAY_DIR"');
 		expect(source).toContain('run_native_replay_probe "plan-strip replay" "$PLAN_DIR"');
 		expect(source).toContain('validate_replay_jsonl "$session_dir" --require-native-read');
-		expect(source).toContain('validate_replay_jsonl "$BASIC_DIR"\n');
+		expect(source.split(/\r?\n/)).toContain('validate_replay_jsonl "$BASIC_DIR"');
 		expect(source).toContain('"$PI_BIN" --approve --cursor-no-fast --model cursor/grok-4.6 --session-dir "$BASIC_DIR" --no-tools -p');
 	});
 

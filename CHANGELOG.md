@@ -4,6 +4,19 @@
 
 ## Unreleased
 
+## 0.5.15 - 2026-11-07
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- docs: focus verification on changed behavior (#423) ([de6c3ed](https://github.com/fitchmultz/pi-cursor-sdk/commit/de6c3ed859768871a86ee51e94d41df09a76da50))
+
+### What's Changed
+* docs: adopt focused verification and meaningful tests by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/423
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.14...v0.5.15
+
 ## 0.5.14 - 2026-11-07
 
 <!-- npm-release:unreleased:start -->

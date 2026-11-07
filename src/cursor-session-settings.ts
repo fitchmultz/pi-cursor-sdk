@@ -12,6 +12,7 @@ function createCliSettings() {
 	return {
 		forceFast: false, forceNoFast: false,
 		mode: { kind: "unset" } as CursorCliModeState,
+		invalidModeNoticeScopes: new Set<string>(),
 		config: {} as CursorExplicitSdkConfig,
 		cloudEnvNames: undefined as string | undefined,
 		localForceConsumed: false,

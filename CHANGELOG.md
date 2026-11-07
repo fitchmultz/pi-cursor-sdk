@@ -4,9 +4,21 @@
 
 ## Unreleased
 
+## 0.5.16 - 2026-11-07
+
+<!-- npm-release:unreleased:start -->
 ### Fixed
 
 - Wait for bridge cleanup to finish when disposal and session shutdown overlap. All callers now wait for the loopback endpoint and listener to close.
+<!-- npm-release:unreleased:end -->
+
+- fix: await shared bridge disposal completion (#415) ([48866be](https://github.com/fitchmultz/pi-cursor-sdk/commit/48866be20e20f904165fd858d0bcdb6a2f1c46d0))
+
+### What's Changed
+* fix: await shared bridge disposal completion by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/415
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.15...v0.5.16
 
 ## 0.5.15 - 2026-11-07
 

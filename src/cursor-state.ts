@@ -79,7 +79,6 @@ type CursorRuntimeControlsExtensionApi = Pick<
 
 const authoritativeGlobalFastPreferenceIds = new Set<string>();
 let globalFastPreferences = new Map<string, boolean>();
-const invalidCursorModeNotifiedSessionScopeKeys = new Set<string>();
 
 function isCursorAgentMode(value: unknown): value is AgentModeOption {
 	return value === "agent" || value === "plan";
@@ -354,11 +353,13 @@ function restoreCliCursorMode(raw: boolean | string | undefined, scopeKey?: stri
 }
 
 function notifyInvalidCursorModeIfCursorActive(ctx: Pick<ExtensionContext, "hasUI" | "mode" | "ui" | "sessionManager">): void {
-	const modeResolution = resolveCursorAgentMode(cursorSettingsScopeForContext(ctx));
+	const settingsScopeKey = cursorSettingsScopeForContext(ctx);
+	const modeResolution = resolveCursorAgentMode(settingsScopeKey);
 	if (modeResolution.kind !== "invalid" || !ctx.hasUI || ctx.mode !== "tui") return;
-	const scopeKey = cursorSettingsScopeForContext(ctx) ?? getCursorSessionScopeKey();
-	if (invalidCursorModeNotifiedSessionScopeKeys.has(scopeKey)) return;
-	invalidCursorModeNotifiedSessionScopeKeys.add(scopeKey);
+	const scopeKey = settingsScopeKey ?? getCursorSessionScopeKey();
+	const notifiedScopeKeys = getCursorSessionSettings(settingsScopeKey).cli.invalidModeNoticeScopes;
+	if (notifiedScopeKeys.has(scopeKey)) return;
+	notifiedScopeKeys.add(scopeKey);
 	ctx.ui.notify(modeResolution.message, "error");
 }
 
@@ -673,7 +674,6 @@ function resetCursorModeStateForTests(): void {
 	setStoredCursorHttp1Enabled(undefined);
 	getCursorSessionSettings().cli.mode = { kind: "unset" };
 	resetCursorRuntimeStateForTests();
-	invalidCursorModeNotifiedSessionScopeKeys.clear();
 	authoritativeGlobalFastPreferenceIds.clear();
 }
 

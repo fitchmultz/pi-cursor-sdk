@@ -26,6 +26,7 @@ const execFile = promisify(execFileCallback);
 const RM_OPTIONS = { force: true, maxRetries: 5, recursive: true, retryDelay: 100 };
 const RENAME_RETRY_LIMIT = 50;
 const RENAME_RETRY_MS = 50;
+const LOCK_BUSY_TIMEOUT_MS = 50;
 const SQLITE_BUSY = 5;
 // Run tsc's JS entrypoint directly through the current node binary: no .cmd shim,
 // no shell, safe for install paths containing spaces on every platform.
@@ -84,7 +85,7 @@ async function compileToStaging(cwd, stagingDir) {
 // releases when this process exits, even after a crash, so a dead holder never blocks the next
 // build. There is no deadline: a live holder only runs the bounded renames below.
 function lockPublication(lockPath) {
-	const lock = new DatabaseSync(lockPath, { timeout: RENAME_RETRY_MS });
+	const lock = new DatabaseSync(lockPath, { timeout: LOCK_BUSY_TIMEOUT_MS });
 	for (;;) {
 		try {
 			lock.exec("BEGIN EXCLUSIVE");
@@ -130,7 +131,7 @@ async function restorePrevious(previousDir, distDir) {
 async function publishStaging(stagingDir, distDir) {
 	let lock;
 	let previousDir;
-	let retainPrevious = false;
+	let canDiscardPrevious = true;
 	try {
 		lock = lockPublication(`${distDir}.lock`);
 		// Move the previous build aside instead of deleting it, so a failed publication can
@@ -144,7 +145,7 @@ async function publishStaging(stagingDir, distDir) {
 			// Two renames, not an atomic swap: dist/ stays absent until this rename publishes.
 			await renameWithRetry(stagingDir, distDir);
 		} catch (error) {
-			if (previousDir) retainPrevious = !(await restorePrevious(previousDir, distDir));
+			if (previousDir) canDiscardPrevious = await restorePrevious(previousDir, distDir);
 			throw error;
 		}
 	} finally {
@@ -152,7 +153,7 @@ async function publishStaging(stagingDir, distDir) {
 		// Safe after success too: rename moved stagingDir, so force makes this a no-op.
 		await discard(stagingDir, "staging");
 		// dist/ holds this build or the restored previous build; a failed restore keeps it.
-		if (previousDir && !retainPrevious) await discard(previousDir, "previous build");
+		if (previousDir && canDiscardPrevious) await discard(previousDir, "previous build");
 	}
 }
 

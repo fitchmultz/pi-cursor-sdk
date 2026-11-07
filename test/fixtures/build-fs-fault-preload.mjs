@@ -87,7 +87,8 @@ const faults = {
 			const dist = join(cwd, "dist");
 			fs.mkdirSync(dist, { recursive: true });
 			fs.writeFileSync(join(dist, "winner.txt"), "published");
-			// Shared fixture: only pi-mcp-adapter supplies dist-relative runtime assets.
+			// Same optional asset-list interface as pi-mcp-adapter's separate fixture copy.
+			// Its __tests__/packaging/build-script-swap.test.ts supplies assets; this package does not.
 			for (const asset of (process.env.BUILD_SWAP_RUNTIME_ASSETS ?? "").split(",").filter(Boolean)) {
 				fs.copyFileSync(join(cwd, asset), join(dist, asset));
 			}

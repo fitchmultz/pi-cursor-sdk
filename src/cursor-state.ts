@@ -350,14 +350,12 @@ function restoreCliCursorMode(raw: boolean | string | undefined, scopeKey?: stri
 	cli.mode = { kind: "invalid", raw: rawText, message };
 }
 
-function notifyInvalidCursorModeIfCursorActive(
-	ctx: Pick<ExtensionContext, "hasUI" | "mode" | "ui" | "sessionManager">,
-	notifiedScopeKeys: Set<string>,
-): void {
+function notifyInvalidCursorModeIfCursorActive(ctx: Pick<ExtensionContext, "hasUI" | "mode" | "ui" | "sessionManager">): void {
 	const settingsScopeKey = cursorSettingsScopeForContext(ctx);
 	const modeResolution = resolveCursorAgentMode(settingsScopeKey);
 	if (modeResolution.kind !== "invalid" || !ctx.hasUI || ctx.mode !== "tui") return;
 	const scopeKey = settingsScopeKey ?? getCursorSessionScopeKey();
+	const notifiedScopeKeys = getCursorSessionSettings(settingsScopeKey).cli.invalidModeNoticeScopes;
 	if (notifiedScopeKeys.has(scopeKey)) return;
 	notifiedScopeKeys.add(scopeKey);
 	ctx.ui.notify(modeResolution.message, "error");
@@ -433,7 +431,6 @@ export function getEffectiveFastForModelId(modelId: string, scopeKey?: string): 
 export function registerCursorRuntimeControls(pi: CursorRuntimeControlsExtensionApi): void {
 	registerCursorSessionSettings(pi);
 	registerCursorCloudRuntimeControls(pi, { refreshStatus: updateCursorStatus });
-	const invalidModeNoticeScopes = new Set<string>();
 
 	pi.registerFlag("cursor-fast", {
 		description: "Force Cursor fast mode for this run when the selected Cursor model supports it",
@@ -660,7 +657,7 @@ export function registerCursorRuntimeControls(pi: CursorRuntimeControlsExtension
 			restoreCliCursorMode(pi.getFlag("cursor-mode"), scopeKey);
 		},
 		sync: (ctx) => {
-			if (isCursorModel(ctx.model)) notifyInvalidCursorModeIfCursorActive(ctx, invalidModeNoticeScopes);
+			if (isCursorModel(ctx.model)) notifyInvalidCursorModeIfCursorActive(ctx);
 			updateCursorStatus(ctx);
 		},
 	});

@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { parseArgs as parsePiArgs } from "../node_modules/@earendil-works/pi-coding-agent/dist/cli/args.js";
 import { buildInitialMessage } from "../node_modules/@earendil-works/pi-coding-agent/dist/cli/initial-message.js";
 import { CURSOR_REPLAY_SOURCE_TOOL_NAMES } from "../src/cursor-replay-source-names.js";
@@ -111,6 +111,33 @@ try {
 			delete process.env.PI_CURSOR_CLOUD_ENV_NAME;
 			delete process.env.CURSOR_CLOUD_SMOKE_ENV_TYPE;
 			delete process.env.CURSOR_CLOUD_SMOKE_ENV_NAME;
+			rmSync(artifactRoot, { recursive: true, force: true });
+		}
+	});
+
+	it.each([
+		{ lean: undefined, nativeTools: undefined },
+		{ lean: "1", nativeTools: undefined },
+		{ lean: undefined, nativeTools: "0" },
+		{ lean: "1", nativeTools: "0" },
+	])("pins Cloud smoke lean off with parent lean=$lean and nativeTools=$nativeTools", async ({ lean, nativeTools }) => {
+		const artifactRoot = mkdtempSync(join(tmpdir(), "cloud-smoke-lean-env-test-"));
+		vi.stubEnv("PI_CURSOR_LEAN", lean);
+		vi.stubEnv("PI_CURSOR_NATIVE_TOOLS", nativeTools);
+		vi.stubEnv("PI_CURSOR_RUNTIME", "local");
+		try {
+			const { buildCloudSmokeEnv } = await import("../scripts/cloud-runtime-smoke.mjs");
+			const env = buildCloudSmokeEnv(artifactRoot);
+
+			expect(env.PI_CURSOR_LEAN).toBe("0");
+			expect(env.PI_CURSOR_RUNTIME).toBe("cloud");
+			// Do not silently enable native tools against an explicit user opt-out.
+			expect(env.PI_CURSOR_NATIVE_TOOLS).toBe(nativeTools);
+			expect(process.env.PI_CURSOR_LEAN).toBe(lean);
+			expect(process.env.PI_CURSOR_NATIVE_TOOLS).toBe(nativeTools);
+			expect(process.env.PI_CURSOR_RUNTIME).toBe("local");
+		} finally {
+			vi.unstubAllEnvs();
 			rmSync(artifactRoot, { recursive: true, force: true });
 		}
 	});

@@ -36,7 +36,7 @@ The repo also ships partial automation for the prerequisite/basic/default-settin
 npm run smoke:live
 ```
 
-`npm run smoke:live` resolves `pi`, `node`, `npm`, `rg`, and `tmux` once in the parent shell, then runs all `pi` shims with the resolved Node directory first on `PATH`. It clears inherited Cursor SDK event-debug env for every child pi run. Isolated helper cases force `PI_CURSOR_SETTING_SOURCES=none`; the `default-settings` helper case explicitly unsets `PI_CURSOR_SETTING_SOURCES` so it exercises the default ambient setting-source path.
+`npm run smoke:live` resolves `pi`, `node`, `npm`, `rg`, and `tmux` once in the parent shell, then runs all `pi` shims with the resolved Node directory first on `PATH`. It clears inherited Cursor SDK event-debug env for every child pi run. Isolated helper cases force `PI_CURSOR_SETTING_SOURCES=none` without changing lean mode. Only the `default-settings` child pins `PI_CURSOR_LEAN=0` and unsets `PI_CURSOR_SETTING_SOURCES`, so it exercises the legacy ambient setting-source path rather than lean's forced empty sources. These per-process overrides leave the parent and ordinary basic/math lean coverage unchanged.
 
 The canonical visual runner for section 4 is checked in separately:
 
@@ -95,9 +95,12 @@ Pass criteria:
 - stderr is empty or contains only expected non-secret diagnostics for the specific test.
 - The persisted JSONL has exactly one assistant message with non-negative usage fields and non-negative `cacheRead/cacheWrite`.
 
-## 2. Default setting-source startup noise check
+## 2. Legacy ambient setting-source startup noise check
+
+This intentionally opts out of lean for one process: lean suppresses Cursor setting sources even when `PI_CURSOR_SETTING_SOURCES` is unset. `env -u` also clears an inherited source override, restoring the legacy ambient default without changing the parent shell.
 
 ```bash
+env -u PI_CURSOR_SETTING_SOURCES PI_CURSOR_LEAN=0 \
 pi --approve -e . --cursor-no-fast --model cursor/grok-4.6 \
   --session-dir "$SMOKE_DIR/default-settings" \
   --no-tools \

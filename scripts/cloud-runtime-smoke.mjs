@@ -145,7 +145,8 @@ function optionalSmokeValue(name) {
 export function buildCloudSmokeEnv(artifactDir, options = {}) {
 	const agentDir = join(artifactDir, "agent");
 	mkdirSync(agentDir, { recursive: true });
-	const env = buildCursorSmokeEnv({ settingSources: "none", eventDebugDir: artifactDir });
+	// Lean is local-only; the Cloud harness must opt out even when the parent uses the default.
+	const env = buildCursorSmokeEnv({ settingSources: "none", lean: false, eventDebugDir: artifactDir });
 	for (const name of CLOUD_ENV_NAMES) delete env[name];
 	const smokeEnvType = options.repoUrl ? undefined : optionalSmokeValue("CURSOR_CLOUD_SMOKE_ENV_TYPE");
 	const smokeEnvName = options.repoUrl ? undefined : optionalSmokeValue("CURSOR_CLOUD_SMOKE_ENV_NAME");

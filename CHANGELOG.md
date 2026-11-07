@@ -8,6 +8,19 @@
 
 - Wait for bridge cleanup to finish when disposal and session shutdown overlap. All callers now wait for the loopback endpoint and listener to close.
 
+## 0.5.14 - 2026-11-07
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- refactor: keep invalid-mode notice receipts with the session manager (#411) ([152cae7](https://github.com/fitchmultz/pi-cursor-sdk/commit/152cae70cd05e216d1ba030615a35a050ae90626))
+
+### What's Changed
+* refactor: keep invalid-mode notice receipts with the session manager by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/411
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.13...v0.5.14
+
 ## 0.5.13 - 2026-11-07
 
 <!-- npm-release:unreleased:start -->

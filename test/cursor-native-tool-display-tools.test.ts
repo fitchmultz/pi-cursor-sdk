@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Text } from "@earendil-works/pi-tui";
+import { stripTerminalSequences, Text } from "@earendil-works/pi-tui";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { wrapNativeCursorTool } from "../src/cursor-native-tool-display-tools.js";
@@ -38,7 +38,7 @@ describe("wrapNativeCursorTool", () => {
 			createRenderContext({ isError: false, toolCallId: "ordinary-edit-1" }),
 		);
 
-		expect(rendered?.render(120).join("\n").trimEnd()).toBe("pi edit");
+		expect(rendered?.render(120).map(stripTerminalSequences).join("\n").trimEnd()).toBe("pi edit");
 		expect(delegateRenderResult).toHaveBeenCalledOnce();
 	});
 });

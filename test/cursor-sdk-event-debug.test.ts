@@ -266,7 +266,7 @@ describe("cursor sdk event debug sink", () => {
 		expect(existsSync(artifactPath("waitResult"))).toBe(false);
 		expect(JSON.parse(readFileSync(artifactPath("summary"), "utf8"))).toMatchObject({
 			waitResultRecorded: false,
-			counts: { errors: 1 },
+			counts: { errors: 1, timeline: { "errors:wait_result": 1 } },
 		});
 		const [errorRecord] = readFileSync(artifactPath("errors"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
 		expect(errorRecord.error.label).toBe("wait_result");

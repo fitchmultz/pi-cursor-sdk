@@ -407,7 +407,7 @@ export class CursorSdkEventDebugSink {
 			stack: error instanceof Error ? error.stack : undefined,
 			value: error,
 		};
-		this.appendJsonl(ARTIFACTS.errors, "error", payload, { [label]: 1 }, label);
+		this.appendJsonl(ARTIFACTS.errors, "error", payload, undefined, label);
 	}
 
 	attachRunStream(run: unknown): void {
@@ -622,7 +622,7 @@ export class CursorSdkEventDebugSink {
 		fileName: string,
 		recordKey: string,
 		value: unknown,
-		counts: Record<string, number>,
+		counts: Record<string, number> | undefined,
 		countKey?: string,
 	): void {
 		const elapsedMs = Date.now() - this.startedAt;
@@ -638,10 +638,10 @@ export class CursorSdkEventDebugSink {
 		this.recordTimeline(layer, type, value);
 	}
 
-	/** Counts every accepted event, including events past the file cap, and buffers its line until finalization. */
-	private bufferJsonl(fileName: string, record: unknown, counts: Record<string, number>, countKey: string): void {
+	/** Counts every accepted event in `counts` when given, including events past the file cap, and buffers its line until finalization. */
+	private bufferJsonl(fileName: string, record: unknown, counts: Record<string, number> | undefined, countKey: string): void {
 		if (!this.acceptsRecords()) return;
-		counts[countKey] = (counts[countKey] ?? 0) + 1;
+		if (counts) counts[countKey] = (counts[countKey] ?? 0) + 1;
 		if (this.truncatedJsonlFiles.has(fileName)) return;
 		const line = `${serializeCursorSdkEventDebugRecord(record)}\n`;
 		const marker = `${JSON.stringify({ type: "artifact_truncated", limitBytes: MAX_CURSOR_SDK_EVENT_DEBUG_JSONL_BYTES })}\n`;

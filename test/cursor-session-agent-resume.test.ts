@@ -576,7 +576,7 @@ describe("cursor-session-agent-resume", () => {
 		await pi.runSessionStart(ctx);
 		const pending = {
 			runtime: "local" as const, agentId: "agent-conversation", poolKey: "pool-1",
-			sendState: { bootstrapped: true, contextFingerprint: "ordinary-context", incrementalSendCount: 0 },
+			sendState: { bootstrapped: true as const, contextFingerprint: "ordinary-context", incrementalSendCount: 0 },
 			storeIdentity: { version: 1 as const, stateRoot: "/tmp/store" },
 		};
 		persistCursorSessionAgentResumeHandle(pending);

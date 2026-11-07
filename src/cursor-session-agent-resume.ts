@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
-import type { SessionCursorAgentSendState } from "./cursor-session-agent.js";
+import type { SessionCursorAgentBootstrappedSendState, SessionCursorAgentSendState } from "./cursor-session-agent.js";
 import { asRecord } from "./cursor-record-utils.js";
 import { getCursorSessionScopeSnapshot, getCursorSessionScopeKey } from "./cursor-session-scope.js";
 import type { CursorSessionStoreIdentity } from "./cursor-session-store.js";
@@ -54,7 +54,8 @@ interface PendingCursorSessionAgentResumeHandle {
 	runtime: "local";
 	agentId: string;
 	poolKey: string;
-	sendState: SessionCursorAgentSendState;
+	/** Only successful sends publish handles, so new entries keep the persisted three-field send-state shape. */
+	sendState: SessionCursorAgentBootstrappedSendState;
 	storeIdentity: CursorSessionStoreIdentity;
 }
 
@@ -122,11 +123,16 @@ export function resolveCursorSessionRepoRoot(cwd: string): string | undefined {
 	}
 }
 
-function isSendState(value: unknown): value is SessionCursorAgentSendState {
+/** Persisted entries always carry all three fields; a never-bootstrapped one has no meaningful fingerprint or count. */
+function parseSendState(value: unknown): SessionCursorAgentSendState | undefined {
 	const record = asRecord(value);
-	return typeof record?.bootstrapped === "boolean" &&
-		typeof record.contextFingerprint === "string" &&
-		typeof record.incrementalSendCount === "number";
+	if (
+		typeof record?.bootstrapped !== "boolean" ||
+		typeof record.contextFingerprint !== "string" ||
+		typeof record.incrementalSendCount !== "number"
+	) return undefined;
+	if (!record.bootstrapped) return { bootstrapped: false };
+	return { bootstrapped: true, contextFingerprint: record.contextFingerprint, incrementalSendCount: record.incrementalSendCount };
 }
 
 function parseStoreIdentity(value: unknown): CursorSessionStoreIdentity | undefined {
@@ -161,9 +167,10 @@ export function parseCursorSessionAgentResumeEntryData(value: unknown): CursorSe
 		typeof record.poolKey !== "string" ||
 		typeof record.branchPathHash !== "string" ||
 		typeof record.compactionGeneration !== "number" ||
-		typeof record.createdAt !== "string" ||
-		!isSendState(record.sendState)
+		typeof record.createdAt !== "string"
 	) return undefined;
+	const sendState = parseSendState(record.sendState);
+	if (!sendState) return undefined;
 	if (record.sessionFile !== undefined && typeof record.sessionFile !== "string") return undefined;
 	if (record.sessionId !== undefined && typeof record.sessionId !== "string") return undefined;
 	if (record.repoRoot !== undefined && typeof record.repoRoot !== "string") return undefined;
@@ -185,11 +192,7 @@ export function parseCursorSessionAgentResumeEntryData(value: unknown): CursorSe
 		poolKey: record.poolKey,
 		branchPathHash: record.branchPathHash,
 		compactionGeneration: record.compactionGeneration,
-		sendState: {
-			bootstrapped: record.sendState.bootstrapped,
-			contextFingerprint: record.sendState.contextFingerprint,
-			incrementalSendCount: record.sendState.incrementalSendCount,
-		},
+		sendState,
 		createdAt: record.createdAt,
 		...(storeIdentity ? { storeIdentity } : {}),
 		...(cleanupCandidateAgentIds?.length ? { cleanupCandidateAgentIds: [...new Set(cleanupCandidateAgentIds)] } : {}),

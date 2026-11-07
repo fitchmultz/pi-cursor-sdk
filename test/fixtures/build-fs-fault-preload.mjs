@@ -11,7 +11,7 @@ const realDelay = timersPromises.setTimeout;
 let elapsedMs = 0;
 
 // Advance the build's native retry clock without waiting on wall time.
-if (["late-winner", "race-loss", "rename-always", "rename-into-dist-always", "dist-locked", "serialized-publication"].includes(process.env.BUILD_SWAP_FAULT)) {
+function useSimulatedRetryClock() {
 	timersPromises.setTimeout = async (ms) => { elapsedMs += ms; };
 }
 
@@ -75,6 +75,7 @@ const faults = {
 		};
 	},
 	"late-winner"() {
+		useSimulatedRetryClock();
 		patchRename(publishing, async (...args) => {
 			if (elapsedMs < 2_200) throw new Error("synthetic late-winner race");
 			fs.writeFileSync(join(args[0], "late-winner.txt"), String(elapsedMs));
@@ -82,6 +83,7 @@ const faults = {
 		});
 	},
 	"race-loss"() {
+		useSimulatedRetryClock();
 		patchRename(publishing, async () => {
 			const cwd = process.cwd();
 			const dist = join(cwd, "dist");
@@ -96,12 +98,15 @@ const faults = {
 		});
 	},
 	"rename-always"() {
+		useSimulatedRetryClock();
 		patchRename(publishing, permanentFailure);
 	},
 	"rename-into-dist-always"() {
+		useSimulatedRetryClock();
 		patchRename(intoDist, permanentFailure);
 	},
 	"dist-locked"() {
+		useSimulatedRetryClock();
 		patchRename(fromDist, async () => {
 			throw new Error(`synthetic dist lock after ${elapsedMs}ms`);
 		});
@@ -110,6 +115,7 @@ const faults = {
 	// aside and fails its publication only once both other builds wait for the lock. The healthy
 	// build then publishes; the failing build moves that output aside and fails afterwards.
 	"serialized-publication"() {
+		useSimulatedRetryClock();
 		const role = process.env.BUILD_SWAP_ROLE;
 		if (role === "holder") {
 			fsPromises.rename = async (...args) => {

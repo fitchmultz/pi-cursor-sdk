@@ -8,6 +8,19 @@
 
 - Default to local Pi-tools-only (lean) mode: expose active, request-declared Pi tools through the bridge, including Pi built-ins and CodeMode routing, while disabling Cursor-native tools, ambient Cursor settings/MCP, and extension replay/question/skill wrappers. Pi instructions, skills, and project context remain intact. Set `PI_CURSOR_LEAN=0` at startup and restart Pi to restore the legacy hybrid surface or use Cursor Cloud; lean mode rejects Cloud before agent creation. The separate legacy `PI_CURSOR_NATIVE_TOOLS=0` MCP-only opt-out and `/cursor-abort` recovery remain available.
 
+## 0.5.15 - 2026-11-07
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- docs: focus verification on changed behavior (#423) ([de6c3ed](https://github.com/fitchmultz/pi-cursor-sdk/commit/de6c3ed859768871a86ee51e94d41df09a76da50))
+
+### What's Changed
+* docs: adopt focused verification and meaningful tests by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/423
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.14...v0.5.15
+
 ## 0.5.14 - 2026-11-07
 
 <!-- npm-release:unreleased:start -->

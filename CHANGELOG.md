@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+### Fixed
+
+- Keep the last working `dist/` when a build cannot publish its output. `npm run build` and the install-time `prepare` build now move the previous `dist/` aside, rename the new output into place, and delete the previous build only after `dist/` holds the new output. If the new output cannot be renamed into place, the previous build is restored and the build still fails with the original error; previously this failure left no `dist/` at all. If the restore also fails, the build reports the retained `dist.previous.*` directory instead of deleting it. The two renames are not an atomic swap: `dist/` is briefly absent between them. A build killed between the two renames leaves `dist/` absent until the next successful build and keeps the previous build in its uniquely named `dist.previous.*` directory, which is not restored or removed automatically.
+- Publish concurrent builds of one checkout one at a time, so one build's rollback can never put an older build over another build's output. Builds still compile in parallel, then take an OS file lock on `dist.lock` (an exclusive `node:sqlite` transaction) only to publish; the OS releases it if a build crashes, so a dead build never blocks the next one. A successful build now always publishes its own output and no longer prints "dist/ was published by a concurrent build". On Node 24 releases before 24.15, loading `node:sqlite` prints Node's ExperimentalWarning.
+
 ## 0.5.11 - 2026-11-04
 
 <!-- npm-release:unreleased:start -->

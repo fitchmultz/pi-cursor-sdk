@@ -8,6 +8,19 @@
 
 - Default to local Pi-tools-only (lean) mode: expose active, request-declared Pi tools through the bridge, including Pi built-ins and CodeMode routing, while disabling Cursor-native tools, ambient Cursor settings/MCP, and extension replay/question/skill wrappers. Pi instructions, skills, and project context remain intact. Set `PI_CURSOR_LEAN=0` at startup and restart Pi to restore the legacy hybrid surface or use Cursor Cloud; lean mode rejects Cloud before agent creation. The separate legacy `PI_CURSOR_NATIVE_TOOLS=0` MCP-only opt-out and `/cursor-abort` recovery remain available.
 
+## 0.5.13 - 2026-11-07
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- refactor: group shell-output state by call (#412) ([74804c7](https://github.com/fitchmultz/pi-cursor-sdk/commit/74804c764694433a1bfc0615d6ae08642da2c54b))
+
+### What's Changed
+* refactor: keep shell-output attribution in per-call records by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/412
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.12...v0.5.13
+
 ## 0.5.12 - 2026-11-06
 
 <!-- npm-release:unreleased:start -->

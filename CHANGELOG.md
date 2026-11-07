@@ -4,6 +4,19 @@
 
 ## Unreleased
 
+## 0.5.17 - 2026-11-07
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- docs: clarify the shared HTTP transport record contract (#427) ([2a35e79](https://github.com/fitchmultz/pi-cursor-sdk/commit/2a35e79eca96ce7a2ac80ed1c26d3dc82c2fa4e0))
+
+### What's Changed
+* docs: explain shared Cursor transport ownership by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/427
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.16...v0.5.17
+
 ## 0.5.16 - 2026-11-07
 
 <!-- npm-release:unreleased:start -->

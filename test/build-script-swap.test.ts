@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import { afterAll, describe, expect, it } from "vitest";
 
 const execFile = promisify(execFileCallback);
@@ -31,10 +32,10 @@ async function runBuild(cwd: string, env: Record<string, string> = {}, nodeArgs:
 			cwd,
 			env: { ...process.env, ...env },
 		});
-		return { code: 0, stderr };
+		return { code: 0, stderr: stripTerminalSequences(stderr) };
 	} catch (error) {
 		const failure = error as { code?: number; stderr?: string };
-		return { code: failure.code ?? 1, stderr: failure.stderr ?? "" };
+		return { code: failure.code ?? 1, stderr: stripTerminalSequences(failure.stderr ?? "") };
 	}
 }
 
@@ -59,7 +60,7 @@ describe("build.mjs staging swap", () => {
 		const { stdout } = await execFile(process.execPath, [
 			"--input-type=module", "-e", `console.log((await import(${JSON.stringify(pathToFileURL(entry).href)})).built)`,
 		]);
-		expect(stdout.trim()).toBe("true");
+		expect(stripTerminalSequences(stdout).trim()).toBe("true");
 	});
 
 	it("keeps Pi host peers and the asset-bearing Cursor SDK external", async () => {
@@ -81,29 +82,55 @@ describe("build.mjs staging swap", () => {
 		const { stdout } = await execFile(process.execPath, [
 			"--input-type=module", "-e", `console.log((await import(${JSON.stringify(entry)})).moduleUrl)`,
 		]);
-		expect(stdout.trim()).toBe(entry);
+		expect(stripTerminalSequences(stdout).trim()).toBe(entry);
 	});
 
-	it("resolves bundled host imports to Pi's own module instance", async () => {
+	it.each([
+		{ name: "resolves bundled host imports to Pi's own module instance", split: false },
+		{ name: "rejects missing factory proof even when Pi --help exits 0 after a host identity split", split: true },
+	])("$name", async ({ split }) => {
 		const dir = makeFixture();
 		fixtures.push(dir);
-		expect((await runBuild(dir, { TSC_STUB_HOST_IDENTITY: "1" })).code).toBe(0);
+		const build = await runBuild(dir, { TSC_STUB_HOST_IDENTITY: "1" });
+		expect(build.code, build.stderr).toBe(0);
+		if (split) {
+			// A distinct export forces the real factory guard below to throw.
+			writeFileSync(join(dir, "dist", "index.js"), "export function getAgentDir() { return process.env.PI_CODING_AGENT_DIR; }\n");
+		}
 		const extension = join(dir, "identity.ts");
+		const marker = join(dir, "identity-factory.json");
+		const agentDir = join(dir, "agent");
 		writeFileSync(extension, [
+			'import { writeFileSync } from "node:fs";',
 			'import { getAgentDir } from "@earendil-works/pi-coding-agent";',
 			'import { getAgentDir as bundled } from "./dist/index.js";',
-			'export default function () { if (getAgentDir !== bundled) throw new Error("host module identity split"); }',
+			'export default function () {',
+			'  if (getAgentDir !== bundled) throw new Error("host module identity split");',
+			`  writeFileSync(${JSON.stringify(marker)}, JSON.stringify({ agentDir: getAgentDir() }));`,
+			'}',
 		].join("\n"));
 		// Windows npm launchers are shell shims, not JavaScript. Run the real
 		// installed entrypoint through Node on every platform.
 		const hostRoot = fileURLToPath(new URL("../", import.meta.resolve("@earendil-works/pi-coding-agent")));
 		const hostManifest = JSON.parse(readFileSync(join(hostRoot, "package.json"), "utf8")) as { bin: { pi: string } };
 		const cli = join(hostRoot, hostManifest.bin.pi);
-		await execFile(process.execPath, [cli, "--no-extensions", "--no-skills", "--offline", "-e", extension, "--help"], {
+		// Pi catches extension errors and --help still exits 0 (execFile resolves).
+		// Only the marker proves the factory ran past the identity guard.
+		const { stderr } = await execFile(process.execPath, [cli, "--no-extensions", "--no-skills", "--offline", "-e", extension, "--help"], {
 			cwd: dir,
-			env: { ...process.env, PI_CODING_AGENT_DIR: join(dir, "agent") },
+			env: { ...process.env, PI_CODING_AGENT_DIR: agentDir },
 			timeout: 30_000,
 		});
+		const diagnostics = stripTerminalSequences(stderr);
+		const proof = existsSync(marker) ? readFileSync(marker, "utf8") : undefined;
+		if (split) {
+			expect(diagnostics).toContain("Failed to load extension");
+			expect(diagnostics).toContain("host module identity split");
+			expect(proof, "a factory that failed its identity guard must not write proof").toBeUndefined();
+		} else {
+			expect(proof, `Pi --help exited 0, but the identity factory proof was missing or invalid. stderr:\n${diagnostics || "(empty)"}`)
+				.toBe(JSON.stringify({ agentDir }));
+		}
 	}, 35_000);
 
 	it("preserves the previous dist and cleans staging when the compile fails", async () => {

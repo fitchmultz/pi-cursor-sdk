@@ -149,7 +149,7 @@ There is no lint or format script in `package.json` at this time.
 - Keep strict TypeScript types. Avoid `any` except in tests or when narrowing untyped external SDK data.
 - Vitest 5 defaults `clearMocks` to `true`; do not depend on mock state leaking between tests.
 - Keep provider runtime code side-effect-light. Do not write secrets, and do not let cache or discovery failures break response streaming unless the run cannot proceed safely.
-- Add or update tests for behavior changes in `src/`. Prefer focused unit tests over live Cursor calls.
+- Test behavior changes at the owning boundary. Extend existing coverage before adding duplicate tests. Remove tests designed to always pass; each retained test must be able to catch a credible regression.
 - If dependency versions change, update `package-lock.json` with npm. Do not manually edit generated dependency output.
 - The bridge runtime closure is bundled and pinned to `@modelcontextprotocol/server@2.3.1`, `@modelcontextprotocol/hono@2.0.2`, `hono@4.13.13`, and `@hono/node-server@2.1.3`. `@cursor/sdk@1.0.40` remains an exact unbundled dependency.
 - Do not commit `dist/`, `coverage/`, `.env*`, `.pi/`, or package tarballs.
@@ -159,7 +159,8 @@ There is no lint or format script in `package.json` at this time.
 Done means:
 
 - The intended behavior or documentation change is complete.
-- Code changes pass `npm test`, `npm run typecheck`, and `npm run typecheck:tests`. For docs-only changes, verify affected links, commands, and documented contracts without asking for a minimal-validation exception; required PR and package checks still apply.
+- Choose validation for the changed behavior and affected callers. Run focused owner tests and relevant type, build, and package checks. Reuse valid results for unchanged inputs; a full test suite is not required after every edit, review, commit, or push. Broaden checks when they cover a credible regression that the focused checks cannot reach.
+- For docs-only changes, verify affected links, commands, and documented contracts. Required PR, CI, and package checks still apply.
 - `npm pack --dry-run` passes when package metadata, publishable docs, dependencies, or ignored artifacts change.
 - Related README/docs/tests are updated when behavior, commands, user-visible model IDs, flags, or troubleshooting change.
 - No secrets, local API keys, or noisy local state are added.

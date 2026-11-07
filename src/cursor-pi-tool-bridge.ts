@@ -24,6 +24,7 @@ export type {
 	CursorPiToolBridgeSnapshot,
 	CursorPiToolBridgeSnapshotApi,
 	CursorPiToolBridgeSnapshotOptions,
+	CursorPiToolRequestHandler,
 } from "./cursor-pi-tool-bridge-types.js";
 export type { CursorPiToolBridgeDiagnosticEvent } from "./cursor-pi-tool-bridge-diagnostics.js";
 export { resolveCursorPiToolBridgeDebugEnabled } from "./cursor-pi-tool-bridge-diagnostics.js";

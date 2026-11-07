@@ -37,7 +37,7 @@ test("registered Cursor provider preserves native bridge, replay, usage, queues,
   Object.assign(process.env, {
     PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: "1", PI_CURSOR_SETTING_SOURCES: "none",
     CURSOR_API_KEY: "offline-fixture-only", PI_CURSOR_NATIVE_TOOL_DISPLAY: "1",
-    PI_CURSOR_ASK_QUESTION: "0", PI_CURSOR_LOCAL_RESUME: "0",
+    PI_CURSOR_ASK_QUESTION: "0", PI_CURSOR_LOCAL_RESUME: "0", PI_CURSOR_LEAN: "0",
   });
   const settingsManager = SettingsManager.inMemory({ defaultTools: ["fixture_bridge"], compaction: { enabled: false, keepRecentTokens: 1 }, retry: { enabled: false } });
   const loader = new DefaultResourceLoader({
@@ -439,16 +439,6 @@ test("real parent bridge tool launches a child before parent turn_end without jo
   });
 });
 
-async function shortIdleExtension(root) {
-  const idle = join(root, "short-idle.mjs");
-  await writeFile(idle, `import { __testUtils } from ${JSON.stringify(new URL("../dist/cursor-provider.js", import.meta.url).href)};
-      export default function(pi) {
-        __testUtils.setCursorNativeReplayIdleDisposeMs(20);
-        pi.on("session_shutdown", () => __testUtils.resetCursorNativeReplayIdleDisposeMs());
-      }`);
-  return idle;
-}
-
 for (const cleanup of ["answer", "abort", "shutdown", "deadline"]) {
   const title = cleanup === "answer"
     ? "real deferred bridged question survives idle abandonment and resumes the same SDK run"
@@ -456,12 +446,13 @@ for (const cleanup of ["answer", "abort", "shutdown", "deadline"]) {
   test(title, { timeout: 60000 }, async (t) => {
     await captureNativeOutput(({ collect, retained }) => concurrentFixture(t, async ({ root, create }) => {
       if (cleanup === "deadline") process.env.PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS = "500";
-      const idle = await shortIdleExtension(root);
+      // Configure the loaded extension, not a separate unbundled module instance.
+      process.env.PI_CURSOR_LIVE_RUN_IDLE_DISPOSE_MS = "20";
       const entered = Promise.withResolvers();
       const answer = Promise.withResolvers();
       let actualToolCallId;
       let executionAborts = 0;
-      const owner = await create(`pending-${cleanup}`, { beforeExtensions: [idle], tool: async (id, _args, signal) => {
+      const owner = await create(`pending-${cleanup}`, { tool: async (id, _args, signal) => {
         actualToolCallId = id;
         const abort = () => { executionAborts++; answer.reject(new Error("owned execution aborted")); };
         signal.addEventListener("abort", abort, { once: true });

@@ -36,7 +36,7 @@ The repo also ships partial automation for the prerequisite/basic/default-settin
 npm run smoke:live
 ```
 
-`npm run smoke:live` resolves `pi`, `node`, `npm`, `rg`, and `tmux` once in the parent shell, then runs all `pi` shims with the resolved Node directory first on `PATH`. It clears inherited Cursor SDK event-debug env for every child pi run. Isolated helper cases force `PI_CURSOR_SETTING_SOURCES=none`; the `default-settings` helper case explicitly unsets `PI_CURSOR_SETTING_SOURCES` so it exercises the default ambient setting-source path.
+`npm run smoke:live` resolves `pi`, `node`, `npm`, `rg`, and `tmux` once in the parent shell, then runs all `pi` shims with the resolved Node directory first on `PATH`. It clears inherited Cursor SDK event-debug env for every child pi run. Isolated helper cases force `PI_CURSOR_SETTING_SOURCES=none` without changing lean mode. Only the `default-settings` child pins `PI_CURSOR_LEAN=0` and unsets `PI_CURSOR_SETTING_SOURCES`, so it exercises the legacy ambient setting-source path rather than lean's forced empty sources. These per-process overrides leave the parent and ordinary basic/math lean coverage unchanged.
 
 The canonical visual runner for section 4 is checked in separately:
 
@@ -54,7 +54,7 @@ SKIP_LIVE=1 npm run smoke:isolated
 npm run smoke:isolated -- --self-test
 ```
 
-`npm run smoke:isolated` follows the same smoke-runner env contract as live/visual/steering helpers: pack-only work resolves only `node`, `npm`, and `env` from the parent shell and does not require `pi`; live checks then resolve `pi` and `rg`. It runs pi/npm shims with the resolved Node directory first on `PATH`, clears Cursor SDK event-debug env, forces `PI_CURSOR_SETTING_SOURCES=none` for provider checks, and explicitly unsets `PI_CURSOR_SETTING_SOURCES` for install/list checks.
+`npm run smoke:isolated` keeps its basic provider check on the built-in lean default, but explicitly pins `PI_CURSOR_LEAN=0`, native registration on, and the pi bridge off for native/plan-strip replay checks. It follows the same smoke-runner env contract as live/visual/steering helpers: pack-only work resolves only `node`, `npm`, and `env` from the parent shell and does not require `pi`; live checks then resolve `pi` and `rg`. It runs pi/npm shims with the resolved Node directory first on `PATH`, clears Cursor SDK event-debug env, forces `PI_CURSOR_SETTING_SOURCES=none` for provider checks, and explicitly unsets `PI_CURSOR_SETTING_SOURCES` for install/list checks.
 
 Scan persisted sessions for native replay tool failures:
 
@@ -95,9 +95,12 @@ Pass criteria:
 - stderr is empty or contains only expected non-secret diagnostics for the specific test.
 - The persisted JSONL has exactly one assistant message with non-negative usage fields and non-negative `cacheRead/cacheWrite`.
 
-## 2. Default setting-source startup noise check
+## 2. Legacy ambient setting-source startup noise check
+
+This intentionally opts out of lean for one process: lean suppresses Cursor setting sources even when `PI_CURSOR_SETTING_SOURCES` is unset. `env -u` also clears an inherited source override, restoring the legacy ambient default without changing the parent shell.
 
 ```bash
+env -u PI_CURSOR_SETTING_SOURCES PI_CURSOR_LEAN=0 \
 pi --approve -e . --cursor-no-fast --model cursor/grok-4.6 \
   --session-dir "$SMOKE_DIR/default-settings" \
   --no-tools \
@@ -136,7 +139,7 @@ Pass criteria:
 
 ## 4. Focused visual card/color rendering check
 
-This is a visual debug menu for changed card/color behavior requiring new live evidence. Select only the relevant category below, or reuse a batched existing platform suite; do not execute the entire list by default. It requires offscreen TUI visual inspection, not only JSONL or code review. Use Node 24+, official Pi 1.5.0 or another current compatibility target, exact `@cursor/sdk@1.0.40`, a fresh temporary session dir, Cursor SDK `plan` mode, native replay enabled, and the checked-in visual runner. The runner resolves `pi` by directly walking the parent `PATH`, uses `process.execPath` for Node, and prepends that Node directory for both prereq checks and tmux launches so `#!/usr/bin/env node` shims use the validated Node. The default matrix is native replay only: native replay registration is forced on, settings sources are `none`, the pi bridge is off, overlapping built-in pi tools are not exposed, and inherited Cursor SDK event-debug artifact env is cleared. With `--event-debug`, debug capture writes to a deterministic directory under `VISUAL_DIR`.
+This is a visual debug menu for changed card/color behavior requiring new live evidence. Select only the relevant category below, or reuse a batched existing platform suite; do not execute the entire list by default. It requires offscreen TUI visual inspection, not only JSONL or code review. Use Node 24+, official Pi 1.5.0 or another current compatibility target, exact `@cursor/sdk@1.0.40`, a fresh temporary session dir, Cursor SDK `plan` mode, native replay enabled, and the checked-in visual runner. The runner resolves `pi` by directly walking the parent `PATH`, uses `process.execPath` for Node, and prepends that Node directory for both prereq checks and tmux launches so `#!/usr/bin/env node` shims use the validated Node. The default matrix is native replay only: `PI_CURSOR_LEAN=0` is forced so native replay registration and explicit bridge/builtin overrides remain effective, native replay registration is forced on, settings sources are `none`, the pi bridge is off, overlapping built-in pi tools are not exposed, and inherited Cursor SDK event-debug artifact env is cleared. With `--event-debug`, debug capture writes to a deterministic directory under `VISUAL_DIR`.
 
 ```bash
 VISUAL_DIR="$(mktemp -d /tmp/pi-cursor-sdk-1016-visual.XXXXXX)"
@@ -185,7 +188,7 @@ npm run smoke:visual -- "${VISUAL_ARGS[@]}" \
   --prompt 'Stay in Cursor plan mode. If Cursor exposes plan, todo, task, or mode activity for this request, use that capability to outline a tiny unit test without editing files. Otherwise answer with a concise numbered plan. Do not use shell or file mutation tools.'
 ```
 
-By default, `npm run smoke:visual` writes `.ansi`, `.txt`, `.html`, `.png`, and `.jsonl.path` artifacts. Check browser availability before a paid run. If PNG rendering fails but ANSI/HTML evidence was retained, render that retained evidence with the canonical browser/xterm path and save a PNG; do not repeat the model call merely to produce a screenshot. To visually audit bridge behavior or ambient Cursor settings, opt in with `--bridge`, `--bridge --expose-builtin-tools`, or `--setting-sources <value>` and label that evidence separately; do not count those opt-in runs as default native replay matrix proof.
+By default, `npm run smoke:visual` writes `.ansi`, `.txt`, `.html`, `.png`, and `.jsonl.path` artifacts. Check browser availability before a paid run. If PNG rendering fails but ANSI/HTML evidence was retained, render that retained evidence with the canonical browser/xterm path and save a PNG; do not repeat the model call merely to produce a screenshot. To visually audit bridge behavior or ambient Cursor settings, opt in with `--bridge`, `--bridge --expose-builtin-tools`, or `--setting-sources <value>` and label that evidence separately; these visual-runner overrides still keep `PI_CURSOR_LEAN=0`, and do not count as default native replay matrix proof. The platform bridge, abort, and HTTP/1.1 suites instead pin `PI_CURSOR_LEAN=1` to retain lean coverage.
 
 Expected proof for each category is defined in [Cursor Native Tool Visual Audit Workflow](./cursor-native-tool-visual-audit.md). Do not mark a category passed because the prompt was sent. A category passes only when the PNG shows the expected card and the JSONL shows the expected completed `toolCall` / `toolResult` pair with the expected `isError` state.
 
@@ -246,10 +249,15 @@ Pass criteria:
 
 ## 7. Native replay cards without the pi bridge
 
+Native replay requires an explicit opt-out of the default lean surface.
+
 ```bash
 PI_CURSOR_SETTING_SOURCES=none \
+PI_CURSOR_LEAN=0 \
 PI_CURSOR_PI_TOOL_BRIDGE=0 \
+PI_CURSOR_EXPOSE_BUILTIN_TOOLS=0 \
 PI_CURSOR_NATIVE_TOOL_DISPLAY=1 \
+PI_CURSOR_REGISTER_NATIVE_TOOLS=1 \
 pi --approve -e . --cursor-no-fast --model cursor/grok-4.6 \
   --session-dir "$SMOKE_DIR/native-replay" \
   -p 'Native replay smoke. Use your Cursor file-reading capability to read ./README.md, then answer README_SEEN=yes if it contains pi-cursor-sdk.' \

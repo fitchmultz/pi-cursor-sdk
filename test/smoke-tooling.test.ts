@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { parseArgs as parsePiArgs } from "../node_modules/@earendil-works/pi-coding-agent/dist/cli/args.js";
 import { buildInitialMessage } from "../node_modules/@earendil-works/pi-coding-agent/dist/cli/initial-message.js";
 import { CURSOR_REPLAY_SOURCE_TOOL_NAMES } from "../src/cursor-replay-source-names.js";
@@ -115,6 +115,33 @@ try {
 		}
 	});
 
+	it.each([
+		{ lean: undefined, nativeTools: undefined },
+		{ lean: "1", nativeTools: undefined },
+		{ lean: undefined, nativeTools: "0" },
+		{ lean: "1", nativeTools: "0" },
+	])("pins Cloud smoke lean off with parent lean=$lean and nativeTools=$nativeTools", async ({ lean, nativeTools }) => {
+		const artifactRoot = mkdtempSync(join(tmpdir(), "cloud-smoke-lean-env-test-"));
+		vi.stubEnv("PI_CURSOR_LEAN", lean);
+		vi.stubEnv("PI_CURSOR_NATIVE_TOOLS", nativeTools);
+		vi.stubEnv("PI_CURSOR_RUNTIME", "local");
+		try {
+			const { buildCloudSmokeEnv } = await import("../scripts/cloud-runtime-smoke.mjs");
+			const env = buildCloudSmokeEnv(artifactRoot);
+
+			expect(env.PI_CURSOR_LEAN).toBe("0");
+			expect(env.PI_CURSOR_RUNTIME).toBe("cloud");
+			// Do not silently enable native tools against an explicit user opt-out.
+			expect(env.PI_CURSOR_NATIVE_TOOLS).toBe(nativeTools);
+			expect(process.env.PI_CURSOR_LEAN).toBe(lean);
+			expect(process.env.PI_CURSOR_NATIVE_TOOLS).toBe(nativeTools);
+			expect(process.env.PI_CURSOR_RUNTIME).toBe("local");
+		} finally {
+			vi.unstubAllEnvs();
+			rmSync(artifactRoot, { recursive: true, force: true });
+		}
+	});
+
 	it("harvests exact Cloud cleanup IDs from session JSONL and framed lifecycle journals", async () => {
 		const artifactRoot = mkdtempSync(join(tmpdir(), "cloud-smoke-lifecycle-test-"));
 		try {
@@ -151,6 +178,9 @@ try {
 				baseEnv: {
 					...process.env,
 					PI_CURSOR_RUNTIME: "cloud",
+					PI_CURSOR_LEAN: "0",
+					PI_CURSOR_PI_TOOL_BRIDGE: "0",
+					PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "0",
 					PI_CURSOR_CLOUD_ACK: "1",
 					PI_CURSOR_CLOUD_REPO: "ambient/repo",
 					PI_CURSOR_CLOUD_AUTO_CREATE_PR: "1",
@@ -166,19 +196,87 @@ try {
 			expect(env.PI_CURSOR_CLOUD_AUTO_CREATE_PR).toBeUndefined();
 			expect(env.PI_CURSOR_CLOUD_SKIP_REVIEWER_REQUEST).toBeUndefined();
 			expect(env.PI_CURSOR_CLOUD_ENV).toBeUndefined();
-			expect(env.PI_CURSOR_PI_TOOL_BRIDGE).toBe("0");
-			expect(env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS).toBe("0");
+			expect(env.PI_CURSOR_LEAN).toBe("1");
+			expect(env.PI_CURSOR_PI_TOOL_BRIDGE).toBe("1");
+			expect(env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS).toBe("1");
+			expect(env.PI_CURSOR_REGISTER_NATIVE_TOOLS).toBe("0");
 			const unsetEnv = buildLocalResumeSmokeEnv(artifactRoot, { localResumeEnv: "unset", baseEnv: { ...process.env, PI_CURSOR_LOCAL_RESUME: "1" } });
 			expect(unsetEnv.PI_CURSOR_LOCAL_RESUME).toBeUndefined();
 			const optOutEnv = buildLocalResumeSmokeEnv(artifactRoot, { localResumeEnv: "off", baseEnv: { ...process.env, PI_CURSOR_LOCAL_RESUME: "1" } });
 			expect(optOutEnv.PI_CURSOR_LOCAL_RESUME).toBe("0");
-			const bridgeEnv = buildLocalResumeSmokeEnv(artifactRoot, { bridge: true, exposeBuiltinTools: true });
+			const nativeBaseEnv = { ...process.env, PI_CURSOR_LEAN: "1", PI_CURSOR_PI_TOOL_BRIDGE: "1", PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1" };
+			const nativeEnv = buildLocalResumeSmokeEnv(artifactRoot, { lean: false, baseEnv: nativeBaseEnv });
+			expect(nativeEnv.PI_CURSOR_LEAN).toBe("0");
+			expect(nativeEnv.PI_CURSOR_PI_TOOL_BRIDGE).toBe("0");
+			expect(nativeEnv.PI_CURSOR_EXPOSE_BUILTIN_TOOLS).toBe("0");
+			expect(nativeBaseEnv.PI_CURSOR_LEAN).toBe("1");
+			const bridgeEnv = buildLocalResumeSmokeEnv(artifactRoot, { lean: false, bridge: true, exposeBuiltinTools: true, baseEnv: nativeBaseEnv });
+			expect(bridgeEnv.PI_CURSOR_LEAN).toBe("0");
 			expect(bridgeEnv.PI_CURSOR_PI_TOOL_BRIDGE).toBe("1");
 			expect(bridgeEnv.PI_CURSOR_EXPOSE_BUILTIN_TOOLS).toBe("1");
 			expect(env.PI_CODING_AGENT_DIR).toBe(join(artifactRoot, "agent"));
 			expect(existsSync(env.PI_CODING_AGENT_DIR!)).toBe(true);
 		} finally {
 			rmSync(artifactRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("forwards lean defaults and native surface overrides through the actual RPC launcher without spawning pi", () => {
+		const code = String.raw`
+import assert from "node:assert/strict";
+import childProcess from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
+import { PassThrough } from "node:stream";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+const launches = [];
+childProcess.spawn = (_command, _args, options) => {
+  launches.push(options.env);
+  return { stdout: new PassThrough(), stderr: new PassThrough(), stdin: new PassThrough() };
+};
+syncBuiltinESMExports();
+const { startRpc } = await import("./scripts/lib/local-resume-smoke-harness.mjs");
+delete process.env.CURSOR_LOCAL_RESUME_SMOKE_EXTENSION_PATH;
+const artifactDir = mkdtempSync(join(tmpdir(), "local-resume-launch-env-"));
+try {
+  const options = { artifactDir, sessionDir: join(artifactDir, "sessions"), sessionId: "offline-env-proof" };
+  await startRpc({ ...options, baseEnv: { PI_CURSOR_LEAN: "0" } }).stop();
+  await startRpc({ ...options, lean: false, baseEnv: { PI_CURSOR_LEAN: "1" } }).stop();
+  await startRpc({ ...options, lean: false, bridge: true, exposeBuiltinTools: true, baseEnv: { PI_CURSOR_LEAN: "1" } }).stop();
+  assert.deepEqual(launches.map(env => [env.PI_CURSOR_LEAN, env.PI_CURSOR_PI_TOOL_BRIDGE, env.PI_CURSOR_EXPOSE_BUILTIN_TOOLS]), [
+    ["1", "1", "1"], ["0", "0", "0"], ["0", "1", "1"],
+  ]);
+  console.log("local-resume-launch-env-ok");
+} finally {
+  rmSync(artifactDir, { recursive: true, force: true });
+}
+`;
+		const result = run(process.execPath, ["--input-type=module", "-e", code]);
+		expect(result.status, result.stderr).toBe(0);
+		expect(result.stdout).toContain("local-resume-launch-env-ok");
+	});
+
+	it("holds lean off across every native-to-bridge transition and deleted-agent fallback", () => {
+		const smokeSource = readFileSync("scripts/local-resume-smoke.mjs", "utf8");
+		const toolSurfaceSource = smokeSource.slice(smokeSource.indexOf("async function runToolSurfaceSmoke()"), smokeSource.indexOf("async function runAbortSmoke()"));
+		const cleanupSource = readFileSync("scripts/local-resume-cleanup-smoke.mjs", "utf8");
+		for (const [source, count] of [[toolSurfaceSource, 3], [cleanupSource, 4]] as const) {
+			const launches = [...source.matchAll(/withRpc\(\{([^}]+)\},/g)];
+			expect(launches).toHaveLength(count);
+			for (const launch of launches) expect(launch[1]).toContain("lean: false");
+		}
+	});
+
+	it("isolates native platform replay from lean bridge, abort, and HTTP transport proof", () => {
+		const native = getScenario("cursor-native-visual-matrix")!;
+		expect({ PI_CURSOR_LEAN: "1", ...native.env }).toMatchObject({
+			PI_CURSOR_LEAN: "0", PI_CURSOR_REGISTER_NATIVE_TOOLS: "1", PI_CURSOR_PI_TOOL_BRIDGE: "0", PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "0",
+		});
+		for (const suite of ["cursor-http1-live", "cursor-bridge-visual-matrix", "cursor-abort-cleanup"]) {
+			expect({ PI_CURSOR_LEAN: "0", ...getScenario(suite)!.env }, suite).toMatchObject({
+				PI_CURSOR_LEAN: "1", PI_CURSOR_REGISTER_NATIVE_TOOLS: "0", PI_CURSOR_PI_TOOL_BRIDGE: "1", PI_CURSOR_EXPOSE_BUILTIN_TOOLS: "1",
+			});
 		}
 	});
 
@@ -244,7 +342,7 @@ try {
 			cursorCalls: 1,
 			finalMarker: "HTTP1_LIVE_OK",
 			requiredCards: ["http1-status"],
-			env: { PI_CURSOR_HTTP_1_1: "1", PI_CURSOR_PI_TOOL_BRIDGE: "0", PI_CURSOR_SDK_EVENT_DEBUG: "1" },
+			env: { PI_CURSOR_LEAN: "1", PI_CURSOR_HTTP_1_1: "1", PI_CURSOR_PI_TOOL_BRIDGE: "1", PI_CURSOR_SDK_EVENT_DEBUG: "1" },
 		});
 	});
 

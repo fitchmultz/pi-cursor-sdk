@@ -1,3 +1,4 @@
+import { isCursorLeanEnabled } from "./cursor-lean.js";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -190,6 +191,7 @@ async function askOneQuestion(question: CursorQuestion, ctx: { ui: ExtensionCont
 }
 
 function syncCursorQuestionToolForModel(pi: Pick<ExtensionAPI, "getActiveTools" | "setActiveTools">, model: ExtensionContext["model"]): void {
+	if (isCursorLeanEnabled()) return;
 	const activeToolNames = new Set(pi.getActiveTools());
 	const shouldBeActive = !arePiToolsDisabled(pi) && isCursorModel(model) && resolveCursorPiToolBridgeEnabled();
 	const alreadyActive = activeToolNames.has(CURSOR_ASK_QUESTION_TOOL_NAME);
@@ -210,7 +212,7 @@ function emitCursorAskQuestionBlockedEvent(
 }
 
 export function registerCursorQuestionTool(pi: CursorQuestionToolExtensionApi): void {
-	if (!resolveCursorAskQuestionEnabled()) return;
+	if (isCursorLeanEnabled() || !resolveCursorAskQuestionEnabled()) return;
 
 	pi.registerTool({
 		name: CURSOR_ASK_QUESTION_TOOL_NAME,

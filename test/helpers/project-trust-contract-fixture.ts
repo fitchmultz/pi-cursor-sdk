@@ -40,6 +40,8 @@ function isolatedPiEnv(homeDir: string, agentDir: string): NodeJS.ProcessEnv {
 		XDG_CONFIG_HOME: join(homeDir, ".config"),
 		XDG_CACHE_HOME: join(homeDir, ".cache"),
 		PI_CODING_AGENT_DIR: agentDir,
+		// These legacy trust/Cloud contracts must reach config/auth checks, not lean's local-only guard.
+		PI_CURSOR_LEAN: "0",
 		PI_OFFLINE: "1",
 		PI_SKIP_VERSION_CHECK: "1",
 		PI_TELEMETRY: "0",

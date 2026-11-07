@@ -33,12 +33,14 @@ describe("smoke CLI and package contracts", () => {
 			expect(liveHelp!.stdout).toContain("--self-test");
 			expect(isolatedHelp!.status).toBe(0);
 			expect(isolatedHelp!.stdout).toContain("plan-strip");
+			expect(isolatedHelp!.stdout).toContain("PI_CURSOR_LEAN=0");
 			expect(isolatedHelp!.stdout).toContain("--self-test");
 		}
 		expect(steeringHelp.status).toBe(0);
 		expect(steeringHelp.stdout).toContain("RPC steering smoke");
 		expect(visualHelp.status).toBe(0);
 		expect(visualHelp.stdout).toContain("Canonical offscreen TUI visual smoke runner");
+		expect(visualHelp.stdout).toContain("PI_CURSOR_LEAN=0");
 		expect(visualHelp.stdout).toContain("PI_CURSOR_REGISTER_NATIVE_TOOLS=1");
 		expect(visualHelp.stdout).toContain("--expose-builtin-tools");
 		expect(jsonlHelp.status).toBe(0);
@@ -69,6 +71,8 @@ describe("smoke CLI and package contracts", () => {
 		expect(localResumeHelp.stdout).toContain("--compaction");
 		expect(localResumeHelp.stdout).toContain("--default-dry-run");
 		expect(localResumeHelp.stdout).toContain("--cleanup");
+		expect(localResumeHelp.stdout).toContain("Ordinary lanes pin PI_CURSOR_LEAN=1");
+		expect(localResumeHelp.stdout).toContain("--tool-surface and --cleanup pin PI_CURSOR_LEAN=0");
 		expect(localResumeHelp.stdout).toContain("2  invalid command-line usage");
 
 		if (process.platform !== "win32") {

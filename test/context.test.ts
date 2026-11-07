@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { Type } from "typebox";
 import {
 	buildCursorPrompt,
@@ -16,6 +16,8 @@ import {
 } from "../src/cursor-session-send-policy.js";
 import type { Context, UserMessage, AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
 import { loadInstalledPiBuildSystemPrompt } from "./helpers/pi-system-prompt.js";
+
+afterEach(() => vi.unstubAllEnvs());
 
 const TOOL_TAIL_GUARD = [
 	"Shell: use explicit `cd` to repo path for project commands; session cwd may differ from tool args.",
@@ -61,6 +63,42 @@ describe("buildCursorPrompt", () => {
 		expect(result.text).not.toContain("custom_private_tool");
 		expect(result.text).toContain("private-skill");
 		expect(result.text).not.toContain("Semantic code intelligence priority");
+	});
+
+	it.each([true, false])("uses captured lean policy for the installed Pi catalog and authoritative guidelines (lean=%s)", (leanEnabled) => {
+		// Deliberately disagree with the captured policy to catch environment rereads.
+		vi.stubEnv("PI_CURSOR_LEAN", leanEnabled ? "0" : "1");
+		const prompt = loadInstalledPiBuildSystemPrompt()({
+			cwd: "/repo",
+			selectedTools: ["private_audit"],
+			toolSnippets: { private_audit: "Audit private ticket records" },
+			promptGuidelines: ["Never disclose private ticket identifiers", "Use private_audit for ticket inspection"],
+			contextFiles: [{ path: "/repo/AGENTS.md", content: "Project confidentiality instructions remain authoritative." }],
+		});
+		expect(prompt).toContain("<tools>");
+		expect(prompt).toContain("<rules>");
+		expect(prompt).toContain("Never disclose private ticket identifiers");
+		const systemPrompt = `  ${prompt}\n\nSemantic code intelligence priority:\n- Inspect definitions before making changes.\n\nNever send customer records to external services.  `;
+		const result = buildCursorPrompt({ systemPrompt, messages: [] }, { leanEnabled });
+		expect(result.text).toContain("Project confidentiality instructions remain authoritative.");
+		if (leanEnabled) {
+			expect(result.text).toContain(`System instructions from pi:\n${systemPrompt.trim()}`);
+			expect(result.text).toContain("Never disclose private ticket identifiers");
+			expect(result.text).toContain("Use private_audit for ticket inspection");
+			expect(result.text).toContain("Semantic code intelligence priority:");
+			expect(result.text).toContain("Never send customer records to external services.");
+			expect(result.text).not.toContain("Pi tool catalog omitted");
+			expect(result.text).toContain("Pi tool catalogs and guidelines below retain Pi names, not direct SDK call names");
+			expect(result.text).toContain("For direct calls, use only the matching exposed MCP name and its listed schema");
+			expect(result.text).toContain("Cursor native tools (including task/subagents): disabled");
+		} else {
+			// Preserve the established native/hybrid sanitization behavior.
+			expect(result.text).toContain("Pi tool catalog omitted");
+			expect(result.text).not.toContain("private_audit");
+			expect(result.text).not.toContain("Never disclose private ticket identifiers");
+			expect(result.text).not.toContain("Semantic code intelligence priority:");
+			expect(result.text).not.toContain("Never send customer records to external services.");
+		}
 	});
 
 	it("defensively formats assistant string content", () => {

@@ -82,6 +82,12 @@ Artifacts (gitignored when under .debug/):
 Stdout:
   Prints one JSON summary line on success. Raw payloads stay on disk only.
 
+Capture policy:
+  Defaults PI_CURSOR_LEAN to 0 for legacy native replay/bridge capture when unset or empty.
+  Explicit lean values are preserved for reproductions.
+  Native display/bridge flags default on; explicit overrides are passed through.
+  An explicit PI_CURSOR_NATIVE_TOOLS=0 is preserved.
+
 Exit codes:
   0  capture completed
   1  invalid arguments, missing auth, pi failure, or missing capture summary
@@ -213,6 +219,8 @@ export async function runDebugProviderEvents(args, envInput = process.env) {
 	];
 	const env = {
 		...envInput,
+		// Default the native/bridge probe to legacy, but preserve an explicit lean setting for reproductions.
+		PI_CURSOR_LEAN: envFlag(envInput.PI_CURSOR_LEAN, "0"),
 		CURSOR_API_KEY: args.apiKey,
 		PI_CURSOR_SDK_EVENT_DEBUG: "1",
 		PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR: artifactDir,

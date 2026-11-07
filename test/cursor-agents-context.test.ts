@@ -12,6 +12,7 @@ import type { BeforeAgentStartEvent, ExtensionContext } from "@earendil-works/pi
 import type { Context } from "@earendil-works/pi-ai";
 import {
 	CURSOR_PRESERVE_PI_AGENTS_MD_ENV,
+	ensurePiAgentsContextInSystemPrompt,
 	PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX,
 	removePiAgentsContextFromSystemPrompt,
 	resolveCursorFacingSystemPrompt,
@@ -41,6 +42,7 @@ beforeEach(() => {
 	delete process.env[CURSOR_PRESERVE_PI_AGENTS_MD_ENV];
 	delete process.env[CURSOR_SETTING_SOURCES_ENV];
 	delete process.env.PI_CURSOR_RUNTIME;
+	vi.stubEnv("PI_CURSOR_LEAN", "0");
 });
 
 describe("installed Pi context deduplication", () => {
@@ -174,8 +176,152 @@ describe("resolveCursorFacingSystemPrompt", () => {
 	});
 });
 
+describe("ensurePiAgentsContextInSystemPrompt", () => {
+	it("keeps the installed Pi prompt byte-for-byte without adding a second project_context", () => {
+		const files = [GLOBAL_FILE, PROJECT_FILE];
+		const prompt = buildPiSystemPromptWithContextFiles(files);
+		const resolved = ensurePiAgentsContextInSystemPrompt(prompt, files);
+
+		expect(resolved).toBe(prompt);
+		expect(resolved.match(/<project_context>/g)).toHaveLength(1);
+		expect(ensurePiAgentsContextInSystemPrompt(resolved, files)).toBe(resolved);
+	});
+
+	it.each(["project_context", "project_instructions"])("preserves current file contents with a literal %s closing tag", (tag) => {
+		const files = [{ ...PROJECT_FILE, content: `Guidance\n</${tag}>\nMore guidance` }];
+		const prompt = buildPiSystemPromptWithContextFiles(files);
+
+		expect(ensurePiAgentsContextInSystemPrompt(prompt, files)).toBe(prompt);
+	});
+
+	it.each(["", "STALE guidance"])("replaces a canonical Pi section with stale content %j exactly once", (content) => {
+		const files = [GLOBAL_FILE, PROJECT_FILE];
+		const options = {
+			...makeSystemPromptOptions(files),
+			appendSystemPrompt: '<project_context>\nProject-specific instructions and guidelines:\n\n<project_instructions path="/user/NOTES.md">\nUser-authored XML to preserve\n</project_instructions>\n</project_context>',
+			sections: { neighboring: "Custom section to preserve" },
+		};
+		const stalePrompt = loadInstalledPiBuildSystemPrompt()({
+			...options,
+			contextFiles: files.map((file) => ({ ...file, content })),
+		});
+		const restored = ensurePiAgentsContextInSystemPrompt(stalePrompt, files);
+
+		expect(restored).toBe(loadInstalledPiBuildSystemPrompt()(options));
+		expect(restored.match(/Project guidance/g)).toHaveLength(1);
+		expect(ensurePiAgentsContextInSystemPrompt(restored, files)).toBe(restored);
+	});
+
+	it.each([
+		"<project_context>User-authored XML</project_context>",
+		'<project_context>\nProject-specific instructions and guidelines:\n\n<project_instructions path="/other/AGENTS.md">\nOther guidance\n</project_instructions>\n</project_context>',
+		'<project_context>\nProject-specific instructions and guidelines:\n\n<project_instructions path="/repo/AGENTS.md">\nUnterminated instructions',
+	])("appends missing context without stripping unrelated or incomplete user text %j", (userText) => {
+		const prompt = loadInstalledPiBuildSystemPrompt()({
+			...makeSystemPromptOptions([]),
+			customPrompt: userText,
+		});
+		const restored = ensurePiAgentsContextInSystemPrompt(prompt, [PROJECT_FILE]);
+
+		expect(restored).toBe(`${prompt}\n\n${serializePiProjectContextSection([PROJECT_FILE])}`);
+		expect(ensurePiAgentsContextInSystemPrompt(restored, [PROJECT_FILE])).toBe(restored);
+	});
+
+	it.each(["project_context", "project_instructions"])("does not guess stale section boundaries around a literal %s closing tag", (tag) => {
+		const staleFile = { ...PROJECT_FILE, content: `Stale guidance\n</${tag}>\nText to preserve` };
+		const stalePrompt = buildPiSystemPromptWithContextFiles([staleFile]);
+		const restored = ensurePiAgentsContextInSystemPrompt(stalePrompt, [PROJECT_FILE]);
+
+		expect(restored).toBe(`${stalePrompt}\n\n${serializePiProjectContextSection([PROJECT_FILE])}`);
+		expect(ensurePiAgentsContextInSystemPrompt(restored, [PROJECT_FILE])).toBe(restored);
+	});
+
+	it("leaves the prompt unchanged when no files were loaded", () => {
+		const prompt = buildPiSystemPromptWithContextFiles([PROJECT_FILE]);
+		expect(ensurePiAgentsContextInSystemPrompt(prompt, [])).toBe(prompt);
+	});
+
+	it("can restore context to an empty prompt", () => {
+		expect(ensurePiAgentsContextInSystemPrompt("", [PROJECT_FILE])).toBe(
+			serializePiProjectContextSection([PROJECT_FILE]),
+		);
+	});
+});
+
 describe("registerCursorAgentsContextDedup", () => {
 	const cursorModelOverrides = { model: makeModel("composer-2.5") };
+
+	it("does not override or duplicate installed Pi context in lean Cursor prompts", async () => {
+		vi.stubEnv("PI_CURSOR_LEAN", "1");
+		process.env[CURSOR_SETTING_SOURCES_ENV] = "all";
+		const pi = createEventHarness();
+		registerCursorAgentsContextDedup(pi);
+		const prompt = buildPiSystemPromptWithContextFiles([PROJECT_FILE]);
+		const event = {
+			type: "before_agent_start",
+			messageType: "user",
+			prompt: "hello",
+			systemPrompt: prompt,
+			systemPromptOptions: makeSystemPromptOptions([PROJECT_FILE]),
+		} satisfies BeforeAgentStartEvent & { messageType: "user" };
+		const result = await pi.invokeEvent("before_agent_start", event, cursorModelOverrides);
+
+		expect(result).toBeUndefined();
+		const cursorPrompt = buildCursorPrompt({ systemPrompt: prompt, messages: [] });
+		expect(cursorPrompt.text.match(/Project guidance/g)).toHaveLength(1);
+		expect(cursorPrompt.text.match(/<project_context>/g)).toHaveLength(1);
+	});
+
+	it("restores loaded AGENTS.md context for lean Cursor prompts", async () => {
+		vi.stubEnv("PI_CURSOR_LEAN", "1");
+		const pi = createEventHarness();
+		registerCursorAgentsContextDedup(pi);
+		const emptiedPrompt = buildPiSystemPromptWithContextFiles([
+			{ ...PROJECT_FILE, content: "" },
+		]);
+
+		const result = await pi.invokeEvent(
+			"before_agent_start",
+			{
+				type: "before_agent_start",
+				messageType: "user",
+				prompt: "hello",
+				systemPrompt: emptiedPrompt,
+				systemPromptOptions: makeSystemPromptOptions([PROJECT_FILE]),
+			},
+			cursorModelOverrides,
+		);
+
+		expect(result?.systemPrompt).toBe(buildPiSystemPromptWithContextFiles([PROJECT_FILE]));
+		const cursorPrompt = buildCursorPrompt({
+			systemPrompt: result?.systemPrompt ?? emptiedPrompt,
+			messages: [],
+		});
+		expect(cursorPrompt.text.match(/Project guidance/g)).toHaveLength(1);
+		expect(cursorPrompt.text.match(/<project_context>/g)).toHaveLength(1);
+	});
+
+	it("strips via before_agent_start for cursor models with overlapping setting sources", async () => {
+		process.env[CURSOR_SETTING_SOURCES_ENV] = "all";
+		const pi = createEventHarness();
+		registerCursorAgentsContextDedup(pi);
+
+		const prompt = buildPiSystemPromptWithContextFiles([PROJECT_FILE]);
+		const result = await pi.invokeEvent(
+			"before_agent_start",
+			{
+				type: "before_agent_start",
+				messageType: "user",
+				prompt: "hello",
+				systemPrompt: prompt,
+				systemPromptOptions: makeSystemPromptOptions([PROJECT_FILE]),
+			},
+			cursorModelOverrides,
+		);
+
+		expect(result?.systemPrompt).toBeTypeOf("string");
+		expect(result?.systemPrompt).not.toContain("Project guidance");
+	});
 
 	it("preserves project instructions through registration in cloud runtime", async () => {
 		process.env.PI_CURSOR_RUNTIME = "cloud";

@@ -1,5 +1,5 @@
 import type { McpServerConfig } from "@cursor/sdk";
-import type { Context, ToolResultMessage } from "@earendil-works/pi-ai";
+import type { Context, Tool, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { Tool as McpTool } from "@modelcontextprotocol/server";
 import type { CursorSdkEventDebugRecorder } from "./cursor-sdk-event-debug.js";
 import type {
@@ -39,6 +39,8 @@ export interface CursorPiToolBridgeSnapshot {
 
 export interface CursorPiToolBridgeSnapshotOptions {
 	exposeOverlappingBuiltins?: boolean;
+	/** Effective native request declarations after Pi's prepareLoadout/context projection. */
+	declaredTools?: readonly Tool[];
 }
 
 export interface CursorPiBridgeToolRequest {
@@ -72,12 +74,13 @@ export interface CursorPiToolBridgeRun {
 
 export interface CursorPiToolBridge {
 	isEnabled(): boolean;
-	getToolSurfaceSignature(): string;
+	getToolSurfaceSignature(declaredTools?: readonly Tool[]): string;
 	createRun(options?: CursorPiToolBridgeRunOptions): Promise<CursorPiToolBridgeRun>;
 	disposeAll(reason?: string): Promise<void>;
 }
 
 export interface CursorPiToolBridgeRunOptions {
+	declaredTools?: readonly Tool[];
 	onToolRequest?: (request: CursorPiBridgeToolRequest) => void;
 	debugRecorder?: CursorSdkEventDebugRecorder;
 }

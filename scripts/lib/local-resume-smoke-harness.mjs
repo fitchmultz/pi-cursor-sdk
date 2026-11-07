@@ -106,8 +106,9 @@ export function buildLocalResumeSmokeEnv(
 	artifactDir,
 	{
 		baseEnv = process.env,
-		bridge = false,
-		exposeBuiltinTools = false,
+		lean = true,
+		bridge = lean,
+		exposeBuiltinTools = lean,
 		localResumeEnv = "on",
 	} = {},
 ) {
@@ -116,6 +117,7 @@ export function buildLocalResumeSmokeEnv(
 	const env = buildCursorSmokeEnv({
 		baseEnv,
 		settingSources: "none",
+		lean,
 		bridge,
 		nativeToolDisplay: false,
 		registerNativeTools: false,
@@ -145,8 +147,9 @@ export function startRpc({
 	artifactDir,
 	sessionDir,
 	sessionId,
-	bridge = false,
-	exposeBuiltinTools = false,
+	lean = true,
+	bridge = lean,
+	exposeBuiltinTools = lean,
 	extraExtensions = [],
 	localResumeEnv = "on",
 	baseEnv = process.env,
@@ -188,6 +191,7 @@ export function startRpc({
 			cwd: workspaceDir,
 			env: buildLocalResumeSmokeEnv(artifactDir, {
 				baseEnv,
+				lean,
 				bridge,
 				exposeBuiltinTools,
 				localResumeEnv,

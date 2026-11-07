@@ -6,7 +6,19 @@
 
 This document records maintainer testing lessons for `pi-cursor-sdk`. It complements unit tests and the [Cursor live smoke checklist](./cursor-live-smoke-checklist.md). Use it when adding regression coverage, debugging false-green releases, or building isolated smoke harnesses.
 
-For a **minimal one-session dogfood pass** (baseline env, one native + one bridge call, JSONL ID patterns, bootstrap manifest, edit diff card), use the [Cursor dogfood checklist](./cursor-dogfood-checklist.md) only when its selected changed behavior needs new live proof; do not follow it with a full paid matrix by default.
+For a **minimal legacy/hybrid dogfood pass** (`PI_CURSOR_LEAN=0`, one native + one bridge call, JSONL ID patterns, bootstrap manifest, edit diff card), use the [Cursor dogfood checklist](./cursor-dogfood-checklist.md) only when its selected changed behavior needs new live proof. That native-replay checklist is not default-lean validation; do not follow it with a full paid matrix by default.
+
+## Smoke surface pins must include the lean policy
+
+Default local lean mode forces the pi bridge and builtin exposure on and disables native replay registration. Setting only `PI_CURSOR_PI_TOOL_BRIDGE=0` or `PI_CURSOR_REGISTER_NATIVE_TOOLS=1` therefore cannot select the legacy native surface. Native replay paths (`smoke:visual`, `smoke:steering`, isolated native/plan-strip checks, the platform native matrix, native-specific `debug:provider-events` examples, and the legacy/hybrid dogfood checklist) explicitly select `PI_CURSOR_LEAN=0`. The local-resume tool-surface and cleanup lanes hold that same opt-out across all launches so switching bridge/builtin pins really changes the pool key; changing lean between the two sides would only prove a lean-policy change instead.
+
+Do not globally opt smoke out of lean mode to fix a native lane. Ordinary local-resume lanes and the platform bridge, abort, and HTTP/1.1 suites pin `PI_CURSOR_LEAN=1` to isolate inherited native overrides while exercising the default policy. The isolated basic provider check clears inherited env and leaves lean unset, exercising the built-in default. Offline env/launcher contracts and fake-PATH self-tests cover these boundaries without Cursor calls; real native replay still requires its separate persisted JSONL and visual evidence when selected under the cost policy.
+
+### Legacy/hybrid dogfood is an explicit opt-out
+
+The [dogfood checklist](./cursor-dogfood-checklist.md#minimal-environment) tests legacy native execution/replay alongside the Pi bridge, not the product default. Pin `PI_CURSOR_LEAN=0` on its launches, including manual native/plan-strip recipes. Preserve a protective `PI_CURSOR_NATIVE_TOOLS=0`: a restricted run cannot prove native host execution/replay, so report that evidence unavailable rather than overriding the restriction. Native replay additionally needs display/registration enabled; a bridge assertion needs actual bridge exposure. The legacy expectation that `--no-tools` leaves host tools callable does not apply to default lean mode.
+
+The `debug:provider-events` helper defaults only its child to legacy mode when lean is unset/empty; an explicit `PI_CURSOR_LEAN=1` is forwarded for lean capture. Native-tool, display, and bridge flags are also forwarded, subject to the product's lean overrides. For default-lean or reporter-matched capture, enable `PI_CURSOR_SDK_EVENT_DEBUG=1` on the ordinary Pi invocation without changing its policy instead. See [Pi provider SDK event capture](#pi-provider-sdk-event-capture).
 
 ## Durable store identity versus SDK pathname
 
@@ -274,19 +286,22 @@ Simulate plan-mode execute stripping with the repo fixture:
 
 - `scripts/fixtures/plan-strip-shim/index.ts`
 
-It sets active tools to `read`, `bash`, `edit`, `write` on each `turn_start`. Run pi with:
+It sets active tools to `read`, `bash`, `edit`, `write` on each `turn_start`. This is a **legacy native-replay** recipe, not a default-lean check: explicitly opt out of lean, disable the Pi bridge to isolate host replay, and enable replay display/registration. `PI_CURSOR_NATIVE_TOOLS` remains inherited; if it is `0`, preserve that restriction and report the native assertions unavailable rather than claiming resync coverage. Use `--mode json`: plain `-p` binds print mode, which deliberately disables replay registration even when `PI_CURSOR_REGISTER_NATIVE_TOOLS=1`. Run Pi with:
 
 ```bash
-pi --approve -e scripts/fixtures/plan-strip-shim --cursor-no-fast --model cursor/grok-4.6 \
-  --session-dir "$SMOKE_DIR/plan-strip" \
+PI_CURSOR_LEAN=0 PI_CURSOR_PI_TOOL_BRIDGE=0 \
+PI_CURSOR_NATIVE_TOOL_DISPLAY=1 PI_CURSOR_REGISTER_NATIVE_TOOLS=1 \
+pi --approve -e . -e scripts/fixtures/plan-strip-shim --cursor-no-fast --model cursor/grok-4.6 \
+  --mode json --session-dir "$SMOKE_DIR/plan-strip" \
   -p 'After reset, read README.md and answer PLAN_STRIP_OK=yes.'
 ```
 
-Pass criteria:
+One-shot pass criteria:
 
 - No replay `Tool * not found` entries in JSONL
-- Native replay tools (`grep`, `find`, `read`, etc.) succeed after `turn_start` resync
-- On non-Cursor model switch, native replay wrappers are removed except core pi tools
+- Reported native tools, such as the requested `read`, replay successfully after `turn_start` resync; claim only the tool types actually observed
+
+**Separate model-switch check:** the one-shot command exits and cannot establish non-Cursor switching behavior. In an interactive legacy session, or through the existing offline model-switch contract in [`test/index-native-tools.test.ts`](../test/index-native-tools.test.ts), verify that switching away from Cursor deactivates non-core replay tools while core wrappers delegate ordinary Pi execution/rendering.
 
 ## Local validation ladder
 
@@ -367,21 +382,25 @@ Hard repo rule: Cursor SDK behavior claims must come from the installed `@cursor
 
 When debugging pi parsing, replay routing, bridge timing, or send-plan behavior, capture the raw `onDelta`/`onStep` payloads **as the Cursor provider receives them** instead of using the direct SDK probe above.
 
-One-shot maintainer script (RPC pi run, gitignored artifacts by default):
+The one-shot `debug:provider-events` helper defaults to **legacy/hybrid capture** (RPC Pi run, gitignored artifacts): unset/empty `PI_CURSOR_LEAN` becomes `0` in the child, while explicit `1` or `0` is forwarded without mutating the parent environment. Native display and the bridge default to `1`; explicit inherited values are forwarded, not forced effective over product policy. In particular, lean `1` still disables native tools/replay and forces its bridge on. `PI_CURSOR_NATIVE_TOOLS` is inherited unchanged, so `0` still disables native host tools; legacy registration/display restrictions can also prevent replay cards. A capture summary is not proof that the model invoked either surface. Setting sources follow `--setting-sources`, then `PI_CURSOR_SETTING_SOURCES`, otherwise `all`; use `--setting-sources none` when ambient Cursor config is not part of the reproduction.
+
+For a selected minimal legacy capture:
 
 ```bash
-CURSOR_API_KEY=... npm run debug:provider-events -- \
+PI_CURSOR_LEAN=0 CURSOR_API_KEY=... npm run debug:provider-events -- \
   --cwd . \
   --model cursor/grok-4.6 \
   --prompt 'Repro prompt here' \
+  --setting-sources none \
   --out .debug/cursor-sdk-events/manual-repro
 ```
 
 Or read a prompt from disk:
 
 ```bash
-CURSOR_API_KEY=... npm run debug:provider-events -- \
+PI_CURSOR_LEAN=0 CURSOR_API_KEY=... npm run debug:provider-events -- \
   --prompt-file .debug/repro-prompt.txt \
+  --setting-sources none \
   --out .debug/cursor-sdk-events/manual-repro
 ```
 
@@ -409,7 +428,7 @@ Artifacts under `--out` (default `.debug/cursor-sdk-events/<timestamp>/` under `
 - `conversation.json` — `run.conversation()` when supported
 - `summary.json` — counts and artifact paths
 
-During any normal pi session you can also opt in with:
+To capture **the actual default lean policy** or an existing reporter-selected surface, enable only event debugging on the ordinary Pi command, not the legacy helper. This flag does not change lean, native-tool, display, bridge, or setting-source policy; retain the original flags/config when reproducing a report. For a default-lean checkout run with lean otherwise unset:
 
 ```bash
 PI_CURSOR_SDK_EVENT_DEBUG=1 pi --approve -e . --model cursor/grok-4.6
@@ -465,7 +484,8 @@ Ask the reporter (or capture yourself) for:
 | `pi --version` and installed `pi-cursor-sdk` version | Confirms extension/runtime in use |
 | Model ID (for example `cursor/grok-4.6`) | Routing/replay behavior is model-scoped |
 | Exact repro prompt and prior turns | Multi-turn replay history affects prompt text |
-| Flags: `--cursor-no-fast`, `PI_CURSOR_PI_TOOL_BRIDGE`, `PI_CURSOR_EXPOSE_BUILTIN_TOOLS`, `PI_CURSOR_SETTING_SOURCES`, `PI_CURSOR_TOOL_MANIFEST` | Bridge vs native-only vs narrowed settings; bootstrap callable-surface manifest |
+| Tool policy: `PI_CURSOR_LEAN` and `PI_CURSOR_NATIVE_TOOLS` (including whether each was unset) | Default lean vs legacy/hybrid or legacy MCP-only; determines whether native host execution/replay is possible |
+| Other flags: `--cursor-no-fast`, `PI_CURSOR_NATIVE_TOOL_DISPLAY`, `PI_CURSOR_REGISTER_NATIVE_TOOLS`, `PI_CURSOR_PI_TOOL_BRIDGE`, `PI_CURSOR_EXPOSE_BUILTIN_TOOLS`, `PI_CURSOR_SETTING_SOURCES`, `PI_CURSOR_TOOL_MANIFEST` | Replay display/registration, bridge exposure, narrowed settings, and bootstrap manifest |
 | Whether the listed names are `pi__*` bridge MCP, Cursor-native (`browser_navigate`, `WebSearch`), or `cursor-replay-*` replay IDs | Three different surfaces (see [Cursor native tool replay](./cursor-native-tool-replay.md#live-bridge-vs-replay)) |
 | Red toast / `errorMessage` text, if any | Distinguishes #55 failure surfacing from silent text echo |
 | Process exit / uncaught `ConnectError` / `ETIMEDOUT` stack trace, if any | Hard network crash (**#43**), not #40 model text echo |
@@ -473,7 +493,7 @@ Ask the reporter (or capture yourself) for:
 
 ### Capture steps (maintainers)
 
-Use an isolated session dir and do not paste auth, tokens, or raw debug payloads into issues.
+Use an isolated session dir and do not paste auth, tokens, or raw debug payloads into issues. **Choose the reporter's actual surface before running a capture.** Set the policy variables below in the parent shell to the recorded reporter values; this `env -i` recipe carries them into the isolated process instead of silently clearing them. Unset/empty variables use `1` for both flags in this shell recipe; `PI_CURSOR_LEAN=1` still overrides native tools off, so this does not globally switch reproductions to legacy. Preserve an explicit `PI_CURSOR_NATIVE_TOOLS=0`. Match the remaining CLI flags/extensions/config as well; record any intentional isolation differences instead of claiming an unchanged reproduction.
 
 ```bash
 SMOKE_DIR="/tmp/pi-cursor-sdk-issue40-$(date +%s)"
@@ -483,6 +503,14 @@ chmod 600 "$SMOKE_DIR/home/.pi/agent/auth.json"
 
 env -i HOME="$SMOKE_DIR/home" PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" \
   MISE_DISABLE=1 \
+  PI_CURSOR_LEAN="${PI_CURSOR_LEAN:-1}" \
+  PI_CURSOR_NATIVE_TOOLS="${PI_CURSOR_NATIVE_TOOLS:-1}" \
+  PI_CURSOR_NATIVE_TOOL_DISPLAY="${PI_CURSOR_NATIVE_TOOL_DISPLAY-1}" \
+  PI_CURSOR_REGISTER_NATIVE_TOOLS="${PI_CURSOR_REGISTER_NATIVE_TOOLS-1}" \
+  PI_CURSOR_PI_TOOL_BRIDGE="${PI_CURSOR_PI_TOOL_BRIDGE-1}" \
+  PI_CURSOR_EXPOSE_BUILTIN_TOOLS="${PI_CURSOR_EXPOSE_BUILTIN_TOOLS-0}" \
+  PI_CURSOR_SETTING_SOURCES="${PI_CURSOR_SETTING_SOURCES-all}" \
+  PI_CURSOR_TOOL_MANIFEST="${PI_CURSOR_TOOL_MANIFEST-1}" \
   PI_CURSOR_PI_TOOL_BRIDGE_DEBUG=1 \
   pi --approve -e . --cursor-no-fast --model cursor/grok-4.6 \
   --session-dir "$SMOKE_DIR/session" \
@@ -491,19 +519,19 @@ env -i HOME="$SMOKE_DIR/home" PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/b
 
 Optional provider/SDK timelines (separate from pi session JSONL; see [Pi provider SDK event capture](#pi-provider-sdk-event-capture) and [Cursor SDK event capture probe](#cursor-sdk-event-capture-probe)):
 
-For pi parsing, replay routing, or bridge timing, prefer:
+For reporter-matched Pi parsing or bridge timing, add `PI_CURSOR_SDK_EVENT_DEBUG=1` to the isolated Pi invocation above; it keeps that chosen surface unchanged and writes under `.debug/cursor-sdk-events/`.
+
+The following helper example explicitly selects a **legacy/hybrid comparison** with `PI_CURSOR_LEAN=0`; it is not an unchanged reproduction of a default-lean report. The helper otherwise defaults unset/empty lean to `0` but honors an explicit `1`. Native-tool and display/bridge values are forwarded subject to product policy. Select `--setting-sources` to match the report, or `none` for an intentional ambient-free comparison:
 
 ```bash
-npm run debug:provider-events -- \
+PI_CURSOR_LEAN=0 npm run debug:provider-events -- \
   --cwd "$PWD" \
   --model cursor/grok-4.6 \
   --prompt '<exact reporter prompt>' \
   --out "$SMOKE_DIR/provider-events"
 ```
 
-Or add `PI_CURSOR_SDK_EVENT_DEBUG=1` to the pi run above (writes under `.debug/cursor-sdk-events/`).
-
-For raw Cursor SDK surfaces only:
+For raw Cursor SDK surfaces only (a separate SDK agent path, not proof of the reporter's Pi tool policy):
 
 ```bash
 npm run debug:sdk-events -- \

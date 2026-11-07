@@ -1,5 +1,7 @@
+import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { PassThrough } from "node:stream";
 import { join, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -14,11 +16,17 @@ import {
 	resolveCursorSdkEventDebugEnabled,
 	__testUtils as sdkEventDebugTestUtils,
 } from "../src/cursor-sdk-event-debug.js";
-import { backfillPiSessionSnapshot, parseDebugProviderEventsArgs } from "../scripts/debug-provider-events.mjs";
+import { backfillPiSessionSnapshot, parseDebugProviderEventsArgs, runDebugProviderEvents } from "../scripts/debug-provider-events.mjs";
 import {
 	resolveCursorSettingSources,
 	serializeCursorSettingSources,
 } from "../shared/cursor-setting-sources.mjs";
+
+const providerProbeProcess = vi.hoisted(() => ({ spawn: vi.fn() }));
+vi.mock("node:child_process", async (importOriginal) => ({
+	...await importOriginal<typeof import("node:child_process")>(),
+	spawn: providerProbeProcess.spawn,
+}));
 
 describe("cursor sdk event debug sink", () => {
 	it("is disabled by default", () => {
@@ -571,6 +579,59 @@ describe("discarded incomplete started tool calls", () => {
 });
 
 describe("debug-provider-events maintainer probe", () => {
+	it.each([
+		{ lean: undefined, nativeTools: undefined, display: undefined, bridge: undefined },
+		{ lean: "", nativeTools: undefined, display: undefined, bridge: undefined },
+		{ lean: "1", nativeTools: undefined, display: undefined, bridge: undefined },
+		{ lean: "0", nativeTools: undefined, display: undefined, bridge: undefined },
+		{ lean: undefined, nativeTools: "0", display: "0", bridge: "0" },
+		{ lean: "1", nativeTools: "0", display: "0", bridge: "0" },
+		{ lean: "0", nativeTools: "0", display: "0", bridge: "0" },
+	])("preserves capture policy with parent lean=$lean and nativeTools=$nativeTools", async ({ lean, nativeTools, display, bridge }) => {
+		const artifactDir = mkdtempSync(join(tmpdir(), "pi-cursor-debug-provider-env-"));
+		vi.stubEnv("CURSOR_API_KEY", "offline-probe-key");
+		vi.stubEnv("PI_CURSOR_LEAN", lean);
+		vi.stubEnv("PI_CURSOR_NATIVE_TOOLS", nativeTools);
+		vi.stubEnv("PI_CURSOR_NATIVE_TOOL_DISPLAY", display);
+		vi.stubEnv("PI_CURSOR_PI_TOOL_BRIDGE", bridge);
+		// Fake only the Pi process boundary: no extension, provider, or SDK turn runs.
+		const child = Object.assign(new EventEmitter(), {
+			stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
+			exitCode: 0, signalCode: null,
+		});
+		child.stdin.on("data", () => child.stdout.write('{"type":"agent_settled"}\n'));
+		providerProbeProcess.spawn.mockReturnValueOnce(child);
+		try {
+			writeFileSync(join(artifactDir, "summary.json"), JSON.stringify({
+				artifactDir, artifacts: {}, counts: {}, elapsedMs: 0, waitResultRecorded: true,
+			}));
+			const args = parseDebugProviderEventsArgs([
+				"--cwd", artifactDir, "--out", artifactDir, "--prompt", "offline probe", "--setting-sources", "none",
+			]);
+
+			await expect(runDebugProviderEvents(args)).resolves.toMatchObject({ artifactDir });
+
+			expect(providerProbeProcess.spawn).toHaveBeenCalledOnce();
+			const childEnv = providerProbeProcess.spawn.mock.calls[0]![2].env as NodeJS.ProcessEnv;
+			expect(childEnv.PI_CURSOR_LEAN).toBe(lean || "0");
+			expect(childEnv.PI_CURSOR_NATIVE_TOOLS).toBe(nativeTools);
+			expect(childEnv.PI_CURSOR_NATIVE_TOOL_DISPLAY).toBe(display ?? "1");
+			expect(childEnv.PI_CURSOR_PI_TOOL_BRIDGE).toBe(bridge ?? "1");
+			expect(childEnv.PI_CURSOR_SETTING_SOURCES).toBe("none");
+			expect(process.env.PI_CURSOR_LEAN).toBe(lean);
+			expect(process.env.PI_CURSOR_NATIVE_TOOLS).toBe(nativeTools);
+			expect(process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY).toBe(display);
+			expect(process.env.PI_CURSOR_PI_TOOL_BRIDGE).toBe(bridge);
+		} finally {
+			providerProbeProcess.spawn.mockReset();
+			child.stdin.destroy();
+			child.stdout.destroy();
+			child.stderr.destroy();
+			vi.unstubAllEnvs();
+			rmSync(artifactDir, { recursive: true, force: true });
+		}
+	});
+
 	it("backfills a missing pi session snapshot after pi exits", () => {
 		const baseDir = mkdtempSync(join(tmpdir(), "pi-cursor-debug-provider-backfill-"));
 		const artifactDir = join(baseDir, "artifacts");

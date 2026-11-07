@@ -1,6 +1,7 @@
+import { isCursorLeanEnabled } from "./cursor-lean.js";
 import { createHash } from "node:crypto";
 import type { AgentModeOption, AgentOptions, LocalAgentOptions, LocalAgentStore, ModelSelection, SDKAgent, SettingSource } from "@cursor/sdk";
-import type { Context } from "@earendil-works/pi-ai";
+import type { Context, Tool } from "@earendil-works/pi-ai";
 import { normalizeCursorCustomStoreRoot } from "./cursor-custom-store-path.js";
 import { claimCursorLocalAgent } from "./cursor-local-agent-ownership.js";
 import {
@@ -133,6 +134,7 @@ function rethrowSupersededWhenReplacedByDifferentPoolIdentity(scopeKey: string, 
 interface SessionCursorAgentCreateParams {
 	scope?: CursorTurnScope;
 	bridge?: CursorPiToolBridge;
+	bridgeDeclaredTools?: readonly Tool[];
 	apiKey: string;
 	agentMode: AgentModeOption;
 	cwd: string;
@@ -140,6 +142,8 @@ interface SessionCursorAgentCreateParams {
 	settingSources?: SettingSource[];
 	localSafety?: CursorLocalSafetyOptions;
 	agents?: AgentOptions["agents"];
+	/** Captured by the turn owner before asynchronous acquisition, when available. */
+	leanEnabled?: boolean;
 	/** Captured by the turn owner before asynchronous acquisition. */
 	nativeToolsEnabled?: boolean;
 	useHttp1ForAgent?: boolean;
@@ -172,11 +176,12 @@ export function buildCursorLocalAgentOptions(options: {
 	settingSources?: SettingSource[];
 	localSafety?: CursorLocalSafetyOptions;
 	store?: LocalAgentStore;
+	leanEnabled?: boolean;
 }): LocalAgentOptions {
 	return {
 		cwd: options.cwd,
 		...(options.store ? { store: options.store } : {}),
-		...(options.settingSources ? { settingSources: options.settingSources } : {}),
+		...((options.leanEnabled ?? isCursorLeanEnabled()) ? { settingSources: [] } : options.settingSources ? { settingSources: options.settingSources } : {}),
 		...(options.localSafety?.autoReview === true ? { autoReview: true } : {}),
 		...(options.localSafety?.sandboxEnabled === true ? { sandboxOptions: { enabled: true } } : {}),
 	};
@@ -221,9 +226,9 @@ function buildApiKeyPoolKeyFingerprint(apiKey: string): string {
 	return createHash("sha256").update(apiKey).digest("hex").slice(0, 16);
 }
 
-function buildBridgePoolKeySuffix(registeredBridge: CursorPiToolBridge | undefined): string {
+function buildBridgePoolKeySuffix(registeredBridge: CursorPiToolBridge | undefined, declaredTools?: readonly Tool[]): string {
 	if (!registeredBridge) return "bridge:absent";
-	return registeredBridge.getToolSurfaceSignature();
+	return registeredBridge.getToolSurfaceSignature(declaredTools);
 }
 
 function buildCustomSubagentPoolKeySuffix(agents: AgentOptions["agents"]): string[] {
@@ -254,10 +259,10 @@ function buildSessionAgentPoolKey(scopeKey: string, params: SessionCursorAgentCr
 				? "http1:on"
 				: "http1:off",
 		buildApiKeyPoolKeyFingerprint(params.apiKey),
-		buildBridgePoolKeySuffix("bridge" in params ? params.bridge : getRegisteredCursorPiToolBridge()),
+		buildBridgePoolKeySuffix("bridge" in params ? params.bridge : getRegisteredCursorPiToolBridge(), params.leanEnabled ? params.bridgeDeclaredTools : undefined),
 		...buildCustomSubagentPoolKeySuffix(params.agents),
-		// Omit for the default so historical durable keys remain byte-for-byte stable.
-		...(params.nativeToolsEnabled === false ? ["tools:mcp-only"] : []),
+		// Omit default policy markers so historical durable keys stay stable.
+		...(params.leanEnabled ? ["lean"] : params.nativeToolsEnabled === false ? ["tools:mcp-only"] : []),
 	].join("\0");
 }
 
@@ -485,6 +490,8 @@ async function createSessionAgentEntry(
 		const registeredBridge = params.bridge;
 		if (registeredBridge) {
 			bridgeRun = await registeredBridge.createRun({
+				// Legacy mode keeps the registry-owned surface; lean follows Pi's projected loadout.
+				declaredTools: params.leanEnabled ? params.bridgeDeclaredTools : undefined,
 				onToolRequest: params.onBridgeToolRequest,
 				debugRecorder: params.debugRecorder,
 			});
@@ -514,17 +521,20 @@ async function createSessionAgentEntry(
 		sessionStore = storeSelection.sessionStore;
 		const resumeAttemptAllowed = storeSelection.resumeAttemptAllowed;
 		let resumeNotice = storeSelection.resumeFallback ? LOCAL_RESUME_FALLBACK_NOTICE : undefined;
-		const buildAgentOptions = () => ({
+		const buildAgentOptions = (): AgentOptions => ({
 			apiKey: params.apiKey,
 			model: params.modelSelection,
 			mode: params.agentMode,
 			local: buildCursorLocalAgentOptions({
 				cwd: params.cwd,
+				leanEnabled: params.leanEnabled,
 				settingSources: params.settingSources,
 				localSafety: params.localSafety,
 				store: sessionStore!.store,
 			}),
-			...(params.nativeToolsEnabled === false ? { tools: ["mcp"] } : {}),
+			...(params.leanEnabled
+				? { tools: bridgeRun ? ["mcp"] : [] }
+				: params.nativeToolsEnabled === false ? { tools: ["mcp"] } : {}),
 			...(bridgeRun?.mcpServers ? { mcpServers: bridgeRun.mcpServers } : {}),
 			...(params.agents && Object.keys(params.agents).length ? { agents: params.agents } : {}),
 		});
@@ -597,7 +607,14 @@ export function invalidateSessionAgent(
 }
 
 export async function acquireSessionCursorAgent(input: SessionCursorAgentCreateParams): Promise<SessionCursorAgentLease> {
-	const params = { ...input, scope: input.scope ?? getCursorSessionScopeSnapshot(), bridge: "bridge" in input ? input.bridge : getRegisteredCursorPiToolBridge() };
+	const leanEnabled = input.leanEnabled ?? isCursorLeanEnabled();
+	const params = {
+		...input,
+		leanEnabled,
+		nativeToolsEnabled: leanEnabled ? false : input.nativeToolsEnabled,
+		scope: input.scope ?? getCursorSessionScopeSnapshot(),
+		bridge: "bridge" in input ? input.bridge : getRegisteredCursorPiToolBridge(),
+	};
 	const scopeKey = params.scope.scopeKey;
 	const persistentStore = params.scope.sessionFile !== undefined;
 	params.storeRoot = persistentStore && params.storeRoot !== undefined ? normalizeCursorCustomStoreRoot(params.storeRoot) : undefined;

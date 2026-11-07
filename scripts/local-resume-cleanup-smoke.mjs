@@ -27,8 +27,9 @@ export async function runCleanupSmoke() {
 	let oldResumeEntryId;
 	let oldStoreIdentity;
 	console.error(scrubSmokeText(`[local-resume-smoke] artifacts: ${artifactRoot}`));
+	// Native -> bridge replacement must create a superseded agent even with lean enabled by default.
 	try {
-		await withRpc({ artifactDir: artifactRoot, sessionDir, sessionId }, async (rpc) => {
+		await withRpc({ artifactDir: artifactRoot, sessionDir, sessionId, lean: false }, async (rpc) => {
 			const baseline = await promptAndRead({
 				rpc,
 				artifactDir: artifactRoot,
@@ -47,7 +48,7 @@ export async function runCleanupSmoke() {
 			}
 		});
 
-		await withRpc({ artifactDir: artifactRoot, sessionDir, sessionId, bridge: true, exposeBuiltinTools: true }, async (rpc) => {
+		await withRpc({ artifactDir: artifactRoot, sessionDir, sessionId, lean: false, bridge: true, exposeBuiltinTools: true }, async (rpc) => {
 			const changedSurface = await promptAndRead({
 				rpc,
 				artifactDir: artifactRoot,
@@ -85,7 +86,7 @@ export async function runCleanupSmoke() {
 			assertExactStringArray("cleanup deleted agents", latestCleanup.deletedAgentIds, [oldAgentId]);
 		});
 
-		await withRpc({ artifactDir: artifactRoot, sessionDir, sessionId, bridge: true, exposeBuiltinTools: true }, async (rpc) => {
+		await withRpc({ artifactDir: artifactRoot, sessionDir, sessionId, lean: false, bridge: true, exposeBuiltinTools: true }, async (rpc) => {
 			const restart = await promptAndRead({
 				rpc,
 				artifactDir: artifactRoot,
@@ -97,7 +98,7 @@ export async function runCleanupSmoke() {
 			if (restart.metadata.run.agentId !== newAgentId) fail("cleanup deleted or failed to resume the current recorded agent", JSON.stringify({ expected: newAgentId, actual: restart.metadata.run.agentId }, null, 2));
 		});
 
-		await withRpc({ artifactDir: artifactRoot, sessionDir, sessionId, extraExtensions: [extensionPath] }, async (rpc) => {
+		await withRpc({ artifactDir: artifactRoot, sessionDir, sessionId, lean: false, extraExtensions: [extensionPath] }, async (rpc) => {
 			const oldBranch = await promptAndRead({
 				rpc,
 				artifactDir: artifactRoot,

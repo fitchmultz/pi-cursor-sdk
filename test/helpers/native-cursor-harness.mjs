@@ -58,6 +58,8 @@ export async function concurrentFixture(t, run) {
     PI_CODING_AGENT_DIR: join(root, "agent"), PI_OFFLINE: "1", PI_CURSOR_SETTING_SOURCES: "none",
     CURSOR_API_KEY: "offline-fixture-only", PI_CURSOR_NATIVE_TOOL_DISPLAY: "1",
     PI_CURSOR_ASK_QUESTION: "0", PI_CURSOR_LOCAL_RESUME: "0", PI_CURSOR_SDK_EVENT_DEBUG: "1",
+    // These contracts exercise legacy replay and Cloud, not the lean default.
+    PI_CURSOR_LEAN: "0",
   });
   globalThis.fetch = (input, options) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);

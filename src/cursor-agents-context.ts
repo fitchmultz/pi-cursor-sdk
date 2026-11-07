@@ -4,6 +4,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { parseEnvBoolean } from "./cursor-env-boolean.js";
+import { isCursorLeanEnabled } from "./cursor-lean.js";
 import { isCursorModel } from "./cursor-model.js";
 import {
 	cursorSettingSourcesIncludes,
@@ -17,6 +18,8 @@ export const CURSOR_PRESERVE_PI_AGENTS_MD_ENV = "PI_CURSOR_PRESERVE_PI_AGENTS_MD
 /** Opening tag prefix pi `buildSystemPrompt()` uses for each context file (path attribute only). */
 export const PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX = '<project_instructions path="';
 const PI_PROJECT_INSTRUCTIONS_CLOSE = "</project_instructions>";
+const PI_PROJECT_CONTEXT_OPEN = "<project_context>\nProject-specific instructions and guidelines:\n\n";
+const PI_PROJECT_CONTEXT_CLOSE = "\n</project_context>";
 
 function normalizeContextPath(filePath: string): string {
 	return filePath.replace(/\\/g, "/");
@@ -115,13 +118,50 @@ export function serializePiProjectInstructionsBlock(file: PiAgentsContextFile): 
 /** Exact pi `buildSystemPrompt()` serialization for the project_context section. */
 export function serializePiProjectContextSection(contextFiles: readonly PiAgentsContextFile[]): string {
 	if (contextFiles.length === 0) return "";
-	return [
-		"<project_context>",
-		"Project-specific instructions and guidelines:",
-		"",
-		contextFiles.map(serializePiProjectInstructionsBlock).join("\n\n"),
-		"</project_context>",
-	].join("\n");
+	return `${PI_PROJECT_CONTEXT_OPEN}${contextFiles.map(serializePiProjectInstructionsBlock).join("\n\n")}${PI_PROJECT_CONTEXT_CLOSE}`;
+}
+
+/** Recognize only canonical Pi blocks with exactly the supplied paths, not arbitrary user-authored XML. */
+function hasPiContextFilePaths(sectionBody: string, contextFiles: readonly PiAgentsContextFile[]): boolean {
+	let remaining = sectionBody;
+	for (const [index, file] of contextFiles.entries()) {
+		const open = `${PI_PROJECT_INSTRUCTIONS_OPEN_PREFIX}${file.path}">\n`;
+		if (!remaining.startsWith(open)) return false;
+		const close = `\n${PI_PROJECT_INSTRUCTIONS_CLOSE}`;
+		const closeStart = remaining.indexOf(close, open.length);
+		if (closeStart < 0) return false;
+		remaining = remaining.slice(closeStart + close.length);
+		if (index < contextFiles.length - 1) {
+			if (!remaining.startsWith("\n\n")) return false;
+			remaining = remaining.slice(2);
+		}
+	}
+	return remaining.length === 0;
+}
+
+/** Ensure lean mode receives Pi's authoritative project context, even if another hook altered its rendered block. */
+export function ensurePiAgentsContextInSystemPrompt(
+	systemPrompt: string,
+	contextFiles: readonly PiAgentsContextFile[],
+): string {
+	const expectedSection = serializePiProjectContextSection(contextFiles);
+	if (!expectedSection || systemPrompt.includes(expectedSection)) return systemPrompt;
+
+	let start = systemPrompt.indexOf(PI_PROJECT_CONTEXT_OPEN);
+	while (start >= 0) {
+		const bodyStart = start + PI_PROJECT_CONTEXT_OPEN.length;
+		const closeStart = systemPrompt.indexOf(PI_PROJECT_CONTEXT_CLOSE, bodyStart);
+		if (closeStart < 0) break;
+		if (hasPiContextFilePaths(systemPrompt.slice(bodyStart, closeStart), contextFiles)) {
+			const end = closeStart + PI_PROJECT_CONTEXT_CLOSE.length;
+			return systemPrompt.slice(0, start) + expectedSection + systemPrompt.slice(end);
+		}
+		start = systemPrompt.indexOf(PI_PROJECT_CONTEXT_OPEN, bodyStart);
+	}
+
+	// Unknown sections (including ambiguous literal closing tags in file content)
+	// are opaque. Add the authoritative section without discarding user text.
+	return systemPrompt ? `${systemPrompt}\n\n${expectedSection}` : expectedSection;
 }
 
 /** Remove pi context blocks that overlap Cursor setting sources. */
@@ -161,6 +201,9 @@ export function resolveCursorFacingSystemPrompt(
 ): string {
 	if (runtime === "cloud" || !systemPromptOptions) return systemPrompt;
 	const contextFiles = systemPromptOptions.contextFiles ?? [];
+	if (isCursorLeanEnabled()) {
+		return ensurePiAgentsContextInSystemPrompt(systemPrompt, contextFiles);
+	}
 	const settingSources =
 		settingSourcesRaw === undefined
 			? getEffectiveCursorSettingSources()

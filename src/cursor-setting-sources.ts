@@ -1,3 +1,4 @@
+import { isCursorLeanEnabled } from "./cursor-lean.js";
 import type { SettingSource } from "@cursor/sdk";
 /** Provider-facing wrapper; canonical parsing lives in shared/cursor-setting-sources.mjs. */
 import {
@@ -16,7 +17,7 @@ export function resolveCursorSettingSources(raw?: string): SettingSource[] | und
 export function getEffectiveCursorSettingSources(
 	raw: string | undefined = process.env[CURSOR_SETTING_SOURCES_ENV],
 ): SettingSource[] | undefined {
-	return resolveCursorSettingSources(raw);
+	return isCursorLeanEnabled() ? [] : resolveCursorSettingSources(raw);
 }
 
 export function cursorSettingSourcesIncludes(

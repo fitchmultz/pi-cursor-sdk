@@ -2,12 +2,14 @@
 
 User-facing overview of callable vs display-only tools: [Cursor tool surfaces in pi](./cursor-tool-surfaces.md).
 
+Lean mode is the default (`PI_CURSOR_LEAN` unset or `1`). It exposes only the Pi bridge path below, disables native Cursor tools and ambient Cursor settings/MCP, and does not register replay, question, or skill-activation wrappers. Set `PI_CURSOR_LEAN=0` at startup and restart Pi to use the legacy hybrid/replay surface described here. Bridge execution/timeout details apply in both modes; native replay sections apply only to legacy mode.
+
 pi-cursor-sdk has two separate pi-facing paths plus Cursor's own local-agent tool surface:
 
-1. **Local pi MCP bridge:** default-on for local Cursor agents. It exposes the current pi session's bridgeable active tools to Cursor through a tokenized `127.0.0.1` MCP endpoint, excluding internal Cursor replay activity names and, by default, overlapping built-in pi tools (`read`, `bash`, `write`, `edit`, `grep`, `find`, `ls`). When Cursor calls one of those MCP tools, pi executes the real pi tool through the normal pi tool path.
+1. **Local pi MCP bridge:** default-on for local Cursor agents. It exposes the current pi session's bridgeable active tools to Cursor through a tokenized `127.0.0.1` MCP endpoint, excluding internal Cursor replay activity names. Lean includes overlapping built-ins (`read`, `bash`, `write`, `edit`, `grep`, `find`, `ls`) only when active and request-declared; legacy hides them unless `PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1`. When Cursor calls one of these MCP tools, pi executes the real pi tool through the normal pi tool path.
 2. **Cursor native tool replay:** display-only. It renders completed Cursor SDK tool activity as pi-native-looking cards using recorded Cursor results.
 
-This document is about replay. Replay is not execution and is not the local pi bridge. Pi `tool_call` hooks cannot govern native work that already ran before replay; blocking or rewriting its card cannot prevent or transform the original command. Hiding replay or disabling the bridge is not enforcement. For the opt-in public SDK MCP-only local surface, its ambient-MCP limits, and why it is not a sandbox, see [MCP-only local turns](./cursor-tool-surfaces.md#opt-in-mcp-only-local-turns).
+This document is about replay. Replay is not execution and is not the local pi bridge. Pi `tool_call` hooks cannot govern native work that already ran before replay; blocking or rewriting its card cannot prevent or transform the original command. Hiding replay or disabling the bridge is not enforcement. For default lean routing and the separate legacy public SDK MCP-only opt-out, see [Cursor tool surfaces](./cursor-tool-surfaces.md). Neither is an OS sandbox: allowed Pi/MCP tools can execute arbitrary work, and the legacy MCP-only opt-out retains ambient MCP unless setting sources are disabled.
 
 ## Live bridge vs replay
 
@@ -23,7 +25,7 @@ Cursor SDK `plan` mode (`--cursor-mode plan` or `/cursor-mode plan`) can make Cu
 
 ## Local pi bridge summary
 
-The bridge is enabled by default when bridgeable active pi tools exist. Cursor sees bridge-owned MCP names such as `pi__sem_reindex`, while pi history and tool cards use the real pi tool name such as `sem_reindex`. The bridge hides overlapping built-in pi tools by default because Cursor already has native equivalents; extension/custom tools and non-overlapping active tools present in pi's active tool registry normally remain exposed. pi-cursor-sdk also registers `cursor_ask_question` for Cursor models when the bridge is enabled and `PI_CURSOR_ASK_QUESTION=1`, exposed to Cursor as `pi__cursor_ask_question`. The tool is off by default. When pi has visible Agent Skills loaded, pi-cursor-sdk registers `cursor_activate_skill`, exposed as `pi__cursor_activate_skill`, so Cursor can load the full pi `SKILL.md` that corresponds to the current pi skill catalog. The bridge does not call pi tool `execute()` handlers directly; it queues the request, emits a real pi `toolCall`, waits for the matching pi `toolResult`, and resolves the Cursor MCP call back into the same live Cursor SDK run without creating a new `Agent`, unless the run was disposed, aborted, or cancelled.
+The bridge is enabled by default when bridgeable active pi tools exist. Cursor sees bridge-owned MCP names such as `pi__sem_reindex`, while pi history and tool cards use the real pi tool name such as `sem_reindex`. Lean mode does not register replay, question, or skill-activation tools. Lean direct exposure intersects Pi's active registry with the current model request declarations, preserving projected descriptions/schemas and CodeMode nested guidance; an empty declaration exposes no tools. SDK create/resume use `tools: ["mcp"]` for a nonempty bridge or `tools: []` for an empty bridge, with `local.settingSources: []`. Nested CodeMode/MCP availability stays under Pi's control; see [CodeMode routing](./cursor-tool-surfaces.md#built-in-codemode-and-mcp). Legacy mode can register display wrappers, the opt-in question tool, and skill activation for visible Pi skills, and hides overlapping built-ins unless opted in. The bridge does not call pi tool `execute()` handlers directly; it queues the request, emits a real pi `toolCall`, waits for the matching pi `toolResult`, and resolves the Cursor MCP call back into the same live Cursor SDK run without creating a new `Agent`, unless the run was disposed, aborted, or cancelled.
 
 Outstanding bridge calls pause the live run's idle-abandonment timer (five minutes by default), including queued/emitted requests and pi tools awaiting an answer. The full idle window resumes after the last matching call settles and the provider drain lease ends, including when cleanup was requested before the lease. Explicit abort/shutdown/reset/compaction and the fail-closed MCP/bridge deadline (one hour by default) still clean up pending work. Display-only native replay without pending bridge work retains its idle expiry.
 
@@ -32,18 +34,19 @@ The bridge migrated from legacy `@modelcontextprotocol/sdk` v1 to stable MCP v2.
 Rollback, timeout, and diagnostics controls:
 
 ```bash
-PI_CURSOR_ASK_QUESTION=0 pi --model cursor/grok-4.6
-PI_CURSOR_PI_TOOL_BRIDGE=0 pi --model cursor/grok-4.6
-PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1 pi --model cursor/grok-4.6
+# Legacy-only controls; lean keeps the bridge/built-ins on and never adds the question wrapper.
+PI_CURSOR_LEAN=0 PI_CURSOR_ASK_QUESTION=0 pi --model cursor/grok-4.6
+PI_CURSOR_LEAN=0 PI_CURSOR_PI_TOOL_BRIDGE=0 pi --model cursor/grok-4.6
+PI_CURSOR_LEAN=0 PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1 pi --model cursor/grok-4.6
 PI_CURSOR_MCP_TOOL_TIMEOUT_SECONDS=7200 pi --model cursor/grok-4.6
 PI_CURSOR_MCP_TOOL_TIMEOUT_MS=7200000 pi --model cursor/grok-4.6
 PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS=120000 pi --model cursor/grok-4.6
-PI_CURSOR_MCP_CONNECT_TIMEOUT_SECONDS=5 pi --model cursor/grok-4.6
-PI_CURSOR_MCP_CONNECT_TIMEOUT_MS=5000 pi --model cursor/grok-4.6
+PI_CURSOR_LEAN=0 PI_CURSOR_MCP_CONNECT_TIMEOUT_SECONDS=5 pi --model cursor/grok-4.6
+PI_CURSOR_LEAN=0 PI_CURSOR_MCP_CONNECT_TIMEOUT_MS=5000 pi --model cursor/grok-4.6
 PI_CURSOR_PI_TOOL_BRIDGE_DEBUG=1 pi --model cursor/grok-4.6
 ```
 
-`PI_CURSOR_ASK_QUESTION=1` enables only `cursor_ask_question` / `pi__cursor_ask_question`, leaving the rest of the pi bridge available; it is off by default. `PI_CURSOR_PI_TOOL_BRIDGE=0` disables the bridge, including `pi__cursor_ask_question`. `PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1` opts in to exposing overlapping pi tool names that Cursor already has native equivalents for (`read`, `bash`, `write`, `edit`, `grep`, `find`, and `ls`). By default those names are hidden even when pi's Cursor replay wrapper has registered them as extension tools; non-overlapping active built-ins remain bridgeable by default. The installed Cursor SDK uses a 60-second MCP protocol default; pi-cursor-sdk overrides that seam by default with 3600 seconds for MCP `callTool` requests and 10 seconds for verified initialize/listTools requests on first send. Bridged calls also have a local fail-closed deadline capped by the effective MCP tool timeout; lower it with `PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS` to reject stale pending state and abort active pi execution sooner. Unknown MCP protocol timeout stacks keep the SDK default. `PI_CURSOR_PI_TOOL_BRIDGE_DEBUG=1` emits typed, allowlisted, scrubbed single-line JSONL bridge diagnostics to `process.stderr` with prefix `[pi-cursor-sdk:bridge]`; it is off by default, uses run-safe IDs that are not reused in endpoint paths, and does not print endpoint URLs/path components/tokens, raw args/results, file contents, or secrets. Cursor-native tools, Cursor settings, plugins, and configured Cursor MCP servers still come from the Cursor SDK local agent path. Cloud Cursor agents are out of scope for this bridge.
+Only in legacy mode (`PI_CURSOR_LEAN=0`), `PI_CURSOR_ASK_QUESTION=1` enables only `cursor_ask_question` / `pi__cursor_ask_question`, leaving the rest of the pi bridge available; it is off by default. `PI_CURSOR_PI_TOOL_BRIDGE=0` disables the bridge, including `pi__cursor_ask_question`. `PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1` opts in to exposing overlapping pi tool names that Cursor already has native equivalents for (`read`, `bash`, `write`, `edit`, `grep`, `find`, and `ls`). Legacy hides those names by default even when Cursor's replay wrapper registered them as extension tools; non-overlapping active built-ins remain bridgeable. Lean overrides bridge/built-in opt-outs and never registers these wrappers. The installed Cursor SDK uses a 60-second MCP protocol default; pi-cursor-sdk overrides that seam by default with 3600 seconds for MCP `callTool` requests and 10 seconds for verified initialize/listTools requests on first send. Bridged calls also have a local fail-closed deadline capped by the effective MCP tool timeout; lower it with `PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS` to reject stale pending state and abort active pi execution sooner. Unknown MCP protocol timeout stacks keep the SDK default. `PI_CURSOR_PI_TOOL_BRIDGE_DEBUG=1` emits typed, allowlisted, scrubbed single-line JSONL bridge diagnostics to `process.stderr` with prefix `[pi-cursor-sdk:bridge]`; it is off by default, uses run-safe IDs that are not reused in endpoint paths, and does not print endpoint URLs/path components/tokens, raw args/results, file contents, or secrets. Cursor-native tools, Cursor settings, plugins, and configured Cursor MCP servers still come from the Cursor SDK local agent path. Cloud Cursor agents are out of scope for this bridge.
 
 ## Shell correlation and evidence
 
@@ -74,13 +77,13 @@ When Cursor reports completed tool activity, the extension can display recorded 
 
 Cursor `glob` activity is displayed through native `find` cards.
 
-For the full `@cursor/sdk@1.0.37` `ToolType` set, disposition matrix, and runtime alias normalization, see [SDK ToolType replay matrix](#sdk-tooltype-replay-matrix) below. Official SDK reference: https://cursor.com/docs/sdk/typescript
+For the full installed `@cursor/sdk@1.0.40` `ToolType` set, disposition matrix, and runtime alias normalization, see [SDK ToolType replay matrix](#sdk-tooltype-replay-matrix) below. Official SDK reference: https://cursor.com/docs/sdk/typescript
 
 Edit and write activity replays through pi-facing `edit` and `write` cards only when replay arguments truthfully satisfy the matching pi schema, but still uses recorded Cursor results only. The adapter passes through truthful Cursor paths, content when Cursor reported it, and recorded diff/details; it does not pretend Cursor's editing schema is pi's schema and it fails closed if a recorded replay result is missing. Cursor `StrReplace` with recorded replacement text displays as native-looking `edit`; path-only Cursor `edit` and notebook edit activity fall back to neutral Cursor activity so pi does not reject the replay before recorded-result handling. Cursor `write` displays as native-looking `write`. Diagnostics, delete, todos/plans, task/subagent, image, MCP, semantic search, screen recording, and web search/fetch activity use neutral Cursor activity cards with pi's default success/error tool shell. Cursor SDK `task` activity is labeled **Cursor subagent** by default because it represents Cursor-spawned child-agent work; `PI_CURSOR_TASK_PRESENTATION=task` keeps the older **Cursor task** wording for comparison. MCP completions whose `toolName` is `WebSearch` / `web_search` / `WebFetch` / similar are labeled **Cursor web search** or **Cursor web fetch** instead of generic **Cursor MCP**. Neutral Cursor activity cards carry display metadata such as `activityTitle` and `activitySummary`, so partial/collapsed cards can say `Cursor plan`, `Cursor todos`, `Cursor subagent`, `Cursor MCP`, `Cursor semantic search`, `Cursor screen recording`, `Cursor web search`, `Cursor web fetch`, or `Cursor edit` instead of only `Cursor activity`. These replay tools only display recorded Cursor results; they never mutate files or execute tool work directly. Replay paths are normalized to workspace-relative paths when possible. Most collapsed replay cards include bounded previews for diffs and text details so small edits, todos, task output, and MCP results are visible without expanding; web search/fetch activity stays summary-only while collapsed because those cards often arrive after final text and can otherwise bury the answer. Ctrl+O expansion shows the recorded details. Edit previews omit raw unified diff headers and show compact numbered changed/context lines using pi's native diff added/removed/context colors, and write previews use syntax highlighting when pi can infer a language from the path. Image generation replay cards show the saved image path in the collapsed summary and render the image inline when pi terminal image display is enabled and the generated file is still readable.
 
 ## SDK ToolType replay matrix
 
-Source of truth for SDK tool names: `@cursor/sdk@1.0.37` public `ToolType = ToolCall["type"]` union and https://cursor.com/docs/sdk/typescript. All SDK 1.0.36 variants remain; SDK 1.0.37 adds `computerUse`.
+Source of truth for SDK tool names: installed `@cursor/sdk@1.0.40` public `ToolType = ToolCall["type"]` union and https://cursor.com/docs/sdk/typescript. The 17 public variants below are unchanged from SDK 1.0.37, which added `computerUse` to the SDK 1.0.36 set. This is a declaration/replay contract, not proof that every tool is available in a particular run.
 
 Implementation owners: `src/cursor-tool-presentation-registry.ts` (canonical names, labels, visibility, replay policy, bridge exclusions for internal replay wrappers, alias normalization, and display-spec key completeness), `src/cursor-transcript-tool-specs.ts` (registry-keyed display implementations for transcript formatting and pi display builders), `src/cursor-native-tool-display-replay.ts` (replay card rendering derived from registry replay metadata), and `src/cursor-web-tool-activity.ts` (MCP/web alias remapping before display lookup).
 
@@ -215,10 +218,10 @@ Native replay wrappers are registered only for tool names not already owned by a
 
 Registration checks the current tool owner on every model sync, not once per process. Pi rebuilds its tool registry after `/new`, `/resume`, reloads, and session switches. Cursor reinstalls wrappers over builtins, but if the new session loads another extension's tool, Cursor stops replaying through that name and leaves the other extension untouched. Replay becomes available again when the conflict disappears. A conflicting name is reported to the user only once. Any `cursor-replay-*` call that reaches a Cursor wrapper with no recorded display fails closed instead of running the real tool.
 
-Disable native replay registration entirely:
+Lean already disables native replay registration. To disable it while retaining the legacy execution surface:
 
 ```bash
-PI_CURSOR_NATIVE_TOOL_DISPLAY=0 pi --model cursor/grok-4.6
+PI_CURSOR_LEAN=0 PI_CURSOR_NATIVE_TOOL_DISPLAY=0 pi --model cursor/grok-4.6
 ```
 
 `PI_CURSOR_REGISTER_NATIVE_TOOLS=0` is also accepted as a registration-only opt-out.

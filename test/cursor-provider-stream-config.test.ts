@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { Type } from "typebox";
 import {
 	resetCursorProviderTestState,
 	mockedCreate,
@@ -15,6 +16,8 @@ import {
 	mockedMessagesList,
 	asMockSdkAgent,
 	createMockAgentPlatform,
+	registerBridgeForProviderTest,
+	createTestToolInfo,
 } from "./helpers/cursor-provider-harness.js";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 import { cursorLiveRuns } from "../src/cursor-provider-live-run-drain.js";
@@ -42,6 +45,7 @@ async function setCursorModeForProviderTest(mode: "agent" | "plan", existing?: R
 
 describe("streamCursor prompt and model config", () => {
 	beforeEach(resetCursorProviderTestState);
+	afterEach(() => vi.unstubAllEnvs());
 
 	it("leaves local safety controls off by default", async () => {
 		mockCreatedAgent({
@@ -531,6 +535,45 @@ describe("streamCursor prompt and model config", () => {
 		expect(sentMessage.text).not.toContain("Pi bridge");
 		expect(sentMessage.text).not.toContain("Use pi__cursor_ask_question");
 		expect(sentMessage.text).not.toContain("prefer matching exposed pi__* tools");
+	});
+
+	it("omits pi bridge prompt guidance in lean mode when the request declares no tools", async () => {
+		vi.stubEnv("PI_CURSOR_LEAN", "1");
+		const previousManifest = process.env.PI_CURSOR_TOOL_MANIFEST;
+		delete process.env.PI_CURSOR_TOOL_MANIFEST;
+		registerBridgeForProviderTest({
+			active: ["sem_reindex"],
+			tools: [createTestToolInfo("sem_reindex", Type.Object({ target: Type.String() }), "Reindex semantic cache")],
+		});
+		const mockSend = vi.fn().mockResolvedValue({
+			id: "run-1",
+			agentId: "agent-1",
+			status: "finished",
+			wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
+			cancel: vi.fn(),
+			supports: () => true,
+			unsupportedReason: () => undefined,
+		});
+		mockCreatedAgent({
+			send: mockSend,
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+		const context = makeContext([{ role: "user", content: "use bridge if needed", timestamp: 1 }]);
+		context.tools = [];
+
+		try {
+			await collectEvents(streamCursor(makeModel("gpt-5.5@272k"), context, { apiKey: "test-key", reasoning: "medium" }));
+		} finally {
+			if (previousManifest === undefined) delete process.env.PI_CURSOR_TOOL_MANIFEST;
+			else process.env.PI_CURSOR_TOOL_MANIFEST = previousManifest;
+		}
+
+		const sentMessage = mockSend.mock.calls[0]?.[0] as { text: string };
+		expect(sentMessage.text).not.toContain("For exposed pi bridge tools");
+		expect(sentMessage.text).not.toContain("Use pi__cursor_ask_question");
+		expect(sentMessage.text).not.toContain("Pi bridge: call exposed pi__* MCP names");
+		expect(sentMessage.text).not.toContain("prefer matching exposed pi__* tools");
+		expect(sentMessage.text).not.toContain("pi__sem_reindex");
 	});
 
 	it("caches SDK checkpoint context windows after successful runs", async () => {

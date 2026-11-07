@@ -1,6 +1,17 @@
+import { isCursorLeanEnabled } from "./cursor-lean.js";
+
 export const CURSOR_PI_BRIDGE_MCP_TOOL_PREFIX = "pi__";
 export const CURSOR_PI_BRIDGE_PREFERENCE_TEXT =
 	"For MCP work and delegation, prefer matching exposed pi__* tools using their listed names, schemas, and prompt guidelines; use Cursor-configured MCP or Cursor-native subagents only when the matching pi tool is not exposed or unavailable.";
+
+export function getCursorPiBridgePreferenceText(options: { leanEnabled?: boolean; nativeToolsEnabled?: boolean } = {}): string {
+	if (options.leanEnabled ?? isCursorLeanEnabled()) {
+		return "Only exposed pi__* tools are callable. Cursor-native tools, subagents, web search, and ambient MCP are disabled.";
+	}
+	return options.nativeToolsEnabled === false
+		? "Use only exposed pi__* MCP names for Pi work; native task/subagents are disabled."
+		: CURSOR_PI_BRIDGE_PREFERENCE_TEXT;
+}
 
 function formatPromptGuidelines(promptGuidelines: readonly string[] | undefined): string | undefined {
 	const guidelines = promptGuidelines?.map((guideline) => guideline.trim()).filter(Boolean) ?? [];

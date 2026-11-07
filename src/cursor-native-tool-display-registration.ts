@@ -1,3 +1,4 @@
+import { isCursorLeanEnabled } from "./cursor-lean.js";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { arePiToolsDisabled } from "./cursor-active-tools.js";
 import {
@@ -100,6 +101,7 @@ export function syncRegisteredNativeCursorToolsForModel(
 	pi: CursorNativeToolActivationApi,
 	model: ExtensionContext["model"],
 ): void {
+	if (isCursorLeanEnabled()) return;
 	const { registeredNativeToolSources } = getCursorNativeToolDisplayState(pi);
 	if (registeredNativeToolSources.size === 0) return;
 	if (!isCursorModel(model)) {
@@ -137,7 +139,7 @@ function ensureThenSyncNativeCursorToolsForModel(pi: CursorNativeToolRegistryApi
 			registeredNativeToolSources.delete(toolName);
 		}
 	}
-	const requested = isCursorNativeToolRegistrationRequested(ctx.mode);
+	const requested = !isCursorLeanEnabled() && isCursorNativeToolRegistrationRequested(ctx.mode);
 	setCursorNativeToolDisplayRuntimeRequested(requested, pi);
 	if (!requested) {
 		removeRegisteredNonCoreNativeCursorTools(pi);

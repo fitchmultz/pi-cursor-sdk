@@ -1,4 +1,5 @@
 import { assertCursorNativeToolsRuntime, resolveCursorNativeToolsEnabled } from "./cursor-native-tools.js";
+import { isCursorLeanEnabled } from "./cursor-lean.js";
 import { CursorLiveRunAbortError } from "./cursor-live-run-coordinator.js";
 import { cursorLiveRuns, drainExistingCursorLiveRunBeforeSend } from "./cursor-provider-live-run-drain.js";
 import { installCursorSdkProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
@@ -74,8 +75,9 @@ export class CursorProviderTurnRunner {
 			// prepare dispatch below always act on the same config snapshot.
 			const resolvedConfig = resolveCursorProviderTurnConfig(cwd, scope.projectTrusted, scope.scopeKey);
 			this.runtimeTarget = resolvedConfig.runtime.value;
-			const nativeToolsEnabled = resolveCursorNativeToolsEnabled();
-			assertCursorNativeToolsRuntime(this.runtimeTarget, nativeToolsEnabled);
+			const leanEnabled = isCursorLeanEnabled();
+			const nativeToolsEnabled = resolveCursorNativeToolsEnabled(process.env, leanEnabled);
+			assertCursorNativeToolsRuntime(this.runtimeTarget, nativeToolsEnabled, leanEnabled);
 			this.sdkEventDebug = CursorSdkEventDebugSink.maybeCreate({
 				cwd,
 				modelId: model.id,
@@ -102,6 +104,7 @@ export class CursorProviderTurnRunner {
 				sdkEventDebug: this.sdkEventDebug,
 				throwIfAborted: () => this.throwIfAborted(),
 				resolvedConfig,
+				leanEnabled,
 				nativeToolsEnabled,
 			});
 

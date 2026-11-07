@@ -51,7 +51,8 @@ Prerequisites:
   pi, node, npm, rg, tmux on PATH
   Resolved pi/node/npm/rg/tmux paths from the parent shell are reused in tmux-launched checks; pi shims run with the resolved node directory first on PATH.
   timeout or gtimeout optional; bash process-group kill fallback is used when absent
-  Child pi runs clear Cursor SDK event-debug env; isolated cases force PI_CURSOR_SETTING_SOURCES=none and default-settings unsets it.
+  Child pi runs clear Cursor SDK event-debug env; isolated cases force PI_CURSOR_SETTING_SOURCES=none without changing lean mode.
+  Only default-settings pins PI_CURSOR_LEAN=0 and unsets PI_CURSOR_SETTING_SOURCES to exercise legacy ambient settings.
 
 Coverage:
   - prereq model listing
@@ -88,7 +89,7 @@ build_smoke_env_arrays() {
 	DEBUG_ENV_UNSETS=( "${SMOKE_CURSOR_SDK_EVENT_DEBUG_ENV_UNSETS[@]}" )
 	BASE_ENV=( "$ENV_BIN" "${DEBUG_ENV_UNSETS[@]}" "PATH=$SEALED_PATH" )
 	NONE_ENV=( "$ENV_BIN" "${DEBUG_ENV_UNSETS[@]}" "PATH=$SEALED_PATH" PI_CURSOR_SETTING_SOURCES=none )
-	DEFAULT_ENV=( "$ENV_BIN" "${DEBUG_ENV_UNSETS[@]}" -u PI_CURSOR_SETTING_SOURCES "PATH=$SEALED_PATH" )
+	DEFAULT_ENV=( "$ENV_BIN" "${DEBUG_ENV_UNSETS[@]}" -u PI_CURSOR_SETTING_SOURCES "PATH=$SEALED_PATH" PI_CURSOR_LEAN=0 )
 }
 
 tail_file() {
@@ -259,7 +260,7 @@ capture_and_require_default_model() {
 }
 
 run_self_test() {
-	local temp_dir bin_dir fake_pi fake_node fake_node_marker fake_list_pi env_capture hostile_path captured_path node_dir name
+	local temp_dir bin_dir fake_pi fake_node fake_node_marker fake_list_pi env_capture hostile_path captured_path node_dir name lean_case
 	RG_BIN="$(command -v rg || true)"
 	temp_dir="$(mktemp -d /tmp/pi-cursor-sdk-live-smoke-self-test.XXXXXX)"
 	trap 'rm -rf "$temp_dir"' RETURN
@@ -307,10 +308,34 @@ EOF_SELFTEST_NODE
 		fi
 	done
 
-	PI_CURSOR_SETTING_SOURCES=all "${DEFAULT_ENV[@]}" "$fake_pi" --version
-	if grep -q '^PI_CURSOR_SETTING_SOURCES=' "$env_capture"; then
-		fail "self-test failed: default-settings env did not unset PI_CURSOR_SETTING_SOURCES"
-	fi
+	for lean_case in unset enabled; do
+		(
+			if [[ "$lean_case" == "unset" ]]; then
+				unset PI_CURSOR_LEAN
+			else
+				export PI_CURSOR_LEAN=1
+			fi
+			export PI_CURSOR_SETTING_SOURCES=all
+			"${DEFAULT_ENV[@]}" "$fake_pi" --version
+			[[ "$PI_CURSOR_SETTING_SOURCES" == "all" ]] || fail "self-test failed: default-settings changed parent setting sources"
+			grep -qx 'PI_CURSOR_LEAN=0' "$env_capture" || fail "self-test failed: default-settings did not opt out of $lean_case lean mode"
+			if grep -q '^PI_CURSOR_SETTING_SOURCES=' "$env_capture"; then
+				fail "self-test failed: default-settings env did not unset PI_CURSOR_SETTING_SOURCES"
+			fi
+
+			# Basic/math lanes must keep the default or inherited lean policy, not the ambient lane's opt-out.
+			"${NONE_ENV[@]}" "$fake_pi" --version
+			if [[ "$lean_case" == "unset" ]]; then
+				[[ -z "${PI_CURSOR_LEAN+x}" ]] || fail "self-test failed: default-settings changed unset parent lean mode"
+				if grep -q '^PI_CURSOR_LEAN=' "$env_capture"; then
+					fail "self-test failed: isolated env replaced default lean mode"
+				fi
+			else
+				[[ "${PI_CURSOR_LEAN-}" == "1" ]] || fail "self-test failed: default-settings changed enabled parent lean mode"
+				grep -qx 'PI_CURSOR_LEAN=1' "$env_capture" || fail "self-test failed: isolated env replaced inherited lean mode"
+			fi
+		)
+	done
 	# Large-catalog prereq: exercise the same capture_and_require_default_model helper.
 	fake_list_pi="$bin_dir/pi-list-models"
 	cat >"$fake_list_pi" <<'EOF_FAKE_LIST'

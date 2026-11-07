@@ -1,5 +1,6 @@
 import { createServer, type Server as HttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { Tool } from "@earendil-works/pi-ai";
 import type {
 	CursorPiToolBridge,
 	CursorPiToolBridgeRun,
@@ -83,10 +84,11 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 		return resolveCursorPiToolBridgeEnabled(this.env);
 	}
 
-	getToolSurfaceSignature(): string {
+	getToolSurfaceSignature(declaredTools?: readonly Tool[]): string {
 		if (!this.isEnabled()) return "bridge:off";
 		const snapshot = buildCursorPiToolBridgeSnapshot(this.pi, {
 			exposeOverlappingBuiltins: resolveCursorPiToolBridgeBuiltinsEnabled(this.env),
+			declaredTools,
 		});
 		return buildCursorPiToolBridgeSurfaceSignature(snapshot);
 	}
@@ -96,6 +98,7 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 		const snapshot = bridgeEnabled
 			? buildCursorPiToolBridgeSnapshot(this.pi, {
 				exposeOverlappingBuiltins: resolveCursorPiToolBridgeBuiltinsEnabled(this.env),
+				declaredTools: options.declaredTools,
 			})
 			: createEmptySnapshot();
 		const run = new CursorPiToolBridgeRunImpl(this, this.env, snapshot, bridgeEnabled && snapshot.tools.length > 0, options);

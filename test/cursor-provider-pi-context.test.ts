@@ -54,6 +54,7 @@ describe("installed Pi provider context boundary", () => {
 	afterEach(async () => {
 		await __testUtils.releaseAllPendingCursorLiveRunsForTests();
 		await __testUtils.resetSessionCursorAgents();
+		vi.unstubAllEnvs();
 	});
 
 	it("preserves system instructions, tool snapshots, and incremental reuse through ModelRuntime", async () => {
@@ -129,22 +130,29 @@ describe("installed Pi provider context boundary", () => {
 		expect(sdkSend.mock.calls[1][0].text).not.toContain("/fixture/private");
 	});
 
-	it("keeps the empty request snapshot distinct from the bridge's registry-owned surface", async () => {
+	it.each([false, true])("separates the request snapshot from legacy registry exposure but projects it in lean mode (lean=%s)", async (lean) => {
+		vi.stubEnv("PI_CURSOR_LEAN", lean ? "1" : "0");
 		process.env.PI_CURSOR_TOOL_MANIFEST = "1";
 		const sdkSend = mockSend();
 		registerBridgeForProviderTest({ active: [tool.name], tools: [createTestToolInfo(tool.name, tool.parameters)] });
 		const { received, send } = await boundary();
 		expect((await send({ systemPrompt: "SYSTEM_SENTINEL", tools: [], messages: [user] })).stopReason).toBe("stop");
 		expect(getActiveContextToolNames(received[0])).toEqual(new Set());
-		// The bridge intentionally uses pi.getActiveTools/getAllTools, not the
-		// provider replay allowlist (the established stock-Pi contract).
-		expect(mockedCreate.mock.calls[0][0]?.mcpServers?.pi_tools).toBeDefined();
 		const text = sdkSend.mock.calls[0][0].text;
-		expect(text).toContain("For exposed pi bridge tools");
-		expect(text).toContain("prefer matching exposed pi__* tools using their listed names, schemas, and prompt guidelines");
+		if (lean) {
+			expect(mockedCreate.mock.calls[0][0]?.mcpServers?.pi_tools).toBeUndefined();
+			expect(mockedCreate.mock.calls[0][0]?.tools).toEqual([]);
+			expect(text).not.toContain("For exposed pi bridge tools");
+			expect(text).not.toContain("pi__audit_tool");
+		} else {
+			// Preserve stock Pi's registry-owned surface independently of the replay allowlist.
+			expect(mockedCreate.mock.calls[0][0]?.mcpServers?.pi_tools).toBeDefined();
+			expect(text).toContain("For exposed pi bridge tools");
+			expect(text).toContain("prefer matching exposed pi__* tools using their listed names, schemas, and prompt guidelines");
+			expect(text).toContain("Pi bridge: call exposed pi__* MCP names");
+			expect(text).toContain("pi__audit_tool");
+		}
 		expect(text).not.toContain("Use pi__cursor_ask_question");
-		expect(text).toContain("Pi bridge: call exposed pi__* MCP names");
-		expect(text).toContain("pi__audit_tool");
 	});
 
 	it("preserves bridge filters and the callable manifest at the provider boundary", async () => {

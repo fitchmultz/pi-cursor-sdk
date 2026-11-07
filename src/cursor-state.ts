@@ -1,7 +1,9 @@
+import { isCursorLeanEnabled } from "./cursor-lean.js";
 import type { AgentModeOption } from "@cursor/sdk";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import {
 	CURSOR_HOST_TOOL_MANIFEST_SUMMARY,
+	CURSOR_LEAN_TOOL_MANIFEST_SUMMARY,
 	CURSOR_TOOL_MANIFEST_ENV,
 	resolveCursorToolManifestEnabled,
 } from "./cursor-tool-manifest.js";
@@ -378,7 +380,7 @@ function formatCursorToolsDebugReport(
 		"Cursor tool surfaces (current registry snapshot; not a live run):",
 		`${CURSOR_PI_TOOL_BRIDGE_ENV}: ${bridgeEnabled ? "enabled" : "disabled"}`,
 		`${CURSOR_TOOL_MANIFEST_ENV}: ${manifestEnabled ? "enabled" : "disabled"}`,
-		`${CURSOR_SETTING_SOURCES_ENV}: ${formatEffectiveCursorSettingSourcesLabel(env[CURSOR_SETTING_SOURCES_ENV])}`,
+		`${CURSOR_SETTING_SOURCES_ENV}: ${isCursorLeanEnabled(env) ? "none (PI_CURSOR_LEAN=1)" : formatEffectiveCursorSettingSourcesLabel(env[CURSOR_SETTING_SOURCES_ENV])}`,
 	];
 
 	let bridgeSnapshot;
@@ -392,10 +394,12 @@ function formatCursorToolsDebugReport(
 		}
 	}
 
-	lines.push(
-		`Cursor host/MCP: ${CURSOR_HOST_TOOL_MANIFEST_SUMMARY}; configured MCP depends on Cursor settings.`,
-		"Pi tool toggles affect pi tools/bridge exposure only; they do not disable Cursor host/configured MCP tools.",
-	);
+	lines.push(...(isCursorLeanEnabled(env)
+		? [CURSOR_LEAN_TOOL_MANIFEST_SUMMARY]
+		: [
+			`Cursor host/MCP: ${CURSOR_HOST_TOOL_MANIFEST_SUMMARY}; configured MCP depends on Cursor settings.`,
+			"Pi tool toggles affect pi tools/bridge exposure only; they do not disable Cursor host/configured MCP tools.",
+		]));
 	if (!bridgeEnabled) {
 		lines.push("Pi bridge: disabled (PI_CURSOR_PI_TOOL_BRIDGE=0).");
 	} else if (bridgeSnapshot) {
@@ -403,6 +407,7 @@ function formatCursorToolsDebugReport(
 		lines.push(`Pi bridge exposure eligibility: ${names.length ? names.join(", ") : "no eligible pi__* tools"}.`);
 	}
 	lines.push(
+		"Actual runs also apply Pi's request-level declarations, including codemode-only tool hiding.",
 		"This snapshot does not prove a run's endpoint attachment, MCP initialization, catalog fetch, or tool calls.",
 		`For per-run observations, enable ${CURSOR_PI_TOOL_BRIDGE_DEBUG_ENV}=1 before the turn.`,
 		"run_created/tools_exposed record exposure only; mcp_initialized records a validated notifications/initialized receipt; mcp_tools_list records catalog-handler output (toolCount), not client/model consumption or ongoing connection health.",

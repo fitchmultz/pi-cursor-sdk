@@ -22,6 +22,7 @@ const execFile = promisify(execFileCallback);
 const REQUIRED_SOURCE_BUILD_MODULES = [
 	"typescript",
 	"@types/node",
+	"esbuild",
 	"typebox",
 	"@earendil-works/pi-ai",
 	"@earendil-works/pi-coding-agent",

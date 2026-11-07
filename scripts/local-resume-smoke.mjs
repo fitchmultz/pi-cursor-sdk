@@ -52,6 +52,10 @@ Environment:
   CURSOR_LOCAL_RESUME_SMOKE_EXTENSION_PATH Packed extension path override (platform runner only).
   CURSOR_LOCAL_RESUME_SMOKE_ARTIFACT_DIR   Fixed artifact root (platform runner only).
 
+Surface isolation:
+  Ordinary lanes pin PI_CURSOR_LEAN=1 (pi bridge with builtin tools).
+  --tool-surface and --cleanup pin PI_CURSOR_LEAN=0 so native/bridge surface changes remain effective.
+
 Exit codes:
   0  local resume proof passed
   1  auth/run/assertion failure
@@ -221,8 +225,9 @@ async function runToolSurfaceSmoke() {
 	let originalAgentId;
 	let originalPoolKey;
 	console.error(scrubSmokeText(`[local-resume-smoke] artifacts: ${artifactRoot}`));
+	// Keep the lean policy fixed off so the bridge/builtin pins change the real SDK surface.
 	try {
-		await withRpc({ artifactDir: artifactRoot, sessionDir, sessionId }, async (rpc) => {
+		await withRpc({ artifactDir: artifactRoot, sessionDir, sessionId, lean: false }, async (rpc) => {
 			const first = await promptAndRead({
 				rpc,
 				artifactDir: artifactRoot,
@@ -236,7 +241,7 @@ async function runToolSurfaceSmoke() {
 			if (!originalPoolKey) fail("baseline turn did not persist a resume pool key");
 		});
 
-		await withRpc({ artifactDir: artifactRoot, sessionDir, sessionId }, async (rpc) => {
+		await withRpc({ artifactDir: artifactRoot, sessionDir, sessionId, lean: false }, async (rpc) => {
 			const sameSurface = await promptAndRead({
 				rpc,
 				artifactDir: artifactRoot,
@@ -248,7 +253,7 @@ async function runToolSurfaceSmoke() {
 			if (sameSurface.metadata.run.agentId !== originalAgentId) fail("same tool surface restart did not resume original agent", JSON.stringify({ original: originalAgentId, actual: sameSurface.metadata.run.agentId }, null, 2));
 		});
 
-		await withRpc({ artifactDir: artifactRoot, sessionDir, sessionId, bridge: true, exposeBuiltinTools: true }, async (rpc) => {
+		await withRpc({ artifactDir: artifactRoot, sessionDir, sessionId, lean: false, bridge: true, exposeBuiltinTools: true }, async (rpc) => {
 			const changedSurface = await promptAndRead({
 				rpc,
 				artifactDir: artifactRoot,

@@ -107,11 +107,13 @@ describe("maintainer scripts shared lib", () => {
 			baseEnv: {
 				PATH: "/tmp/fake:/usr/bin",
 				PI_CURSOR_SETTING_SOURCES: "all",
+				PI_CURSOR_LEAN: "1",
 				PI_CURSOR_SDK_EVENT_DEBUG: "1",
 				PI_CURSOR_SDK_EVENT_DEBUG_DIR: "/tmp/stale",
 			},
 			nodePath: "/opt/node/bin/node",
 			settingSources: "none",
+			lean: false,
 			nativeToolDisplay: true,
 			registerNativeTools: true,
 			bridge: false,
@@ -119,6 +121,7 @@ describe("maintainer scripts shared lib", () => {
 		});
 		expect(env.PATH).toBe(`/opt/node/bin${delimiter}/tmp/fake:/usr/bin`);
 		expect(env.PI_CURSOR_SETTING_SOURCES).toBe("none");
+		expect(env.PI_CURSOR_LEAN).toBe("0");
 		expect(env.PI_CURSOR_NATIVE_TOOL_DISPLAY).toBe("1");
 		expect(env.PI_CURSOR_REGISTER_NATIVE_TOOLS).toBe("1");
 		expect(env.PI_CURSOR_PI_TOOL_BRIDGE).toBe("0");
@@ -135,11 +138,20 @@ describe("maintainer scripts shared lib", () => {
 		expect(defaultSettingsEnv.PI_CURSOR_SETTING_SOURCES).toBeUndefined();
 
 		const plan = buildCursorSmokeEnvPlan({
-			baseEnv: { PATH: "/bin", PI_CURSOR_NATIVE_TOOL_DISPLAY: "0", PI_CURSOR_PI_TOOL_BRIDGE: "1", TERM: "bad" },
+			baseEnv: { PATH: "/bin", PI_CURSOR_LEAN: "0", PI_CURSOR_NATIVE_TOOL_DISPLAY: "0", PI_CURSOR_PI_TOOL_BRIDGE: "1", TERM: "bad" },
 			nodePath: "/opt/node/bin/node",
 		});
 		expect(plan.envEntries).toEqual([]);
 		expect(plan.env.PI_CURSOR_NATIVE_TOOL_DISPLAY).toBe("0");
+		expect(plan.env.PI_CURSOR_LEAN).toBe("0");
+
+		for (const lean of [false, true]) {
+			const baseEnv = { PI_CURSOR_LEAN: lean ? "0" : "1" };
+			const explicitPlan = buildCursorSmokeEnvPlan({ baseEnv, lean });
+			expect(explicitPlan.env.PI_CURSOR_LEAN).toBe(lean ? "1" : "0");
+			expect(explicitPlan.envEntries).toEqual([["PI_CURSOR_LEAN", lean ? "1" : "0"]]);
+			expect(baseEnv.PI_CURSOR_LEAN).toBe(lean ? "0" : "1");
+		}
 	});
 
 	it("serializes setting sources for child env forwarding", () => {

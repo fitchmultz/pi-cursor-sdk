@@ -38,6 +38,7 @@ export function buildCursorSmokeEnv({
 	baseEnv = process.env,
 	nodePath = process.execPath,
 	settingSources,
+	lean,
 	nativeToolDisplay,
 	registerNativeTools,
 	bridge,
@@ -49,6 +50,7 @@ export function buildCursorSmokeEnv({
 	env.PATH = sealedNodePath(nodePath, baseEnv.PATH ?? "");
 	if (settingSources === null) delete env.PI_CURSOR_SETTING_SOURCES;
 	else if (settingSources !== undefined) env.PI_CURSOR_SETTING_SOURCES = settingSources;
+	if (lean !== undefined) env.PI_CURSOR_LEAN = boolEnv(lean);
 	if (nativeToolDisplay !== undefined) env.PI_CURSOR_NATIVE_TOOL_DISPLAY = boolEnv(nativeToolDisplay);
 	if (registerNativeTools !== undefined) env.PI_CURSOR_REGISTER_NATIVE_TOOLS = boolEnv(registerNativeTools);
 	if (bridge !== undefined) env.PI_CURSOR_PI_TOOL_BRIDGE = boolEnv(bridge);
@@ -65,6 +67,7 @@ export function buildCursorSmokeEnvPlan(options = {}) {
 	const env = buildCursorSmokeEnv(options);
 	const envEntries = [];
 	pushIfDefined(envEntries, "PI_CURSOR_SETTING_SOURCES", options.settingSources === null ? undefined : options.settingSources);
+	pushIfDefined(envEntries, "PI_CURSOR_LEAN", options.lean === undefined ? undefined : boolEnv(options.lean));
 	pushIfDefined(envEntries, "PI_CURSOR_NATIVE_TOOL_DISPLAY", options.nativeToolDisplay === undefined ? undefined : boolEnv(options.nativeToolDisplay));
 	pushIfDefined(envEntries, "PI_CURSOR_REGISTER_NATIVE_TOOLS", options.registerNativeTools === undefined ? undefined : boolEnv(options.registerNativeTools));
 	pushIfDefined(envEntries, "PI_CURSOR_PI_TOOL_BRIDGE", options.bridge === undefined ? undefined : boolEnv(options.bridge));

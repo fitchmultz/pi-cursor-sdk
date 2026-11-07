@@ -154,7 +154,6 @@ export async function recordCursorProviderTerminalUsage(
 /** Single wait/finalize path for SDK runs: accounting, replay, incomplete tools, artifacts, context cache. */
 export async function awaitFinalizeCursorRunOutcome(params: AwaitFinalizeCursorRunOutcomeParams): Promise<FinalizedCursorRunOutcome> {
 	const apiKey = params.resolvedApiKey ?? params.optionsApiKey;
-	params.prepared.runtime.sdkRun = params.run;
 	let waitResult: Awaited<ReturnType<typeof params.run.wait>>;
 	try {
 		waitResult = params.waitResult ?? (await params.run.wait());

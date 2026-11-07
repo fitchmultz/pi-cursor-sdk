@@ -58,6 +58,7 @@ export interface CursorProviderTurnSendMeta {
 
 interface CursorProviderTurnRuntimeBase {
 	turnCoordinator: CursorSdkTurnCoordinator;
+	/** The one run attachment: written by send when `agent.send()` resolves, read by abort and terminal accounting. */
 	sdkRun?: Awaited<ReturnType<SDKAgent["send"]>>;
 	usageTerminalRecorded?: boolean;
 }
@@ -148,7 +149,34 @@ export interface CursorProviderTurnSend {
 	cursorAgentMessageOffset: number | undefined;
 }
 
+/** The send's abort listener. Send releases it on failure; on success the caller owns the release. */
+export interface CursorProviderTurnAbortRegistration {
+	release(): void;
+}
+
 export interface CursorProviderTurnSendResult {
 	send: CursorProviderTurnSend;
-	abortRegistration: { signal: AbortSignal; listener: () => void } | undefined;
+	abortRegistration: CursorProviderTurnAbortRegistration | undefined;
 }
+
+/**
+ * What the runner owns after each orchestration boundary. The runner's `finally`
+ * releases exactly the current phase's resources; each phase's own partial
+ * acquisitions stay in that phase's try/finally.
+ */
+export type CursorProviderTurnPhase =
+	| { kind: "unprepared" }
+	| { kind: "prepared"; prepared: CursorProviderTurnPrepareResult }
+	/** The usage origin is claimed, so every later failure owes a terminal fact. */
+	| { kind: "started"; prepared: StartedCursorProviderTurn }
+	| { kind: "sent"; prepared: StartedCursorProviderTurn; abortRegistration: CursorProviderTurnAbortRegistration | undefined }
+	/**
+	 * The SDK run can outlive this Pi turn (`toolUse` ends the turn, not the run),
+	 * so its completion releases the output filter, abort registration and observers.
+	 */
+	| {
+			kind: "liveCompletionOwnsCleanup";
+			prepared: StartedCursorProviderTurn;
+			abortRegistration: CursorProviderTurnAbortRegistration | undefined;
+			completion: Promise<void>;
+	  };

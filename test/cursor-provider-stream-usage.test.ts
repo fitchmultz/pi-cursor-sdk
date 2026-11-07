@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { RunResult } from "@cursor/sdk";
 import {
 	resetCursorProviderTestState,
 	makeModel,
@@ -62,6 +63,45 @@ describe("streamCursor usage accounting", () => {
 		}));
 	});
 
+	it.each([
+		{ boundary: "abort during the origin claim", sends: 0, cancelled: false, terminal: "abort", reason: "aborted" },
+		{ boundary: "Agent.send rejection", sends: 1, cancelled: false, terminal: "error", reason: "error" },
+		{ boundary: "abort while recording the returned run", sends: 1, cancelled: true, terminal: "abort", reason: "aborted" },
+	] as const)("records one $terminal terminal and abandons the agent after $boundary", async ({ boundary, sends, cancelled, terminal, reason }) => {
+		const controller = new AbortController();
+		const model = makeModel();
+		const context = makeContext();
+		const pi = createPiHarness();
+		registerCursorNativeToolDisplayState(pi);
+		// Installed before capture so the harness still mirrors every entry into its SessionManager.
+		pi.appendEntry.mockImplementation((type, data) => {
+			const kind = (data as { kind?: string } | undefined)?.kind;
+			if (boundary === "abort during the origin claim" && type === "pi-cursor-sdk:usage-origin-v1") controller.abort();
+			if (boundary === "abort while recording the returned run" && type === "pi-cursor-sdk:usage-v1" && kind === "run") controller.abort();
+		});
+		const ownership = captureProviderTestOwnership(model, context, undefined, pi);
+		// SDK 1.0.40: send() takes no signal; a local run's wait() settles cancelled after cancel().
+		const completion = Promise.withResolvers<RunResult>();
+		const cancel = vi.fn(async () => { completion.resolve({ id: "run-accounted", status: "cancelled" }); });
+		const send = boundary === "Agent.send rejection"
+			? vi.fn().mockRejectedValue(new Error("send failed"))
+			: vi.fn().mockResolvedValue(asMockCursorRun({ id: "run-accounted", agentId: "agent-1", status: "running", wait: () => completion.promise, cancel }));
+		const dispose = vi.fn().mockResolvedValue(undefined);
+		mockCreatedAgent({ send, [Symbol.asyncDispose]: dispose });
+
+		const events = await collectEvents(streamOwnedCursor(model, context, { apiKey: "test-key", signal: controller.signal }, ownership));
+
+		expect(getErrorEvent(events).reason).toBe(reason);
+		expect(send).toHaveBeenCalledTimes(sends);
+		expect(cancel.mock.calls.length > 0).toBe(cancelled);
+		const terminals = pi.appendEntry.mock.calls.flatMap(([type, data]) => {
+			const record = data as { kind?: string; status?: string } | undefined;
+			return type === "pi-cursor-sdk:usage-v1" && record?.kind === "terminal" ? [record.status] : [];
+		});
+		expect(terminals).toEqual([terminal]);
+		expect(dispose).toHaveBeenCalledOnce();
+	});
+
 	it("ignores returned RunResult usage for occupancy but persists its terminal-only facts", async () => {
 		const root = mkdtempSync(join(tmpdir(), "cursor-terminal-usage-"));
 		try {
@@ -76,8 +116,9 @@ describe("streamCursor usage accounting", () => {
 			ownership.usageRecorder = captureCursorUsageRecorder(pi, ctx);
 			const usage = { inputTokens: 1_405_237, outputTokens: 9_680, cacheReadTokens: 1_297_860,
 				cacheWriteTokens: 107_320, totalTokens: 2_820_097, reasoningTokens: 3_641 };
+			const handleUsage = { inputTokens: 40, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 42 };
 			mockCreatedAgent({
-				send: vi.fn().mockResolvedValue(asMockCursorRun({ id: "run-1", agentId: "agent-1", status: "finished",
+				send: vi.fn().mockResolvedValue(asMockCursorRun({ id: "run-1", agentId: "agent-1", status: "finished", usage: handleUsage,
 					wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished", result: "done", usage }),
 				})),
 				[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
@@ -92,7 +133,7 @@ describe("streamCursor usage accounting", () => {
 			const start = view.records.find(record => record.kind === "start")!;
 			const terminals = view.records.filter(record => record.kind === "terminal");
 			expect(terminals).toHaveLength(1);
-			expect(terminals[0]).toMatchObject({ turnId: start.turnId, origin: start.origin, status: "success", waitUsage: usage });
+			expect(terminals[0]).toMatchObject({ turnId: start.turnId, origin: start.origin, status: "success", waitUsage: usage, handleUsage });
 			expect(start.origin).toMatchObject({ sessionId: reopened.getSessionId(), sessionFile: reopened.getSessionFile() });
 			expect(view.records.filter(record => record.kind === "run")).toMatchObject([{ turnId: start.turnId, origin: start.origin, runId: "run-1" }]);
 			expect(start).toMatchObject({ data: { agentId: "agent-1" } });

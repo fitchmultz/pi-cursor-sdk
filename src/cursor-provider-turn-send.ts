@@ -50,26 +50,27 @@ function recordDebug(action: () => void): void {
 
 export async function sendCursorProviderTurn(sendParams: SendCursorProviderTurnParams): Promise<CursorProviderTurnSendResult> {
 	const { params, prepared, sdkEventDebug, sdkProcessErrorGuard, throwIfAborted, resolvedApiKey } = sendParams;
-	const { options } = params;
+	const signal = params.options?.signal;
 	const { agent, cwd, payload, meta, runtime } = prepared;
 	const { turnCoordinator, liveRun } = runtime;
 
-	let completed = false;
-	let sdkRun: Awaited<ReturnType<typeof agent.send>> | null = null;
-	const abortListener = () => {
+	// The signal is the only cancellation authority. SDK sends take no signal, so until
+	// `agent.send()` returns a handle an abort can stop only bridge work.
+	const cancelSend = (): Promise<void> | undefined => {
 		sdkProcessErrorGuard.suppressAbortErrors();
 		liveRun?.bridgeRun?.cancel("Cursor SDK run aborted");
-		if (sdkRun) {
-			sdkRun.cancel().catch(() => {});
-		}
+		return runtime.sdkRun?.cancel().catch(() => {});
 	};
-	const abortSignal = options?.signal;
-	const abortRegistration = abortSignal
-		? { signal: abortSignal, listener: abortListener }
+	const onAbort = () => {
+		void cancelSend();
+	};
+	const abortRegistration = signal
+		? { release: () => signal.removeEventListener("abort", onAbort) }
 		: undefined;
+	let completed = false;
 
 	try {
-		abortRegistration?.signal.addEventListener("abort", abortListener, { once: true });
+		signal?.addEventListener("abort", onAbort, { once: true });
 		throwIfAborted();
 		let cursorAgentMessageOffset: number | undefined;
 		if (prepared.runtimeTarget === "local" && prepared.execution === "conversation") {
@@ -125,8 +126,9 @@ export async function sendCursorProviderTurn(sendParams: SendCursorProviderTurnP
 		}
 		const run = await runPromise;
 		if (prepared.runtimeTarget === "local") watchCursorLocalRunTerminalError(prepared.store, run);
-		sdkRun = run;
+		// The one attachment, before any further await: abort, accounting and live-run release all reach this run.
 		runtime.sdkRun = run;
+		if (liveRun) cursorLiveRuns.attachSdkRun(liveRun, run);
 		try {
 			await prepared.usage.recordRun({ runId: run.id, requestId: run.requestId });
 		} catch (error) {
@@ -149,12 +151,9 @@ export async function sendCursorProviderTurn(sendParams: SendCursorProviderTurnP
 			agentId: run.agentId,
 			status: run.status,
 		}));
-		if (liveRun) cursorLiveRuns.attachSdkRun(liveRun, run);
-		if (options?.signal?.aborted) {
-			sdkProcessErrorGuard.suppressAbortErrors();
-			liveRun?.bridgeRun?.cancel("Cursor SDK run aborted");
-			await run.cancel().catch(() => {});
-		}
+		// An abort before the handle existed reached only bridge work. Recheck after the run is
+		// recorded so its cancellation follows the record and the caller awaits it.
+		if (signal?.aborted) await cancelSend();
 
 		completed = true;
 		return {
@@ -162,8 +161,7 @@ export async function sendCursorProviderTurn(sendParams: SendCursorProviderTurnP
 			abortRegistration,
 		};
 	} finally {
-		if (!completed && abortRegistration) {
-			abortRegistration.signal.removeEventListener("abort", abortRegistration.listener);
-		}
+		// The caller owns the registration only after a successful handoff.
+		if (!completed) abortRegistration?.release();
 	}
 }

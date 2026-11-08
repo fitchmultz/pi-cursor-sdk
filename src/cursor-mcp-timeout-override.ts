@@ -19,9 +19,15 @@ type GlobalSetTimeout = typeof globalThis.setTimeout;
 type SetTimeoutHandler = Parameters<GlobalSetTimeout>[0];
 type SetTimeoutDelay = Parameters<GlobalSetTimeout>[1];
 
-let originalSetTimeout: GlobalSetTimeout | undefined;
-let installedToolTimeoutMs = DEFAULT_CURSOR_MCP_TOOL_TIMEOUT_MS;
-let installedConnectTimeoutMs = DEFAULT_CURSOR_MCP_CONNECT_TIMEOUT_MS;
+type CursorMcpTimeoutDelays = Pick<CursorMcpToolTimeoutOverrideState, "timeoutMs" | "connectTimeoutMs">;
+
+interface InstalledCursorMcpTimeoutOverride {
+	readonly delegate: GlobalSetTimeout;
+	readonly setTimeout: GlobalSetTimeout;
+	delays: CursorMcpTimeoutDelays;
+}
+
+let installedOverride: InstalledCursorMcpTimeoutOverride | undefined;
 
 function parsePositiveNumber(value: string | undefined): number | undefined {
 	const trimmed = value?.trim();
@@ -94,49 +100,55 @@ function isCursorSdkDefaultMcpTimeout(delay: SetTimeoutDelay): boolean {
 	return typeof delay === "number" && delay === CURSOR_SDK_MCP_DEFAULT_TIMEOUT_MS;
 }
 
-function patchedSetTimeout(
-	handler: SetTimeoutHandler,
-	delay?: SetTimeoutDelay,
-	...args: unknown[]
-): ReturnType<GlobalSetTimeout> {
-	const delegate = originalSetTimeout;
-	if (!delegate) throw new Error("Cursor MCP timeout override installed without original setTimeout");
+function createCursorMcpTimeoutOverride(
+	delegate: GlobalSetTimeout,
+	delays: CursorMcpTimeoutDelays,
+): InstalledCursorMcpTimeoutOverride {
+	const installation: InstalledCursorMcpTimeoutOverride = {
+		delegate,
+		delays,
+		setTimeout: function patchedSetTimeout(
+			handler: SetTimeoutHandler,
+			delay?: SetTimeoutDelay,
+			...args: unknown[]
+		): ReturnType<GlobalSetTimeout> {
+			let nextDelay = delay;
+			// Once restored, a wrapper that another owner still calls forwards unchanged.
+			if (installedOverride === installation && isCursorSdkDefaultMcpTimeout(delay)) {
+				const stack = new Error().stack;
+				if (isCursorSdkMcpToolTimeoutStack(stack)) {
+					nextDelay = installation.delays.timeoutMs;
+				} else if (isCursorSdkMcpConnectTimeoutStack(stack)) {
+					nextDelay = installation.delays.connectTimeoutMs;
+				}
+			}
 
-	let nextDelay = delay;
-	if (isCursorSdkDefaultMcpTimeout(delay)) {
-		const stack = new Error().stack;
-		if (isCursorSdkMcpToolTimeoutStack(stack)) {
-			nextDelay = installedToolTimeoutMs;
-		} else if (isCursorSdkMcpConnectTimeoutStack(stack)) {
-			nextDelay = installedConnectTimeoutMs;
-		}
-	}
-
-	return Reflect.apply(delegate, globalThis, [handler, nextDelay, ...args]) as ReturnType<GlobalSetTimeout>;
+			return Reflect.apply(delegate, globalThis, [handler, nextDelay, ...args]) as ReturnType<GlobalSetTimeout>;
+		} as GlobalSetTimeout,
+	};
+	return installation;
 }
 
 export function installCursorMcpToolTimeoutOverride(): CursorMcpToolTimeoutOverrideState {
-	installedToolTimeoutMs = resolveCursorMcpToolTimeoutMs();
-	installedConnectTimeoutMs = resolveCursorMcpConnectTimeoutMs();
+	const delays: CursorMcpTimeoutDelays = {
+		timeoutMs: resolveCursorMcpToolTimeoutMs(),
+		connectTimeoutMs: resolveCursorMcpConnectTimeoutMs(),
+	};
 
-	if (!originalSetTimeout) {
-		originalSetTimeout = globalThis.setTimeout;
-		globalThis.setTimeout = patchedSetTimeout as GlobalSetTimeout;
+	if (installedOverride) {
+		installedOverride.delays = delays;
+	} else {
+		installedOverride = createCursorMcpTimeoutOverride(globalThis.setTimeout, delays);
+		globalThis.setTimeout = installedOverride.setTimeout;
 	}
 
-	return {
-		installed: true,
-		timeoutMs: installedToolTimeoutMs,
-		connectTimeoutMs: installedConnectTimeoutMs,
-		sdkDefaultTimeoutMs: CURSOR_SDK_MCP_DEFAULT_TIMEOUT_MS,
-	};
+	return { installed: true, ...delays, sdkDefaultTimeoutMs: CURSOR_SDK_MCP_DEFAULT_TIMEOUT_MS };
 }
 
 export function restoreCursorMcpToolTimeoutOverride(): void {
-	if (originalSetTimeout) {
-		globalThis.setTimeout = originalSetTimeout;
-		originalSetTimeout = undefined;
-	}
-	installedToolTimeoutMs = DEFAULT_CURSOR_MCP_TOOL_TIMEOUT_MS;
-	installedConnectTimeoutMs = DEFAULT_CURSOR_MCP_CONNECT_TIMEOUT_MS;
+	const installation = installedOverride;
+	if (!installation) return;
+	installedOverride = undefined;
+	// A later owner may wrap this override. Keep its wrapper installed.
+	if (globalThis.setTimeout === installation.setTimeout) globalThis.setTimeout = installation.delegate;
 }

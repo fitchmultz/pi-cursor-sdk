@@ -45,6 +45,17 @@ const mockedStreamCursor = vi.mocked(streamCursor);
 
 type DiscoverOptions = Parameters<typeof discoverModels>[0];
 
+async function startQuestionTool() {
+	process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
+	mockedDiscover.mockResolvedValueOnce([]);
+	const pi = createExtensionPi();
+	await extensionFactory(pi);
+	await pi.runSessionStart();
+	const tool = pi._tools.find((candidate) => candidate.name === CURSOR_ASK_QUESTION_TOOL_NAME);
+	if (!tool) throw new Error(`${CURSOR_ASK_QUESTION_TOOL_NAME} was not registered`);
+	return { pi, tool };
+}
+
 describe("extension registration and discovery", () => {
 	afterEach(resetIndexExtensionTestState);
 	beforeEach(async () => {
@@ -432,58 +443,104 @@ describe("extension registration and discovery", () => {
 		{ options: [{ label: "Web app", value: "web" }, { label: "CLI", value: "cli" }], expectedValue: "web" },
 		{ options: ["Web app", "CLI"], expectedValue: "Web app" },
 	])("asks Cursor questions through pi UI selection with $expectedValue option values", async ({ options, expectedValue }) => {
-		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
-		mockedDiscover.mockResolvedValueOnce([]);
-		const pi = createExtensionPi();
-		await extensionFactory(pi);
-		await pi.runSessionStart();
-
+		const { pi, tool } = await startQuestionTool();
 		const select = vi.fn().mockResolvedValue("Web app");
 		const input = vi.fn();
-		const tool = pi._tools.find((candidate) => candidate.name === CURSOR_ASK_QUESTION_TOOL_NAME);
+		const { signal } = new AbortController();
 		const listenerPayloads: unknown[] = [];
 		const unsubscribe = pi.events.on(CURSOR_ASK_QUESTION_BLOCKED_EVENT, (payload) => {
 			listenerPayloads.push(payload);
 		});
-		const result = await tool!.execute(
+		const result = await tool.execute(
 			"question-1",
 			{
 				question: "What kind of calculator should Cursor plan?",
 				options,
 				allowCustom: false,
 			},
-			undefined,
+			signal,
 			undefined,
 			createExtensionTestContext({ ui: { notify: vi.fn(), setStatus: vi.fn(), select, input } }),
 		);
 
 		unsubscribe();
 		expect(listenerPayloads).toEqual([{ active: true }, { active: false }]);
-		expect(select).toHaveBeenCalledWith("What kind of calculator should Cursor plan?", ["Web app", "CLI"]);
+		expect(select).toHaveBeenCalledWith("What kind of calculator should Cursor plan?", ["Web app", "CLI"], { signal });
 		expect(input).not.toHaveBeenCalled();
 		expect(result.content).toEqual([{ type: "text", text: "User answered: Web app" }]);
-		expect(result.details).toMatchObject({
-			uiAvailable: true,
-			cancelled: false,
-			answers: [{ id: "question_1", answer: "Web app", value: expectedValue, cancelled: false }],
-		});
+		expect(result.details).toMatchObject({ uiAvailable: true, cancelled: false });
+		expect(result.details).toHaveProperty("answers", [{
+			id: "question_1", question: "What kind of calculator should Cursor plan?", answer: "Web app", value: expectedValue, wasCustom: false, cancelled: false,
+		}]);
 		expect(pi._eventsEmitted.filter((entry) => entry.channel === CURSOR_ASK_QUESTION_BLOCKED_EVENT)).toEqual([
 			{ channel: CURSOR_ASK_QUESTION_BLOCKED_EVENT, data: { active: true } },
 			{ channel: CURSOR_ASK_QUESTION_BLOCKED_EVENT, data: { active: false } },
 		]);
-		expect(tool!.executionMode).toBe("sequential");
+		expect(tool.executionMode).toBe("sequential");
+	});
+
+	const customLabel = "Type a custom answer";
+	it.each([
+		{
+			scenario: "selects a listed option named like the custom-answer entry",
+			params: { question: "Label?", options: [customLabel, "Other"] },
+			pick: (choices: string[]) => choices[0],
+			typed: undefined,
+			dialogs: [["select", "Label?", [customLabel, "Other", `${customLabel} (2)`]]],
+			answer: { answer: customLabel, value: customLabel, wasCustom: false, cancelled: false },
+		},
+		{
+			scenario: "keeps that option a selection when custom answers are off",
+			params: { question: "Label?", options: [customLabel, "Other"], allowCustom: false },
+			pick: (choices: string[]) => choices[0],
+			typed: undefined,
+			dialogs: [["select", "Label?", [customLabel, "Other"]]],
+			answer: { answer: customLabel, value: customLabel, wasCustom: false, cancelled: false },
+		},
+		{
+			scenario: "types a custom answer from the uniquely labelled entry",
+			params: { question: "Label?", options: [customLabel, "Other"] },
+			pick: (choices: string[]) => choices.at(-1),
+			typed: "  Mobile  ",
+			dialogs: [["select", "Label?", [customLabel, "Other", `${customLabel} (2)`]], ["input", "Label?", "Type your answer"]],
+			answer: { answer: "Mobile", value: "Mobile", wasCustom: true, cancelled: false },
+		},
+		{
+			scenario: "records a dismissed free-text answer as cancelled custom input",
+			params: { question: "Describe it" },
+			pick: () => undefined,
+			typed: undefined,
+			dialogs: [["input", "Describe it", "Type your answer"]],
+			answer: { answer: null, wasCustom: true, cancelled: true },
+		},
+	])("$scenario", async ({ params, pick, typed, dialogs, answer }) => {
+		const { tool } = await startQuestionTool();
+		const opened: unknown[] = [];
+		const select = vi.fn(async (title: string, choices: string[]) => {
+			opened.push(["select", title, choices]);
+			return pick(choices);
+		});
+		const input = vi.fn(async (title: string, placeholder?: string) => {
+			opened.push(["input", title, placeholder]);
+			return typed;
+		});
+		const result = await tool.execute(
+			"question-custom",
+			params,
+			undefined,
+			undefined,
+			createExtensionTestContext({ ui: { notify: vi.fn(), setStatus: vi.fn(), select, input } }),
+		);
+
+		expect(opened).toEqual(dialogs);
+		expect(result.details).toMatchObject({ cancelled: answer.cancelled });
+		expect(result.details).toHaveProperty("answers", [{ id: "question_1", question: params.question, ...answer }]);
 	});
 
 	it("clears pi-cursor-sdk:ask-question:blocked when the Cursor question UI is cancelled", async () => {
-		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
-		mockedDiscover.mockResolvedValueOnce([]);
-		const pi = createExtensionPi();
-		await extensionFactory(pi);
-		await pi.runSessionStart();
-
+		const { pi, tool } = await startQuestionTool();
 		const select = vi.fn().mockResolvedValue(undefined);
-		const tool = pi._tools.find((candidate) => candidate.name === CURSOR_ASK_QUESTION_TOOL_NAME);
-		const result = await tool!.execute(
+		const result = await tool.execute(
 			"question-cancel",
 			{
 				question: "Proceed?",
@@ -496,6 +553,7 @@ describe("extension registration and discovery", () => {
 		);
 
 		expect(result.details).toMatchObject({ cancelled: true });
+		expect(result.details).toHaveProperty("answers", [{ id: "question_1", question: "Proceed?", answer: null, wasCustom: false, cancelled: true }]);
 		expect(pi._eventsEmitted.filter((entry) => entry.channel === CURSOR_ASK_QUESTION_BLOCKED_EVENT)).toEqual([
 			{ channel: CURSOR_ASK_QUESTION_BLOCKED_EVENT, data: { active: true } },
 			{ channel: CURSOR_ASK_QUESTION_BLOCKED_EVENT, data: { active: false } },
@@ -503,16 +561,10 @@ describe("extension registration and discovery", () => {
 	});
 
 	it("clears pi-cursor-sdk:ask-question:blocked when the Cursor question UI rejects", async () => {
-		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
-		mockedDiscover.mockResolvedValueOnce([]);
-		const pi = createExtensionPi();
-		await extensionFactory(pi);
-		await pi.runSessionStart();
-
+		const { pi, tool } = await startQuestionTool();
 		const select = vi.fn().mockRejectedValue(new Error("UI failed"));
-		const tool = pi._tools.find((candidate) => candidate.name === CURSOR_ASK_QUESTION_TOOL_NAME);
 		await expect(
-			tool!.execute(
+			tool.execute(
 				"question-reject",
 				{
 					question: "Proceed?",

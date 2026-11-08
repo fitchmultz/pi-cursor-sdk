@@ -1,6 +1,8 @@
 node_modules/
 dist/
 dist.staging*/
+dist.previous*/
+dist.lock
 coverage/
 .env
 .env.*

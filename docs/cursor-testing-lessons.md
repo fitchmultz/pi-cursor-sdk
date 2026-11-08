@@ -404,10 +404,10 @@ Artifacts under `--out` (default `.debug/cursor-sdk-events/<timestamp>/` under `
 - `timeline.jsonl` — merged cross-layer timeline (one grep-friendly stream for the whole turn)
 - `pi-session-snapshot.jsonl` — copy of pi session JSONL at turn finalize (session dir also gets latest `pi-session.jsonl`)
 - `final-partial.json` — assistant partial emitted to pi at end of the provider turn
-- `errors.jsonl` — provider/stream/conversation failures
-- `wait-result.json` — `run.wait()` result
+- `errors.jsonl` — provider/stream/conversation failures, including a failed `wait-result.json` write (`wait_result`)
+- `wait-result.json` — `run.wait()` result; `summary.json` sets `waitResultRecorded` only when this file was written
 - `conversation.json` — `run.conversation()` when supported
-- `summary.json` — counts and artifact paths
+- `summary.json` — counts and artifact paths, written once at turn finalization after any run stream capture ends; later records are neither written nor counted
 
 During any normal pi session you can also opt in with:
 

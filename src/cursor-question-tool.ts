@@ -34,7 +34,14 @@ interface CursorQuestion {
 	allowCustom: boolean;
 }
 
-interface CursorQuestionAnswer {
+/** One question's outcome. `dialog` records which dialog was dismissed. */
+type CursorQuestionAnswer =
+	| { kind: "selected"; label: string; value: string }
+	| { kind: "custom"; text: string }
+	| { kind: "cancelled"; dialog: "select" | "input" };
+
+/** Persisted `details.answers` entry; its flags are derived from {@link CursorQuestionAnswer}. */
+interface CursorQuestionAnswerDetails {
 	id: string;
 	question: string;
 	answer: string | null;
@@ -45,7 +52,7 @@ interface CursorQuestionAnswer {
 
 interface CursorQuestionDetails {
 	questions: CursorQuestion[];
-	answers: CursorQuestionAnswer[];
+	answers: CursorQuestionAnswerDetails[];
 	uiAvailable: boolean;
 	cancelled: boolean;
 }
@@ -129,7 +136,7 @@ function normalizeQuestions(params: CursorAskQuestionParams): CursorQuestion[] {
 	return rawQuestions.map(normalizeQuestion).filter((question): question is CursorQuestion => question !== undefined);
 }
 
-function summarizeAnswers(answers: CursorQuestionAnswer[]): string {
+function summarizeAnswers(answers: CursorQuestionAnswerDetails[]): string {
 	if (answers.length === 0) return "No answer was collected.";
 	if (answers.length === 1) {
 		const [answer] = answers;
@@ -144,7 +151,7 @@ function summarizeAnswers(answers: CursorQuestionAnswer[]): string {
 	].join("\n");
 }
 
-function buildDetails(questions: CursorQuestion[], answers: CursorQuestionAnswer[], uiAvailable: boolean): CursorQuestionDetails {
+function buildDetails(questions: CursorQuestion[], answers: CursorQuestionAnswerDetails[], uiAvailable: boolean): CursorQuestionDetails {
 	return {
 		questions,
 		answers,
@@ -153,40 +160,49 @@ function buildDetails(questions: CursorQuestion[], answers: CursorQuestionAnswer
 	};
 }
 
-async function askOneQuestion(question: CursorQuestion, ctx: { ui: ExtensionContext["ui"] }): Promise<CursorQuestionAnswer> {
+function toAnswerDetails(question: CursorQuestion, answer: CursorQuestionAnswer): CursorQuestionAnswerDetails {
+	const asked = { id: question.id, question: question.question };
+	switch (answer.kind) {
+		case "selected":
+			return { ...asked, answer: answer.label, value: answer.value, wasCustom: false, cancelled: false };
+		case "custom":
+			return { ...asked, answer: answer.text, value: answer.text, wasCustom: true, cancelled: false };
+		case "cancelled":
+			// A dismissed text input was a custom answer in progress.
+			return { ...asked, answer: null, wasCustom: answer.dialog === "input", cancelled: true };
+	}
+}
+
+const CUSTOM_ANSWER_CHOICE = "Type a custom answer";
+
+/** pi `select` returns the chosen string, so the custom entry must differ from every option, which is shown unchanged. */
+function customAnswerChoice(labels: readonly string[]): string {
+	let choice = CUSTOM_ANSWER_CHOICE;
+	for (let suffix = 2; labels.includes(choice); suffix += 1) choice = `${CUSTOM_ANSWER_CHOICE} (${suffix})`;
+	return choice;
+}
+
+// Every dialog gets the tool's signal: pi dismisses an open dialog on abort (and shows none once aborted), resolving
+// `undefined`, so the question is cancelled and no later question is asked.
+async function askOneQuestion(
+	question: CursorQuestion,
+	ui: ExtensionContext["ui"],
+	signal: AbortSignal | undefined,
+): Promise<CursorQuestionAnswer> {
 	if (question.options.length > 0) {
 		const labels = question.options.map((option) => option.description ? `${option.label} — ${option.description}` : option.label);
-		const customLabel = "Type a custom answer";
-		const choices = question.allowCustom ? [...labels, customLabel] : labels;
-		const selected = await ctx.ui.select(question.question, choices);
-		if (!selected) {
-			return { id: question.id, question: question.question, answer: null, wasCustom: false, cancelled: true };
+		const customChoice = question.allowCustom ? customAnswerChoice(labels) : undefined;
+		const selected = await ui.select(question.question, customChoice ? [...labels, customChoice] : labels, { signal });
+		if (!selected) return { kind: "cancelled", dialog: "select" };
+		if (selected !== customChoice) {
+			const selectedIndex = labels.indexOf(selected);
+			const option = selectedIndex >= 0 ? question.options[selectedIndex] : undefined;
+			return { kind: "selected", label: option?.label ?? selected, value: option?.value ?? selected };
 		}
-		if (selected === customLabel) {
-			const customAnswer = await ctx.ui.input(question.question, "Type your answer");
-			const trimmed = customAnswer?.trim();
-			return trimmed
-				? { id: question.id, question: question.question, answer: trimmed, value: trimmed, wasCustom: true, cancelled: false }
-				: { id: question.id, question: question.question, answer: null, wasCustom: true, cancelled: true };
-		}
-		const selectedIndex = labels.indexOf(selected);
-		const selectedOption = selectedIndex >= 0 ? question.options[selectedIndex] : undefined;
-		const answer = selectedOption?.label ?? selected;
-		return {
-			id: question.id,
-			question: question.question,
-			answer,
-			value: selectedOption?.value ?? answer,
-			wasCustom: false,
-			cancelled: false,
-		};
 	}
 
-	const answer = await ctx.ui.input(question.question, "Type your answer");
-	const trimmed = answer?.trim();
-	return trimmed
-		? { id: question.id, question: question.question, answer: trimmed, value: trimmed, wasCustom: true, cancelled: false }
-		: { id: question.id, question: question.question, answer: null, wasCustom: true, cancelled: true };
+	const text = (await ui.input(question.question, "Type your answer", { signal }))?.trim();
+	return text ? { kind: "custom", text } : { kind: "cancelled", dialog: "input" };
 }
 
 function syncCursorQuestionToolForModel(pi: Pick<ExtensionAPI, "getActiveTools" | "setActiveTools">, model: ExtensionContext["model"]): void {
@@ -224,7 +240,7 @@ export function registerCursorQuestionTool(pi: CursorQuestionToolExtensionApi): 
 			"Do not call cursor_ask_question unless the user explicitly asked to be prompted or to choose among options.",
 			"If this tool is available, prefer a reasonable default and state the assumption instead of blocking on a questionnaire.",
 		],
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			const questions = normalizeQuestions(params as CursorAskQuestionParams);
 			if (questions.length === 0) {
 				throw new Error("No valid question was provided.");
@@ -239,11 +255,11 @@ export function registerCursorQuestionTool(pi: CursorQuestionToolExtensionApi): 
 			// awaits input so consumers (e.g. Herdr) can map it to blocked/working.
 			emitCursorAskQuestionBlockedEvent(pi, { active: true });
 			try {
-				const answers: CursorQuestionAnswer[] = [];
+				const answers: CursorQuestionAnswerDetails[] = [];
 				for (const question of questions) {
-					const answer = await askOneQuestion(question, ctx);
-					answers.push(answer);
-					if (answer.cancelled) break;
+					const answer = await askOneQuestion(question, ctx.ui, signal);
+					answers.push(toAnswerDetails(question, answer));
+					if (answer.kind === "cancelled") break;
 				}
 
 				return {

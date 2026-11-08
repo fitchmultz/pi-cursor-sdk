@@ -1086,7 +1086,10 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 		}
 	});
 
-	it("rejects queued MCP calls and clears pending state when replayed tool dispatch throws", async () => {
+	it.each([
+		["replayed tool dispatch throws", () => { throw new Error("handler failed"); }, "error"],
+		["the run is explicitly detached", undefined, "cancelled"],
+	] as const)("rejects queued MCP calls and clears pending state when %s", async (_case, handler, rejectionKind) => {
 		const diagnostics = collectBridgeDiagnosticOutput();
 		const registry = __testUtils.createRegistry(
 			createBridgePiHarness({ active: ["read"], tools: [createToolInfo("read")] }),
@@ -1099,15 +1102,13 @@ describe("cursor pi tool bridge loopback MCP lifecycle", () => {
 			await vi.waitFor(() => expect(diagnostics.records().some((record) => record.event === "request_queued")).toBe(true));
 			const queued = diagnostics.records().find((record) => record.event === "request_queued");
 
-			run.setOnToolRequest(() => {
-				throw new Error("handler failed");
-			});
+			run.setOnToolRequest(handler);
 
 			const error = await callPromise;
 			const rejected = diagnostics.records().find((record) => record.event === "request_rejected");
 			expect(error).toBeInstanceOf(Error);
 			expect(queued?.piToolCallId).toEqual(expect.any(String));
-			expect(rejected).toMatchObject({ piToolCallId: queued?.piToolCallId, pendingCount: 0, rejectionKind: "error" });
+			expect(rejected).toMatchObject({ piToolCallId: queued?.piToolCallId, pendingCount: 0, rejectionKind });
 			expect(run.hasPendingPiToolCallId(queued?.piToolCallId as string)).toBe(false);
 		} finally {
 			await client.close().catch(() => undefined);
@@ -1293,6 +1294,21 @@ describe("cursor pi tool bridge URL host and port", () => {
 			});
 			await closeServer(server);
 		}
+	});
+
+	it("resumes concurrent disposal and registry shutdown callers only after releasing the endpoint and port", async () => {
+		const registry = createReadRegistry({});
+		const run = await registry.createRun();
+		const port = Number(new URL(getCursorPiBridgeMcpUrl(run)).port);
+		// Record what each caller observes when it resumes; registry shutdown races the in-flight disposal.
+		const observedOnResume = (caller: Promise<void>) => caller.then(() => ({
+			endpoints: registry.getEndpointCount(),
+			listenerPort: registry.getHttpServerAddress()?.port,
+		}));
+		const released = { endpoints: 0, listenerPort: undefined };
+		expect(await Promise.all([run.dispose(), run.dispose(), registry.disposeAll()].map(observedOnResume)))
+			.toEqual([released, released, released]);
+		await closeServer(await holdPort(port));
 	});
 
 	it.each(["127.0.0.1", "localhost"])("freezes advertised host %s and port until the owned listeners close", async (initialHost) => {

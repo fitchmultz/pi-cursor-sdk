@@ -6,8 +6,8 @@ import { claimCursorLocalAgent } from "./cursor-local-agent-ownership.js";
 import {
 	getRegisteredCursorPiToolBridge,
 	type CursorPiToolBridge,
-	type CursorPiBridgeToolRequest,
 	type CursorPiToolBridgeRun,
+	type CursorPiToolRequestHandler,
 } from "./cursor-pi-tool-bridge.js";
 import { computeCursorContextFingerprint } from "./context.js";
 import { getCursorSessionScopeSnapshot, getCursorSessionScopeGeneration, getCursorSessionScopeKey, type CursorTurnScope } from "./cursor-session-scope.js";
@@ -143,7 +143,7 @@ interface SessionCursorAgentCreateParams {
 	/** Captured by the turn owner before asynchronous acquisition. */
 	nativeToolsEnabled?: boolean;
 	useHttp1ForAgent?: boolean;
-	onBridgeToolRequest?: (request: CursorPiBridgeToolRequest) => void;
+	onBridgeToolRequest?: CursorPiToolRequestHandler;
 	debugRecorder?: CursorSdkEventDebugRecorder;
 	localResume?: boolean;
 	storeRoot?: string;
@@ -316,7 +316,7 @@ function createInitialSendState(): SessionCursorAgentSendState {
 
 function bindBridgeToolRequest(
 	entry: SessionCursorAgentActiveEntry,
-	onBridgeToolRequest?: (request: CursorPiBridgeToolRequest) => void,
+	onBridgeToolRequest?: CursorPiToolRequestHandler,
 ): void {
 	entry.bridgeRun?.setOnToolRequest(onBridgeToolRequest);
 }

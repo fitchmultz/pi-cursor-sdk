@@ -104,26 +104,25 @@ describe("streamCursor native replay shell output", () => {
 
 	it("drops shell-output-delta fallback data when overlapping shell calls make attribution ambiguous", async () => {
 		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
+			const completeShell = (callId: string, command: string) => opts.onDelta({
+				update: {
+					type: "tool-call-completed",
+					toolCall: {
+						name: "shell",
+						args: { command },
+						result: { status: "success", value: { stdout: "", stderr: "", exitCode: 0, executionTime: 1 } },
+					},
+					callId,
+				},
+			});
 			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "shell", args: { command: "sleep 1" } }, callId: "shell-1" } });
 			opts.onDelta({ update: { type: "shell-output-delta", event: { case: "stdout", value: { data: "partial first output\n" } } } });
 			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "shell", args: { command: "sleep 2" } }, callId: "shell-2" } });
 			opts.onDelta({ update: { type: "shell-output-delta", event: { case: "stdout", value: { data: "ambiguous output\n" } } } });
-			for (const [callId, command] of [
-				["shell-1", "sleep 1"],
-				["shell-2", "sleep 2"],
-			] as const) {
-				opts.onDelta({
-					update: {
-						type: "tool-call-completed",
-						toolCall: {
-							name: "shell",
-							args: { command },
-							result: { status: "success", value: { stdout: "", stderr: "", exitCode: 0, executionTime: 1 } },
-						},
-						callId,
-					},
-				});
-			}
+			completeShell("shell-1", "sleep 1");
+			// Deltas carry no call ID, so shell-2 stays ambiguous after shell-1 completes.
+			opts.onDelta({ update: { type: "shell-output-delta", event: { case: "stdout", value: { data: "late output\n" } } } });
+			completeShell("shell-2", "sleep 2");
 			return asMockCursorRun({
 				id: "run-1",
 				agentId: "agent-1",
@@ -147,6 +146,7 @@ describe("streamCursor native replay shell output", () => {
 		expect(trace).toContain("$ sleep 1");
 		expect(trace).toContain("$ sleep 2");
 		expect(trace).not.toContain("ambiguous output");
+		expect(trace).not.toContain("late output");
 		expect(trace.match(/\(no output\)/g)).toHaveLength(2);
 	});
 

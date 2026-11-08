@@ -4,6 +4,19 @@
 
 ## Unreleased
 
+## 0.5.20 - 2026-11-08
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- fix: restore only the owned MCP timeout wrapper (#417) ([aeadc9e](https://github.com/fitchmultz/pi-cursor-sdk/commit/aeadc9e79c91189e6aad00289d01201844a9da02))
+
+### What's Changed
+* fix: restore only the owned MCP timeout wrapper by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/417
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.19...v0.5.20
+
 ## 0.5.19 - 2026-11-07
 
 <!-- npm-release:unreleased:start -->

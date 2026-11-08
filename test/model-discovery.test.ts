@@ -49,6 +49,7 @@ describe("discoverModels", () => {
 		process.env = { ...originalEnv };
 		delete process.env.CURSOR_API_KEY;
 		delete process.env.PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT;
+		delete process.env.PI_CURSOR_MODEL_ALIASES;
 		tmpAgentDir = mkdtempSync(join(tmpdir(), "pi-cursor-discovery-"));
 		process.env.PI_CODING_AGENT_DIR = tmpAgentDir;
 		process.argv = ["node", "vitest"];
@@ -142,8 +143,65 @@ describe("discoverModels", () => {
 		expect(getCursorModelMetadata("z-model@long")?.defaultParams).toEqual([{ id: "context", value: "long" }]);
 	});
 
+	it.each([
+		["by default", undefined, ["gpt-5.5@1m", "gpt-5.5@272k"]],
+		["when disabled", "0", ["gpt-5.5@1m", "gpt-5.5@272k"]],
+		["when enabled", "1", ["gpt-5.5@1m", "gpt-5.5@272k", "gpt-latest@1m", "gpt-latest@272k"]],
+	] as const)("registers alias rows only %s", async (_label, aliasesEnv, expectedIds) => {
+		process.env.CURSOR_API_KEY = "test-key-123";
+		if (aliasesEnv === undefined) delete process.env.PI_CURSOR_MODEL_ALIASES;
+		else process.env.PI_CURSOR_MODEL_ALIASES = aliasesEnv;
+		mockedList.mockResolvedValueOnce([
+			{
+				id: "gpt-5.5",
+				displayName: "GPT-5.5",
+				aliases: ["gpt-latest", ""],
+				parameters: [
+					{ id: "context", displayName: "Context", values: [{ value: "1m" }, { value: "272k" }] },
+					{ id: "reasoning", displayName: "Reasoning", values: [{ value: "none" }, { value: "medium" }] },
+				],
+				variants: [
+					{
+						params: [
+							{ id: "context", value: "1m" },
+							{ id: "reasoning", value: "medium" },
+						],
+						displayName: "GPT-5.5",
+						isDefault: true,
+					},
+				],
+			},
+		]);
+
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
+
+		expect(models.map((model) => model.id)).toEqual(expectedIds);
+		expect(models.filter((model) => model.id.startsWith("gpt-latest"))).toHaveLength(aliasesEnv === "1" ? 2 : 0);
+		// Alias metadata survives either way so sessions and preferences that
+		// already select by alias keep resolving to the base model.
+		expect(getCursorModelMetadata("gpt-latest@1m")).toMatchObject({
+			baseModelId: "gpt-5.5",
+			selectionModelId: "gpt-latest",
+		});
+		expect(buildCursorModelSelection("gpt-latest@272k", "medium")).toEqual({
+			id: "gpt-latest",
+			params: [
+				{ id: "context", value: "272k" },
+				{ id: "reasoning", value: "medium" },
+			],
+		});
+		expect(buildCursorModelSelection("gpt-5.5@272k", "medium")).toEqual({
+			id: "gpt-5.5",
+			params: [
+				{ id: "context", value: "272k" },
+				{ id: "reasoning", value: "medium" },
+			],
+		});
+	});
+
 	it("registers Cursor model aliases with the same params and context variants", async () => {
 		process.env.CURSOR_API_KEY = "test-key-123";
+		process.env.PI_CURSOR_MODEL_ALIASES = "1";
 		mockedList.mockResolvedValueOnce([
 			{
 				id: "gpt-5.5",
@@ -186,6 +244,7 @@ describe("discoverModels", () => {
 
 	it("uses the aliased base model context-window cache for aliases without context params", async () => {
 		process.env.CURSOR_API_KEY = "test-key-123";
+		process.env.PI_CURSOR_MODEL_ALIASES = "1";
 		mockedList.mockResolvedValueOnce([
 			{
 				id: "gpt-5-mini",
@@ -399,6 +458,7 @@ describe("discoverModels", () => {
 		saveCachedContextWindow("base-context-model@1m", 300000);
 		saveCachedContextWindow("base-context-model@1m:fast", 320000);
 		saveCachedContextWindow("observed-alias@1m", 310000);
+		process.env.PI_CURSOR_MODEL_ALIASES = "1";
 		const windowsById = Object.fromEntries(register([{
 			id: "base-context-model",
 			displayName: "Base Context Model",

@@ -8,6 +8,7 @@ import type { ProviderModelConfig as PiProviderModelConfig } from "@earendil-wor
 import type { ModelThinkingLevel, ThinkingLevelMap } from "@earendil-works/pi-ai";
 import { getCursorModelSelectionIdentities } from "../shared/cursor-model-selection-identities.mjs";
 import { loadContextWindowCache } from "./context-window-cache.js";
+import { parseEnvBoolean } from "./cursor-env-boolean.js";
 import { loadCursorSdk } from "./cursor-sdk-runtime.js";
 import { normalizeCursorApiKey } from "./cursor-api-key.js";
 import { sanitizeCursorProviderError } from "./cursor-provider-errors.js";
@@ -27,6 +28,11 @@ const TEXT_AND_IMAGE_INPUT: ProviderModelConfig["input"] = ["text", "image"];
 const AUTH_SETUP_HINT = "/login (Use an API key -> Cursor) or CURSOR_API_KEY; startup discovery does not parse Pi CLI arguments, and Cursor Agent CLI/Desktop login is not reused";
 const CATALOG_REFRESH_HINT =
 	"After adding auth to an already-started pi session, run /cursor-refresh-models to refresh the full live Cursor model catalog without restarting pi.";
+// Alias IDs repeat the model they rename, one pi row per context/speed variant,
+// so pi model lists grew a second copy of nearly every Cursor model. Canonical
+// IDs are always registered; set this when a script or subagent selects by alias.
+const MODEL_ALIASES_ENV = "PI_CURSOR_MODEL_ALIASES";
+const DEFAULT_REGISTER_ALIAS_MODEL_ROWS = false;
 
 export type CursorModelFallbackReason = "missing-api-key" | "cache-only" | "discovery-failed" | "empty-model-list" | "cached-after-error";
 
@@ -261,7 +267,9 @@ function toModelConfig(metadata: CursorModelMetadata, name: string): ProviderMod
 function registerModelItems(items: ModelListItem[], metadataMap = metadataByPiModelId): ProviderModelConfig[] {
 	metadataMap.clear();
 	const contextWindowCache = loadContextWindowCache();
-	return getCursorModelSelectionIdentities(items).map(({ model: item, selectionModelId, context, fastOverride, piModelId, contextWindowKey, baseContextWindowKey }) => {
+	const includeAliasRows = parseEnvBoolean(process.env[MODEL_ALIASES_ENV], DEFAULT_REGISTER_ALIAS_MODEL_ROWS);
+	const configs: ProviderModelConfig[] = [];
+	for (const { model: item, selectionModelId, context, fastOverride, piModelId, contextWindowKey, baseContextWindowKey } of getCursorModelSelectionIdentities(items)) {
 		const defaultParams = getDefaultParams(item);
 		const contextParams = context ? replaceParam(defaultParams, "context", context) : defaultParams;
 		const params = fastOverride === undefined ? contextParams : replaceParam(contextParams, "fast", fastOverride ? "true" : "false");
@@ -275,10 +283,15 @@ function registerModelItems(items: ModelListItem[], metadataMap = metadataByPiMo
 			[piModelId, contextWindowKey, baseContextWindowKey],
 			fastOverride,
 		);
+		// Alias identities always supply metadata so sessions and preferences that
+		// already select by alias keep resolving; they become pi rows only on request,
+		// because one row per alias repeats its base model in every model list.
 		metadataMap.set(piModelId, metadata);
+		if (!includeAliasRows && selectionModelId !== item.id) continue;
 		const alias = selectionModelId === item.id ? undefined : selectionModelId;
-		return toModelConfig(metadata, getModelName(item, context, alias, fastOverride));
-	});
+		configs.push(toModelConfig(metadata, getModelName(item, context, alias, fastOverride)));
+	}
+	return configs;
 }
 
 export function getCursorModelMetadata(modelId: string): CursorModelMetadata | undefined {

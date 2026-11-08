@@ -159,6 +159,17 @@ PI_CURSOR_SDK_MODEL_CACHE_TTL_MS=3600000 pi --model cursor/grok-4.6
 PI_CURSOR_SDK_DISABLE_MODEL_CACHE=1 pi --model cursor/grok-4.6
 ```
 
+### Model alias rows
+
+Cursor's catalog reports aliases such as `gpt-latest` or `fable@300k` for a base model. By default the extension registers only the canonical model IDs, so each model appears once per context in `/model` and `--list-models`. Aliases still resolve to their base model inside the extension: a session or script that already selected an alias keeps running, and Cursor fast preferences and cached context windows keyed by an alias keep matching.
+
+```bash
+# Register an extra pi row for every unambiguous Cursor alias.
+PI_CURSOR_MODEL_ALIASES=1 pi --list-models cursor
+```
+
+Aliases shared by multiple base models are never registered, with or without the flag.
+
 Do not store the API key in `~/.pi/agent/cursor-sdk.json`. That file is only for non-secret extension state such as Cursor fast defaults. `PATH` is only for executable lookup and should not contain the API key.
 
 ## Verify your setup

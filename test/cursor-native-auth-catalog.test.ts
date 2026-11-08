@@ -25,6 +25,7 @@ beforeEach(() => {
 	vi.stubEnv("PI_CODING_AGENT_DIR", root);
 	vi.stubEnv("CURSOR_API_KEY", undefined);
 	vi.stubEnv("PI_CURSOR_SDK_DISABLE_MODEL_CACHE", undefined);
+	vi.stubEnv("PI_CURSOR_MODEL_ALIASES", undefined);
 	vi.stubEnv("PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT", "1");
 	list.mockReset();
 });
@@ -56,6 +57,7 @@ it("hides only unauthenticated availability, retaining known CLI selection and n
 });
 
 it("real same-session login/rotation/logout updates cached metadata with zero catalog calls", async () => {
+	vi.stubEnv("PI_CURSOR_MODEL_ALIASES", "1");
 	const { runtime, pi, credentials, registry } = await fixture();
 	const load = vi.spyOn(sdkRuntime, "loadCursorSdk");
 	saveModelListCache(fingerprintApiKey("synthetic-login"), [{ ...item("native-cached"), aliases: ["native-alias"], variants: [{ displayName: "default", params: [{ id: "opaque", value: "retained" }] }] }]);

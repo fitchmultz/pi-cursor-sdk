@@ -19,7 +19,7 @@ import { registerCursorRuntimeControls } from "../src/cursor-state.js";
 import { registerCursorSessionScope } from "../src/cursor-session-scope.js";
 import { CursorSdkEventDebugSink, __testUtils as sdkEventDebugTestUtils } from "../src/cursor-sdk-event-debug.js";
 import type { SDKMessage } from "@cursor/sdk";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -83,6 +83,51 @@ describe("streamCursor debug artifacts", () => {
 					artifactDir,
 					waitResultRecorded: true,
 				});
+			} finally {
+				if (previousDebug === undefined) delete process.env.PI_CURSOR_SDK_EVENT_DEBUG;
+				else process.env.PI_CURSOR_SDK_EVENT_DEBUG = previousDebug;
+				if (previousRunDir === undefined) delete process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR;
+				else process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR = previousRunDir;
+				rmSync(artifactDir, { recursive: true, force: true });
+			}
+		});
+
+		it("keeps the provider result when the wait-result artifact cannot be written", async () => {
+			const artifactDir = mkdtempSync(join(tmpdir(), "pi-cursor-provider-debug-wait-result-"));
+			const waitResultPath = join(artifactDir, sdkEventDebugTestUtils.ARTIFACTS.waitResult);
+			const previousDebug = process.env.PI_CURSOR_SDK_EVENT_DEBUG;
+			const previousRunDir = process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR;
+			process.env.PI_CURSOR_SDK_EVENT_DEBUG = "1";
+			process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR = artifactDir;
+			// A directory at the artifact path makes the real wait-result write fail.
+			mkdirSync(waitResultPath);
+
+			try {
+				mockCreatedAgent({
+					send: vi.fn().mockResolvedValue(asMockCursorRun({
+						id: "run-debug",
+						agentId: "agent-debug",
+						status: "finished",
+						wait: vi.fn().mockResolvedValue({ id: "run-debug", status: "finished", result: "done" }),
+					})),
+					[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+				});
+
+				const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+
+				expect(getDoneEvent(events).message).toMatchObject({
+					stopReason: "stop",
+					content: [{ type: "text", text: "done" }],
+				});
+				expect(JSON.parse(readFileSync(join(artifactDir, sdkEventDebugTestUtils.ARTIFACTS.summary), "utf8"))).toMatchObject({
+					waitResultRecorded: false,
+				});
+				const errorLabels = readFileSync(join(artifactDir, sdkEventDebugTestUtils.ARTIFACTS.errors), "utf8")
+					.trim()
+					.split("\n")
+					.map((line) => JSON.parse(line).error.label as string);
+				expect(errorLabels).toContain("wait_result");
+				expect(statSync(waitResultPath).isDirectory()).toBe(true);
 			} finally {
 				if (previousDebug === undefined) delete process.env.PI_CURSOR_SDK_EVENT_DEBUG;
 				else process.env.PI_CURSOR_SDK_EVENT_DEBUG = previousDebug;

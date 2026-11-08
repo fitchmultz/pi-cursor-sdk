@@ -8,6 +8,133 @@
 
 - Debug capture: `drain-events.jsonl` `turn_start` and `turn_end` records now report the live run's SDK result as `sdkOutcome` (`running`, `finished`, `cancelled` or `error`) instead of `done`. `done: true` used to mean finished, cancelled or failed.
 
+## 0.5.20 - 2026-11-08
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- fix: restore only the owned MCP timeout wrapper (#417) ([aeadc9e](https://github.com/fitchmultz/pi-cursor-sdk/commit/aeadc9e79c91189e6aad00289d01201844a9da02))
+
+### What's Changed
+* fix: restore only the owned MCP timeout wrapper by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/417
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.19...v0.5.20
+
+## 0.5.19 - 2026-11-07
+
+<!-- npm-release:unreleased:start -->
+### Fixed
+
+- Keep the last working `dist/` when a build cannot publish its output. `npm run build` and the install-time `prepare` build now move the previous `dist/` aside, rename the new output into place, and delete the previous build only after `dist/` holds the new output. If the new output cannot be renamed into place, the previous build is restored and the build still fails with the original error; previously this failure left no `dist/` at all. If the restore also fails, the build reports the retained `dist.previous.*` directory instead of deleting it. The two renames are not an atomic swap: `dist/` is briefly absent between them. A build killed between the two renames leaves `dist/` absent until the next successful build and keeps the previous build in its uniquely named `dist.previous.*` directory, which is not restored or removed automatically.
+- Publish concurrent builds of one checkout one at a time, so one build's rollback can never put an older build over another build's output. Builds still compile in parallel, then take an OS file lock on `dist.lock` (an exclusive `node:sqlite` transaction) only to publish; the OS releases it if a build crashes, so a dead build never blocks the next one. A successful build now always publishes its own output and no longer prints "dist/ was published by a concurrent build". On Node 24 releases before 24.15, loading `node:sqlite` prints Node's ExperimentalWarning.
+<!-- npm-release:unreleased:end -->
+
+- Preserve build output across failed concurrent publication (#431) ([760cea4](https://github.com/fitchmultz/pi-cursor-sdk/commit/760cea470f76c2aa5bb4ca50e7f48e13ba41054f))
+
+### What's Changed
+* Preserve build output across failed concurrent publication by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/431
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.18...v0.5.19
+
+## 0.5.18 - 2026-11-07
+
+<!-- npm-release:unreleased:start -->
+### Fixed
+
+- Report Cursor SDK event-debug wait results and finalization truthfully. `summary.json` reports `waitResultRecorded: true` only when `wait-result.json` was actually written; a failed write is listed in `errors.jsonl` as `wait_result` and is not replaced by a later fallback result. Finalization still waits for the run's stream capture, then stops recording: later records no longer write artifacts or change counts, and a failed finalization keeps its original error without retrying. Provider results are unchanged.
+<!-- npm-release:unreleased:end -->
+
+- fix: keep SDK debug finalization truthful and stable (#424) ([6102de6](https://github.com/fitchmultz/pi-cursor-sdk/commit/6102de6308a36b363144697b1c0d08a603412686))
+
+### What's Changed
+* fix: keep SDK debug finalization truthful and stable by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/424
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.17...v0.5.18
+
+## 0.5.17 - 2026-11-07
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- docs: clarify the shared HTTP transport record contract (#427) ([2a35e79](https://github.com/fitchmultz/pi-cursor-sdk/commit/2a35e79eca96ce7a2ac80ed1c26d3dc82c2fa4e0))
+
+### What's Changed
+* docs: explain shared Cursor transport ownership by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/427
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.16...v0.5.17
+
+## 0.5.16 - 2026-11-07
+
+<!-- npm-release:unreleased:start -->
+### Fixed
+
+- Wait for bridge cleanup to finish when disposal and session shutdown overlap. All callers now wait for the loopback endpoint and listener to close.
+<!-- npm-release:unreleased:end -->
+
+- fix: await shared bridge disposal completion (#415) ([48866be](https://github.com/fitchmultz/pi-cursor-sdk/commit/48866be20e20f904165fd858d0bcdb6a2f1c46d0))
+
+### What's Changed
+* fix: await shared bridge disposal completion by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/415
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.15...v0.5.16
+
+## 0.5.15 - 2026-11-07
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- docs: focus verification on changed behavior (#423) ([de6c3ed](https://github.com/fitchmultz/pi-cursor-sdk/commit/de6c3ed859768871a86ee51e94d41df09a76da50))
+
+### What's Changed
+* docs: adopt focused verification and meaningful tests by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/423
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.14...v0.5.15
+
+## 0.5.14 - 2026-11-07
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- refactor: keep invalid-mode notice receipts with the session manager (#411) ([152cae7](https://github.com/fitchmultz/pi-cursor-sdk/commit/152cae70cd05e216d1ba030615a35a050ae90626))
+
+### What's Changed
+* refactor: keep invalid-mode notice receipts with the session manager by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/411
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.13...v0.5.14
+
+## 0.5.13 - 2026-11-07
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- refactor: group shell-output state by call (#412) ([74804c7](https://github.com/fitchmultz/pi-cursor-sdk/commit/74804c764694433a1bfc0615d6ae08642da2c54b))
+
+### What's Changed
+* refactor: keep shell-output attribution in per-call records by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/412
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.12...v0.5.13
+
+## 0.5.12 - 2026-11-06
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- test: compare native replay renders by visible text (#420) ([650d89f](https://github.com/fitchmultz/pi-cursor-sdk/commit/650d89f1c6c34518f47a0407f682c677bd74f31c))
+
+### What's Changed
+* test: compare native replay renders by visible text by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/420
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.11...v0.5.12
+
 ## 0.5.11 - 2026-11-04
 
 <!-- npm-release:unreleased:start -->

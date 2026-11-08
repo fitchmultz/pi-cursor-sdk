@@ -85,11 +85,15 @@ export function mergeShellOutputDeltasIntoCursorToolCall(
 	};
 }
 
+type CursorShellCallOutput =
+	| { kind: "collecting"; deltas: CursorShellOutputDeltas; progressCount: number }
+	| { kind: "ambiguous" };
+
 export class CursorShellOutputTracker {
+	// SDK output deltas carry no call ID, so only a sole active shell call can collect them.
 	private readonly activeShellCallIds = new Set<string>();
-	private readonly ambiguousShellOutputCallIds = new Set<string>();
-	private readonly shellOutputDeltasByCallId = new Map<string, CursorShellOutputDeltas>();
-	private readonly shellOutputProgressCountsByCallId = new Map<string, number>();
+	// The normalizer clears then takes synchronously; collected output and its count survive until that take.
+	private readonly shellCallOutputs = new Map<string, CursorShellCallOutput>();
 
 	onShellToolStarted(callId: string): void {
 		this.activeShellCallIds.add(callId);
@@ -97,46 +101,41 @@ export class CursorShellOutputTracker {
 
 	onShellToolCleared(callId: string): void {
 		this.activeShellCallIds.delete(callId);
-		this.ambiguousShellOutputCallIds.delete(callId);
-		this.shellOutputProgressCountsByCallId.delete(callId);
+		if (this.shellCallOutputs.get(callId)?.kind === "ambiguous") this.shellCallOutputs.delete(callId);
 	}
 
 	appendShellOutputDelta(delta: CursorShellOutputDelta): CursorShellOutputProgressDelta | undefined {
 		if (this.activeShellCallIds.size !== 1) {
 			for (const activeCallId of this.activeShellCallIds) {
-				this.ambiguousShellOutputCallIds.add(activeCallId);
-				this.shellOutputDeltasByCallId.delete(activeCallId);
-				this.shellOutputProgressCountsByCallId.delete(activeCallId);
+				this.shellCallOutputs.set(activeCallId, { kind: "ambiguous" });
 			}
 			return undefined;
 		}
 		const [callId] = this.activeShellCallIds;
-		if (!callId || this.ambiguousShellOutputCallIds.has(callId)) return undefined;
-		let deltas = this.shellOutputDeltasByCallId.get(callId);
-		if (!deltas) {
-			deltas = { stdout: [], stderr: [] };
-			this.shellOutputDeltasByCallId.set(callId, deltas);
+		if (!callId) return undefined;
+		let output = this.shellCallOutputs.get(callId);
+		if (!output) {
+			output = { kind: "collecting", deltas: { stdout: [], stderr: [] }, progressCount: 0 };
+			this.shellCallOutputs.set(callId, output);
 		}
-		deltas[delta.stream].push(delta.data);
+		if (output.kind === "ambiguous") return undefined;
+		output.deltas[delta.stream].push(delta.data);
 
 		if (!getCursorShellOutputProgressPreview(delta.data)) return undefined;
-		const progressCount = this.shellOutputProgressCountsByCallId.get(callId) ?? 0;
-		if (progressCount >= SHELL_OUTPUT_PROGRESS_MAX_DELTAS_PER_CALL) return undefined;
-		this.shellOutputProgressCountsByCallId.set(callId, progressCount + 1);
+		if (output.progressCount >= SHELL_OUTPUT_PROGRESS_MAX_DELTAS_PER_CALL) return undefined;
+		output.progressCount += 1;
 		return { ...delta, callId };
 	}
 
 	takeDeltasForCall(callId: string): CursorShellOutputDeltas | undefined {
-		const deltas = this.shellOutputDeltasByCallId.get(callId);
-		this.shellOutputDeltasByCallId.delete(callId);
-		this.shellOutputProgressCountsByCallId.delete(callId);
-		return deltas;
+		const output = this.shellCallOutputs.get(callId);
+		if (output?.kind !== "collecting") return undefined;
+		this.shellCallOutputs.delete(callId);
+		return output.deltas;
 	}
 
 	clear(): void {
 		this.activeShellCallIds.clear();
-		this.ambiguousShellOutputCallIds.clear();
-		this.shellOutputDeltasByCallId.clear();
-		this.shellOutputProgressCountsByCallId.clear();
+		this.shellCallOutputs.clear();
 	}
 }

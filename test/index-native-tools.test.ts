@@ -1,9 +1,8 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { stripVTControlCharacters } from "node:util";
 import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
-import { resetCapabilitiesCache, setCapabilities } from "@earendil-works/pi-tui";
+import { resetCapabilitiesCache, setCapabilities, stripTerminalSequences } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
 	createEditToolDefinition,
@@ -206,7 +205,7 @@ describe("extension native Cursor tool replay", () => {
 					replayContext,
 				)?.render(120).join("\n") ?? "";
 
-			const callRenderedText = stripVTControlCharacters(callRendered);
+			const callRenderedText = stripTerminalSequences(callRendered);
 			expect(callRenderedText).toContain("read README.md");
 			expect(callRenderedText).toContain("local file preview");
 			expect(resultRendered).toContain(notice);
@@ -276,7 +275,7 @@ describe("extension native Cursor tool replay", () => {
 			},
 		};
 
-		const collapsed = cursorTool!.renderResult?.(result, createRenderOptions(), theme, context)?.render(120).join("\n").trimEnd() ?? "";
+		const collapsed = cursorTool!.renderResult?.(result, createRenderOptions(), theme, context)?.render(120).map(stripTerminalSequences).join("\n").trimEnd() ?? "";
 		const expanded = cursorTool!.renderResult?.(result, createRenderOptions({ expanded: true }), theme, context)?.render(120).join("\n") ?? "";
 
 		expect(collapsed).toBe("Cursor web search web search azure-functions python");
@@ -585,7 +584,7 @@ describe("extension native Cursor tool replay", () => {
 
 			const theme = createRenderTheme({ bg: (_style: string, text: string) => text });
 			const renderCall = (tool: { renderCall?: (...args: any[]) => { render(width: number): string[] } }, args: Record<string, unknown>) =>
-				stripVTControlCharacters(
+				stripTerminalSequences(
 					tool.renderCall?.(
 						args,
 						theme,

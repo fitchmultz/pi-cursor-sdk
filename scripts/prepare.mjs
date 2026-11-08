@@ -54,8 +54,8 @@ async function runBuild() {
 		cwd: process.cwd(),
 		maxBuffer: 20 * 1024 * 1024,
 	});
-	// Forward build output on success too: install-time diagnostics such as the
-	// concurrent-swap race-loss warning are otherwise swallowed.
+	// Keep successful-build cleanup warnings visible during installs.
+	// reportError forwards failed-build output, including paths to retained previous builds.
 	if (stdout) process.stdout.write(stdout);
 	if (stderr) process.stderr.write(stderr);
 }

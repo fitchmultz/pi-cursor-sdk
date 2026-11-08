@@ -16,7 +16,11 @@ type CursorHttp1Sdk = {
 let globalPreferenceAuthoritative = false;
 const CONFIGURED_CURSOR_KEY = Symbol.for("pi-cursor-sdk.http1-configuration.v1");
 type Http1Configuration = { cursor?: CursorHttp1Sdk["Cursor"] };
-// Keep the configured SDK handle available to the last session's shutdown, even in another module copy.
+// `cursor` is the SDK handle holding an extension-set `useHttp1ForAgent`; absent means the SDK default.
+// Every module copy, including released 0.5.11+ copies, shares this record so the last live session's
+// shutdown can reset it from any copy. Keep its key and shape, and mutate it in place: each copy keeps the
+// object it first read. Store only the handle. Released copies do not record the HTTP/1.1 preference
+// in this object, and each turn reapplies its resolved setting.
 const processState = globalThis as typeof globalThis & { [CONFIGURED_CURSOR_KEY]?: Http1Configuration };
 const configuration = processState[CONFIGURED_CURSOR_KEY] ??= {};
 

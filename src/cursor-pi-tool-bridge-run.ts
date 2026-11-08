@@ -25,6 +25,7 @@ import type {
 	CursorPiToolBridgeRun,
 	CursorPiToolBridgeRunOptions,
 	CursorPiToolBridgeSnapshot,
+	CursorPiToolRequestHandler,
 } from "./cursor-pi-tool-bridge-types.js";
 import {
 	asToolResultMessage,
@@ -53,6 +54,12 @@ interface PendingBridgeCall {
 	settled: boolean;
 }
 
+/** `initial` queues requests for the first handler; `detached` rejects queued and later requests until a handler reattaches. */
+type ToolRequestHandlerState =
+	| { kind: "initial" }
+	| { kind: "attached"; handler: CursorPiToolRequestHandler }
+	| { kind: "detached" };
+
 export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 	readonly id: string;
 	readonly enabled: boolean;
@@ -70,14 +77,12 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 	private readonly pendingToolCallListeners = new Set<() => void>();
 	private readonly pendingByPiToolCallId = new Map<string, PendingBridgeCall>();
 	private readonly pendingByBridgeCallId = new Map<string, PendingBridgeCall>();
-	private readonly pendingByCursorMcpCallId = new Map<string, PendingBridgeCall>();
-	private onToolRequest?: (request: CursorPiBridgeToolRequest) => void;
+	private toolRequestHandler: ToolRequestHandlerState;
 	private debugRecorder: CursorPiToolBridgeRunOptions["debugRecorder"];
-	private liveRunHandlerDetached = false;
 	private mcpServer?: McpProtocolServer;
 	private mcpTransport?: WebStandardStreamableHTTPServerTransport;
 	private toolCallCounter = 0;
-	private disposed = false;
+	private disposal?: Promise<void>;
 
 	constructor(
 		registry: CursorPiToolBridgeRunHost,
@@ -90,7 +95,9 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 		this.env = env;
 		this.snapshot = snapshot;
 		this.enabled = enabled;
-		this.onToolRequest = options.onToolRequest;
+		this.toolRequestHandler = options.onToolRequest
+			? { kind: "attached", handler: options.onToolRequest }
+			: { kind: "initial" };
 		this.debugRecorder = options.debugRecorder;
 		const runUuid = randomUUID();
 		this.runUuid = runUuid;
@@ -139,19 +146,16 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 		return this.queuedRequests.splice(0);
 	}
 
-	setOnToolRequest(handler?: (request: CursorPiBridgeToolRequest) => void): void {
+	setOnToolRequest(handler?: CursorPiToolRequestHandler): void {
 		if (!handler) {
-			this.liveRunHandlerDetached = true;
+			this.toolRequestHandler = { kind: "detached" };
 			this.rejectQueuedToolRequestsWithoutHandler("Cursor pi tool bridge has no active live run");
-		} else {
-			this.liveRunHandlerDetached = false;
+			return;
 		}
-		this.onToolRequest = handler;
-		if (handler) {
-			for (const request of this.queuedRequests.splice(0)) {
-				const pending = this.pendingByPiToolCallId.get(request.piToolCallId);
-				if (pending) this.dispatchPendingToolRequest(pending, handler);
-			}
+		this.toolRequestHandler = { kind: "attached", handler };
+		for (const request of this.queuedRequests.splice(0)) {
+			const pending = this.pendingByPiToolCallId.get(request.piToolCallId);
+			if (pending) this.dispatchPendingToolRequest(pending, handler);
 		}
 	}
 
@@ -248,9 +252,16 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 		}
 	}
 
-	async dispose(): Promise<void> {
-		if (this.disposed) return;
-		this.disposed = true;
+	private get disposed(): boolean {
+		return this.disposal !== undefined;
+	}
+
+	dispose(): Promise<void> {
+		this.disposal ??= this.disposeOnce();
+		return this.disposal;
+	}
+
+	private async disposeOnce(): Promise<void> {
 		this.cancel("Cursor pi tool bridge run disposed");
 		this.pendingToolCallListeners.clear();
 		await waitForProtocolFlush();
@@ -339,7 +350,6 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 			signal?.addEventListener("abort", pending.onAbort, { once: true });
 			this.pendingByPiToolCallId.set(request.piToolCallId, pending);
 			this.pendingByBridgeCallId.set(request.bridgeCallId, pending);
-			this.pendingByCursorMcpCallId.set(cursorMcpCallId, pending);
 			this.knownCursorMcpCallIds.add(cursorMcpCallId);
 			this.notifyPendingToolCallsChanged();
 			pending.timeout = setTimeout(() => {
@@ -347,25 +357,21 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 				this.rejectAndAbortPending(pending, new Error(reason));
 			}, this.callTimeoutMs);
 			pending.timeout.unref?.();
-			if (!this.onToolRequest) {
-				if (this.liveRunHandlerDetached) {
-					this.rejectPending(pending, new Error("Cursor pi tool bridge has no active live run"), "cancelled");
-					return;
-				}
-				this.queuedRequests.push(request);
-				this.emitRequestQueuedDiagnostic(request);
-				this.recordBridgeRaw({ kind: "queued", request });
+			const handlerState = this.toolRequestHandler;
+			if (handlerState.kind === "detached") {
+				this.rejectPending(pending, new Error("Cursor pi tool bridge has no active live run"), "cancelled");
 				return;
 			}
+			if (handlerState.kind === "initial") this.queuedRequests.push(request);
 			this.emitRequestQueuedDiagnostic(request);
 			this.recordBridgeRaw({ kind: "queued", request });
-			this.dispatchPendingToolRequest(pending, this.onToolRequest);
+			if (handlerState.kind === "attached") this.dispatchPendingToolRequest(pending, handlerState.handler);
 		});
 	}
 
 	private dispatchPendingToolRequest(
 		pending: PendingBridgeCall,
-		handler: (request: CursorPiBridgeToolRequest) => void,
+		handler: CursorPiToolRequestHandler,
 	): void {
 		try {
 			handler(pending.request);
@@ -462,7 +468,6 @@ export class CursorPiToolBridgeRunImpl implements CursorPiToolBridgeRun {
 		if (pending.timeout) clearTimeout(pending.timeout);
 		this.pendingByPiToolCallId.delete(pending.request.piToolCallId);
 		this.pendingByBridgeCallId.delete(pending.request.bridgeCallId);
-		if (pending.request.cursorMcpCallId) this.pendingByCursorMcpCallId.delete(pending.request.cursorMcpCallId);
 		const queuedIndex = this.queuedRequests.findIndex((request) => request.bridgeCallId === pending.request.bridgeCallId);
 		if (queuedIndex >= 0) this.queuedRequests.splice(queuedIndex, 1);
 		this.notifyPendingToolCallsChanged();

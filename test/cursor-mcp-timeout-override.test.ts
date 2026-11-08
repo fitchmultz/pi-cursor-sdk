@@ -13,34 +13,40 @@ afterEach(() => {
 	vi.unstubAllEnvs();
 });
 
+// The installed SDK MCP client over an offline transport. `timers` records each
+// delay that reaches the global timer installed before any override.
+async function offlineInstalledMcpClient() {
+	const modules = await installedCursorModules();
+	const exports = modules("/@modelcontextprotocol/sdk/dist/esm/client/index.js");
+	const Client = Object.values(exports).find((value: any) => typeof value === "function" && typeof value.prototype?.callTool === "function") as any;
+	expect(Client).toBeTypeOf("function");
+	const timers: number[] = [];
+	const original = globalThis.setTimeout;
+	vi.stubGlobal("setTimeout", ((callback: any, delay: number, ...args: any[]) => {
+		timers.push(delay);
+		return original(callback, delay, ...args);
+	}) as typeof setTimeout);
+	const transport = {
+		start: async () => {}, close: async () => { transport.onclose?.(); },
+		send: async (message: any) => {
+			if (message.method === "initialize") {
+				transport.onmessage?.({ jsonrpc: "2.0", id: message.id, result: {
+					protocolVersion: "2025-11-25", capabilities: { tools: {}, prompts: {} },
+					serverInfo: { name: "offline", version: "1" },
+				} });
+			}
+		},
+		onmessage: undefined as ((message: any) => void) | undefined,
+		onclose: undefined as (() => void) | undefined,
+	};
+	return { client: new Client({ name: "offline-contract", version: "1" }), transport, timers };
+}
+
 describe("Cursor MCP timeout override", () => {
 	it("applies scoped defaults to actual installed SDK MCP requests without minifier coupling", async () => {
-		const modules = await installedCursorModules();
-		const exports = modules("/@modelcontextprotocol/sdk/dist/esm/client/index.js");
-		const Client = Object.values(exports).find((value: any) => typeof value === "function" && typeof value.prototype?.callTool === "function") as any;
-		expect(Client).toBeTypeOf("function");
-		const client = new Client({ name: "offline-contract", version: "1" });
+		const { client, transport, timers } = await offlineInstalledMcpClient();
 		const pending: Promise<unknown>[] = [];
-		const timers: number[] = [];
-		const original = globalThis.setTimeout;
-		vi.stubGlobal("setTimeout", ((callback: any, delay: number, ...args: any[]) => {
-			timers.push(delay);
-			return original(callback, delay, ...args);
-		}) as typeof setTimeout);
 		installCursorMcpToolTimeoutOverride();
-		const transport = {
-			start: async () => {}, close: async () => { transport.onclose?.(); },
-			send: async (message: any) => {
-				if (message.method === "initialize") {
-					transport.onmessage?.({ jsonrpc: "2.0", id: message.id, result: {
-						protocolVersion: "2025-11-25", capabilities: { tools: {}, prompts: {} },
-						serverInfo: { name: "offline", version: "1" },
-					} });
-				}
-			},
-			onmessage: undefined as ((message: any) => void) | undefined,
-			onclose: undefined as (() => void) | undefined,
-		};
 		try {
 			await client.connect(transport);
 			expect(timers).toContain(10_000);
@@ -65,6 +71,41 @@ describe("Cursor MCP timeout override", () => {
 			await client.close();
 			await Promise.all(pending);
 			restoreCursorMcpToolTimeoutOverride();
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("restores only its own timer wrapper and forwards SDK defaults through a later owner's wrapper", async () => {
+		const { client, transport, timers } = await offlineInstalledMcpClient();
+		const pending: Promise<unknown>[] = [];
+		const callToolDelays = () => {
+			timers.length = 0;
+			pending.push(client.callTool({ name: "offline", arguments: {} }).catch(() => {}));
+			return [...timers];
+		};
+		try {
+			await client.connect(transport);
+			installCursorMcpToolTimeoutOverride();
+			const cursorSetTimeout = globalThis.setTimeout;
+			const laterSetTimeout = ((...args: any[]) => Reflect.apply(cursorSetTimeout, globalThis, args)) as typeof setTimeout;
+			globalThis.setTimeout = laterSetTimeout;
+			expect(callToolDelays()).toEqual([3_600_000]);
+
+			restoreCursorMcpToolTimeoutOverride();
+			expect(globalThis.setTimeout).toBe(laterSetTimeout);
+			expect(callToolDelays()).toEqual([60_000]);
+
+			installCursorMcpToolTimeoutOverride();
+			expect(callToolDelays()).toEqual([3_600_000]);
+			restoreCursorMcpToolTimeoutOverride();
+			expect(globalThis.setTimeout).toBe(laterSetTimeout);
+
+			// The later owner releases by reinstalling the wrapper it captured.
+			globalThis.setTimeout = cursorSetTimeout;
+			expect(callToolDelays()).toEqual([60_000]);
+		} finally {
+			await client.close();
+			await Promise.all(pending);
 			vi.unstubAllGlobals();
 		}
 	});

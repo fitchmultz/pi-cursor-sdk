@@ -1,17 +1,24 @@
 #!/usr/bin/env node
 /**
  * Purpose: Produce the compiled runtime files that the Pi extension manifest loads.
- * Responsibilities: Run TypeScript emit into a staging directory, then atomically swap it
- * into dist/ so a failed TypeScript emit never destroys a previously working dist.
+ * Responsibilities: Run TypeScript emit into a staging directory, then publish it with two renames:
+ * the previous dist/ moves aside and the staged tree moves into dist/. This is not an atomic swap;
+ * dist/ is briefly absent between the renames. A failed emit never touches dist/, and a failed
+ * publication restores the previous build or reports where it is retained.
  * Usage: `npm run build`; also invoked by scripts/prepare.mjs during install lifecycles.
- * Invariants/Assumptions: `node_modules` provides `typescript`; deleting `dist/` is safe generated output.
+ * Invariants/Assumptions: `node_modules` provides `typescript`; dist/ is generated output. Builds of
+ * one checkout compile concurrently but publish one at a time under dist.lock, so only the lock
+ * holder moves trees in or out of dist/, and the previous build is deleted only after dist/ holds
+ * this build's output.
  */
 
 import { execFile as execFileCallback } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
+import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 
@@ -19,17 +26,19 @@ const execFile = promisify(execFileCallback);
 const RM_OPTIONS = { force: true, maxRetries: 5, recursive: true, retryDelay: 100 };
 const RENAME_RETRY_LIMIT = 50;
 const RENAME_RETRY_MS = 50;
+const LOCK_BUSY_TIMEOUT_MS = 50;
+const SQLITE_BUSY = 5;
 // Run tsc's JS entrypoint directly through the current node binary: no .cmd shim,
 // no shell, safe for install paths containing spaces on every platform.
 const tscPath = join(process.cwd(), "node_modules", "typescript", "bin", "tsc");
 
-async function discardStaging(path) {
+async function discard(path, label) {
 	try {
 		await rm(path, RM_OPTIONS);
 	} catch (error) {
-		// Cleanup is always best-effort: it must not turn a successful race loss
+		// Cleanup is always best-effort: it must not turn a successful publication
 		// into failure or replace the compiler/publish error that matters.
-		console.warn(`could not remove staging ${path}: ${error?.message ?? error}`);
+		console.warn(`could not remove ${label} ${path}: ${error?.message ?? error}`);
 	}
 }
 
@@ -42,14 +51,6 @@ function isOwnerGone(pid) {
 	}
 }
 
-async function hasPublishedDist(path) {
-	try {
-		return (await readdir(path)).length > 0;
-	} catch {
-		return false;
-	}
-}
-
 async function reapStrandedStaging(cwd) {
 	// Signal 0 proves only that the owner was gone at probe time. Pid reuse
 	// between this probe and removal is inherent to pid-based reaping.
@@ -58,7 +59,7 @@ async function reapStrandedStaging(cwd) {
 		if (!match || !entry.isDirectory()) continue;
 		const ownerPid = Number(match[1]);
 		if (ownerPid === process.pid || !isOwnerGone(ownerPid)) continue;
-		await discardStaging(join(cwd, entry.name));
+		await discard(join(cwd, entry.name), "staging");
 	}
 }
 
@@ -74,38 +75,85 @@ async function compileToStaging(cwd, stagingDir) {
 	} catch (error) {
 		if (error?.stdout) process.stdout.write(error.stdout);
 		if (error?.stderr) process.stderr.write(error.stderr);
-		await discardStaging(stagingDir);
+		await discard(stagingDir, "staging");
 		throw error;
 	}
 }
 
-async function publishStaging(stagingDir, distDir) {
-	try {
-		// A failed dist removal must fail loudly; keep it outside the retry loop.
-		// Remove dist exactly once so retries never delete a concurrent winner.
-		await rm(distDir, RM_OPTIONS);
-		for (let retry = 0; ; retry++) {
-			try {
-				await rename(stagingDir, distDir);
-				return;
-			} catch (error) {
-				// A completed staged build is non-empty; a bare directory is not proof
-				// that a concurrent publisher won the race.
-				if (await hasPublishedDist(distDir)) {
-					console.warn("dist/ was published by a concurrent build; discarding this build's staging tree.");
-					return;
-				}
-				// At most 50 retries (~2.5s) keep persistent filesystem errors bounded.
-				if (existsSync(stagingDir) && retry < RENAME_RETRY_LIMIT) {
-					await delay(RENAME_RETRY_MS);
-					continue;
-				}
-				throw error;
+// Serializes publication across the builds of one checkout. SQLite holds the EXCLUSIVE
+// transaction with OS file locks (POSIX advisory locks, LockFileEx on Windows) that the OS
+// releases when this process exits, even after a crash, so a dead holder never blocks the next
+// build. There is no deadline: a live holder only runs the bounded renames below.
+function lockPublication(lockPath) {
+	const lock = new DatabaseSync(lockPath, { timeout: LOCK_BUSY_TIMEOUT_MS });
+	for (;;) {
+		try {
+			lock.exec("BEGIN EXCLUSIVE");
+			return lock;
+		} catch (error) {
+			// SQLITE_BUSY after the busy timeout means another build still holds the lock.
+			if ((error?.errcode & 0xff) === SQLITE_BUSY) continue;
+			lock.close();
+			throw error;
+		}
+	}
+}
+
+// Renames one tree within the bounded retry policy: at most 50 retries (~2.5s) while the
+// source still exists, so persistent filesystem errors fail instead of hanging.
+async function renameWithRetry(from, to) {
+	for (let retry = 0; ; retry++) {
+		try {
+			await rename(from, to);
+			return;
+		} catch (error) {
+			if (existsSync(from) && retry < RENAME_RETRY_LIMIT) {
+				await delay(RENAME_RETRY_MS);
+				continue;
 			}
+			throw error;
+		}
+	}
+}
+
+// Returns whether the previous build is back in dist/. If not, it stays where it is and its
+// path is reported; it is never deleted.
+async function restorePrevious(previousDir, distDir) {
+	try {
+		await renameWithRetry(previousDir, distDir);
+		return true;
+	} catch (error) {
+		console.error(`could not restore dist/; the previous build is retained at ${previousDir}: ${error?.message ?? error}`);
+		return false;
+	}
+}
+
+async function publishStaging(stagingDir, distDir) {
+	let lock;
+	let previousDir;
+	let canDiscardPrevious = true;
+	try {
+		lock = lockPublication(`${distDir}.lock`);
+		// Move the previous build aside instead of deleting it, so a failed publication can
+		// restore it. The unique name never collides with a backup a crashed build left behind.
+		if (existsSync(distDir)) {
+			const target = `${distDir}.previous.${process.pid}.${randomUUID()}`;
+			await renameWithRetry(distDir, target);
+			previousDir = target;
+		}
+		try {
+			// Two renames, not an atomic swap: dist/ stays absent until this rename publishes.
+			await renameWithRetry(stagingDir, distDir);
+		} catch (error) {
+			if (previousDir) canDiscardPrevious = await restorePrevious(previousDir, distDir);
+			throw error;
 		}
 	} finally {
+		lock?.close();
 		// Safe after success too: rename moved stagingDir, so force makes this a no-op.
-		await discardStaging(stagingDir);
+		await discard(stagingDir, "staging");
+		// dist/ holds this build or the restored previous build; a failed restore keeps it.
+		if (previousDir && canDiscardPrevious) await discard(previousDir, "previous build");
 	}
 }
 

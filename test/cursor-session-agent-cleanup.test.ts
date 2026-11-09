@@ -110,7 +110,7 @@ describe("cursor-session-agent-cleanup", () => {
 		vi.clearAllMocks();
 	});
 
-	it("plans only recorded cleanup candidates and protects the active branch agent", () => {
+	it("plans only recorded cleanup candidates and protects the active branch agent, even after a retryable cleanup failure", () => {
 		const oldEntry = resumeEntry("r1", resumeData("agent-old"));
 		const activeEntry = resumeEntry("r2", resumeData("agent-active", {
 			cleanupCandidateAgentIds: ["agent-old", "agent-old", "agent-*", "bc-cloud"],
@@ -120,6 +120,32 @@ describe("cursor-session-agent-cleanup", () => {
 		expect(readCursorSessionAgentCleanupPlan(entries, entries, cleanupScope)).toEqual({
 			candidateAgentIds: ["agent-old"],
 			protectedAgentIds: ["agent-active"],
+		});
+
+		const afterFailure = linearEntries([
+			...entries,
+			cleanupEntry("c1", {
+				action: "delete",
+				phase: "intent",
+				runtime: "local",
+				timestamp: "2026-07-08T00:01:00.000Z",
+				candidateAgentIds: ["agent-old"],
+			}),
+			cleanupEntry("c2", {
+				action: "delete",
+				phase: "result",
+				runtime: "local",
+				timestamp: "2026-07-08T00:02:00.000Z",
+				candidateAgentIds: ["agent-old"],
+				deletedAgentIds: [],
+				failedAgentIds: [{ agentId: "agent-old", error: "still busy" }],
+			}),
+		]);
+		expect(readCursorSessionAgentCleanupPlan(afterFailure, afterFailure, cleanupScope).candidateAgentIds).toEqual(["agent-old"]);
+		// Navigating back to agent-old's branch makes it the current handle again.
+		expect(readCursorSessionAgentCleanupPlan(afterFailure, afterFailure.slice(0, 1), cleanupScope)).toEqual({
+			candidateAgentIds: [],
+			protectedAgentIds: ["agent-old"],
 		});
 	});
 
@@ -206,7 +232,7 @@ describe("cursor-session-agent-cleanup", () => {
 		})).toBeUndefined();
 	});
 
-	it("reconciles durable intents, successful results, failed results, and legacy delete entries", () => {
+	it("reconciles durable intents, successful results, failed results, and legacy delete entries, keeping deletions and rejections final", () => {
 		const oldEntry = resumeEntry("r1", resumeData("agent-old"));
 		const activeEntry = resumeEntry("r2", resumeData("agent-active", {
 			cleanupCandidateAgentIds: ["agent-old", "agent-pending", "agent-deleted", "agent-failed", "agent-invalid"],
@@ -238,15 +264,30 @@ describe("cursor-session-agent-cleanup", () => {
 			],
 		});
 
+		const expectedPlan = { candidateAgentIds: ["agent-failed"], protectedAgentIds: ["agent-active"] };
 		const entries = linearEntries([oldEntry, activeEntry, legacyDeleted, intent, result]);
-		expect(readCursorSessionAgentCleanupPlan(
-			entries,
-			entries.slice(0, 2),
-			cleanupScope,
-		)).toEqual({
-			candidateAgentIds: ["agent-failed"],
-			protectedAgentIds: ["agent-active"],
+		expect(readCursorSessionAgentCleanupPlan(entries, entries.slice(0, 2), cleanupScope)).toEqual(expectedPlan);
+
+		// A later intent and retryable failures cannot revive a deleted or rejected agent.
+		const finalAgentIds = ["agent-deleted", "agent-invalid", "agent-old"];
+		const laterIntent = cleanupEntry("c4", {
+			action: "delete",
+			phase: "intent",
+			runtime: "local",
+			timestamp: "2026-07-08T00:04:00.000Z",
+			candidateAgentIds: finalAgentIds,
 		});
+		const laterResult = cleanupEntry("c5", {
+			action: "delete",
+			phase: "result",
+			runtime: "local",
+			timestamp: "2026-07-08T00:05:00.000Z",
+			candidateAgentIds: finalAgentIds,
+			deletedAgentIds: [],
+			failedAgentIds: finalAgentIds.map((agentId) => ({ agentId, error: "still busy" })),
+		});
+		const laterEntries = linearEntries([...entries, laterIntent, laterResult]);
+		expect(readCursorSessionAgentCleanupPlan(laterEntries, laterEntries.slice(0, 2), cleanupScope)).toEqual(expectedPlan);
 	});
 
 	it("ignores cleanup candidates copied from another session scope", () => {

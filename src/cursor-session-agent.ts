@@ -330,13 +330,6 @@ async function disposePoolEntryForScope(scopeKey: string, options?: { terminal?:
 	await disposeSessionAgentInstance(state.instance, { deadTransport: invalidation === "deadTransport" });
 }
 
-function bindBridgeToolRequest(
-	entry: SessionCursorAgentActiveEntry,
-	onBridgeToolRequest?: CursorPiToolRequestHandler,
-): void {
-	entry.instance.bridgeRun?.setOnToolRequest(onBridgeToolRequest);
-}
-
 /** Records one successful send; an incremental send never bootstraps a fresh agent, so its next plan still bootstraps. */
 function advanceSessionCursorAgentSendState(
 	sendState: SessionCursorAgentSendState,
@@ -425,7 +418,7 @@ function leaseFromEntry(
 ): SessionCursorAgentLease {
 	const { instance } = entry;
 	instance.resumeEnabled = params.localResume === true;
-	bindBridgeToolRequest(entry, params.onBridgeToolRequest);
+	instance.bridgeRun?.setOnToolRequest(params.onBridgeToolRequest);
 	instance.bridgeRun?.setDebugRecorder(params.debugRecorder);
 	const resumeNotice = instance.resumeNotice;
 	instance.resumeNotice = undefined;

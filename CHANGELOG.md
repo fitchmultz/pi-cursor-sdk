@@ -8,6 +8,19 @@
 
 - Event-debug `metadata.json` represents a pooled agent that has not bootstrapped as `providerMeta.sendState: { "bootstrapped": false }`. Fingerprint and incremental-send count fields appear only after a successful bootstrap. Persisted resume entries keep their existing format.
 
+## 0.5.26 - 2026-11-09
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- refactor: make Cursor turn cleanup ownership explicit (#444) ([ae27d81](https://github.com/fitchmultz/pi-cursor-sdk/commit/ae27d81186733974b5e326486bdc28cb17ed6b8f))
+
+### What's Changed
+* refactor: make Cursor turn cleanup ownership explicit by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/444
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.25...v0.5.26
+
 ## 0.5.25 - 2026-11-09
 
 <!-- npm-release:unreleased:start -->

@@ -143,7 +143,7 @@ describe("CursorRunFinalizer", () => {
 		const { finalizer, guard } = makeFinalizer(stream, partial, debugSink);
 		try {
 			await finalizer.applyTerminalEvent({ kind: "direct", prepared, outcome: finishedOutcome() });
-			await expect(finalizer.cleanup(prepared, undefined, undefined)).resolves.toBeUndefined();
+			await expect(finalizer.cleanup({ kind: "sent", prepared, abortRegistration: undefined })).resolves.toBeUndefined();
 			stream.end();
 			const events = await collectAssistantEvents(stream);
 			expect(events.filter(event => event.type === "done")).toHaveLength(1);

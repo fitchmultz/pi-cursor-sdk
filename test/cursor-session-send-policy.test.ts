@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import type { Context } from "@earendil-works/pi-ai";
 import { computeCursorContextFingerprint } from "../src/context.js";
+import type { SessionCursorAgentSendState } from "../src/cursor-session-agent.js";
 import {
 	buildCursorSessionSendPrompt,
 	MAX_COMPLETED_INCREMENTAL_SENDS_BEFORE_REBOOTSTRAP,
 	planCursorSessionSend,
+	type CursorSessionSendPlan,
 } from "../src/cursor-session-send-policy.js";
 import { getCursorToolTailGuardText } from "../src/context.js";
 
@@ -17,10 +19,10 @@ describe("cursor-session-send-policy", () => {
 	};
 	const fingerprint = computeCursorContextFingerprint(priorContext);
 
-	it.each([
+	it.each<{ name: string; state: SessionCursorAgentSendState; context: Context; expected: CursorSessionSendPlan }>([
 		{
 			name: "plans initial bootstrap without resetting the agent",
-			state: { bootstrapped: false, contextFingerprint: "", incrementalSendCount: 0 },
+			state: { bootstrapped: false },
 			context: priorContext,
 			expected: { mode: "bootstrap", resetAgent: false, reason: "initial" },
 		},

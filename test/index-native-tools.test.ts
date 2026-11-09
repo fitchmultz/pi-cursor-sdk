@@ -131,7 +131,7 @@ describe("extension native Cursor tool replay", () => {
 		});
 	});
 
-	it("removes only a shut-down binding's pending Cursor replay results", async () => {
+	it("preserves another binding's overwritten Cursor replay result while removing a shut-down binding's own results", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		const [owner, sibling] = [createExtensionPi(), createExtensionPi()];
 		for (const pi of [owner, sibling]) {
@@ -146,6 +146,7 @@ describe("extension native Cursor tool replay", () => {
 			result: { content: [{ type: "text", text }] },
 			isError: false,
 		}, getCursorNativeToolDisplayState(pi));
+		expect(record(sibling, "cursor-replay-1-1-tool-1", "old sibling result")).toBe(true);
 		expect(record(owner, "cursor-replay-1-1-tool-1", "owner result")).toBe(true);
 		expect(record(sibling, "cursor-replay-1-2-tool-1", "sibling result")).toBe(true);
 

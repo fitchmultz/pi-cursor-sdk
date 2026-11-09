@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Event-debug `metadata.json` represents a pooled agent that has not bootstrapped as `providerMeta.sendState: { "bootstrapped": false }`. Fingerprint and incremental-send count fields appear only after a successful bootstrap. Persisted resume entries keep their existing format.
+
 ## 0.5.24 - 2026-11-09
 
 <!-- npm-release:unreleased:start -->

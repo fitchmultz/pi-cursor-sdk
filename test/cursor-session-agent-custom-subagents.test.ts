@@ -63,6 +63,6 @@ describe("session custom subagent identity", () => {
 		expect(first.agent[Symbol.asyncDispose]).toHaveBeenCalledOnce();
 		expect(replacement.agent).not.toBe(first.agent);
 		expect(replacement.poolKey).not.toBe(first.poolKey);
-		expect(replacement.sendState).toEqual({ bootstrapped: false, contextFingerprint: "", incrementalSendCount: 0 });
+		expect(replacement.sendState).toEqual({ bootstrapped: false });
 	});
 });

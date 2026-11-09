@@ -46,7 +46,7 @@ function makePrepared(
 		contextWindowAgentId: "agent-1", textDeltas: [], sessionAgentScopeKey: "scope-1",
 		sessionAgentLease: {
 			scopeKey: "scope-1", poolKey: "pool-1", instanceId: 1, agent, store, storeIdentity,
-			sendState: { bootstrapped: false, contextFingerprint: "", incrementalSendCount: 0 },
+			sendState: { bootstrapped: false },
 			created: false, commitSend, trackRunCompletion,
 		},
 		restoreCursorSdkOutputFilter: () => {},

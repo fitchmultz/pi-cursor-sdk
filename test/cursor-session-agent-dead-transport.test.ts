@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { claimCursorLocalAgent } from "../src/cursor-local-agent-ownership.js";
 import { __testUtils as resumeTestUtils } from "../src/cursor-session-agent-resume.js";
 import {
 	acquireSessionCursorAgent,
@@ -42,6 +43,8 @@ describe("cursor-session-agent dead transport", () => {
 			expect(second.created).toBe(true);
 			expect(second.agent).not.toBe(first.agent);
 			expect(hangingDispose).toHaveBeenCalledTimes(1);
+			// A timed-out disposal is not proof of closure, so the exact agent stays claimed.
+			expect(claimCursorLocalAgent(first.storeIdentity, first.agent.agentId)).toBeUndefined();
 		} finally {
 			vi.useRealTimers();
 		}

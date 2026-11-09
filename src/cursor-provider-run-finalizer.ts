@@ -136,12 +136,9 @@ export class CursorRunFinalizer {
 				break;
 			case "prepared":
 			case "started":
-				this.safeCleanup(() => phase.prepared.restoreCursorSdkOutputFilter());
-				await phase.prepared.lifecycle.dispose().catch(() => {});
-				break;
 			case "sent":
 				this.safeCleanup(() => phase.prepared.restoreCursorSdkOutputFilter());
-				this.safeCleanup(() => phase.abortRegistration?.release());
+				if (phase.kind === "sent") this.safeCleanup(() => phase.abortRegistration?.release());
 				await phase.prepared.lifecycle.dispose().catch(() => {});
 				break;
 			case "liveCompletionOwnsCleanup":

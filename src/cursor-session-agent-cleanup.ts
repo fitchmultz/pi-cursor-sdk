@@ -51,6 +51,10 @@ export interface CursorSessionAgentCleanupPlan {
 
 export type CursorSessionAgentCleanupScope = CursorSessionAgentResumeScope;
 
+/** Current resume handles decide protection; recorded cleanup results decide the other outcomes. */
+type CleanupAgentOutcome = "eligible" | "protected" | "pending" | "deleted" | "rejected";
+type RecordedCleanupAgentOutcome = Exclude<CleanupAgentOutcome, "protected">;
+
 type LocalResumeCleanupApi = Pick<ExtensionAPI, "appendEntry">;
 type LocalResumeCleanupCommandContext = Pick<ExtensionCommandContext, "cwd"> & {
 	sessionManager: Pick<ExtensionCommandContext["sessionManager"], "getEntries" | "getBranch" | "getSessionFile" | "getSessionId">;
@@ -134,32 +138,30 @@ function parseCleanupEntryData(value: unknown): CursorSessionAgentCleanupEntryDa
 	};
 }
 
-function readUnavailableAgentIds(entries: readonly SessionEntry[]): Set<string> {
-	const deleted = new Set<string>();
-	const pending = new Set<string>();
-	const permanentlyFailed = new Set<string>();
+function readRecordedCleanupAgentOutcomes(entries: readonly SessionEntry[]): Map<string, RecordedCleanupAgentOutcome> {
+	const outcomes = new Map<string, RecordedCleanupAgentOutcome>();
+	const record = (agentId: string, outcome: RecordedCleanupAgentOutcome) => {
+		const previous = outcomes.get(agentId);
+		// Deletion and rejection are final; later records cannot revive the agent.
+		if (previous !== "deleted" && previous !== "rejected") outcomes.set(agentId, outcome);
+	};
 	for (const entry of entries) {
 		if (entry.type !== "custom" || entry.customType !== CURSOR_SESSION_AGENT_CLEANUP_ENTRY_TYPE) continue;
 		const data = parseCleanupEntryData(entry.data);
 		if (data?.action !== "delete") continue;
 		if (data.phase === "intent") {
-			for (const agentId of data.candidateAgentIds) {
-				if (!deleted.has(agentId)) pending.add(agentId);
-			}
+			for (const agentId of data.candidateAgentIds) record(agentId, "pending");
 			continue;
 		}
-		for (const agentId of data.deletedAgentIds ?? []) {
-			deleted.add(agentId);
-			pending.delete(agentId);
-		}
-		if (data.phase === "result") {
-			for (const failure of data.failedAgentIds ?? []) {
-				pending.delete(failure.agentId);
-				if (failure.retryable === false) permanentlyFailed.add(failure.agentId);
-			}
-		}
+		for (const agentId of data.deletedAgentIds ?? []) record(agentId, "deleted");
+		// Unphased legacy delete entries contribute only their deletions.
+		if (data.phase !== "result") continue;
+		for (const failure of data.failedAgentIds ?? []) record(failure.agentId, failure.retryable === false ? "rejected" : "eligible");
 	}
-	return new Set([...deleted, ...pending, ...permanentlyFailed, ...nondurableCleanupResultAgentIds]);
+	// Agents whose result this process could not durably record stay pending, even when memory
+	// still holds a retryable failure for them.
+	for (const agentId of nondurableCleanupResultAgentIds) record(agentId, "pending");
+	return outcomes;
 }
 
 function readLatestBranchAgentId(branch: readonly SessionEntry[], scope: CursorSessionAgentCleanupScope): string | undefined {
@@ -171,10 +173,12 @@ function readCursorSessionAgentCleanupPlanDetails(
 	branch: readonly SessionEntry[],
 	scope: CursorSessionAgentCleanupScope,
 ): CursorSessionAgentCleanupPlan & { candidates: CursorSessionAgentCleanupCandidate[] } {
-	const unavailable = readUnavailableAgentIds(entries);
+	const recordedOutcomes = readRecordedCleanupAgentOutcomes(entries);
 	const latestBranchAgentId = readLatestBranchAgentId(branch, scope);
 	const protectedAgentIds = new Set(readResumableCursorSessionAgentIds(entries, scope));
 	if (latestBranchAgentId && isCursorLocalAgentId(latestBranchAgentId)) protectedAgentIds.add(latestBranchAgentId);
+	const outcomeOf = (agentId: string): CleanupAgentOutcome =>
+		protectedAgentIds.has(agentId) ? "protected" : recordedOutcomes.get(agentId) ?? "eligible";
 	const candidates = new Map<string, CursorSessionAgentCleanupCandidate>();
 	for (const resume of readResumeEntries(entries)) {
 		if (!resumeEntryMatchesCleanupScope(resume, scope)) continue;
@@ -183,7 +187,7 @@ function readCursorSessionAgentCleanupPlanDetails(
 			...(resume.cleanupCandidates ?? []),
 		];
 		for (const candidate of recordedCandidates) {
-			if (!isCursorLocalAgentId(candidate.agentId) || protectedAgentIds.has(candidate.agentId) || unavailable.has(candidate.agentId)) continue;
+			if (!isCursorLocalAgentId(candidate.agentId) || outcomeOf(candidate.agentId) !== "eligible") continue;
 			const existing = candidates.get(candidate.agentId);
 			if (!existing?.storeIdentity || candidate.storeIdentity) candidates.set(candidate.agentId, candidate);
 		}

@@ -19,9 +19,9 @@ jobs:
     permissions:
       contents: write
     if: vars.NPM_RELEASE_ENABLED == 'true' && github.ref == 'refs/heads/main' && github.repository_owner == 'fitchmultz'
-    uses: fitchmultz/.github/.github/workflows/npm-release-plan.yml@81643f314e88cba668cc68c2d06abcefcbba44ee # main
+    uses: fitchmultz/.github/.github/workflows/npm-release-plan.yml@88ddafce8e084a1cc84b9b8dd508c44db70d444a # main
     with:
-      automation-ref: 81643f314e88cba668cc68c2d06abcefcbba44ee # main
+      automation-ref: 88ddafce8e084a1cc84b9b8dd508c44db70d444a # main
 
   checks:
     needs: plan
@@ -36,9 +36,9 @@ jobs:
     if: needs.plan.outputs.release == 'true'
     permissions:
       contents: write
-    uses: fitchmultz/.github/.github/workflows/npm-release-prepare.yml@81643f314e88cba668cc68c2d06abcefcbba44ee # main
+    uses: fitchmultz/.github/.github/workflows/npm-release-prepare.yml@88ddafce8e084a1cc84b9b8dd508c44db70d444a # main
     with:
-      automation-ref: 81643f314e88cba668cc68c2d06abcefcbba44ee # main
+      automation-ref: 88ddafce8e084a1cc84b9b8dd508c44db70d444a # main
       source-ref: ${{ needs.plan.outputs.source }}
       release-source: ${{ needs.plan.outputs.release-source }}
       official-version: ${{ needs.plan.outputs.official-version }}
@@ -68,7 +68,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: fitchmultz/.github
-          ref: 81643f314e88cba668cc68c2d06abcefcbba44ee # main
+          ref: 88ddafce8e084a1cc84b9b8dd508c44db70d444a # main
           path: automation
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -110,9 +110,9 @@ jobs:
       actions: read
       contents: write
       id-token: write
-    uses: fitchmultz/.github/.github/workflows/npm-release-qualified.yml@81643f314e88cba668cc68c2d06abcefcbba44ee # main
+    uses: fitchmultz/.github/.github/workflows/npm-release-qualified.yml@88ddafce8e084a1cc84b9b8dd508c44db70d444a # main
     with:
-      automation-ref: 81643f314e88cba668cc68c2d06abcefcbba44ee # main
+      automation-ref: 88ddafce8e084a1cc84b9b8dd508c44db70d444a # main
       source-ref: ${{ needs.plan.outputs.source }}
       release-source: ${{ needs.plan.outputs.release-source }}
       official-version: ${{ needs.plan.outputs.official-version }}

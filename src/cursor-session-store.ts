@@ -16,6 +16,7 @@ export interface CursorSessionStoreIdentity {
 export interface OpenCursorSessionStore {
 	identity: CursorSessionStoreIdentity;
 	store: LocalAgentStore;
+	/** Closes once; concurrent and later callers share that outcome. */
 	dispose(): Promise<void>;
 }
 
@@ -298,17 +299,20 @@ async function openOwnedCursorSessionStore(
 		throw error;
 	}
 	const openedStore = store;
+	let disposal: Promise<void> | undefined;
 	return {
 		identity: openedIdentity,
 		store: observeCursorLocalRunTerminalErrors(openedStore),
-		dispose: async () => {
+		// Overlapping SDK disposals close SQLite twice (ERR_INVALID_STATE), and a repeat
+		// would report an earlier failed close as success or rerun temporary removal.
+		dispose: () => disposal ??= (async () => {
 			try {
 				await openedStore.dispose();
 			} finally {
 				lease?.release();
 				await removeTemporaryStore();
 			}
-		},
+		})(),
 	};
 }
 

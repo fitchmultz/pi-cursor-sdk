@@ -14,6 +14,7 @@ import {
 	asMockCursorRun,
 	asMockSdkAgent,
 	mockedCreate,
+	registerNativeToolDisplayForTest,
 } from "./helpers/cursor-provider-harness.js";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";
 
@@ -68,26 +69,27 @@ describe("streamCursor stream events", () => {
 			expect(mockedCreate).toHaveBeenCalledTimes(2);
 		});
 
-		it("aborts a queued Cursor turn without waiting for the active turn", async () => {
-			let releaseFirstSend!: () => void;
-			const firstSendReleased = new Promise<void>((resolve) => {
-				releaseFirstSend = resolve;
+		it("aborts a queued Cursor turn without waiting for or releasing the active turn's live SDK run", async () => {
+			// The active turn's live run is this scope's pending run. The queued request never
+			// holds the turn lease, so its abort must leave that SDK run and agent alone.
+			process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+			await registerNativeToolDisplayForTest([]);
+			const firstRunFinished = Promise.withResolvers<void>();
+			const firstWait = vi.fn(async () => {
+				await firstRunFinished.promise;
+				return { id: "first-run", status: "finished" as const };
 			});
+			const firstCancel = vi.fn().mockResolvedValue(undefined);
+			const firstDispose = vi.fn().mockResolvedValue(undefined);
 			const firstSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
-				await firstSendReleased;
 				opts.onDelta({ update: { type: "text-delta", text: "first-answer" } });
-				return asMockCursorRun({
-					id: "first-run",
-					agentId: "first-agent",
-					status: "finished",
-					wait: vi.fn().mockResolvedValue({ id: "first-run", status: "finished" }),
-				});
+				return asMockCursorRun({ id: "first-run", agentId: "first-agent", status: "running", wait: firstWait, cancel: firstCancel });
 			});
-			const secondSend = vi.fn();
-			mockedCreate.mockResolvedValueOnce(asMockSdkAgent({ agentId: "first-agent", send: firstSend }));
+			mockedCreate.mockResolvedValueOnce(asMockSdkAgent({ agentId: "first-agent", send: firstSend, [Symbol.asyncDispose]: firstDispose }));
 
 			const firstEventsPromise = collectEvents(streamCursor(makeModel("composer-2.5"), makeContext([{ role: "user", content: "first task", timestamp: 1 }]), { apiKey: "test-key" }));
-			await vi.waitFor(() => expect(firstSend).toHaveBeenCalledTimes(1));
+			// wait() starts only after the SDK run is attached to the scope's live run.
+			await vi.waitFor(() => expect(firstWait).toHaveBeenCalledTimes(1));
 			const controller = new AbortController();
 			const secondEventsPromise = collectEvents(streamCursor(makeModel("gpt-5.5@272k"), makeContext([{ role: "user", content: "second task", timestamp: 1 }]), { apiKey: "test-key", reasoning: "medium", signal: controller.signal }));
 
@@ -95,8 +97,9 @@ describe("streamCursor stream events", () => {
 			const secondEvents = await secondEventsPromise;
 			expect(secondEvents[0]?.type).toBe("start");
 			expect(getErrorEvent(secondEvents).reason).toBe("aborted");
-			expect(secondSend).not.toHaveBeenCalled();
 			expect(mockedCreate).toHaveBeenCalledTimes(1);
+			expect(firstCancel).not.toHaveBeenCalled();
+			expect(firstDispose).not.toHaveBeenCalled();
 
 			const thirdSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
 				opts.onDelta({ update: { type: "text-delta", text: "third-answer" } });
@@ -109,11 +112,12 @@ describe("streamCursor stream events", () => {
 			});
 			mockedCreate.mockResolvedValueOnce(asMockSdkAgent({ agentId: "third-agent", send: thirdSend }));
 			const thirdEventsPromise = collectEvents(streamCursor(makeModel("gpt-5.5@272k"), makeContext([{ role: "user", content: "third task", timestamp: 1 }]), { apiKey: "test-key", reasoning: "medium" }));
-			await Promise.resolve();
-			expect(thirdSend).not.toHaveBeenCalled();
 
-			releaseFirstSend();
-			expect(collectTextDeltas(await firstEventsPromise)).toBe("first-answer");
+			firstRunFinished.resolve();
+			const firstEvents = await firstEventsPromise;
+			expect(getDoneEvent(firstEvents).reason).toBe("stop");
+			expect(collectTextDeltas(firstEvents)).toBe("first-answer");
+			expect(firstCancel).not.toHaveBeenCalled();
 			expect(collectTextDeltas(await thirdEventsPromise)).toBe("third-answer");
 		});
 

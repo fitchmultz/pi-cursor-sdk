@@ -102,7 +102,7 @@ it.each(["named", "unnamed"])("tracks the real %s tool owner across native new/r
 		const stream = createAssistantMessageEventStream();
 		// This run represents already-completed SDK work; only the real display/drain pipeline runs.
 		const run = cursorLiveRuns.start({ id: `cursor-replay-${Date.now()}-1`, agent: {} as SDKAgent, promptInputTokens: 0 });
-		cursorLiveRuns.markFinished(run, "");
+		cursorLiveRuns.settle(run, { kind: "finished", finalText: "" });
 		const router = new CursorTurnDisplayRouter({
 			cwd: runtime.cwd, liveRun: run, useNativeToolReplay: true,
 			activeToolNames: new Set(runtime.session.getActiveToolNames()), nativeReplayId: run.id,

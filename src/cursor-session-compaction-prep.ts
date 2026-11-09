@@ -11,7 +11,7 @@ export async function prepareCursorSessionForCompaction(
 ): Promise<void> {
 	while (true) {
 		const run = cursorLiveRuns.getActiveForScope(scopeKey);
-		if (!run || run.disposed) break;
+		if (!run) break;
 		await cursorLiveRuns.release(run);
 	}
 	await resetSessionCursorAgent(scopeKey);

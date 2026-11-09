@@ -158,8 +158,8 @@ function readRecordedCleanupAgentOutcomes(entries: readonly SessionEntry[]): Map
 		if (data.phase !== "result") continue;
 		for (const failure of data.failedAgentIds ?? []) record(failure.agentId, failure.retryable === false ? "rejected" : "eligible");
 	}
-	// Agents whose result this process could not durably record stay pending, even when memory
-	// still holds a retryable failure for them.
+	// Nondurable results keep agents pending despite earlier durable retryable failures.
+	// Deleted and rejected outcomes remain final.
 	for (const agentId of nondurableCleanupResultAgentIds) record(agentId, "pending");
 	return outcomes;
 }

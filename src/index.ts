@@ -48,7 +48,7 @@ export default async function (pi: CursorExtensionApi) {
 		description: "Abort this session's pending local Cursor run without undoing completed work",
 		handler: async (_args, ctx) => {
 			const run = cursorLiveRuns.getActiveForScope(getCursorSessionScopeSnapshot(pi).scopeKey);
-			if (run && !run.disposed) {
+			if (run) {
 				if (!ctx.isIdle() && ctx.model?.provider === "cursor") ctx.abort();
 				await cursorLiveRuns.release(run);
 			}

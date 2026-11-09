@@ -385,13 +385,13 @@ describe("streamCursor prompt and model config", () => {
 			agent: asMockSdkAgent({ agentId: "local-agent", send: vi.fn() }),
 			promptInputTokens: 0,
 		});
-		cursorLiveRuns.markFinished(liveRun, "local live result");
+		cursorLiveRuns.settle(liveRun, { kind: "finished", finalText: "local live result" });
 
 		try {
 			const events = await collectEvents(streamCursor(makeModel("gpt-5.5@1m"), makeContext(), { apiKey: "test-key" }));
 
 			expect(getErrorEvent(events).error.errorMessage).toContain("local Cursor live run is pending");
-			expect(liveRun.disposed).toBe(false);
+			expect(liveRun.resources.kind).toBe("open");
 			expect(mockedCreate).not.toHaveBeenCalled();
 		} finally {
 			await cursorLiveRuns.release(liveRun);

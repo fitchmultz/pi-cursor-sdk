@@ -180,6 +180,108 @@ test("same-file durable resume handles remain stable but cannot reattach a live 
   });
 });
 
+// The offline transport finishes right after its replayed read, so the SDK run completes inside the replay toolUse turn.
+for (const { delivery, prompt, lastMessageRole } of [
+  { delivery: "final answer", prompt: "REPLAY_FIXTURE answer after the read", lastMessageRole: "assistant" },
+  { delivery: "terminating replay", prompt: "REPLAY_FIXTURE EMPTY_RESULT_FIXTURE", lastMessageRole: "toolResult" },
+]) {
+  test(`a native replay run publishes its resume handle where Pi receives its ${delivery}`, { timeout: 60000 }, async (t) => {
+    await concurrentFixture(t, async ({ create }) => {
+      process.env.PI_CURSOR_LOCAL_RESUME = "1";
+      const name = `replay-resume-${lastMessageRole}`;
+      const a = await create(name);
+      await a.session.prompt(prompt);
+      const branch = a.manager.getBranch();
+      const lastMessage = branch.findLast(e => e.type === "message");
+      assert.equal(lastMessage.message.role, lastMessageRole);
+      const handleIndex = branch.findLastIndex(e => e.type === "custom" && e.customType === "cursor-sdk-agent-resume");
+      assert.ok(handleIndex > branch.indexOf(lastMessage), "the handle follows every message its run delivered");
+      const handle = branch[handleIndex].data;
+      await a.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+      const resumeCount = state.resumed.length;
+      const b = await create(`${name}-restart`, {
+        cwd: a.cwd, model: a.session.model, toolDescription: `Owned by ${name}`, systemPrompt: `OWNER_${name}`,
+        manager: SessionManager.open(a.manager.getSessionFile()),
+      });
+      await b.session.prompt("continue after restart");
+      assert.equal(b.session.messages.at(-1).stopReason, "stop", b.session.messages.at(-1).errorMessage);
+      assert.equal(state.resumed.length, resumeCount + 1);
+      assert.equal(state.resumed.at(-1).agentId, handle.agentId);
+      await retainNativeEvidence(`native-replay-resume-${lastMessageRole}`, b.manager, b.cwd);
+    });
+  });
+}
+
+test("threshold compaction between a replay run's successful send and its final answer cancels that run's resume handle", { timeout: 60000 }, async (t) => {
+  await concurrentFixture(t, async ({ create }) => {
+    process.env.PI_CURSOR_LOCAL_RESUME = "1";
+    const a = await create("replay-compaction", { compaction: { enabled: true, reserveTokens: 16384, keepRecentTokens: 1 } });
+    await a.session.setModel({ ...a.session.model, contextWindow: 128000 });
+    // Only the replay run reports pressure, so Pi compacts before requesting that run's final answer.
+    state.usageByCwd.set(a.cwd, {
+      raw: { inputTokens: 125000, outputTokens: 6, cacheReadTokens: 5, cacheWriteTokens: 0 },
+      billed: { inputTokens: 10, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 0, totalTokens: 15 },
+    });
+    const unsubscribe = a.session.subscribe((event) => {
+      if (event.type === "tool_execution_start") state.usageByCwd.delete(a.cwd);
+    });
+    const sendCount = state.sends.length;
+    await a.session.prompt("REPLAY_FIXTURE answer after the read");
+    unsubscribe();
+    const replay = state.sends[sendCount];
+    const branch = a.manager.getBranch();
+    const compactionIndex = branch.findIndex(e => e.type === "compaction");
+    const lastMessageIndex = branch.findLastIndex(e => e.type === "message");
+    assert.ok(compactionIndex > branch.findIndex(e => e.type === "message" && e.message.role === "toolResult"), "Pi compacted after the replay turn");
+    assert.equal(branch[lastMessageIndex].message.stopReason, "stop");
+    const handles = branch.flatMap((e, index) => e.type === "custom" && e.customType === "cursor-sdk-agent-resume" ? [{ index, data: e.data }] : []);
+    assert.deepEqual(handles.filter(h => h.data.agentId === replay.agentId), []);
+    assert.ok(handles.at(-1).index > lastMessageIndex && handles.at(-1).data.compactionGeneration === 1, "the post-compaction send publishes after its answer");
+    await a.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+    const resumeCount = state.resumed.length;
+    const b = await create("replay-compaction-restart", {
+      cwd: a.cwd, model: a.session.model, toolDescription: "Owned by replay-compaction", systemPrompt: "OWNER_replay-compaction",
+      manager: SessionManager.open(a.manager.getSessionFile()),
+    });
+    await b.session.prompt("continue after restart");
+    assert.equal(b.session.messages.at(-1).stopReason, "stop", b.session.messages.at(-1).errorMessage);
+    assert.deepEqual(state.resumed.slice(resumeCount).map(r => r.agentId), [handles.at(-1).data.agentId]);
+    await retainNativeEvidence("native-replay-compaction", b.manager, b.cwd);
+  });
+});
+
+test("a replay run finished before an abort cannot publish its resume handle on a branch selected afterwards", { timeout: 60000 }, async (t) => {
+  await concurrentFixture(t, async ({ create }) => {
+    process.env.PI_CURSOR_LOCAL_RESUME = "1";
+    const a = await create("replay-abort-tree");
+    await a.session.prompt("first request");
+    let aborting;
+    const unsubscribe = a.session.subscribe((event) => {
+      if (event.type === "tool_execution_start") aborting ??= a.session.abort();
+    });
+    await a.session.prompt("REPLAY_FIXTURE interrupted request");
+    await aborting;
+    unsubscribe();
+    // The offline run finished before Pi replayed its read, so its send succeeded before the abort.
+    const interrupted = state.sends.at(-1);
+    const firstUser = a.manager.getEntries().find(e => e.type === "message" && e.message.role === "user");
+    await a.session.navigateTree(firstUser.id, { summarize: false });
+    await a.session.prompt("after tree");
+    const isResume = e => e.type === "custom" && e.customType === "cursor-sdk-agent-resume";
+    assert.deepEqual(a.manager.getBranch().filter(e => isResume(e) && e.data.agentId === interrupted.agentId), []);
+    await a.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+    const resumeCount = state.resumed.length;
+    const b = await create("replay-abort-tree-restart", {
+      cwd: a.cwd, model: a.session.model, toolDescription: "Owned by replay-abort-tree", systemPrompt: "OWNER_replay-abort-tree",
+      manager: SessionManager.open(a.manager.getSessionFile()),
+    });
+    await b.session.prompt("continue after restart");
+    assert.equal(b.session.messages.at(-1).stopReason, "stop", b.session.messages.at(-1).errorMessage);
+    assert.deepEqual(state.resumed.slice(resumeCount).map(r => r.agentId).filter(id => id === interrupted.agentId), []);
+    await retainNativeEvidence("native-replay-abort-tree", b.manager, b.cwd);
+  });
+});
+
 test("independent concurrent streams retain owned persisted lineage and sibling isolation", { timeout: 60000 }, async (t) => {
   await concurrentFixture(t, async ({ create }) => {
     const a = await create("concurrent-A");

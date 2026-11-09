@@ -108,7 +108,7 @@ export function resolveCursorProviderTurnConfig(cwd: string, projectTrusted = ge
 function buildCloudCursorProviderTurnLifecycle(agent: SDKAgent): CursorProviderTurnLifecycle {
 	return {
 		trackRunCompletion: () => {},
-		commitSend: () => {},
+		commitSend: () => undefined,
 		abandon: async () => {},
 		dispose: async () => {
 			await agent[Symbol.asyncDispose]?.();

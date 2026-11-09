@@ -7,6 +7,7 @@
 ### Changed
 
 - Event-debug `metadata.json` represents a pooled agent that has not bootstrapped as `providerMeta.sendState: { "bootstrapped": false }`. Fingerprint and incremental-send count fields appear only after a successful bootstrap. Persisted resume entries keep their existing format.
+- A local run's resume handle is now recorded at the end of the Pi turn that delivers its result. That is the final answer, or the last replayed tool when the run has no final text. A run that finished while Pi was still replaying its native tools previously recorded the handle before its final answer. A restart then could not resume that agent and bootstrapped a new one from the transcript. A finished run whose result never reaches Pi, for example after an abort, records no handle. When new user input continues the agent, only the continuing send records one. Tree navigation, compaction and session replacement before delivery cancel the handle, so it cannot land on a branch selected afterwards. The entry format is unchanged.
 
 ## 0.5.26 - 2026-11-09
 

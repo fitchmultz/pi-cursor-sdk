@@ -12,8 +12,10 @@ import {
 import { computeCursorContextFingerprint } from "./context.js";
 import { getCursorSessionScopeSnapshot, getCursorSessionScopeGeneration, getCursorSessionScopeKey, type CursorTurnScope } from "./cursor-session-scope.js";
 import {
+	captureCursorSessionAgentResumeOrigin,
 	getMatchingCursorSessionAgentResumeHandle,
-	persistCursorSessionAgentResumeHandle,
+	type CursorSessionAgentResumeOrigin,
+	type CursorSessionAgentResumePublication,
 } from "./cursor-session-agent-resume.js";
 import type { CursorSdkEventDebugRecorder } from "./cursor-sdk-event-debug.js";
 import { loadCursorSdk, type CursorSdkModule } from "./cursor-sdk-runtime.js";
@@ -49,7 +51,8 @@ export interface SessionCursorAgentLease {
 	created: boolean;
 	resumed?: boolean;
 	resumeNotice?: string;
-	commitSend(context: Context, bootstrapped: boolean): void;
+	/** Advances the send state; a resume-enabled send returns its handle for the turn that delivers its terminal output. */
+	commitSend(context: Context, bootstrapped: boolean): CursorSessionAgentResumePublication | undefined;
 	trackRunCompletion(completion: Promise<unknown>): void;
 }
 
@@ -64,7 +67,6 @@ interface SessionCursorAgentInstance {
 	readonly sessionStore: OpenCursorSessionStore;
 	readonly resumed: boolean;
 	readonly releaseAgentClaim: () => void;
-	resumeEnabled: boolean;
 	resumeNotice?: string;
 	sendState: SessionCursorAgentSendState;
 }
@@ -354,19 +356,23 @@ function advanceSessionCursorAgentSendState(
 	};
 }
 
-function commitSessionAgentSend(instance: SessionCursorAgentInstance, context: Context, bootstrapped: boolean): void {
-	if (!getCurrentActiveEntry(instance)) return;
+function commitSessionAgentSend(
+	instance: SessionCursorAgentInstance,
+	context: Context,
+	bootstrapped: boolean,
+	resumeOrigin: CursorSessionAgentResumeOrigin | undefined,
+): CursorSessionAgentResumePublication | undefined {
+	if (!getCurrentActiveEntry(instance)) return undefined;
 	const sendState = advanceSessionCursorAgentSendState(instance.sendState, context, bootstrapped);
 	instance.sendState = sendState;
-	if (instance.resumeEnabled && sendState.bootstrapped) {
-		persistCursorSessionAgentResumeHandle({
-			runtime: "local",
-			agentId: instance.agent.agentId,
-			poolKey: instance.poolKey,
-			sendState,
-			storeIdentity: instance.sessionStore.identity,
-		}, instance.scopeKey);
-	}
+	if (!resumeOrigin || !sendState.bootstrapped) return undefined;
+	return resumeOrigin.capture({
+		runtime: "local",
+		agentId: instance.agent.agentId,
+		poolKey: instance.poolKey,
+		sendState,
+		storeIdentity: instance.sessionStore.identity,
+	});
 }
 
 function normalizeRunCompletion(completion: Promise<unknown>): Promise<void> {
@@ -424,7 +430,8 @@ function leaseFromEntry(
 	created: boolean,
 ): SessionCursorAgentLease {
 	const { instance } = entry;
-	instance.resumeEnabled = params.localResume === true;
+	// Each lease issues at most one send; its handle belongs to the session lineage current at issue.
+	const resumeOrigin = params.localResume === true ? captureCursorSessionAgentResumeOrigin(instance.scopeKey) : undefined;
 	bindBridgeToolRequest(entry, params.onBridgeToolRequest);
 	instance.bridgeRun?.setDebugRecorder(params.debugRecorder);
 	const resumeNotice = instance.resumeNotice;
@@ -443,9 +450,7 @@ function leaseFromEntry(
 		created,
 		resumed: instance.resumed,
 		...(resumeNotice ? { resumeNotice } : {}),
-		commitSend: (context, bootstrapped) => {
-			commitSessionAgentSend(instance, context, bootstrapped);
-		},
+		commitSend: (context, bootstrapped) => commitSessionAgentSend(instance, context, bootstrapped, resumeOrigin),
 		trackRunCompletion: (completion) => {
 			trackSessionAgentRunCompletion(instance, completion);
 		},
@@ -561,7 +566,6 @@ async function createSessionAgentInstance(
 			bridgeRun,
 			sessionStore,
 			sendState: effectiveSendState,
-			resumeEnabled: params.localResume === true,
 			resumed,
 			releaseAgentClaim,
 			...(resumeNotice ? { resumeNotice } : {}),

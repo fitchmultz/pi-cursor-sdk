@@ -14,6 +14,7 @@ import type { CursorSdkTurnUsage } from "./cursor-usage-accounting.js";
 import type { CursorNativeToolDisplayItem, CursorNativeToolDisplayState } from "./cursor-native-tool-display-state.js";
 import type { CursorPiBridgeToolRequest, CursorPiToolBridgeRun } from "./cursor-pi-tool-bridge.js";
 import type { CursorRunOutcome } from "./cursor-provider-run-outcome.js";
+import type { CursorSessionAgentResumePublication } from "./cursor-session-agent-resume.js";
 import { getCursorSessionScopeKey } from "./cursor-session-scope.js";
 import type { CursorSdkEventDebugRecorder } from "./cursor-sdk-event-debug.js";
 import { installCursorSdkProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
@@ -68,6 +69,8 @@ export interface CursorLiveRun {
 	emittedText: string;
 	recordedToolDisplayIds: string[];
 	resumeNotice?: string;
+	/** Committed at SDK completion; only terminal deliveries publish it, which chained or disposed runs never reach. */
+	resumePublication?: CursorSessionAgentResumePublication;
 	/** Written only by the coordinator: `settle()` and `release()`. */
 	outcome: CursorLiveRunOutcome;
 	resources: CursorLiveRunResources;

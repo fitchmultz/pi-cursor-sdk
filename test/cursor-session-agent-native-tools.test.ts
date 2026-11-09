@@ -63,7 +63,7 @@ describe("MCP-only conversation compatibility", () => {
 			manager.appendMessage({ role: "user", content: "request", timestamp: 1 });
 			await pi.runBeforeAgentStart(context());
 			const first = await acquireSessionCursorAgent(options);
-			first.commitSend(makeContext(), true);
+			first.commitSend(makeContext(), true)?.publish();
 			manager.appendMessage(makeAssistantMessage("answer"));
 			await pi.runTurnEnd({}, context());
 			const file = manager.getSessionFile()!;

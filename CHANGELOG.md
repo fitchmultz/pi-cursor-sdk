@@ -4,6 +4,19 @@
 
 ## Unreleased
 
+## 0.5.23 - 2026-11-09
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- refactor: fold local cleanup outcomes per agent (#418) ([c4a873e](https://github.com/fitchmultz/pi-cursor-sdk/commit/c4a873e0f47c754e07fcc30b86b13cb3d9c758ca))
+
+### What's Changed
+* refactor: fold local cleanup outcomes per agent by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/418
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.22...v0.5.23
+
 ## 0.5.22 - 2026-11-08
 
 <!-- npm-release:unreleased:start -->

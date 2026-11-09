@@ -20,10 +20,10 @@ import type { installCursorSdkProcessErrorGuard } from "./cursor-sdk-process-err
 import type { CursorSdkEventDebugSink } from "./cursor-sdk-event-debug.js";
 import { awaitFinalizeCursorRunOutcome, recordCursorProviderTerminalUsage } from "./cursor-provider-turn-finalize.js";
 import type {
+	CursorProviderTurnPhase,
 	CursorProviderTurnPrepareResult,
 	CursorProviderTurnRunnerParams,
 	CursorProviderTurnSend,
-	CursorProviderTurnSendResult,
 	LiveCursorProviderTurnRuntime,
 	LocalCursorProviderTurnPrepareResult,
 	StartedCursorProviderTurn,
@@ -55,11 +55,6 @@ function applyLiveRunOutcome(
 	cursorLiveRuns.settle(liveRun, outcome);
 }
 
-export interface CursorLiveRunCompletion {
-	waitCompletion: Promise<void>;
-	prepared: StartedCursorProviderTurn;
-}
-
 export interface CursorRunFinalizerParams {
 	runnerParams: CursorProviderTurnRunnerParams;
 	sdkEventDebug: () => CursorSdkEventDebugSink | undefined;
@@ -80,7 +75,8 @@ export class CursorRunFinalizer {
 
 	constructor(private readonly params: CursorRunFinalizerParams) {}
 
-	startLiveRunCompletion(startParams: StartCursorLiveRunCompletionParams): CursorLiveRunCompletion {
+	/** Starts SDK completion handling; the runner hands live-turn cleanup to the returned completion. */
+	startLiveRunCompletion(startParams: StartCursorLiveRunCompletionParams): Promise<void> {
 		const { runnerParams } = this.params;
 		const sdkEventDebug = this.params.sdkEventDebug();
 		const { send, prepared, modelId, discardIncompleteTools } = startParams;
@@ -118,7 +114,7 @@ export class CursorRunFinalizer {
 		// Mark the pooled local agent busy as soon as the SDK run exists so auto-compaction summarization
 		// (and other concurrent acquires) wait for run.wait() instead of hitting AgentBusyError.
 		prepared.lifecycle.trackRunCompletion(waitCompletion);
-		return { waitCompletion, prepared };
+		return waitCompletion;
 	}
 
 	async applyTerminalEvent(event: CursorTurnTerminalEvent): Promise<void> {
@@ -132,31 +128,37 @@ export class CursorRunFinalizer {
 		this.terminalApplied = true;
 	}
 
-	async cleanup(
-		prepared: CursorProviderTurnPrepareResult | undefined,
-		sendResult: CursorProviderTurnSendResult | undefined,
-		liveCompletion: CursorLiveRunCompletion | undefined,
-	): Promise<void> {
-		const abortRegistration = sendResult?.abortRegistration;
+	/** Releases exactly what the runner's phase owns, deferring to the live completion once it owns cleanup. */
+	async cleanup(phase: CursorProviderTurnPhase): Promise<void> {
 		this.params.runnerParams.sdkEventDebugRef.current = undefined;
-		if (liveCompletion) {
-			void liveCompletion.waitCompletion
-				.finally(async () => {
-					this.safeCleanup(() => prepared?.restoreCursorSdkOutputFilter());
-					if (abortRegistration) {
-						this.safeCleanup(() => abortRegistration.signal.removeEventListener("abort", abortRegistration.listener));
-					}
-					await this.finalizeSdkEventDebugBestEffort();
-					this.safeCleanup(() => this.params.sdkProcessErrorGuard.dispose());
-				})
-				.catch(() => {});
-			return;
+		switch (phase.kind) {
+			case "unprepared":
+				break;
+			case "prepared":
+			case "started":
+				this.safeCleanup(() => phase.prepared.restoreCursorSdkOutputFilter());
+				await phase.prepared.lifecycle.dispose().catch(() => {});
+				break;
+			case "sent":
+				this.safeCleanup(() => phase.prepared.restoreCursorSdkOutputFilter());
+				this.safeCleanup(() => phase.abortRegistration?.release());
+				await phase.prepared.lifecycle.dispose().catch(() => {});
+				break;
+			case "liveCompletionOwnsCleanup":
+				void phase.completion
+					.finally(async () => {
+						this.safeCleanup(() => phase.prepared.restoreCursorSdkOutputFilter());
+						this.safeCleanup(() => phase.abortRegistration?.release());
+						await this.finalizeSdkEventDebugBestEffort();
+						this.safeCleanup(() => this.params.sdkProcessErrorGuard.dispose());
+					})
+					.catch(() => {});
+				return;
+			default: {
+				const _exhaustive: never = phase;
+				return _exhaustive;
+			}
 		}
-		this.safeCleanup(() => prepared?.restoreCursorSdkOutputFilter());
-		if (abortRegistration) {
-			this.safeCleanup(() => abortRegistration.signal.removeEventListener("abort", abortRegistration.listener));
-		}
-		await prepared?.lifecycle.dispose().catch(() => {});
 		await this.finalizeSdkEventDebugBestEffort();
 		this.safeCleanup(() => this.params.sdkProcessErrorGuard.dispose());
 	}

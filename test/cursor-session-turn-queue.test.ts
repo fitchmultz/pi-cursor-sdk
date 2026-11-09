@@ -24,6 +24,7 @@ describe("cursor session turn queue", () => {
 
 	it("serializes calls for the same scope", async () => {
 		const releaseFirst = deferred();
+		const releaseSecond = deferred();
 		const events: string[] = [];
 
 		const first = runExclusiveCursorSessionTurn("scope", async () => {
@@ -34,6 +35,8 @@ describe("cursor session turn queue", () => {
 		});
 		const second = runExclusiveCursorSessionTurn("scope", async () => {
 			events.push("second:start");
+			await releaseSecond.promise;
+			events.push("second:end");
 			return "second";
 		});
 
@@ -42,8 +45,19 @@ describe("cursor session turn queue", () => {
 
 		releaseFirst.resolve();
 		await expect(first).resolves.toBe("first");
-		await expect(second).resolves.toBe("second");
+		await flushQueue();
+		// The first call's settled slot must not unlink the running second call's slot.
+		const third = runExclusiveCursorSessionTurn("scope", async () => {
+			events.push("third:start");
+			return "third";
+		});
+		await flushQueue();
 		expect(events).toEqual(["first:start", "first:end", "second:start"]);
+
+		releaseSecond.resolve();
+		await expect(second).resolves.toBe("second");
+		await expect(third).resolves.toBe("third");
+		expect(events).toEqual(["first:start", "first:end", "second:start", "second:end", "third:start"]);
 		expect(cursorSessionTurnQueueTestUtils.count()).toBe(0);
 	});
 

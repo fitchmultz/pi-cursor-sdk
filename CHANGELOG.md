@@ -4,6 +4,30 @@
 
 ## Unreleased
 
+## 0.5.28 - 2026-11-09
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+<!-- npm-release:carried:start -->
+### Changed
+
+- Event-debug `metadata.json` represents a pooled agent that has not bootstrapped as `providerMeta.sendState: { "bootstrapped": false }`. Fingerprint and incremental-send count fields appear only after a successful bootstrap. Persisted resume entries keep their existing format.
+<!-- npm-release:carried:end -->
+
+- Supersedes unpublished 0.5.27 from d6f45b5ee72e9410a74f3252edbca4b70be8da53. Includes all changes since v0.5.26; the original release records remain unchanged.
+
+- ci: adopt unpublished release recovery (#450) ([4afa039](https://github.com/fitchmultz/pi-cursor-sdk/commit/4afa039e5c59a64b89ab320f25e0ad601b1561a3))
+
+### What's Changed
+* Refactor pooled agent and send-state ownership by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/446
+* chore(release): 0.5.27 by @pi-durable[bot] in https://github.com/fitchmultz/pi-cursor-sdk/pull/447
+* Inline pooled agent bridge callback binding by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/448
+* ci: adopt unpublished release recovery by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/450
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.26...v0.5.28
+
 ## 0.5.27 - 2026-11-09
 
 <!-- npm-release:unreleased:start -->

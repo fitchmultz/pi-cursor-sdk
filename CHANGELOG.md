@@ -4,9 +4,21 @@
 
 ## Unreleased
 
+## 0.5.27 - 2026-11-09
+
+<!-- npm-release:unreleased:start -->
 ### Changed
 
 - Event-debug `metadata.json` represents a pooled agent that has not bootstrapped as `providerMeta.sendState: { "bootstrapped": false }`. Fingerprint and incremental-send count fields appear only after a successful bootstrap. Persisted resume entries keep their existing format.
+<!-- npm-release:unreleased:end -->
+
+- Refactor pooled agent and send-state ownership (#446) ([9959087](https://github.com/fitchmultz/pi-cursor-sdk/commit/99590875cf3a52aea96633720550c95cced3e22b))
+
+### What's Changed
+* Refactor pooled agent and send-state ownership by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/446
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.26...v0.5.27
 
 ## 0.5.26 - 2026-11-09
 

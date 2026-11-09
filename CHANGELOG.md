@@ -4,9 +4,21 @@
 
 ## Unreleased
 
+## 0.5.24 - 2026-11-09
+
+<!-- npm-release:unreleased:start -->
 ### Changed
 
 - Debug capture: `drain-events.jsonl` `turn_start` and `turn_end` records now report the live run's SDK result as `sdkOutcome` (`running`, `finished`, `cancelled` or `error`) instead of `done`. `done: true` used to mean finished, cancelled or failed.
+<!-- npm-release:unreleased:end -->
+
+- refactor: separate live run outcomes from resource release (#419) ([0d95be9](https://github.com/fitchmultz/pi-cursor-sdk/commit/0d95be9b5d4c68f18bb2ef90a975b4a06e74d3cf))
+
+### What's Changed
+* refactor: separate live run outcomes from resource release by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/419
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.23...v0.5.24
 
 ## 0.5.23 - 2026-11-09
 

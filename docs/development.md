@@ -48,6 +48,22 @@ Before retrying a failed or unpublished candidate, inspect its exact source/run 
 
 Publication records are independent: npm published 0.5.2, while GitHub's `v0.5.2` release remains a draft bound to source `9820ae7`. Preserve that tag, draft, and candidate assets unchanged. Verify npm and GitHub records independently for each new release.
 
+### Replace a failed unpublished version
+
+The version workflow supports paired `supersede-version` and `supersede-source` inputs through the pinned shared automation. Merge the source fix through normal PR checks before dispatching. Follow the [shared replacement procedure](https://github.com/fitchmultz/.github/blob/main/docs/npm-releases.md#replace-a-failed-unpublished-version-with-fixed-source).
+
+Dispatch `npm-version.yml` only on `main`, with both inputs. For failed unpublished 0.5.27, `supersede-source` is the full failed automatic version PR merge SHA, not the earlier `99590875` queue source:
+
+```bash
+gh workflow run npm-version.yml --repo fitchmultz/pi-cursor-sdk --ref main \
+	-f supersede-version=0.5.27 \
+	-f supersede-source=d6f45b5ee72e9410a74f3252edbca4b70be8da53
+```
+
+The shared versioner verifies that the version is still unpublished and its original release run failed. The existing release App opens a normal version PR from fixed `main`. It chooses the replacement version above the manifest, all npm versions, and version tags. Leave both inputs empty for ordinary reconciliation.
+
+Preserve the failed source and its history, tag, draft, assets, candidate, failed run, and receipts unchanged. Do not relabel old proof or publish fixed bytes as 0.5.27. Keep all normal pre-commit/pre-push reviews, current-head CI and Pi/Cursor reviews, prospective candidate qualification, actual post-merge candidate/catalog/installer gates, and OIDC publication checks. Verify the new npm and GitHub records independently; a local workflow check does not prove real recovery.
+
 ### Review and catalog qualification commands
 
 Run these maintainer commands from the repository root.

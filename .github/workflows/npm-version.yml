@@ -13,6 +13,17 @@ on:
   schedule:
     - cron: "17 12 * * *"
   workflow_dispatch:
+    inputs:
+      supersede-version:
+        description: Failed unpublished automatic version
+        required: false
+        type: string
+        default: ''
+      supersede-source:
+        description: Failed automatic version merge SHA
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -33,12 +44,14 @@ jobs:
       (github.event_name != 'check_run' ||
         github.event.check_run.app.slug == 'pi-durable' || github.event.check_run.app.slug == 'cursor') &&
       (github.event_name != 'issue_comment' || github.event.issue.pull_request != null)
-    uses: fitchmultz/.github/.github/workflows/npm-release-bump.yml@81643f314e88cba668cc68c2d06abcefcbba44ee # main
+    uses: fitchmultz/.github/.github/workflows/npm-release-bump.yml@88ddafce8e084a1cc84b9b8dd508c44db70d444a # main
     with:
-      automation-ref: 81643f314e88cba668cc68c2d06abcefcbba44ee # main
+      automation-ref: 88ddafce8e084a1cc84b9b8dd508c44db70d444a # main
       app-client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
       package-qualified: true
       version-reviewed: true
+      supersede-version: ${{ inputs.supersede-version || '' }}
+      supersede-source: ${{ inputs.supersede-source || '' }}
     secrets:
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
       PI_DURABLE_ACCESS_TOKEN: ${{ secrets.PI_DURABLE_ACCESS_TOKEN }}

@@ -8,6 +8,19 @@
 
 - Debug capture: `drain-events.jsonl` `turn_start` and `turn_end` records now report the live run's SDK result as `sdkOutcome` (`running`, `finished`, `cancelled` or `error`) instead of `done`. `done: true` used to mean finished, cancelled or failed.
 
+## 0.5.22 - 2026-11-08
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- fix: share each session store close outcome (#413) ([727e6e5](https://github.com/fitchmultz/pi-cursor-sdk/commit/727e6e51ff676dc11188213919c3b7e393a1484e))
+
+### What's Changed
+* fix: share each session-store close outcome by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/413
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.21...v0.5.22
+
 ## 0.5.21 - 2026-11-08
 
 <!-- npm-release:unreleased:start -->

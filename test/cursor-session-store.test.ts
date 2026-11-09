@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { Agent, createAgentPlatform, type LocalAgentStore } from "@cursor/sdk";
+import { SqliteLocalAgentStore } from "@cursor/sdk/sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	buildCursorSessionStateRoot,
@@ -80,30 +81,30 @@ describe("cursor session store identity", () => {
 		} finally { rmSync(removalRoot); }
 	});
 
-	it("removes a temporary root even when SQLite disposal fails", async () => {
-		const workspaceRoot = mkdtempSync(join(tmpdir(), "pi-cursor-store-dispose-failure-"));
-		let stateRoot = "";
-		storeTestUtils.setSdkOperations({
-			getDefaultStateRoot: () => join(workspaceRoot, "sdk-owned"),
-			openSqliteStore: async (options) => {
-				stateRoot = options.stateRoot;
-				mkdirSync(stateRoot, { recursive: true });
-				return {
-					dispose: async () => { throw new Error("dispose failed"); },
-				} as unknown as LocalAgentStore & { dispose(): Promise<void> };
-			},
+	it.each(["succeeds", "fails"] as const)("shares one installed SQLite close outcome with concurrent and later callers and removes the temporary root when disposal %s", async (outcome) => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "pi-cursor-store-dispose-"));
+		const close = SqliteLocalAgentStore.prototype.dispose;
+		const sdkDispose = vi.spyOn(SqliteLocalAgentStore.prototype, "dispose");
+		// A reported close failure must stay failed: repeating the installed dispose() finds nothing open and resolves.
+		if (outcome === "fails") sdkDispose.mockImplementationOnce(async function (this: SqliteLocalAgentStore) {
+			await close.call(this);
+			throw new Error("dispose failed");
 		});
+		const settles = (disposal: Promise<void>) => outcome === "fails"
+			? expect(disposal).rejects.toThrow("dispose failed")
+			: expect(disposal).resolves.toBeUndefined();
 		try {
-			const selection = await openCursorSessionStoreForScope({
-				cwd: workspaceRoot,
-				scopeKey: "ephemeral",
-				persistent: false,
-			});
-			const removalRoot = dirname(dirname(stateRoot));
-			await expect(selection.sessionStore.dispose()).rejects.toThrow("dispose failed");
+			const { sessionStore } = await openCursorSessionStoreForScope({ cwd: workspaceRoot, scopeKey: "ephemeral", persistent: false });
+			const removalRoot = dirname(dirname(sessionStore.identity.stateRoot));
+			expect(existsSync(join(sessionStore.identity.stateRoot, "index.db"))).toBe(true);
+			const [first, overlapping] = [sessionStore.dispose(), sessionStore.dispose()];
+			await settles(overlapping);
 			expect(existsSync(removalRoot)).toBe(false);
+			await settles(first);
+			await settles(sessionStore.dispose());
+			expect(sdkDispose).toHaveBeenCalledOnce();
 		} finally {
-			storeTestUtils.setSdkOperations(undefined);
+			sdkDispose.mockRestore();
 			rmSync(workspaceRoot, { recursive: true, force: true });
 		}
 	});

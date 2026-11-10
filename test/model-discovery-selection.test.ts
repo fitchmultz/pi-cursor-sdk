@@ -72,6 +72,7 @@ describe("buildCursorModelSelection", () => {
 	it.each([
 		{ id: "gemini-3.8-flash", defaultEffort: "high" },
 		{ id: "gemini-4-argon", defaultEffort: "medium" },
+		{ id: "gemini-4-carbon", defaultEffort: "medium" },
 	])("maps generated $id reasoning_effort controls without changing catalog defaults", ({ id, defaultEffort }) => {
 		const gemini = FALLBACK_MODEL_ITEMS.find((item) => item.id === id);
 		if (!gemini) throw new Error(`${id} fallback fixture missing`);

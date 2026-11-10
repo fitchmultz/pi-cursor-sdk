@@ -1,6 +1,6 @@
 import type { ModelListItem } from "@cursor/sdk";
 
-// Generated with @cursor/sdk@1.0.40 from 50 Cursor models.
+// Generated with @cursor/sdk@1.0.40 from 49 Cursor models.
 // Refresh with: npm run refresh:cursor-snapshots -- --write
 // Do not add secrets; this file stores public model metadata only.
 export const FALLBACK_MODEL_ITEMS = [
@@ -915,6 +915,19 @@ export const FALLBACK_MODEL_ITEMS = [
 						displayName: "Max"
 					}
 				]
+			},
+			{
+				id: "fast",
+				displayName: "Fast",
+				values: [
+					{
+						value: "false"
+					},
+					{
+						value: "true",
+						displayName: "Fast"
+					}
+				]
 			}
 		],
 		variants: [
@@ -927,6 +940,27 @@ export const FALLBACK_MODEL_ITEMS = [
 					{
 						id: "effort",
 						value: "low"
+					},
+					{
+						id: "fast",
+						value: "false"
+					}
+				],
+				displayName: "Claude Fable 5.2"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "effort",
+						value: "low"
+					},
+					{
+						id: "fast",
+						value: "true"
 					}
 				],
 				displayName: "Claude Fable 5.2"
@@ -940,6 +974,27 @@ export const FALLBACK_MODEL_ITEMS = [
 					{
 						id: "effort",
 						value: "medium"
+					},
+					{
+						id: "fast",
+						value: "false"
+					}
+				],
+				displayName: "Claude Fable 5.2"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "effort",
+						value: "medium"
+					},
+					{
+						id: "fast",
+						value: "true"
 					}
 				],
 				displayName: "Claude Fable 5.2"
@@ -953,6 +1008,27 @@ export const FALLBACK_MODEL_ITEMS = [
 					{
 						id: "effort",
 						value: "high"
+					},
+					{
+						id: "fast",
+						value: "false"
+					}
+				],
+				displayName: "Claude Fable 5.2"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "effort",
+						value: "high"
+					},
+					{
+						id: "fast",
+						value: "true"
 					}
 				],
 				displayName: "Claude Fable 5.2"
@@ -966,6 +1042,27 @@ export const FALLBACK_MODEL_ITEMS = [
 					{
 						id: "effort",
 						value: "xhigh"
+					},
+					{
+						id: "fast",
+						value: "false"
+					}
+				],
+				displayName: "Claude Fable 5.2"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "effort",
+						value: "xhigh"
+					},
+					{
+						id: "fast",
+						value: "true"
 					}
 				],
 				displayName: "Claude Fable 5.2"
@@ -979,6 +1076,27 @@ export const FALLBACK_MODEL_ITEMS = [
 					{
 						id: "effort",
 						value: "max"
+					},
+					{
+						id: "fast",
+						value: "false"
+					}
+				],
+				displayName: "Claude Fable 5.2"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "effort",
+						value: "max"
+					},
+					{
+						id: "fast",
+						value: "true"
 					}
 				],
 				displayName: "Claude Fable 5.2"
@@ -992,6 +1110,27 @@ export const FALLBACK_MODEL_ITEMS = [
 					{
 						id: "effort",
 						value: "low"
+					},
+					{
+						id: "fast",
+						value: "false"
+					}
+				],
+				displayName: "Claude Fable 5.2"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "effort",
+						value: "low"
+					},
+					{
+						id: "fast",
+						value: "true"
 					}
 				],
 				displayName: "Claude Fable 5.2"
@@ -1005,6 +1144,27 @@ export const FALLBACK_MODEL_ITEMS = [
 					{
 						id: "effort",
 						value: "medium"
+					},
+					{
+						id: "fast",
+						value: "false"
+					}
+				],
+				displayName: "Claude Fable 5.2"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "effort",
+						value: "medium"
+					},
+					{
+						id: "fast",
+						value: "true"
 					}
 				],
 				displayName: "Claude Fable 5.2"
@@ -1018,6 +1178,10 @@ export const FALLBACK_MODEL_ITEMS = [
 					{
 						id: "effort",
 						value: "high"
+					},
+					{
+						id: "fast",
+						value: "false"
 					}
 				],
 				displayName: "Claude Fable 5.2",
@@ -1031,7 +1195,45 @@ export const FALLBACK_MODEL_ITEMS = [
 					},
 					{
 						id: "effort",
+						value: "high"
+					},
+					{
+						id: "fast",
+						value: "true"
+					}
+				],
+				displayName: "Claude Fable 5.2"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "effort",
 						value: "xhigh"
+					},
+					{
+						id: "fast",
+						value: "false"
+					}
+				],
+				displayName: "Claude Fable 5.2"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "effort",
+						value: "xhigh"
+					},
+					{
+						id: "fast",
+						value: "true"
 					}
 				],
 				displayName: "Claude Fable 5.2"
@@ -1045,6 +1247,27 @@ export const FALLBACK_MODEL_ITEMS = [
 					{
 						id: "effort",
 						value: "max"
+					},
+					{
+						id: "fast",
+						value: "false"
+					}
+				],
+				displayName: "Claude Fable 5.2"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "effort",
+						value: "max"
+					},
+					{
+						id: "fast",
+						value: "true"
 					}
 				],
 				displayName: "Claude Fable 5.2"
@@ -6679,135 +6902,6 @@ export const FALLBACK_MODEL_ITEMS = [
 		]
 	},
 	{
-		id: "gemini-3.6-flash",
-		displayName: "Gemini 3.6 Flash",
-		aliases: [
-			"gemini-flash-latest",
-			"gemini-flash"
-		],
-		parameters: [
-			{
-				id: "effort",
-				displayName: "Effort",
-				values: [
-					{
-						value: "minimal",
-						displayName: "Minimal"
-					},
-					{
-						value: "low",
-						displayName: "Low"
-					},
-					{
-						value: "medium",
-						displayName: "Medium"
-					},
-					{
-						value: "high",
-						displayName: "High"
-					}
-				]
-			}
-		],
-		variants: [
-			{
-				params: [
-					{
-						id: "effort",
-						value: "minimal"
-					}
-				],
-				displayName: "Gemini 3.6 Flash"
-			},
-			{
-				params: [
-					{
-						id: "effort",
-						value: "low"
-					}
-				],
-				displayName: "Gemini 3.6 Flash"
-			},
-			{
-				params: [
-					{
-						id: "effort",
-						value: "medium"
-					}
-				],
-				displayName: "Gemini 3.6 Flash"
-			},
-			{
-				params: [
-					{
-						id: "effort",
-						value: "high"
-					}
-				],
-				displayName: "Gemini 3.6 Flash",
-				isDefault: true
-			}
-		]
-	},
-	{
-		id: "gemini-3.7-flash",
-		displayName: "Gemini 3.7 Flash",
-		aliases: [
-			"gemini-flash-latest",
-			"gemini-flash"
-		],
-		parameters: [
-			{
-				id: "effort",
-				displayName: "Effort",
-				values: [
-					{
-						value: "low",
-						displayName: "Low"
-					},
-					{
-						value: "medium",
-						displayName: "Medium"
-					},
-					{
-						value: "high",
-						displayName: "High"
-					}
-				]
-			}
-		],
-		variants: [
-			{
-				params: [
-					{
-						id: "effort",
-						value: "low"
-					}
-				],
-				displayName: "Gemini 3.7 Flash"
-			},
-			{
-				params: [
-					{
-						id: "effort",
-						value: "medium"
-					}
-				],
-				displayName: "Gemini 3.7 Flash"
-			},
-			{
-				params: [
-					{
-						id: "effort",
-						value: "high"
-					}
-				],
-				displayName: "Gemini 3.7 Flash",
-				isDefault: true
-			}
-		]
-	},
-	{
 		id: "gemini-3.8-flash",
 		displayName: "Gemini 3.8 Flash",
 		parameters: [
@@ -6912,6 +7006,60 @@ export const FALLBACK_MODEL_ITEMS = [
 					}
 				],
 				displayName: "Gemini 4 Argon High"
+			}
+		]
+	},
+	{
+		id: "gemini-4-carbon",
+		displayName: "Gemini 4 Carbon",
+		parameters: [
+			{
+				id: "reasoning_effort",
+				displayName: "Effort",
+				values: [
+					{
+						value: "low",
+						displayName: "Low"
+					},
+					{
+						value: "medium",
+						displayName: "Medium"
+					},
+					{
+						value: "high",
+						displayName: "High"
+					}
+				]
+			}
+		],
+		variants: [
+			{
+				params: [
+					{
+						id: "reasoning_effort",
+						value: "low"
+					}
+				],
+				displayName: "Gemini 4 Carbon Low"
+			},
+			{
+				params: [
+					{
+						id: "reasoning_effort",
+						value: "medium"
+					}
+				],
+				displayName: "Gemini 4 Carbon Medium",
+				isDefault: true
+			},
+			{
+				params: [
+					{
+						id: "reasoning_effort",
+						value: "high"
+					}
+				],
+				displayName: "Gemini 4 Carbon High"
 			}
 		]
 	},

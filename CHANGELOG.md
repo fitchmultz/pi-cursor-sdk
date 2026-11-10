@@ -7,6 +7,12 @@
 ## 0.5.28 - 2026-11-09
 
 <!-- npm-release:unreleased:start -->
+### Changed
+
+- Refresh the fallback catalog from an authenticated SDK 1.0.40 catalog-only observation on 2026-11-09.
+  The catalog has 50 models, adding Claude Fable 5.2 (`claude-fable-5-2`) and aliases `fable-5-2` and `fable-5.2`.
+  All 49 existing model records and 33 bundled checkpoint-derived entries remain unchanged.
+  This refresh started no Agent/model turn or Cloud run and establishes no new checkpoint limit.
 <!-- npm-release:unreleased:end -->
 
 <!-- npm-release:carried:start -->

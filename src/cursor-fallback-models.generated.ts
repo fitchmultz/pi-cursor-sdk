@@ -1,6 +1,6 @@
 import type { ModelListItem } from "@cursor/sdk";
 
-// Generated with @cursor/sdk@1.0.40 from 49 Cursor models.
+// Generated with @cursor/sdk@1.0.40 from 50 Cursor models.
 // Refresh with: npm run refresh:cursor-snapshots -- --write
 // Do not add secrets; this file stores public model metadata only.
 export const FALLBACK_MODEL_ITEMS = [
@@ -865,6 +865,189 @@ export const FALLBACK_MODEL_ITEMS = [
 					}
 				],
 				displayName: "Claude Fable 5.1"
+			}
+		]
+	},
+	{
+		id: "claude-fable-5-2",
+		displayName: "Claude Fable 5.2",
+		aliases: [
+			"fable-5-2",
+			"fable-5.2"
+		],
+		parameters: [
+			{
+				id: "context",
+				displayName: "Context",
+				values: [
+					{
+						value: "300k",
+						displayName: "300K"
+					},
+					{
+						value: "1m",
+						displayName: "1M"
+					}
+				]
+			},
+			{
+				id: "effort",
+				displayName: "Effort",
+				values: [
+					{
+						value: "low",
+						displayName: "Low"
+					},
+					{
+						value: "medium",
+						displayName: "Medium"
+					},
+					{
+						value: "high",
+						displayName: "High"
+					},
+					{
+						value: "xhigh",
+						displayName: "Extra High"
+					},
+					{
+						value: "max",
+						displayName: "Max"
+					}
+				]
+			}
+		],
+		variants: [
+			{
+				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "effort",
+						value: "low"
+					}
+				],
+				displayName: "Claude Fable 5.2"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "effort",
+						value: "medium"
+					}
+				],
+				displayName: "Claude Fable 5.2"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "effort",
+						value: "high"
+					}
+				],
+				displayName: "Claude Fable 5.2"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "effort",
+						value: "xhigh"
+					}
+				],
+				displayName: "Claude Fable 5.2"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "effort",
+						value: "max"
+					}
+				],
+				displayName: "Claude Fable 5.2"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "effort",
+						value: "low"
+					}
+				],
+				displayName: "Claude Fable 5.2"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "effort",
+						value: "medium"
+					}
+				],
+				displayName: "Claude Fable 5.2"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "effort",
+						value: "high"
+					}
+				],
+				displayName: "Claude Fable 5.2",
+				isDefault: true
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "effort",
+						value: "xhigh"
+					}
+				],
+				displayName: "Claude Fable 5.2"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "effort",
+						value: "max"
+					}
+				],
+				displayName: "Claude Fable 5.2"
 			}
 		]
 	},

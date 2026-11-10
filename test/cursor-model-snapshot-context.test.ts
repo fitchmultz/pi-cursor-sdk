@@ -71,8 +71,11 @@ describe("Cursor model-selection identities", () => {
 		).toThrow("checkpoint input assigns conflicting windows to equivalent selection model-a@1m");
 	});
 
-	it("keeps every bundled key canonical and reachable in the fallback catalog", () => {
+	it("keeps retained bundled keys canonical while omitting catalog removals", () => {
 		const bundled = new Map(Object.entries(BUNDLED_CONTEXT_WINDOWS));
-		expect(normalizeCursorContextWindowEntries(FALLBACK_MODEL_ITEMS, bundled, "bundled snapshot")).toEqual(bundled);
+		const retained = new Map(bundled);
+		expect(retained.delete("gemini-3.6-flash")).toBe(true);
+		expect(retained.delete("gemini-3.7-flash")).toBe(true);
+		expect(normalizeCursorContextWindowEntries(FALLBACK_MODEL_ITEMS, bundled, "bundled snapshot")).toEqual(retained);
 	});
 });

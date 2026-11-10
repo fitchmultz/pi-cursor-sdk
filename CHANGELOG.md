@@ -9,10 +9,15 @@
 <!-- npm-release:unreleased:start -->
 ### Changed
 
-- Refresh the fallback catalog from an authenticated SDK 1.0.40 catalog-only observation on 2026-11-09.
-  The catalog has 50 models, adding Claude Fable 5.2 (`claude-fable-5-2`) and aliases `fable-5-2` and `fable-5.2`.
-  All 49 existing model records and 33 bundled checkpoint-derived entries remain unchanged.
-  This refresh started no Agent/model turn or Cloud run and establishes no new checkpoint limit.
+- Refresh the fallback catalog from the authenticated SDK 1.0.40 catalog-only observation on 2026-11-10, with 49 models.
+  Compared with the 50-model Nov 9 snapshot, it adds Gemini 4 Carbon (`gemini-4-carbon`), removes Gemini 3.6 Flash and 3.7 Flash, and adds Fable 5.2 `fast=false|true` metadata.
+  Fable's 10 variants become 20, with `context=1m`, `effort=high`, and `fast=false` as the default. Its aliases and context/effort values are unchanged, as are the other 47 model records.
+  Carbon exposes `reasoning_effort=low|medium|high`, defaulting to `medium`, with no aliases.
+  The 33 bundled checkpoint-derived entries remain unchanged. This refresh started no Agent/model turn or Cloud run and establishes no new checkpoint limit.
+
+- The authenticated SDK 1.0.40 catalog-only observation on 2026-11-09 returned 50 models.
+  It added Claude Fable 5.2 (`claude-fable-5-2`) and aliases `fable-5-2` and `fable-5.2`, preserving the prior 49 model records and 33 bundled checkpoint-derived entries.
+  That refresh started no Agent/model turn or Cloud run and established no new checkpoint limit.
 <!-- npm-release:unreleased:end -->
 
 <!-- npm-release:carried:start -->

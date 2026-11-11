@@ -6,6 +6,7 @@ export const NATIVE_COMPATIBILITY_TEST_FILES = Object.freeze([
   "test/native-cursor-flow.test.mjs",
   "test/native-cursor-ownership.test.mjs",
   "test/native-cursor-prompt.test.mjs",
+  "test/native-release-review.test.mjs",
 ]);
 
 /** Separate command watchdogs; a failed phase prevents every later phase. */

@@ -6,6 +6,8 @@
 
 ### Changed
 
+- Maintainer reviews receive exact missing-read paths and ranges before native Pi settles, so they can finish the same review without restarting. Complete-read and zero-finding release gates remain unchanged.
+
 - Release version reconciliation and review remediation report fetch failures with the service, HTTP method, public endpoint, and native cause details. Reconciled changelogs retain a final newline.
 
 - Refresh the fallback catalog from the authenticated SDK 1.0.40 catalog-only observation on 2026-11-10, with 49 models.

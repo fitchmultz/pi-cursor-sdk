@@ -115,45 +115,54 @@ function possibleDiagnostic(text) {
 	return CURSOR_SDK_STARTUP_NOISE_PATTERNS.some(prefix => prefix.startsWith(message) || message === prefix || message.startsWith(`${prefix} `));
 }
 
+// A sink is empty between frames, buffers one candidate frame, or delegates
+// transparently after restoration. A candidate keeps its original bytes, the
+// notice owner and creation mute from its start, and its own StringDecoder,
+// which alone holds a split UTF-8 tail.
+const EMPTY = { kind: "empty" }, TRANSPARENT = { kind: "transparent" };
+
 function createFilteredProcessWrite(write, stream) {
-	let pending = [], size = 0, text = "", decoder = new StringDecoder("utf8");
-	let owner, suppressed = false;
-	let active = true;
-	function reset() {
-		pending = []; size = 0; text = ""; decoder = new StringDecoder("utf8"); owner = undefined; suppressed = false;
-	}
-	function finish(output) {
-		const original = Buffer.concat(pending);
-		const kind = isUtf8(original) ? classify(text + decoder.end()) : undefined;
-		const handler = owner, wasSuppressed = suppressed;
-		reset();
+	let parser = EMPTY;
+	// Callers detach the frame first: a notice handler may write to this sink.
+	function finish(frame, output) {
+		const original = Buffer.concat(frame.chunks);
+		const kind = isUtf8(original) ? classify(frame.text + frame.decoder.end()) : undefined;
 		let handled = kind === "noise";
-		if (kind && kind !== "noise" && handler) {
+		if (kind && kind !== "noise" && frame.owner) {
 			// A failed native notice must not turn a capability warning into silence.
 			try {
-				handled = cursorSdkOutputSuppression.run(false, () => handler(kind, CURSOR_SDK_CAPABILITY_NOTICES[kind])) !== false;
+				handled = cursorSdkOutputSuppression.run(false, () => frame.owner(kind, CURSOR_SDK_CAPABILITY_NOTICES[kind])) !== false;
 			} catch { handled = false; }
 		}
-		if (!handled && (kind || !wasSuppressed)) output.push(original);
+		if (!handled && (kind || !frame.suppressed)) output.push(original);
 	}
 	const filteredWrite = (chunk, encodingOrCallback, callback) => {
-		if (!active) return write.call(stream, chunk, encodingOrCallback, callback);
+		if (parser.kind === "transparent") return write.call(stream, chunk, encodingOrCallback, callback);
 		if (typeof chunk !== "string" && !(chunk instanceof Uint8Array)) return write.call(stream, chunk, encodingOrCallback, callback);
 		const bytes = typeof chunk === "string" ? Buffer.from(chunk, typeof encodingOrCallback === "string" ? encodingOrCallback : "utf8") : Buffer.from(chunk);
 		const output = [];
 		for (let offset = 0; offset < bytes.length;) {
+			// Restoration is terminal even if a notice handler restores mid-write.
+			if (parser.kind === "transparent") { output.push(bytes.subarray(offset)); break; }
 			const newline = bytes.indexOf(10, offset);
 			const end = newline < 0 ? bytes.length : newline + 1;
 			const part = bytes.subarray(offset, end);
 			// A write invocation is also a frame boundary after unknown bytes have
 			// forwarded: Pi's native footer/prompt need not end with a newline.
-			if (size === 0) { owner = noticeOwner.getStore(); suppressed = isCursorSdkOutputSuppressed(); }
-			pending.push(part); size += part.length;
-			if (size <= MAX_CANDIDATE_BYTES) text += decoder.write(part);
-			if (size > MAX_CANDIDATE_BYTES || !text || (newline < 0 && !possibleDiagnostic(text))) {
-				if (!suppressed) output.push(...pending);
-				reset();
-			} else if (newline >= 0) finish(output);
+			if (parser.kind === "empty") parser = {
+				kind: "candidate", chunks: [], size: 0, text: "", decoder: new StringDecoder("utf8"),
+				owner: noticeOwner.getStore(), suppressed: isCursorSdkOutputSuppressed(),
+			};
+			const frame = parser;
+			frame.chunks.push(part); frame.size += part.length;
+			if (frame.size <= MAX_CANDIDATE_BYTES) frame.text += frame.decoder.write(part);
+			if (frame.size > MAX_CANDIDATE_BYTES || !frame.text || (newline < 0 && !possibleDiagnostic(frame.text))) {
+				parser = EMPTY;
+				if (!frame.suppressed) output.push(...frame.chunks);
+			} else if (newline >= 0) {
+				parser = EMPTY;
+				finish(frame, output);
+			}
 			offset = end;
 		}
 		const done = typeof encodingOrCallback === "function" ? encodingOrCallback : callback;
@@ -161,15 +170,19 @@ function createFilteredProcessWrite(write, stream) {
 		if (done) process.nextTick(done);
 		return true;
 	};
-	function flush() {
+	// Settle a pending candidate on flush (keep filtering) or restore (terminal).
+	function settle(next) {
+		const frame = parser;
+		if (frame.kind === "transparent") return;
+		parser = next;
 		const output = [];
-		if (size) finish(output);
+		if (frame.kind === "candidate") finish(frame, output);
 		if (output.length) write.call(stream, Buffer.concat(output));
 	}
 	return {
 		write: filteredWrite,
-		flush,
-		restore() { active = false; flush(); },
+		flush: () => settle(EMPTY),
+		restore: () => settle(TRANSPARENT),
 	};
 }
 

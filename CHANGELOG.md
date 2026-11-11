@@ -13,6 +13,7 @@
 
 ### What's Changed
 * refactor: keep replay results with their owners by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/416
+* refactor: make SDK output frame ownership explicit by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/439
 
 
 **Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.30...v0.5.31

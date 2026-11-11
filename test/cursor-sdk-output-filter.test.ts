@@ -136,7 +136,7 @@ describe("Cursor SDK presentation boundary", () => {
 		} finally { restore(); output.restore(); }
 	});
 
-	it("attributes split warnings to their initial owner and preserves warnings when native reporting fails", async () => {
+	it("attributes split frames to the owner and mute at their start and preserves warnings when native reporting fails", async () => {
 		const output = collectOutput(), restore = installCursorSdkOutputFilter();
 		try {
 			const warning = "[local-plugins-bootstrap] loadUserLocalPlugin outside rejected: symlink target /outside is outside /root {}\n";
@@ -145,6 +145,12 @@ describe("Cursor SDK presentation boundary", () => {
 			withCursorSdkOutputNoticeHandler(() => { owners.push("second"); }, () => process.stderr.write(warning.slice(20)));
 			expect(owners).toEqual(["first"]);
 			expect(output.stderr).toEqual([]);
+			suppressCursorSdkOutput(() => process.stdout.write("18:05:"));
+			process.stdout.write("57.959 INFO  started muted\n");
+			process.stdout.write("18:05:");
+			suppressCursorSdkOutput(() => process.stdout.write("57.959 INFO  started visible\n"));
+			expect(Buffer.concat(output.stdout)).toEqual(Buffer.from("18:05:57.959 INFO  started visible\n"));
+			output.stdout.length = 0;
 			withCursorSdkOutputNoticeHandler(() => { throw new Error("native reporter failed"); }, () => process.stderr.write(warning));
 			expect(Buffer.concat(output.stderr)).toEqual(Buffer.from(warning));
 			let callbacks = 0;
@@ -184,6 +190,8 @@ describe("Cursor SDK presentation boundary", () => {
 			const invalidFrame = Buffer.concat([Buffer.from('18:05:57.959 INFO  managed_skills.removed meta={skill_id: "'), Buffer.from([0xff]), Buffer.from('"}\n')]);
 			expect(process.stdout.write(invalidFrame)).toBe(false);
 			process.stdout.write("é", "latin1");
+			// The forwarded partial character must not reach the next frame's decoder.
+			process.stdout.write("18:05:57.959 INFO  managed_skills.removed ctx=syncBuiltinSkills\n");
 			process.stderr.write("18:05:");
 			expect(output.stderr).toEqual([]);
 			restore();

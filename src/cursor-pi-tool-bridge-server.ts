@@ -61,14 +61,19 @@ async function closeServers(servers: readonly HttpServer[]): Promise<void> {
 	}));
 }
 
+// Starting and closing happen inside one serialized lifecycle operation, so other operations see only
+// `stopped` or a fully bound listener set with its frozen advertised host.
+type BridgeHttpServerState =
+	| { kind: "stopped" }
+	| { kind: "listening"; servers: readonly [HttpServer, ...HttpServer[]]; advertisedHost: string };
+type ListeningBridgeHttpServer = Extract<BridgeHttpServerState, { kind: "listening" }>;
+
 export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 	private readonly pi: CursorPiToolBridgeSnapshotApi;
 	private readonly env: Record<string, string | undefined>;
 	private readonly runs = new Set<CursorPiToolBridgeRunImpl>();
 	private readonly routes = new Map<string, CursorPiToolBridgeRunImpl>();
-	private httpServers: HttpServer[] = [];
-	private advertisedHost?: string;
-	private listenPromise?: Promise<void>;
+	private httpServer: BridgeHttpServerState = { kind: "stopped" };
 	private serverLifecycle = Promise.resolve();
 
 	constructor(
@@ -121,11 +126,11 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 
 	async registerRun(pathname: string, run: CursorPiToolBridgeRunImpl): Promise<string> {
 		return this.serializeServerLifecycle(async () => {
-			await this.ensureHttpServer();
+			const { advertisedHost } = await this.ensureHttpServer();
 			this.routes.set(pathname, run);
 			const address = this.getHttpServerAddress();
-			if (!address || !this.advertisedHost) throw new Error("Cursor pi tool bridge HTTP server is not listening");
-			return `http://${this.advertisedHost}:${address.port}${pathname}`;
+			if (!address) throw new Error("Cursor pi tool bridge HTTP server is not listening");
+			return `http://${advertisedHost}:${address.port}${pathname}`;
 		});
 	}
 
@@ -144,7 +149,8 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 	}
 
 	getHttpServerAddress(): AddressInfo | undefined {
-		const address = asRecord(this.httpServers[0]?.address());
+		if (this.httpServer.kind === "stopped") return undefined;
+		const address = asRecord(this.httpServer.servers[0].address());
 		if (typeof address?.port !== "number") return undefined;
 		return {
 			address: typeof address.address === "string" ? address.address : LOOPBACK_HOST,
@@ -171,17 +177,12 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 		return false;
 	}
 
-	private async ensureHttpServer(): Promise<void> {
-		this.listenPromise ??= this.startHttpServer().catch((error: unknown) => {
-			this.httpServers = [];
-			this.advertisedHost = undefined;
-			this.listenPromise = undefined;
-			throw error;
-		});
-		await this.listenPromise;
+	private async ensureHttpServer(): Promise<ListeningBridgeHttpServer> {
+		if (this.httpServer.kind === "stopped") this.httpServer = await this.startHttpServer();
+		return this.httpServer;
 	}
 
-	private async startHttpServer(): Promise<void> {
+	private async startHttpServer(): Promise<ListeningBridgeHttpServer> {
 		// A hostname is a listener policy, not a mutable per-run URL preference.
 		const advertisedHost = resolveCursorPiToolBridgeUrlHost(this.env);
 		const range = resolveCursorPiToolBridgePortRange(this.env);
@@ -199,19 +200,17 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 		const listener = getRequestListener(app.fetch, { overrideGlobalObjects: false });
 		const attempts = range ? range.last - range.first + 1 : advertisedHost === "localhost" ? EPHEMERAL_BIND_ATTEMPTS : 1;
 		for (let attempt = 0; attempt < attempts; attempt += 1) {
-			const servers = [createServer(listener)];
+			const servers: [HttpServer, ...HttpServer[]] = [createServer(listener)];
 			try {
-				await listenOnce(servers[0]!, range ? range.first + attempt : 0);
+				await listenOnce(servers[0], range ? range.first + attempt : 0);
 				if (advertisedHost === "localhost") {
-					const port = (servers[0]!.address() as AddressInfo).port;
+					const port = (servers[0].address() as AddressInfo).port;
 					const ipv6 = createServer(listener);
 					servers.push(ipv6);
 					// Own both explicit loopbacks before publishing any tokenized URL.
 					await listenOnce(ipv6, port, "::1");
 				}
-				this.httpServers = servers;
-				this.advertisedHost = advertisedHost;
-				return;
+				return { kind: "listening", servers, advertisedHost };
 			} catch (error) {
 				try { await closeServers(servers); }
 				catch { throw error; } // Never retry or replace the bind failure when rollback fails.
@@ -223,12 +222,9 @@ export class CursorPiToolBridgeRegistry implements CursorPiToolBridge {
 	}
 
 	private async closeHttpServer(): Promise<void> {
-		await this.listenPromise?.catch(() => undefined);
-		const servers = this.httpServers;
-		this.httpServers = [];
-		this.advertisedHost = undefined;
-		this.listenPromise = undefined;
-		await closeServers(servers);
+		const closing = this.httpServer;
+		this.httpServer = { kind: "stopped" };
+		if (closing.kind === "listening") await closeServers(closing.servers);
 	}
 
 	private async handleHttpRequest(request: Request, parsedBody?: unknown): Promise<Response> {

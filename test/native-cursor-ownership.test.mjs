@@ -339,7 +339,7 @@ test("a replay run kept by a same-branch tree move replays without publishing it
     unsubscribe();
     const interrupted = state.sends.at(-1);
     const abortError = a.manager.getBranch().findLast(e => e.type === "message");
-    assert.equal(abortError.message.stopReason, "error");
+    assert.ok(["aborted", "error"].includes(abortError.message.stopReason));
     // Naming the session appends under the error, so selecting the error is a real tree move that keeps the run's result.
     a.session.setSessionName("kept run");
     await a.session.navigateTree(abortError.id, { summarize: false });

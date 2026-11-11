@@ -493,6 +493,8 @@ export function buildCloudSmokeEvidenceProvenance(options = {}) {
 /**
  * Offline release-gate resource coordinator:
  * run state -> harvest IDs -> cleanup every ID -> repo cleanup -> evidence only on complete success.
+ * When repository cleanup runs, only verified deletion proof (deleted:true, HTTP 404) marks it cleaned.
+ * Unproven deletion fails the gate and reaches onRepositoryCleanupError, when provided.
  */
 export async function coordinateCloudSmokeReleaseGate(callbacks = {}) {
 	const run = callbacks.run;
@@ -542,19 +544,20 @@ export async function coordinateCloudSmokeReleaseGate(callbacks = {}) {
 		captureInterruption();
 	}
 
-	if (state.repository) {
+	const repository = state.repository;
+	if (repository) {
 		if (typeof cleanupRepository !== "function") {
 			failure ??= new Error("coordinateCloudSmokeReleaseGate requires cleanupRepository() when a repository is established");
 		} else {
 			try {
-				const proof = await cleanupRepository(state.repository);
-				throwawayRepository = {
-					name: state.repository.fullName,
-					deleted: proof?.deleted === true,
+				const proof = await cleanupRepository(repository);
+				throwawayRepository = projectThrowawayRepository({
+					name: repository.fullName,
+					deleted: proof?.deleted,
 					httpStatus: proof?.httpStatus,
-				};
+				});
 			} catch (error) {
-				callbacks.onRepositoryCleanupError?.(error, state.repository);
+				callbacks.onRepositoryCleanupError?.(error, repository);
 				failure ??= error;
 			}
 		}
@@ -567,7 +570,6 @@ export async function coordinateCloudSmokeReleaseGate(callbacks = {}) {
 				lanes: state.lanes,
 				cleanup,
 				throwawayRepository,
-				repository: state.repository,
 			});
 		} catch (error) {
 			failure = error;
@@ -580,6 +582,5 @@ export async function coordinateCloudSmokeReleaseGate(callbacks = {}) {
 		lanes: state.lanes,
 		cleanup,
 		throwawayRepository,
-		repository: state.repository,
 	};
 }

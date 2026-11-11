@@ -487,6 +487,19 @@ describe("cloud smoke helper contracts", () => {
 		})).rejects.toThrow(/repo cleanup failed/);
 		expect(writes).toEqual([]);
 
+		// A deletion receipt without independent HTTP 404 proof leaves the exact repository residual.
+		const residualRepositories: string[] = [];
+		await expect(coordinateCloudSmokeReleaseGate({
+			run: async (state) => { state.repository = ownedRepo; },
+			harvestAgentIds: () => [],
+			cleanupAgent: async (id) => ({ agentId: id, archived: true, deleted: true, listExcluded: true }),
+			cleanupRepository: async () => ({ deleted: true }) as never,
+			onRepositoryCleanupError: (_error, repository) => { residualRepositories.push(repository.fullName); },
+			writeEvidence: async (input) => { writes.push(input); },
+		})).rejects.toThrow(/must prove deleted:true with httpStatus 404/);
+		expect(residualRepositories).toEqual([ownedFullName]);
+		expect(writes).toEqual([]);
+
 		await expect(coordinateCloudSmokeReleaseGate({
 			run: async (state) => { state.repository = ownedRepo; },
 			harvestAgentIds: async () => { throw new Error("agent harvest failed"); },
@@ -505,6 +518,12 @@ describe("cloud smoke helper contracts", () => {
 		})).rejects.toThrow(/evidence write failed/);
 		expect(writes).toEqual([]);
 
+		const verifiedResult = {
+			lanes: [{ name: "missing-branch-failure", status: "passed", expectedFailureObserved: true }],
+			cleanup: [{ agentId, archived: true, deleted: true, listExcluded: true }],
+			throwawayRepository: { name: ownedFullName, deleted: true, httpStatus: 404 },
+		};
+
 		await expect(coordinateCloudSmokeReleaseGate({
 			run: async (state) => {
 				state.repository = ownedRepo;
@@ -518,10 +537,56 @@ describe("cloud smoke helper contracts", () => {
 			cleanupAgent: async (id) => ({ agentId: id, archived: true, deleted: true, listExcluded: true }),
 			cleanupRepository: async () => ({ deleted: true as const, httpStatus: 404 as const }),
 			writeEvidence: async (input) => { writes.push(input); },
-		})).resolves.toMatchObject({
-			throwawayRepository: { name: ownedFullName, deleted: true, httpStatus: 404 },
-		});
-		expect(writes).toHaveLength(1);
+		})).resolves.toEqual(verifiedResult);
+		expect(writes).toEqual([verifiedResult]);
+	});
+
+	it("deletes only an exact owned repository when provisioning fails after create", async () => {
+		const provisionThroughGate = async (remoteDescription: string) => {
+			const commands: string[] = [];
+			const residualRepositories: string[] = [];
+			const writes: unknown[] = [];
+			const githubOptions = {
+				randomUUID: () => ownershipToken,
+				writeFileSync: () => undefined,
+				runCommand: (name: string, args: readonly string[]) => {
+					commands.push([name, ...args].join(" "));
+					if (name === "gh" && args[0] === "api") return "owner";
+					if (name === "gh" && args[1] === "view") return JSON.stringify({ isPrivate: true, description: remoteDescription });
+					if (name === "git" && args.includes("push")) throw new Error("seed push rejected");
+					return "";
+				},
+				spawnSync: () => ({ status: 1, stdout: "HTTP/2 404", stderr: "" }) as never,
+			};
+			const outcome = await coordinateCloudSmokeReleaseGate({
+				run: (state) => {
+					createThrowawayRepository("/tmp/artifacts", (owned) => { state.repository = owned; }, githubOptions);
+				},
+				harvestAgentIds: () => [],
+				cleanupAgent: async (id) => ({ agentId: id, archived: true, deleted: true, listExcluded: true }),
+				cleanupRepository: (repository) => deleteThrowawayRepository(repository, githubOptions),
+				onRepositoryCleanupError: (_error, repository) => { residualRepositories.push(repository.fullName); },
+				writeEvidence: (input) => { writes.push(input); },
+			}).then(() => "passed", (error: Error) => error.message);
+			return { outcome, commands, residualRepositories, writes };
+		};
+
+		// Seeding fails after create: the handle published at create is marker-checked and deleted.
+		const seedFailure = await provisionThroughGate(ownedDescription);
+		expect(seedFailure.outcome).toBe("seed push rejected");
+		expect(seedFailure.commands.slice(-2)).toEqual([
+			`gh repo view ${ownedFullName} --json isPrivate,description`,
+			`gh repo delete ${ownedFullName} --yes`,
+		]);
+		expect(seedFailure.residualRepositories).toEqual([]);
+		expect(seedFailure.writes).toEqual([]);
+
+		// The exact marker no longer verifies after create: refuse deletion and report the exact residual.
+		const markerChanged = await provisionThroughGate("changed after create");
+		expect(markerChanged.outcome).toBe("throwaway repository description does not match ownership marker");
+		expect(markerChanged.commands.filter((line) => line.includes("repo delete"))).toEqual([]);
+		expect(markerChanged.residualRepositories).toEqual([ownedFullName]);
+		expect(markerChanged.writes).toEqual([]);
 	});
 
 	it.skipIf(process.platform === "win32")("handles real OS signals on both sides of the evidence commit point", async () => {

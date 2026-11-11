@@ -4,6 +4,19 @@
 
 ## Unreleased
 
+## 0.5.31 - 2026-11-11
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- refactor: keep replay results with their owners (#416) ([f0d5c8a](https://github.com/fitchmultz/pi-cursor-sdk/commit/f0d5c8a3961644d36ea1fade102392f244218a71))
+
+### What's Changed
+* refactor: keep replay results with their owners by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/416
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.30...v0.5.31
+
 ## 0.5.30 - 2026-11-11
 
 <!-- npm-release:unreleased:start -->

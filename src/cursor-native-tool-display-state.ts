@@ -15,18 +15,16 @@ export interface CursorNativeToolDisplayState {
 	registeredNativeToolSources: Map<string, SourceInfo>;
 	skippedNativeToolNames: Set<string>;
 	runtimeRequested: boolean;
-	resultIds: Set<string>;
 }
 
 function createDisplayState(): CursorNativeToolDisplayState {
-	return { registeredNativeToolSources: new Map(), skippedNativeToolNames: new Set(), runtimeRequested: false, resultIds: new Set() };
+	return { registeredNativeToolSources: new Map(), skippedNativeToolNames: new Set(), runtimeRequested: false };
 }
 
 let lastDisplayState = createDisplayState();
 const displayStates = new Map<object, CursorNativeToolDisplayState>();
-// IDs index results; the owning display state and tool authorize consumption.
-export const nativeToolResults = new Map<string, CursorNativeToolDisplayItem>();
-const resultStates = new Map<string, CursorNativeToolDisplayState>();
+// Pending results by tool-call ID; the recording owner and the result's tool authorize one-shot consumption.
+const nativeToolResults = new Map<string, { owner: CursorNativeToolDisplayState; item: CursorNativeToolDisplayItem }>();
 
 export function getCursorNativeToolDisplayState(pi?: object): CursorNativeToolDisplayState {
 	if (!pi) return lastDisplayState;
@@ -41,11 +39,9 @@ export function registerCursorNativeToolDisplayState(pi: { on(event: "session_sh
 	lastDisplayState = state;
 	pi.on("session_shutdown", () => {
 		displayStates.delete(pi);
-		for (const id of state.resultIds) {
-			nativeToolResults.delete(id);
-			resultStates.delete(id);
+		for (const [id, result] of nativeToolResults) {
+			if (result.owner === state) nativeToolResults.delete(id);
 		}
-		state.resultIds.clear();
 	});
 }
 
@@ -86,27 +82,22 @@ export function isRegisteredCursorNativeToolName(toolName: string, pi?: object):
 
 export function recordCursorNativeToolDisplay(item: CursorNativeToolDisplayItem, state = getCursorNativeToolDisplayState()): boolean {
 	if (!state.registeredNativeToolSources.has(item.toolName)) return false;
-	nativeToolResults.set(item.id, item);
-	resultStates.set(item.id, state);
-	state.resultIds.add(item.id);
+	nativeToolResults.set(item.id, { owner: state, item });
 	return true;
 }
 
 export function deleteCursorNativeToolDisplay(id: string): void {
 	nativeToolResults.delete(id);
-	resultStates.get(id)?.resultIds.delete(id);
-	resultStates.delete(id);
 }
 
 export function consumeCursorNativeToolDisplay(id: string, state: CursorNativeToolDisplayState, toolName: string): CursorNativeToolDisplayItem | undefined {
-	const item = nativeToolResults.get(id);
-	if (item) {
-		if (resultStates.get(id) !== state || normalizeCursorToolName(item.toolName) !== normalizeCursorToolName(toolName)) {
-			throw new Error(`No owned Cursor ${toolName} result was available. This replay-only call does not execute work.`);
-		}
-		deleteCursorNativeToolDisplay(id);
+	const result = nativeToolResults.get(id);
+	if (!result) return undefined;
+	if (result.owner !== state || normalizeCursorToolName(result.item.toolName) !== normalizeCursorToolName(toolName)) {
+		throw new Error(`No owned Cursor ${toolName} result was available. This replay-only call does not execute work.`);
 	}
-	return item;
+	nativeToolResults.delete(id);
+	return result.item;
 }
 
 export function isCursorReplayToolCallId(toolCallId: string): boolean {
@@ -128,6 +119,5 @@ export const __testUtils = {
 		lastDisplayState = createDisplayState();
 		displayStates.clear();
 		nativeToolResults.clear();
-		resultStates.clear();
 	},
 };

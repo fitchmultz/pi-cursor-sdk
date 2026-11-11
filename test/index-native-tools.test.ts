@@ -17,7 +17,7 @@ import {
 	makeHarnessModel,
 	makeModel,
 } from "./helpers/pi-harness.js";
-import { createExtensionPi, resetIndexExtensionTestState } from "./helpers/index-extension-test-kit.js";
+import { createExtensionPi, nativeToolDisplayTestUtils, resetIndexExtensionTestState } from "./helpers/index-extension-test-kit.js";
 import { createRenderContext, createRenderOptions, createRenderTheme } from "./helpers/render-fixtures.js";
 
 vi.mock("../src/model-discovery.js", () => ({
@@ -35,6 +35,7 @@ import { discoverModels } from "../src/model-discovery.js";
 const mockedDiscover = vi.mocked(discoverModels);
 import {
 	canRenderCursorToolNatively,
+	getCursorNativeToolDisplayState,
 	recordCursorNativeToolDisplay,
 } from "../src/cursor-native-tool-display-state.js";
 import { CURSOR_ASK_QUESTION_TOOL_NAME } from "../src/cursor-question-tool.js";
@@ -128,6 +129,34 @@ describe("extension native Cursor tool replay", () => {
 			details: undefined,
 			terminate: true,
 		});
+	});
+
+	it("preserves another binding's overwritten Cursor replay result while removing a shut-down binding's own results", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		const [owner, sibling] = [createExtensionPi(), createExtensionPi()];
+		for (const pi of [owner, sibling]) {
+			mockedDiscover.mockResolvedValueOnce([]);
+			await extensionFactory(pi);
+			await pi.runSessionStart();
+		}
+		const record = (pi: object, id: string, text: string) => recordCursorNativeToolDisplay({
+			id,
+			toolName: "read",
+			args: { path: "README.md" },
+			result: { content: [{ type: "text", text }] },
+			isError: false,
+		}, getCursorNativeToolDisplayState(pi));
+		expect(record(sibling, "cursor-replay-1-1-tool-1", "old sibling result")).toBe(true);
+		expect(record(owner, "cursor-replay-1-1-tool-1", "owner result")).toBe(true);
+		expect(record(sibling, "cursor-replay-1-2-tool-1", "sibling result")).toBe(true);
+
+		await sibling.runSessionShutdown({ reason: "quit" });
+
+		expect(nativeToolDisplayTestUtils.nativeToolResultCount()).toBe(1);
+		const readTool = getHarnessRegisteredTool(owner._tools, "read");
+		await expect(
+			readTool.execute("cursor-replay-1-1-tool-1", { path: "README.md" }, undefined, undefined, createExtensionTestContext()),
+		).resolves.toMatchObject({ content: [{ type: "text", text: "owner result" }] });
 	});
 
 	it("labels collapsed native read replay cards when only local preview content is available", async () => {

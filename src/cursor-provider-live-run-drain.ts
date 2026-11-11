@@ -110,15 +110,14 @@ export async function settleCursorLiveToolBatch(run: CursorLiveRun): Promise<voi
 	await scheduler.wait(75);
 }
 
-async function waitForCursorLiveSdkTurnEnded(run: CursorLiveRun, signal?: AbortSignal): Promise<boolean> {
+async function waitForCursorLiveSdkTurnEnded(run: CursorLiveRun, signal?: AbortSignal): Promise<void> {
 	const deadline = Date.now() + 125;
-	while (!cursorLiveRuns.hasSdkTurnEnded(run) && run.outcome.kind === "running" && run.resources.kind === "open") {
+	while (!cursorLiveRuns.hasUntakenSdkTurnObservation(run) && run.outcome.kind === "running" && run.resources.kind === "open") {
 		const remainingMs = deadline - Date.now();
-		if (remainingMs <= 0) return false;
+		if (remainingMs <= 0) return;
 		await scheduler.wait(Math.min(25, remainingMs));
 		if (signal?.aborted) throw new CursorLiveRunAbortError();
 	}
-	return cursorLiveRuns.hasSdkTurnEnded(run);
 }
 
 export function flushPendingCursorLiveRunTraceEventsToStream(
@@ -300,7 +299,8 @@ async function emitCursorLiveRunPendingToolUseTurn(
 	const eventType = cursorLiveRuns.peekEvent(run)?.type;
 	if (eventType !== "tool" && eventType !== "bridge-tool") return undefined;
 	await settleCursorLiveToolBatch(run);
-	const sdkTurnEnded = await waitForCursorLiveSdkTurnEnded(run, options.signal);
+	// A split emitted before its SDK turn ends uses estimates and suppresses later SDK usage for this run.
+	await waitForCursorLiveSdkTurnEnded(run, options.signal);
 	if (options.signal?.aborted) throw new CursorLiveRunAbortError();
 	if (eventType === "tool") {
 		const { active, inactive } = partitionNativeToolsByActiveContext(context, cursorLiveRuns.collectNativeToolBatch(run));
@@ -309,13 +309,11 @@ async function emitCursorLiveRunPendingToolUseTurn(
 			// Inactive-only batch: trace was emitted above; do not emit toolUse.
 			return "handled";
 		}
-		if (!sdkTurnEnded) cursorLiveRuns.ignoreFutureSdkTurnUsage(run);
 		if (options.mode === "emit") turn.emitter.closeAll();
 		emitCursorNativeToolUseTurn(stream, partial, model, context, run, toolResultInputTokens, active, options.occupancyFloor, debugRecorder);
 	} else {
 		const requests = cursorLiveRuns.collectBridgeToolBatch(run);
 		if (requests.length === 0) return "handled";
-		if (!sdkTurnEnded) cursorLiveRuns.ignoreFutureSdkTurnUsage(run);
 		if (options.mode === "emit") turn.emitter.closeAll();
 		emitCursorBridgeToolUseTurn(stream, partial, model, context, run, toolResultInputTokens, requests, options.occupancyFloor);
 	}

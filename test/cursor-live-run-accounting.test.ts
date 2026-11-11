@@ -9,6 +9,9 @@ import {
 	takeCursorLiveTurnInputTokens,
 } from "../src/cursor-live-run-accounting.js";
 
+const earlierTurn = { inputTokens: 25_432, outputTokens: 612, cacheReadTokens: 24_000, cacheWriteTokens: 123 };
+const laterTurn = { inputTokens: 26_044, outputTokens: 95, cacheReadTokens: 25_408, cacheWriteTokens: 0 };
+
 function makeToolResult(toolCallId: string, text: string): ToolResultMessage {
 	return {
 		role: "toolResult",
@@ -65,17 +68,35 @@ describe("cursor live-run accounting", () => {
 		expect(secondTurn.sessionInputTokens).toBe(0);
 	});
 
-	it("takes SDK turn usage once", () => {
+	it("takes the latest ended SDK turn usage once", () => {
 		const state = recordCursorLiveSdkTurnEnded(
-			createCursorLiveRunAccountingState(100),
-			{ inputTokens: 25_432, outputTokens: 612, cacheReadTokens: 24_000, cacheWriteTokens: 123 },
+			recordCursorLiveSdkTurnEnded(createCursorLiveRunAccountingState(100), earlierTurn),
+			laterTurn,
 		);
 
 		const first = takeCursorLiveSdkTurnUsage(state);
 		const second = takeCursorLiveSdkTurnUsage(first.state);
 
-		expect(first.sdkTurnUsage).toEqual({ inputTokens: 25_432, outputTokens: 612, cacheReadTokens: 24_000, cacheWriteTokens: 123 });
-		expect(second.sdkTurnUsage).toBeUndefined();
+		expect(first.usage).toEqual(laterTurn);
+		expect(second.usage).toBeUndefined();
 	});
 
+	it("keeps attributing later SDK usage after a turn ends without usage", () => {
+		const unreported = takeCursorLiveSdkTurnUsage(recordCursorLiveSdkTurnEnded(createCursorLiveRunAccountingState(100)));
+		const next = takeCursorLiveSdkTurnUsage(recordCursorLiveSdkTurnEnded(unreported.state, laterTurn));
+
+		expect(unreported.usage).toBeUndefined();
+		expect(next.usage).toEqual(laterTurn);
+	});
+
+	it("suppresses SDK usage for the rest of the run once a turn is emitted before its SDK turn ended", () => {
+		let state = takeCursorLiveSdkTurnUsage(createCursorLiveRunAccountingState(100)).state;
+
+		for (const lateTurns of [[earlierTurn], [undefined, laterTurn], [laterTurn, earlierTurn]]) {
+			for (const usage of lateTurns) state = recordCursorLiveSdkTurnEnded(state, usage);
+			const taken = takeCursorLiveSdkTurnUsage(state);
+			expect(taken.usage).toBeUndefined();
+			state = taken.state;
+		}
+	});
 });

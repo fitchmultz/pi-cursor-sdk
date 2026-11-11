@@ -61,7 +61,6 @@ export interface CursorLiveRun {
 	sessionBridgeRun?: CursorPiToolBridgeRun;
 	sessionAgentScopeKey: string;
 	sdkRun?: CursorLiveSdkRun;
-	ignoreFutureSdkTurnUsage?: boolean;
 	accounting: CursorLiveRunAccountingState;
 	onAbandon?: () => Promise<void>;
 	pendingEvents: CursorLiveQueuedEvent[];
@@ -105,8 +104,7 @@ export interface CursorLiveRunCoordinator {
 	attachSdkRun(run: CursorLiveRun, sdkRun: CursorLiveSdkRun): void;
 	settle(run: CursorLiveRun, outcome: CursorLiveRunSettledOutcome): void;
 	recordSdkTurnEnded(run: CursorLiveRun, usage?: CursorSdkTurnUsage): void;
-	ignoreFutureSdkTurnUsage(run: CursorLiveRun): void;
-	hasSdkTurnEnded(run: CursorLiveRun): boolean;
+	hasUntakenSdkTurnObservation(run: CursorLiveRun): boolean;
 	queueEvent(run: CursorLiveRun, event: CursorLiveQueuedEvent): void;
 	peekEvent(run: CursorLiveRun): CursorLiveQueuedEvent | undefined;
 	shiftEvent(run: CursorLiveRun): CursorLiveQueuedEvent | undefined;
@@ -418,21 +416,12 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 
 		recordSdkTurnEnded(run, usage): void {
 			if (run.resources.kind !== "open") return;
-			if (run.ignoreFutureSdkTurnUsage) {
-				run.accounting = { ...run.accounting, sdkTurnEnded: false, sdkTurnUsage: undefined };
-				notifyProgress(run);
-				return;
-			}
 			run.accounting = recordCursorLiveSdkTurnEnded(run.accounting, usage);
 			notifyProgress(run);
 		},
 
-		ignoreFutureSdkTurnUsage(run): void {
-			if (run.resources.kind === "open") run.ignoreFutureSdkTurnUsage = true;
-		},
-
-		hasSdkTurnEnded(run): boolean {
-			return run.accounting.sdkTurnEnded;
+		hasUntakenSdkTurnObservation(run): boolean {
+			return run.accounting.sdkTurnUsage.kind === "available";
 		},
 
 		queueEvent(run, event): void {
@@ -487,7 +476,7 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 		takeSdkTurnUsage(run): CursorSdkTurnUsage | undefined {
 			const taken = takeCursorLiveSdkTurnUsage(run.accounting);
 			run.accounting = taken.state;
-			return taken.sdkTurnUsage;
+			return taken.usage;
 		},
 
 		getPendingFromContext(context, getReplayId, scopeKey): CursorLiveRun | undefined {

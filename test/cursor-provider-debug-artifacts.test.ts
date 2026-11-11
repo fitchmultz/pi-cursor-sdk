@@ -23,6 +23,23 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+async function withProviderEventDebugEnv(prefix: string, run: (artifactDir: string) => Promise<void>): Promise<void> {
+	const artifactDir = mkdtempSync(join(tmpdir(), prefix));
+	const previousDebug = process.env.PI_CURSOR_SDK_EVENT_DEBUG;
+	const previousRunDir = process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR;
+	process.env.PI_CURSOR_SDK_EVENT_DEBUG = "1";
+	process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR = artifactDir;
+	try {
+		await run(artifactDir);
+	} finally {
+		if (previousDebug === undefined) delete process.env.PI_CURSOR_SDK_EVENT_DEBUG;
+		else process.env.PI_CURSOR_SDK_EVENT_DEBUG = previousDebug;
+		if (previousRunDir === undefined) delete process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR;
+		else process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR = previousRunDir;
+		rmSync(artifactDir, { recursive: true, force: true });
+	}
+}
+
 async function setCursorModeForProviderDebugTest(mode: "agent" | "plan", existing?: ReturnType<typeof createPiHarness>) {
 	const pi = existing ?? createPiHarness();
 	if (!existing) {
@@ -42,13 +59,7 @@ describe("streamCursor debug artifacts", () => {
 	});
 
 		it("captures provider debug artifacts through streamCursor when enabled", async () => {
-			const artifactDir = mkdtempSync(join(tmpdir(), "pi-cursor-provider-debug-"));
-			const previousDebug = process.env.PI_CURSOR_SDK_EVENT_DEBUG;
-			const previousRunDir = process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR;
-			process.env.PI_CURSOR_SDK_EVENT_DEBUG = "1";
-			process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR = artifactDir;
-
-			try {
+			await withProviderEventDebugEnv("pi-cursor-provider-debug-", async (artifactDir) => {
 				const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
 					opts.onDelta({ update: { type: "text-delta", text: "debugged" } });
 					return asMockCursorRun({
@@ -83,26 +94,15 @@ describe("streamCursor debug artifacts", () => {
 					artifactDir,
 					waitResultRecorded: true,
 				});
-			} finally {
-				if (previousDebug === undefined) delete process.env.PI_CURSOR_SDK_EVENT_DEBUG;
-				else process.env.PI_CURSOR_SDK_EVENT_DEBUG = previousDebug;
-				if (previousRunDir === undefined) delete process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR;
-				else process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR = previousRunDir;
-				rmSync(artifactDir, { recursive: true, force: true });
-			}
+			});
 		});
 
 		it("keeps the provider result when the wait-result artifact cannot be written", async () => {
-			const artifactDir = mkdtempSync(join(tmpdir(), "pi-cursor-provider-debug-wait-result-"));
-			const waitResultPath = join(artifactDir, sdkEventDebugTestUtils.ARTIFACTS.waitResult);
-			const previousDebug = process.env.PI_CURSOR_SDK_EVENT_DEBUG;
-			const previousRunDir = process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR;
-			process.env.PI_CURSOR_SDK_EVENT_DEBUG = "1";
-			process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR = artifactDir;
-			// A directory at the artifact path makes the real wait-result write fail.
-			mkdirSync(waitResultPath);
+			await withProviderEventDebugEnv("pi-cursor-provider-debug-wait-result-", async (artifactDir) => {
+				const waitResultPath = join(artifactDir, sdkEventDebugTestUtils.ARTIFACTS.waitResult);
+				// A directory at the artifact path makes the real wait-result write fail.
+				mkdirSync(waitResultPath);
 
-			try {
 				mockCreatedAgent({
 					send: vi.fn().mockResolvedValue(asMockCursorRun({
 						id: "run-debug",
@@ -128,13 +128,7 @@ describe("streamCursor debug artifacts", () => {
 					.map((line) => JSON.parse(line).error.label as string);
 				expect(errorLabels).toContain("wait_result");
 				expect(statSync(waitResultPath).isDirectory()).toBe(true);
-			} finally {
-				if (previousDebug === undefined) delete process.env.PI_CURSOR_SDK_EVENT_DEBUG;
-				else process.env.PI_CURSOR_SDK_EVENT_DEBUG = previousDebug;
-				if (previousRunDir === undefined) delete process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR;
-				else process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR = previousRunDir;
-				rmSync(artifactDir, { recursive: true, force: true });
-			}
+			});
 		});
 
 		it("records Cursor agent mode in provider debug metadata", async () => {
@@ -154,25 +148,14 @@ describe("streamCursor debug artifacts", () => {
 			const pi = await setCursorModeForProviderDebugTest("agent");
 			await collectEvents(streamCursor(makeModel("gpt-5.5@1m"), makeContext(), { apiKey: "test-key" }));
 
-			const artifactDir = mkdtempSync(join(tmpdir(), "pi-cursor-provider-mode-debug-"));
-			const previousDebug = process.env.PI_CURSOR_SDK_EVENT_DEBUG;
-			const previousRunDir = process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR;
-			process.env.PI_CURSOR_SDK_EVENT_DEBUG = "1";
-			process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR = artifactDir;
-			try {
+			await withProviderEventDebugEnv("pi-cursor-provider-mode-debug-", async (artifactDir) => {
 				await setCursorModeForProviderDebugTest("plan", pi);
 				await collectEvents(streamCursor(makeModel("gpt-5.5@1m"), makeContext(), { apiKey: "test-key" }));
 
 				const metadata = JSON.parse(readFileSync(join(artifactDir, "metadata.json"), "utf8"));
 				expect(metadata.providerMeta).toMatchObject({ agentMode: "plan" });
 				expect(metadata.send).toMatchObject({ agentMode: "plan" });
-			} finally {
-				if (previousDebug === undefined) delete process.env.PI_CURSOR_SDK_EVENT_DEBUG;
-				else process.env.PI_CURSOR_SDK_EVENT_DEBUG = previousDebug;
-				if (previousRunDir === undefined) delete process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR;
-				else process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR = previousRunDir;
-				rmSync(artifactDir, { recursive: true, force: true });
-			}
+			});
 		});
 
 		it("records continuation drain artifacts on the next turn debug sink", async () => {
@@ -366,45 +349,37 @@ describe("streamCursor debug artifacts", () => {
 		});
 
 		it("keeps a returned cloud run owned when post-send debug writes throw", async () => {
-			const artifactDir = mkdtempSync(join(tmpdir(), "pi-cursor-provider-debug-throw-"));
-			const previousDebug = process.env.PI_CURSOR_SDK_EVENT_DEBUG;
-			const previousRunDir = process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR;
-			process.env.PI_CURSOR_SDK_EVENT_DEBUG = "1";
-			process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR = artifactDir;
-			process.env.PI_CURSOR_RUNTIME = "cloud";
-			process.env.PI_CURSOR_CLOUD_ACK = "1";
-			process.env.PI_CURSOR_CLOUD_ALLOW_LOCAL_STATE = "1";
-			const wait = vi.fn().mockResolvedValue({ id: "run-cloud-debug", status: "finished", result: "done" });
-			const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 404 }));
-			const recordRunMetaSpy = vi.spyOn(CursorSdkEventDebugSink.prototype, "recordRunMeta").mockImplementation(() => {
-				throw new Error("debug disk full");
-			});
-			try {
-				mockCreatedAgent({
-					agentId: "bc-00000000-0000-0000-0000-000000000001",
-					send: vi.fn().mockResolvedValue(asMockCursorRun({
-						id: "run-cloud-debug",
-						agentId: "bc-00000000-0000-0000-0000-000000000001",
-						status: "finished",
-						wait,
-					})),
+			await withProviderEventDebugEnv("pi-cursor-provider-debug-throw-", async () => {
+				process.env.PI_CURSOR_RUNTIME = "cloud";
+				process.env.PI_CURSOR_CLOUD_ACK = "1";
+				process.env.PI_CURSOR_CLOUD_ALLOW_LOCAL_STATE = "1";
+				const wait = vi.fn().mockResolvedValue({ id: "run-cloud-debug", status: "finished", result: "done" });
+				const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 404 }));
+				const recordRunMetaSpy = vi.spyOn(CursorSdkEventDebugSink.prototype, "recordRunMeta").mockImplementation(() => {
+					throw new Error("debug disk full");
 				});
+				try {
+					mockCreatedAgent({
+						agentId: "bc-00000000-0000-0000-0000-000000000001",
+						send: vi.fn().mockResolvedValue(asMockCursorRun({
+							id: "run-cloud-debug",
+							agentId: "bc-00000000-0000-0000-0000-000000000001",
+							status: "finished",
+							wait,
+						})),
+					});
 
-				const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+					const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 
-				expect(getDoneEvent(events).message.stopReason).toBe("stop");
-				expect(wait).toHaveBeenCalledTimes(1);
-			} finally {
-				recordRunMetaSpy.mockRestore();
-				fetchSpy.mockRestore();
-				if (previousDebug === undefined) delete process.env.PI_CURSOR_SDK_EVENT_DEBUG;
-				else process.env.PI_CURSOR_SDK_EVENT_DEBUG = previousDebug;
-				if (previousRunDir === undefined) delete process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR;
-				else process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR = previousRunDir;
-				delete process.env.PI_CURSOR_RUNTIME;
-				delete process.env.PI_CURSOR_CLOUD_ACK;
-				delete process.env.PI_CURSOR_CLOUD_ALLOW_LOCAL_STATE;
-				rmSync(artifactDir, { recursive: true, force: true });
-			}
+					expect(getDoneEvent(events).message.stopReason).toBe("stop");
+					expect(wait).toHaveBeenCalledTimes(1);
+				} finally {
+					recordRunMetaSpy.mockRestore();
+					fetchSpy.mockRestore();
+					delete process.env.PI_CURSOR_RUNTIME;
+					delete process.env.PI_CURSOR_CLOUD_ACK;
+					delete process.env.PI_CURSOR_CLOUD_ALLOW_LOCAL_STATE;
+				}
+			});
 		});
 });

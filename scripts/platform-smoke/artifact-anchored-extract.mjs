@@ -10,13 +10,13 @@ import {
 } from "./artifact-bundle-contract.mjs";
 
 const MAGIC = Buffer.from([80, 73, 65, 82, 84, 48, 49, 0]);
-let helperPath;
-let helperDirectory;
-let helperUnavailable = false;
+/** Exit statuses documented in `artifact-openat-extract.c` `main()`. */
+const HELPER_EXIT_OUTCOMES = new Map([[0, "committed"], [2, "rejected"], [3, "rolled-back"], [4, "rollback-incomplete"]]);
+/** Compiled once per process: `unattempted`, then `ready` with its path or `unavailable`. */
+let helper = { kind: "unattempted" };
 
 function compileHelper() {
-	if (helperPath) return helperPath;
-	if (helperUnavailable) return undefined;
+	if (helper.kind !== "unattempted") return helper;
 	const source = fileURLToPath(new URL("./artifact-openat-extract.c", import.meta.url));
 	const content = readFileSync(source);
 	const nativeLimits = [
@@ -26,9 +26,9 @@ function compileHelper() {
 	const key = createHash("sha256").update(content).update(process.platform).update(process.arch)
 		.update(nativeLimits.join(":"))
 		.digest("hex").slice(0, 16);
-	helperDirectory = mkdtempSync(join(tmpdir(), `pi-cursor-artifact-openat-${key}-`));
-	chmodSync(helperDirectory, 0o700);
-	const output = join(helperDirectory, "extract");
+	const directory = mkdtempSync(join(tmpdir(), `pi-cursor-artifact-openat-${key}-`));
+	chmodSync(directory, 0o700);
+	const output = join(directory, "extract");
 	const compiled = spawnSync("cc", [
 		"-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
 		`-DMAX_INPUT=${MAX_INFLATED_BUNDLE_JSON_BYTES}`,
@@ -44,17 +44,16 @@ function compileHelper() {
 		maxBuffer: 1024 * 1024,
 	});
 	if (compiled.status !== 0 || compiled.error || !existsSync(output)) {
-		rmSync(helperDirectory, { recursive: true, force: true });
-		helperDirectory = undefined;
-		helperUnavailable = true;
-		return undefined;
+		rmSync(directory, { recursive: true, force: true });
+		helper = { kind: "unavailable" };
+		return helper;
 	}
 	chmodSync(output, 0o700);
-	helperPath = output;
+	helper = { kind: "ready", path: output };
 	process.once("exit", () => {
-		if (helperDirectory) try { rmSync(helperDirectory, { recursive: true, force: true }); } catch {}
+		try { rmSync(directory, { recursive: true, force: true }); } catch {}
 	});
-	return helperPath;
+	return helper;
 }
 
 function encodeFiles(files) {
@@ -72,8 +71,8 @@ function encodeFiles(files) {
 }
 
 function writePosix(outputDir, files, expectedRoot) {
-	const helper = compileHelper();
-	if (!helper) return false;
+	const prepared = compileHelper();
+	if (prepared.kind !== "ready") return "rejected";
 	let inputDirectory;
 	let inputFd;
 	try {
@@ -83,14 +82,16 @@ function writePosix(outputDir, files, expectedRoot) {
 		writeFileSync(inputPath, encodeFiles(files), { flag: "wx", mode: 0o600 });
 		inputFd = openSync(inputPath, "r");
 		unlinkSync(inputPath);
-		const result = spawnSync(helper, [outputDir, String(expectedRoot.dev), String(expectedRoot.ino)], {
+		const result = spawnSync(prepared.path, [outputDir, String(expectedRoot.dev), String(expectedRoot.ino)], {
 			stdio: [inputFd, "pipe", "pipe"],
 			encoding: "buffer",
 			maxBuffer: 1024 * 1024,
 		});
-		return result.status === 0 && !result.error;
+		// A signal, spawn error, or unrecognized status reports nothing about created entries.
+		return (!result.error && HELPER_EXIT_OUTCOMES.get(result.status)) || "unknown";
 	} catch {
-		return false;
+		// spawnSync reports helper failures in its result, so only frame staging throws.
+		return "rejected";
 	} finally {
 		try {
 			if (inputFd !== undefined) closeSync(inputFd);
@@ -102,10 +103,16 @@ function writePosix(outputDir, files, expectedRoot) {
 	}
 }
 
-/** Extracts prevalidated files without permitting a nested host-path swap to redirect writes.
+/** Extracts prevalidated files without permitting a nested host-path swap to redirect writes and
+ * returns the extraction outcome:
+ * - `committed`: every file was written and verified beneath the pinned root.
+ * - `rejected`: refused before any destination entry was created.
+ * - `rolled-back`: failed after creating entries and removed every entry it created.
+ * - `rollback-incomplete`: failed, and an entry it created could not be confirmed removed.
+ * - `unknown`: the native helper ended without reporting, so created entries may remain.
  * Node has no handle-relative Windows creation API, so Windows controllers fail closed before
  * mutating nonempty bundles. Windows remains a supported target of POSIX-hosted release matrices. */
 export function writeExtractedFilesAnchored(outputDir, files, expectedRoot) {
-	if (process.platform === "win32") return files.length === 0;
+	if (process.platform === "win32") return files.length === 0 ? "committed" : "rejected";
 	return writePosix(outputDir, files, expectedRoot);
 }

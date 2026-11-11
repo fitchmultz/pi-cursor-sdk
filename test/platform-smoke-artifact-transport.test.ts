@@ -158,19 +158,30 @@ describe("platform smoke artifact transport", () => {
 
 	it("fails qualification on malformed structured artifacts without repairing or dropping rows", async () => {
 		const { extractPlatformArtifactBundle, formatPlatformArtifactBundle, scanArtifacts } = await import(artifactsModule);
-		const { finalizeSuiteArtifacts } = await import("../scripts/platform-smoke/target-runtime.mjs" as string);
+		const { bundleExtractedCheck, finalizeSuiteArtifacts } = await import("../scripts/platform-smoke/target-runtime.mjs" as string);
 		const root = mkdtempSync(join(tmpdir(), "platform-malformed-"));
 		const inputs = { "metadata.json": '{"ownerToken":[redacted]}', "session.jsonl": '{"type":"session"}\n{"broken":\n{"type":"message"}\n' };
 		try {
 			const files = Object.entries(inputs).map(([path, text]) => ({ path, size: Buffer.byteLength(text), contentBase64: Buffer.from(text).toString("base64") }));
 			const result = extractPlatformArtifactBundle(root, formatPlatformArtifactBundle({ files }));
 			expect(result.ok).toBe(false);
+			expect(result.extraction).toBe(process.platform === "win32" ? "rejected" : "committed");
+			expect(bundleExtractedCheck("bundle-extracted", result).error).toBe(
+				process.platform === "win32"
+					? "extraction rejected"
+					: "extraction committed (2 structured artifact violations)",
+			);
 			if (process.platform === "win32") return;
 			for (const [path, content] of Object.entries(inputs)) expect(readFileSync(join(root, path), "utf8")).toBe(content);
 			expect(scanArtifacts(root)).toContainEqual({ file: "metadata.json", violation: "invalid JSON" });
 			expect(scanArtifacts(root)).toContainEqual({ file: "session.jsonl", violation: "invalid JSONL at line 2" });
-			const finalized = finalizeSuiteArtifacts(root, [{ id: "scenario", fn: () => true }], {}, Object.keys(inputs));
+			const finalized = finalizeSuiteArtifacts(root, [bundleExtractedCheck("bundle-extracted", result)], {}, Object.keys(inputs));
 			expect(finalized.assertions.ok).toBe(false);
+			expect(finalized.assertions.checks).toContainEqual({
+				id: "bundle-extracted",
+				ok: false,
+				error: "extraction committed (2 structured artifact violations)",
+			});
 			expect(finalized.assertions.checks).toContainEqual(expect.objectContaining({ id: "structured-artifacts-parseable", ok: false }));
 		} finally {
 			rmSync(root, { recursive: true, force: true });

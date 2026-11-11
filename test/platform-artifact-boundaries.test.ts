@@ -49,7 +49,7 @@ describe("platform artifact bundle boundaries", () => {
 		const { extractPlatformArtifactBundle, formatPlatformArtifactBundle } = await import(artifactsModule);
 		const out = tempDir("platform-empty-bundle-");
 
-		expect(extractPlatformArtifactBundle(out, formatPlatformArtifactBundle({ files: [] })).ok).toBe(true);
+		expect(extractPlatformArtifactBundle(out, formatPlatformArtifactBundle({ files: [] }))).toEqual({ ok: true, violations: [], extraction: "committed" });
 		expect(readdirSync(out)).toEqual([]);
 	});
 
@@ -57,7 +57,7 @@ describe("platform artifact bundle boundaries", () => {
 		const { extractPlatformArtifactBundle, formatPlatformArtifactBundle } = await import(artifactsModule);
 		const out = tempDir("platform-windows-extraction-disabled-");
 
-		expect(extractPlatformArtifactBundle(out, formatPlatformArtifactBundle(bundle("artifacts/evidence.txt"))).ok).toBe(false);
+		expect(extractPlatformArtifactBundle(out, formatPlatformArtifactBundle(bundle("artifacts/evidence.txt")))).toEqual({ ok: false, violations: [], extraction: "rejected" });
 		expect(readdirSync(out)).toEqual([]);
 	});
 
@@ -212,10 +212,11 @@ while (true) {
 		writeFileSync(join(root, "existing.txt"), "existing");
 		const first = Buffer.from("first");
 		const existing = Buffer.from("replacement");
+		// Preflight refuses the pre-existing final path before anything, including new-parent, is created.
 		expect(extractPlatformArtifactBundle(root, formatPlatformArtifactBundle({ files: [
 			{ path: "new-parent/first.txt", contentBase64: first.toString("base64"), size: first.length },
 			{ path: "existing.txt", contentBase64: existing.toString("base64"), size: existing.length },
-		] })).ok).toBe(false);
+		] }))).toEqual({ ok: false, violations: [], extraction: "rejected" });
 		expect(readdirSync(root)).not.toContain("new-parent");
 		expect(readFileSync(join(root, "existing.txt"), "utf8")).toBe("existing");
 		expect(readFileSync(sentinel, "utf8")).toBe("outside-sentinel");
@@ -294,7 +295,8 @@ while (true) {
 			input: Buffer.concat([header, path, content]), encoding: "utf8", timeout: 5_000,
 		});
 
-		expect(result.status, result.stderr).toBe(2);
+		// Status 3: extraction failed after creating entries and removed every entry it created.
+		expect(result.status, result.stderr).toBe(3);
 		expect(result.stdout).toBe("moved-after-write\n");
 		expect(lstatSync(escaped)).toMatchObject({ dev: parentIdentity.dev, ino: parentIdentity.ino });
 		expect(readdirSync(out)).toEqual([]);
@@ -356,7 +358,7 @@ const { writeExtractedFilesAnchored } = await import(${JSON.stringify(moduleUrl)
 const out = process.argv[1];
 const content = Buffer.alloc(4 * 1024 * 1024, 97);
 const files = Array.from({ length: 4 }, (_, index) => ({ path: "large-" + index + ".txt", content }));
-console.log(JSON.stringify({ ok: writeExtractedFilesAnchored(out, files, lstatSync(out)) }));
+console.log(JSON.stringify({ outcome: writeExtractedFilesAnchored(out, files, lstatSync(out)) }));
 `;
 		const child = spawn(process.execPath, ["--input-type=module", "-e", code, out], {
 			detached: true,
@@ -376,7 +378,7 @@ console.log(JSON.stringify({ ok: writeExtractedFilesAnchored(out, files, lstatSy
 		});
 
 		expect(status, stderr).toBe(0);
-		expect(JSON.parse(stdout)).toEqual({ ok: true });
+		expect(JSON.parse(stdout)).toEqual({ outcome: "committed" });
 		for (let index = 0; index < 4; index++) {
 			expect(statSync(join(out, `large-${index}.txt`)).size).toBe(4 * 1024 * 1024);
 		}
@@ -391,20 +393,36 @@ console.log(JSON.stringify({ ok: writeExtractedFilesAnchored(out, files, lstatSy
 			{ path: "../escape.txt", content: Buffer.from("escape") },
 		];
 
-		expect(writeExtractedFilesAnchored(out, files, root)).toBe(false);
+		expect(writeExtractedFilesAnchored(out, files, root)).toBe("rejected");
 		expect(readdirSync(out)).toEqual([]);
 	});
 
-	it.skipIf(process.platform === "win32")("rolls back the just-created entry when descriptor retention hits the process limit", () => {
+	it.skipIf(process.platform === "win32")("distinguishes helper rollback from controller spawn failure at the descriptor limit", () => {
 		const out = tempDir("platform-native-low-fd-");
 		const moduleUrl = new URL("../scripts/platform-smoke/artifact-anchored-extract.mjs", import.meta.url).href;
 		const code = String.raw`
-import { lstatSync, readdirSync } from "node:fs";
+import { closeSync, lstatSync, openSync, readdirSync } from "node:fs";
 const { writeExtractedFilesAnchored } = await import(${JSON.stringify(moduleUrl)});
 const out = process.argv[1];
+const root = lstatSync(out);
 const files = Array.from({ length: 100 }, (_, index) => ({ path: "f-" + index + ".txt", content: Buffer.from("safe") }));
-const ok = writeExtractedFilesAnchored(out, files, lstatSync(out));
-console.log(JSON.stringify({ ok, files: readdirSync(out) }));
+const rollback = { outcome: writeExtractedFilesAnchored(out, files, root), files: readdirSync(out) };
+const descriptors = [];
+let exhausted;
+let outcome;
+try {
+  try { while (true) descriptors.push(openSync("/dev/null", "r")); }
+  catch (error) {
+    if (error.code !== "EMFILE") throw error;
+    exhausted = error.code;
+  }
+  // The helper is already compiled/cached. Leave one slot for frame staging, but none for spawnSync.
+  closeSync(descriptors.pop());
+  outcome = writeExtractedFilesAnchored(out, [{ path: "controller.txt", content: Buffer.from("safe") }], root);
+} finally {
+  for (const fd of descriptors) closeSync(fd);
+}
+console.log(JSON.stringify({ rollback, exhausted, spawn: { outcome, files: readdirSync(out) } }));
 `;
 		const result = spawnSync("/bin/sh", ["-c", "ulimit -n 64; exec \"$@\"", "sh", process.execPath, "--input-type=module", "-e", code, out], {
 			encoding: "utf8",
@@ -412,7 +430,35 @@ console.log(JSON.stringify({ ok, files: readdirSync(out) }));
 		});
 
 		expect(result.status, result.stderr).toBe(0);
-		expect(JSON.parse(result.stdout)).toEqual({ ok: false, files: [] });
+		expect(JSON.parse(result.stdout)).toEqual({
+			rollback: { outcome: "rolled-back", files: [] },
+			exhausted: "EMFILE",
+			spawn: { outcome: "unknown", files: [] },
+		});
+	});
+
+	it.skipIf(process.platform !== "darwin")("reports an incomplete rollback when the filesystem refuses to remove a created entry", async () => {
+		const { writeExtractedFilesAnchored } = await import("../scripts/platform-smoke/artifact-anchored-extract.mjs");
+		const out = tempDir("platform-native-append-only-");
+		const appendOnly = join(out, "append-only");
+		mkdirSync(appendOnly);
+		writeFileSync(join(out, "existing.txt"), "existing");
+		// The owner may mark a macOS directory append-only: entries can be created in it but not removed.
+		// Linux reserves the equivalent attribute for CAP_LINUX_IMMUTABLE, so this check is macOS-only.
+		expect(spawnSync("chflags", ["uappnd", appendOnly], { encoding: "utf8" }).status).toBe(0);
+		try {
+			// Calling the native writer directly lets its exclusive create, not host preflight, hit the existing file.
+			const outcome = writeExtractedFilesAnchored(out, [
+				{ path: "append-only/created.txt", content: Buffer.from("created") },
+				{ path: "existing.txt", content: Buffer.from("replacement") },
+			], lstatSync(out));
+
+			expect(outcome).toBe("rollback-incomplete");
+			expect(readdirSync(appendOnly)).toEqual(["created.txt"]);
+			expect(readFileSync(join(out, "existing.txt"), "utf8")).toBe("existing");
+		} finally {
+			expect.soft(spawnSync("chflags", ["nouappnd", appendOnly], { encoding: "utf8" }).status).toBe(0);
+		}
 	});
 
 	it("prunes non-artifact infrastructure", async () => {

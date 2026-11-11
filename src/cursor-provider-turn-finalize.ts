@@ -136,13 +136,18 @@ export interface FinalizedCursorRunOutcome {
 	displayOnlyTraceBlock?: string;
 }
 
+/**
+ * Attempts the turn's terminal accounting once and returns the billing observation it recorded.
+ * Undefined means no observation was recorded here: the terminal was already attempted, or
+ * persistence failed and was reported as incomplete accounting without changing the provider result.
+ */
 export async function recordCursorProviderTerminalUsage(
 	prepared: StartedCursorProviderTurn,
 	status: "success" | "error" | "abort",
 	waitUsage?: unknown,
 ) {
-	if (prepared.runtime.usageTerminalRecorded) return undefined;
-	prepared.runtime.usageTerminalRecorded = true;
+	if (prepared.runtime.usageTerminalAttempted) return undefined;
+	prepared.runtime.usageTerminalAttempted = true;
 	try {
 		return await prepared.usage.recordTerminal({ status, waitUsage, handleUsage: prepared.runtime.sdkRun?.usage });
 	} catch (error) {

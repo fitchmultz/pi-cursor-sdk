@@ -48,6 +48,8 @@ Before retrying a failed or unpublished candidate, inspect its exact source/run 
 
 Publication records are independent: npm published 0.5.2, while GitHub's `v0.5.2` release remains a draft bound to source `9820ae7`. Preserve that tag, draft, and candidate assets unchanged. Verify npm and GitHub records independently for each new release.
 
+The pinned shared versioner preserves a final newline when merging changelogs. When fetch rejects during version reconciliation or review remediation, the CLI reports the service, HTTP method, and public endpoint with Node's native error and cause details. A transport failure does not establish whether a remote write completed. See the [shared recovery guidance](https://github.com/fitchmultz/.github/blob/main/docs/npm-releases.md#recovery) before retrying.
+
 ### Replace a failed unpublished version
 
 The version workflow supports paired `supersede-version` and `supersede-source` inputs through the pinned shared automation. Merge the source fix through normal PR checks before dispatching. Follow the [shared replacement procedure](https://github.com/fitchmultz/.github/blob/main/docs/npm-releases.md#replace-a-failed-unpublished-version-with-fixed-source).

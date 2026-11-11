@@ -4,17 +4,32 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionManager, type SessionEntry } from "@earendil-works/pi-coding-agent";
-import { registerCursorSessionScope, __testUtils as scopeTestUtils } from "../src/cursor-session-scope.js";
+import { getCursorSessionScopeSnapshot, registerCursorSessionScope, __testUtils as scopeTestUtils } from "../src/cursor-session-scope.js";
 import {
+	captureCursorSessionAgentResumeOrigin,
 	CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE,
 	getMatchingCursorSessionAgentResumeHandle,
 	parseCursorSessionAgentResumeEntryData,
-	persistCursorSessionAgentResumeHandle,
 	registerCursorSessionAgentResume,
 	__testUtils as resumeTestUtils,
 	type CursorSessionAgentResumeEntryData,
+	type CursorSessionAgentResumeOrigin,
+	type PendingCursorSessionAgentResumeHandle,
 } from "../src/cursor-session-agent-resume.js";
 import { createPiHarness, makeAssistantMessage } from "./helpers/pi-harness.js";
+
+const runtimeScopeKey = (pi: object) => getCursorSessionScopeSnapshot(pi).scopeKey;
+
+function captureOrigin(pi: object): CursorSessionAgentResumeOrigin {
+	const origin = captureCursorSessionAgentResumeOrigin(runtimeScopeKey(pi));
+	if (!origin) throw new Error("resume state is not bound to this session");
+	return origin;
+}
+
+/** A send issued and committed in the current turn, as the direct provider path does. */
+function publishSend(pi: object, handle: PendingCursorSessionAgentResumeHandle): void {
+	captureOrigin(pi).capture(handle).publish();
+}
 
 function messageEntry(id: string, parentId: string | null, role: "user" | "assistant" = "user"): SessionEntry {
 	return {
@@ -131,7 +146,7 @@ describe("cursor-session-agent-resume", () => {
 			},
 		});
 
-		expect(getMatchingCursorSessionAgentResumeHandle("pool-1")).toMatchObject({
+		expect(getMatchingCursorSessionAgentResumeHandle("pool-1", runtimeScopeKey(pi))).toMatchObject({
 			agentId: "agent-1",
 			sendState: { bootstrapped: true, contextFingerprint: "fp", incrementalSendCount: 2 },
 		});
@@ -174,7 +189,7 @@ describe("cursor-session-agent-resume", () => {
 			await pi.runBeforeAgentStart({ cwd: tempDir, sessionManager: reopened });
 
 			expect(reopened.getBranch().at(-1)).toMatchObject({ type: "message", message: { role: "user" } });
-			expect(getMatchingCursorSessionAgentResumeHandle("pool-1")).toBeUndefined();
+			expect(getMatchingCursorSessionAgentResumeHandle("pool-1", runtimeScopeKey(pi))).toBeUndefined();
 		} finally {
 			rmSync(tempDir, { recursive: true, force: true });
 		}
@@ -205,7 +220,7 @@ describe("cursor-session-agent-resume", () => {
 		});
 
 		pi.appendEntry.mockClear();
-		persistCursorSessionAgentResumeHandle({
+		publishSend(pi, {
 			runtime: "local",
 			agentId: "agent-1",
 			poolKey: "pool-1",
@@ -266,7 +281,7 @@ describe("cursor-session-agent-resume", () => {
 			},
 		});
 
-		expect(getMatchingCursorSessionAgentResumeHandle("pool-1")).toBeUndefined();
+		expect(getMatchingCursorSessionAgentResumeHandle("pool-1", runtimeScopeKey(pi))).toBeUndefined();
 	});
 
 	it("uses append order to supersede a legacy handle with its versioned successor", async () => {
@@ -319,7 +334,7 @@ describe("cursor-session-agent-resume", () => {
 			},
 		});
 
-		expect(getMatchingCursorSessionAgentResumeHandle("pool-1")).toBeUndefined();
+		expect(getMatchingCursorSessionAgentResumeHandle("pool-1", runtimeScopeKey(pi))).toBeUndefined();
 
 		await pi.runSessionStart({
 			cwd: "/tmp/project",
@@ -331,7 +346,7 @@ describe("cursor-session-agent-resume", () => {
 			},
 		});
 
-		expect(getMatchingCursorSessionAgentResumeHandle("pool-1")).toMatchObject({
+		expect(getMatchingCursorSessionAgentResumeHandle("pool-1", runtimeScopeKey(pi))).toMatchObject({
 			agentId: "agent-1",
 			sendState: { contextFingerprint: "fp-new", incrementalSendCount: 1 },
 		});
@@ -374,7 +389,7 @@ describe("cursor-session-agent-resume", () => {
 
 		expect(entries.indexOf).not.toHaveBeenCalled();
 		expect(entries.findIndex).not.toHaveBeenCalled();
-		expect(getMatchingCursorSessionAgentResumeHandle("pool-1")).toMatchObject({
+		expect(getMatchingCursorSessionAgentResumeHandle("pool-1", runtimeScopeKey(pi))).toMatchObject({
 			sendState: { contextFingerprint: "fp-1999", incrementalSendCount: 1999 },
 		});
 	});
@@ -411,7 +426,7 @@ describe("cursor-session-agent-resume", () => {
 				getEntries: vi.fn(() => branch),
 			},
 		});
-		persistCursorSessionAgentResumeHandle({
+		publishSend(pi, {
 			runtime: "local",
 			agentId: "agent-new",
 			poolKey: "pool-new",
@@ -459,7 +474,7 @@ describe("cursor-session-agent-resume", () => {
 			},
 		});
 
-		expect(getMatchingCursorSessionAgentResumeHandle("pool-1")).toBeUndefined();
+		expect(getMatchingCursorSessionAgentResumeHandle("pool-1", runtimeScopeKey(pi))).toBeUndefined();
 	});
 
 	it("clears restored handles on tree navigation and compaction", async () => {
@@ -469,6 +484,7 @@ describe("cursor-session-agent-resume", () => {
 		await pi.runSessionStart({ cwd: "/tmp/project", sessionManager: { getSessionFile: () => "/tmp/session.jsonl" } });
 		resumeTestUtils.set({
 			scopeKey: "/tmp/session.jsonl",
+			runtimeScopeKey: runtimeScopeKey(pi),
 			sessionFile: "/tmp/session.jsonl",
 			cwd: "/tmp/project",
 			branchPathHash: resumeTestUtils.EMPTY_BRANCH_HASH,
@@ -488,9 +504,11 @@ describe("cursor-session-agent-resume", () => {
 			},
 		});
 		await pi.runSessionTree();
-		expect(getMatchingCursorSessionAgentResumeHandle("pool-1")).toBeUndefined();
+		expect(getMatchingCursorSessionAgentResumeHandle("pool-1", runtimeScopeKey(pi))).toBeUndefined();
 
 		resumeTestUtils.set({
+			scopeKey: "/tmp/session.jsonl",
+			runtimeScopeKey: runtimeScopeKey(pi),
 			activeHandle: {
 				version: 1,
 				runtime: "local",
@@ -506,7 +524,7 @@ describe("cursor-session-agent-resume", () => {
 			},
 		});
 		await pi.runSessionCompact();
-		expect(getMatchingCursorSessionAgentResumeHandle("pool-1")).toBeUndefined();
+		expect(getMatchingCursorSessionAgentResumeHandle("pool-1", runtimeScopeKey(pi))).toBeUndefined();
 	});
 
 	it("invalidates an ordinary pending handle when compaction completes", async () => {
@@ -534,14 +552,14 @@ describe("cursor-session-agent-resume", () => {
 				getEntries: vi.fn(() => [first]),
 			},
 		});
-		persistCursorSessionAgentResumeHandle({
+		publishSend(pi, {
 			runtime: "local",
 			agentId: "agent-conversation",
 			poolKey: "pool-1",
 			sendState: { bootstrapped: true, contextFingerprint: "ordinary-context", incrementalSendCount: 0 },
 			storeIdentity: { version: 1, stateRoot: "/tmp/store" },
 		});
-		expect(resumeTestUtils.state.pendingHandle?.agentId).toBe("agent-conversation");
+		expect(resumeTestUtils.stateFor(runtimeScopeKey(pi))?.pendingPublication?.agentId).toBe("agent-conversation");
 
 		await pi.runSessionCompact({
 			compactionEntry: compact,
@@ -553,7 +571,7 @@ describe("cursor-session-agent-resume", () => {
 				getEntries: vi.fn(() => [first, compact, after]),
 			},
 		});
-		expect(resumeTestUtils.state.pendingHandle).toBeUndefined();
+		expect(resumeTestUtils.stateFor(runtimeScopeKey(pi))?.pendingPublication).toBeUndefined();
 
 		pi.appendEntry.mockClear();
 		await pi.runTurnEnd({}, {
@@ -579,15 +597,62 @@ describe("cursor-session-agent-resume", () => {
 			sendState: { bootstrapped: true as const, contextFingerprint: "ordinary-context", incrementalSendCount: 0 },
 			storeIdentity: { version: 1 as const, stateRoot: "/tmp/store" },
 		};
-		persistCursorSessionAgentResumeHandle(pending);
+		publishSend(pi, pending);
 		await pi.runSessionBeforeCompact();
 		await pi.runTurnEnd({}, ctx);
 		expect(manager.getEntries()).toHaveLength(0);
-		persistCursorSessionAgentResumeHandle(pending);
+		publishSend(pi, pending);
 		await pi.runTurnEnd({}, ctx);
 		expect(manager.getEntries()).toEqual([expect.objectContaining({
 			type: "custom", customType: CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE,
 			data: expect.objectContaining({ agentId: "agent-conversation", compactionGeneration: 0 }),
 		})]);
+	});
+
+	it("publishes a send only at a turn boundary in the session lineage that issued it", async () => {
+		const manager = SessionManager.inMemory("/tmp/project");
+		const pi = createPiHarness();
+		pi.appendEntry.mockImplementation((type, data) => { manager.appendCustomEntry(type, data); });
+		registerCursorSessionScope(pi);
+		registerCursorSessionAgentResume(pi);
+		const ctx = { cwd: "/tmp/project", sessionManager: manager };
+		await pi.runSessionStart(ctx);
+		const handle: PendingCursorSessionAgentResumeHandle = {
+			runtime: "local", agentId: "agent-live", poolKey: "pool-1",
+			sendState: { bootstrapped: true, contextFingerprint: "issued-context", incrementalSendCount: 0 },
+			storeIdentity: { version: 1, stateRoot: "/tmp/store" },
+		};
+		const resumeEntries = () => manager.getEntries().filter(
+			(entry) => entry.type === "custom" && entry.customType === CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE,
+		);
+
+		// A live run is issued in one turn and committed in a later replay turn; earlier boundaries carry nothing.
+		manager.appendMessage({ role: "user", content: "issue the send", timestamp: 1 });
+		const issued = captureOrigin(pi);
+		manager.appendMessage(makeAssistantMessage(""));
+		const committed = issued.capture(handle);
+		await pi.runTurnEnd({}, ctx);
+		expect(resumeEntries()).toHaveLength(0);
+		manager.appendMessage(makeAssistantMessage("delivered answer"));
+		committed.publish();
+		await pi.runTurnEnd({}, ctx);
+		expect(manager.getBranch().slice(-2)).toEqual([
+			expect.objectContaining({ type: "message", message: expect.objectContaining({ role: "assistant" }) }),
+			expect.objectContaining({ data: expect.objectContaining({ agentId: "agent-live", sendState: handle.sendState }) }),
+		]);
+
+		for (const [lineageChange, change] of [
+			["tree navigation", () => pi.runSessionTree({}, ctx)],
+			["session start", () => pi.runSessionStart(ctx)],
+			["compaction start", () => pi.runSessionBeforeCompact({}, ctx)],
+			["compaction", () => pi.runSessionCompact({}, ctx)],
+		] as const) {
+			const before = resumeEntries().length;
+			const origin = captureOrigin(pi);
+			await change();
+			origin.capture({ ...handle, agentId: "agent-crossed" }).publish();
+			await pi.runTurnEnd({}, ctx);
+			expect(resumeEntries(), lineageChange).toHaveLength(before);
+		}
 	});
 });

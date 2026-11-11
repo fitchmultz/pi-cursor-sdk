@@ -121,8 +121,8 @@ describe("cursor-session-agent local resume", () => {
 			manager.appendMessage({ role: "user", content: "ordinary request", timestamp: 1 });
 			await pi.runBeforeAgentStart({ cwd: root, sessionManager: sessionManagerContext(manager) });
 			const lease = await acquireSessionCursorAgent(params);
-			expect(resumeTestUtils.state.pendingHandle).toBeUndefined();
-			lease.commitSend(makeContext(), true);
+			expect(resumeTestUtils.stateFor(lease.scopeKey)?.pendingPublication).toBeUndefined();
+			lease.commitSend(makeContext(), true)?.publish();
 			expect(pi.appendEntry).not.toHaveBeenCalled();
 			manager.appendMessage(makeAssistantMessage("ordinary answer"));
 			await pi.runTurnEnd({}, { cwd: root, sessionManager: sessionManagerContext(manager) });
@@ -193,7 +193,7 @@ describe("cursor-session-agent local resume", () => {
 			await pi.runSessionStart({ cwd: root, sessionManager: sessionManagerContext(manager) });
 			manager.appendMessage({ role: "user", content: "ordinary request", timestamp: 1 });
 			const original = await acquireSessionCursorAgent(params);
-			original.commitSend(context, true);
+			original.commitSend(context, true)?.publish();
 			manager.appendMessage(makeAssistantMessage("ordinary answer"));
 			await pi.runTurnEnd({}, { cwd: root, sessionManager: sessionManagerContext(manager) });
 			const published = manager.getEntries().findLast(entry => entry.type === "custom" && entry.customType === CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE);
@@ -212,10 +212,10 @@ describe("cursor-session-agent local resume", () => {
 
 			expect(resumed.resumed).toBe(true);
 			expect(planCursorSessionSend(resumed.sendState, context)).toEqual({ mode: "bootstrap", resetAgent: false, reason: "initial" });
-			resumed.commitSend(context, true);
+			resumed.commitSend(context, true)?.publish();
 			const bootstrapped = { bootstrapped: true, contextFingerprint: computeCursorContextFingerprint(context), incrementalSendCount: 0 };
 			expect(resumed.sendState).toEqual(bootstrapped);
-			expect(resumeTestUtils.state.pendingHandle).toMatchObject({ agentId: "agent-recorded", sendState: bootstrapped });
+			expect(resumeTestUtils.stateFor(resumed.scopeKey)?.pendingPublication).toMatchObject({ agentId: "agent-recorded", sendState: bootstrapped });
 		} finally {
 			await sessionAgentTestUtils.disposeAllSessionCursorAgents();
 			rmSync(root, { recursive: true, force: true });
@@ -316,7 +316,7 @@ describe("cursor-session-agent local resume", () => {
 
 		sessionAgentTestUtils.invalidateSessionAgent(scopeKey);
 		const lease = await acquireSessionCursorAgent({ ...params, forceCreate: true });
-		lease.commitSend(context, true);
+		lease.commitSend(context, true)?.publish();
 
 		expect(createAgent).toHaveBeenCalledTimes(1);
 		expect(createAgent.mock.calls[0][0].local?.store).toEqual(sessionStoreBackedBy(storeMock.stores[1]));
@@ -329,7 +329,7 @@ describe("cursor-session-agent local resume", () => {
 		]);
 		expect(lease.resumed).toBe(false);
 		expect(lease.sendState).toMatchObject({ bootstrapped: true, incrementalSendCount: 0 });
-		expect(resumeTestUtils.state.pendingHandle).toMatchObject({
+		expect(resumeTestUtils.stateFor(lease.scopeKey)?.pendingPublication).toMatchObject({
 			agentId: "agent-new",
 			poolKey: lease.poolKey,
 		});
@@ -556,18 +556,15 @@ describe("cursor-session-agent local resume", () => {
 		};
 
 		const disabled = await acquireSessionCursorAgent({ ...params, localResume: false });
-		disabled.commitSend(context, true);
-		expect(resumeTestUtils.state.pendingHandle).toBeUndefined();
+		expect(disabled.commitSend(context, true)).toBeUndefined();
 
 		const enabled = await acquireSessionCursorAgent({ ...params, localResume: true });
-		enabled.commitSend(context, false);
-		expect(resumeTestUtils.state.pendingHandle).toMatchObject({ agentId: "agent-1" });
-		resumeTestUtils.state.pendingHandle = undefined;
+		enabled.commitSend(context, false)?.publish();
+		expect(resumeTestUtils.stateFor(scopeKey)?.pendingPublication).toMatchObject({ agentId: "agent-1" });
 		enabled.trackRunCompletion(Promise.resolve());
 
 		const disabledAgain = await acquireSessionCursorAgent({ ...params, localResume: false });
-		disabledAgain.commitSend(context, false);
-		expect(resumeTestUtils.state.pendingHandle).toBeUndefined();
+		expect(disabledAgain.commitSend(context, false)).toBeUndefined();
 		expect(disabled.agent).toBe(enabled.agent);
 		expect(enabled.agent).toBe(disabledAgain.agent);
 		expect(createAgent).toHaveBeenCalledTimes(1);

@@ -227,6 +227,9 @@ function emitCursorNativeToolUseTurn(
 		turn: cursorLiveRuns.takeSdkTurnUsage(run),
 		occupancyFloor,
 	});
+	// Terminating replay results end Pi's loop, so this can be the run's last delivery. A replay that fails
+	// instead continues to a stop delivery, which publishes again and supersedes this entry.
+	if (shouldTerminate) run.resumePublication?.publish();
 	partial.stopReason = "toolUse";
 	stream.push({ type: "done", reason: "toolUse", message: partial });
 	cursorLiveRuns.requestIdleDispose(run);
@@ -422,6 +425,7 @@ export async function drainCursorLiveRunTurn(
 						emitDisplayOnlyTraceBlock(stream, partial, run.resumeNotice);
 						run.resumeNotice = undefined;
 					}
+					run.resumePublication?.publish();
 					partial.stopReason = "stop";
 					stream.push({ type: "done", reason: "stop", message: partial });
 					await cursorLiveRuns.release(run);

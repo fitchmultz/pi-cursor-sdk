@@ -1,5 +1,9 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { delimiter, resolve } from "node:path";
+import { once } from "node:events";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, it, vi } from "vitest";
 import {
 	commonBooleanFlag,
@@ -83,6 +87,54 @@ async function waitForChildCloseWithinTest(parent: ChildProcess, timeoutMs = 5_0
 	} finally {
 		if (timer) clearTimeout(timer);
 	}
+}
+
+async function outcomeWithin(promise: Promise<unknown>, timeoutMs: number): Promise<string> {
+	return Promise.race([
+		promise.then(
+			() => "resolved",
+			(error: unknown) => `rejected: ${(error instanceof Error ? error.message : String(error)).split("\n")[0]}`,
+		),
+		delay(timeoutMs, "pending", { ref: false }),
+	]);
+}
+
+// The parent exits as soon as its grandchild starts; the grandchild inherits the parent's stdout
+// and writes to it only after the test creates the release file.
+function stdoutHoldingParentSource(releasePath: string, detachedGrandchild: boolean): string {
+	const grandchild = `const { existsSync } = require("node:fs");
+const timer = setInterval(() => {
+  if (!existsSync(${JSON.stringify(releasePath)})) return;
+  clearInterval(timer);
+  process.stdout.write("grandchild finished\\n");
+}, 20);`;
+	return `const { spawn } = require("node:child_process");
+const grandchild = spawn(process.execPath, ["-e", ${JSON.stringify(grandchild)}], { stdio: ["ignore", "inherit", "ignore"], detached: ${detachedGrandchild} });
+console.log(JSON.stringify({ parentPid: process.pid, grandchildPid: grandchild.pid }));
+grandchild.unref();`;
+}
+
+const localResumeHarnessModule = "../scripts/lib/local-resume-smoke-harness.mjs";
+
+// Real offline Pi RPC child with the built extension: no Cursor credentials and no model turns.
+async function startOfflineLocalResumeRpc(root: string) {
+	const { startRpc } = await import(localResumeHarnessModule);
+	const extensionPath = join(root, "rpc-lifecycle-extension.mjs");
+	writeFileSync(extensionPath, `import { writeFileSync } from "node:fs";
+export default function (pi) {
+  writeFileSync(${JSON.stringify(join(root, "pi.pid"))}, String(process.pid));
+  pi.registerCommand("rpc_lifecycle_exit", { description: "Exit before answering", handler: async () => process.exit(0) });
+}
+`);
+	const baseEnv: NodeJS.ProcessEnv = { ...process.env, HOME: root, PI_OFFLINE: "1", PI_TELEMETRY: "0", PI_SKIP_VERSION_CHECK: "1" };
+	delete baseEnv.CURSOR_API_KEY;
+	return startRpc({
+		artifactDir: root,
+		sessionDir: join(root, "sessions"),
+		sessionId: "rpc-lifecycle",
+		extraExtensions: [extensionPath],
+		baseEnv,
+	});
 }
 
 async function forceCleanupProcess(pid: number | undefined): Promise<void> {
@@ -304,6 +356,87 @@ grandchild.stdout.once("data", () => {
 			} finally {
 				await forceCleanupProcess(grandchildPid);
 			}
+		}
+	}, Math.max(30_000, PROCESS_TREE_TEST_TIMEOUT_MS));
+
+	it("waits for stdio close, not exit, while a grandchild holds the parent's stdout", async () => {
+		const root = mkdtempSync(join(tmpdir(), "pi-cursor-child-close-"));
+		const releasePath = join(root, "release");
+		const parent = spawn(process.execPath, ["-e", stdoutHoldingParentSource(releasePath, false)], { stdio: ["ignore", "pipe", "pipe"] });
+		const exited = once(parent, "exit");
+		let stdout = "";
+		parent.stdout.setEncoding("utf8");
+		parent.stdout.on("data", (chunk: string) => { stdout += chunk; });
+		let grandchildPid: number | undefined;
+		try {
+			grandchildPid = (await readChildPids(parent)).grandchildPid;
+			await exited;
+			const closed = waitForChildClose(parent);
+			expect(await outcomeWithin(closed, 200)).toBe("pending");
+			writeFileSync(releasePath, "");
+			expect(await closed).toBe(0);
+			expect(stdout).toContain("grandchild finished");
+		} finally {
+			writeFileSync(releasePath, "");
+			await forceCleanupProcess(grandchildPid);
+			rmSync(root, { recursive: true, force: true });
+		}
+	}, PROCESS_TREE_TEST_TIMEOUT_MS);
+
+	it.skipIf(process.platform === "win32")("does not verify termination while an escaped grandchild still holds stdout", async () => {
+		const root = mkdtempSync(join(tmpdir(), "pi-cursor-child-escaped-"));
+		const releasePath = join(root, "release");
+		const parent = spawn(
+			process.execPath,
+			["-e", stdoutHoldingParentSource(releasePath, true)],
+			{ stdio: ["ignore", "pipe", "pipe"], ...CHILD_PROCESS_TREE_SPAWN_OPTIONS },
+		);
+		const exited = once(parent, "exit");
+		let grandchildPid: number | undefined;
+		try {
+			grandchildPid = (await readChildPids(parent)).grandchildPid;
+			await exited;
+			await expect(terminateChild(parent, { graceMs: 100 })).rejects.toThrow("failed to verify termination of POSIX process tree");
+			expect(processExists(grandchildPid)).toBe(true);
+			writeFileSync(releasePath, "");
+			expect(await waitForChildCloseWithinTest(parent)).toBe(0);
+		} finally {
+			writeFileSync(releasePath, "");
+			await forceCleanupProcess(grandchildPid);
+			rmSync(root, { recursive: true, force: true });
+		}
+	}, PROCESS_TREE_TEST_TIMEOUT_MS);
+
+	it("rejects outstanding and later local resume RPC requests on stop, and every stop waits for termination", async () => {
+		const root = mkdtempSync(join(tmpdir(), "pi-cursor-local-rpc-stop-"));
+		const rpc = await startOfflineLocalResumeRpc(root);
+		try {
+			const sessionName = "rpc\u2028lifecycle\u2029name";
+			expect((await rpc.send("set_session_name", { name: sessionName }, 60_000)).success).toBe(true);
+			expect((await rpc.send("get_state", {}, 60_000)).data.sessionName).toBe(sessionName);
+			const piPid = Number(readFileSync(join(root, "pi.pid"), "utf8"));
+			const outstanding = rpc.send("get_state", {}, 60_000);
+			const stops: Promise<boolean>[] = [rpc.stop(), rpc.stop()].map((stop: Promise<void>) => stop.then(() => processExists(piPid)));
+			expect(await outcomeWithin(outstanding, 5_000)).toBe("rejected: local resume smoke RPC stopped");
+			expect(await outcomeWithin(rpc.send("get_state", {}, 60_000), 5_000)).toBe("rejected: local resume smoke RPC stopped");
+			expect(await Promise.all(stops)).toEqual([false, false]);
+		} finally {
+			await rpc.stop();
+			rmSync(root, { recursive: true, force: true });
+		}
+	}, Math.max(30_000, PROCESS_TREE_TEST_TIMEOUT_MS));
+
+	it("rejects outstanding and later local resume RPC requests when Pi exits", async () => {
+		const root = mkdtempSync(join(tmpdir(), "pi-cursor-local-rpc-exit-"));
+		const rpc = await startOfflineLocalResumeRpc(root);
+		try {
+			expect((await rpc.send("get_state", {}, 60_000)).success).toBe(true);
+			const exitPrompt = rpc.send("prompt", { message: "/rpc_lifecycle_exit" }, 60_000);
+			expect(await outcomeWithin(exitPrompt, 10_000)).toMatch(/^rejected: local resume smoke RPC exited\. Stderr:/);
+			expect(await outcomeWithin(rpc.send("get_state", {}, 60_000), 5_000)).toMatch(/^rejected: local resume smoke RPC exited\. Stderr:/);
+		} finally {
+			await rpc.stop();
+			rmSync(root, { recursive: true, force: true });
 		}
 	}, Math.max(30_000, PROCESS_TREE_TEST_TIMEOUT_MS));
 

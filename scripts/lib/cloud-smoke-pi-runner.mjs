@@ -5,6 +5,7 @@ import {
 	CHILD_PROCESS_TREE_SPAWN_OPTIONS,
 	terminateChild,
 } from "./cursor-child-process.mjs";
+import { createPiRpcChannel } from "./cursor-pi-rpc.mjs";
 import {
 	awaitCloudSmokeShutdown,
 	createCloudSmokeTerminalFailureState,
@@ -105,80 +106,27 @@ export function createCloudSmokePiRunner({ root, model, shutdown, buildEnv, buil
 			["pipe", "pipe", "pipe"],
 		);
 		const tracking = shutdown.track(child);
-		let stderr = "";
-		const events = [];
-		const pending = new Map();
-		let requestId = 0;
-		let stdoutBuffer = "";
-		child.stdout.setEncoding("utf8");
-		child.stderr.setEncoding("utf8");
-		child.stderr.on("data", (chunk) => { stderr += chunk; });
-		child.stdout.on("data", (chunk) => {
-			stdoutBuffer += chunk;
-			let newlineIndex;
-			while ((newlineIndex = stdoutBuffer.indexOf("\n")) >= 0) {
-				const line = stdoutBuffer.slice(0, newlineIndex);
-				stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
-				if (!line.trim()) continue;
-				let message;
-				try { message = JSON.parse(line); } catch { continue; }
-				if (message.type === "response" && pending.has(message.id)) {
-					if (shutdown.signal.aborted) {
-						rejectAfterShutdown();
-						continue;
-					}
-					const request = pending.get(message.id);
-					pending.delete(message.id);
-					clearTimeout(request.timer);
-					request.resolve(message);
-				} else events.push(message);
-			}
-		});
-		const rejectPending = (error) => {
-			for (const request of pending.values()) {
-				clearTimeout(request.timer);
-				request.reject(error);
-			}
-			pending.clear();
-		};
-		const terminalState = createCloudSmokeTerminalFailureState(rejectPending);
-		const rejectAfterShutdown = () => {
-			void awaitCloudSmokeShutdown(shutdown, tracking).then(rejectPending);
-		};
+		const rpc = createPiRpcChannel(child, { idPrefix: "cloud_smoke" });
+		const terminalState = createCloudSmokeTerminalFailureState(rpc.close);
+		// After a shutdown request, nothing settles until child termination completes.
+		const rejectAfterShutdown = () => rpc.close(awaitCloudSmokeShutdown(shutdown, tracking));
 		shutdown.signal.addEventListener("abort", rejectAfterShutdown, { once: true });
 		if (shutdown.signal.aborted) rejectAfterShutdown();
-		const routeRpcError = installCloudSmokeChildErrorHandlers(
-			child,
-			shutdown,
-			rejectAfterShutdown,
-			terminalState.record,
-		);
+		installCloudSmokeChildErrorHandlers(child, shutdown, rejectAfterShutdown, terminalState.record);
 		child.once("close", () => {
 			shutdown.signal.removeEventListener("abort", rejectAfterShutdown);
 			if (shutdown.signal.aborted) rejectAfterShutdown();
-			else terminalState.record(new Error(`cloud smoke RPC exited. Stderr: ${stderr}`));
+			else terminalState.record(new Error(`cloud smoke RPC exited. Stderr: ${rpc.stderr}`));
 		});
-		const send = (type, extra = {}, timeoutMs = 120000) => new Promise((resolveRequest, rejectRequest) => {
+		const send = (type, extra = {}, timeoutMs = 120000) => {
 			try {
 				shutdown.throwIfRequested();
 				terminalState.throwIfFailed();
 			} catch (error) {
-				rejectRequest(error);
-				return;
+				return Promise.reject(error);
 			}
-			const id = `cloud_smoke_${++requestId}`;
-			const timer = setTimeout(() => {
-				if (shutdown.signal.aborted) return rejectAfterShutdown();
-				pending.delete(id);
-				rejectRequest(new Error(`timeout waiting for ${type}. Stderr: ${stderr}`));
-			}, timeoutMs);
-			pending.set(id, { resolve: resolveRequest, reject: rejectRequest, timer });
-			try {
-				child.stdin.write(`${JSON.stringify({ id, type, ...extra })}\n`);
-			} catch (error) {
-				routeRpcError(error);
-			}
-		});
+			return rpc.send(type, extra, timeoutMs);
+		};
 		const stop = async () => {
 			shutdown.signal.removeEventListener("abort", rejectAfterShutdown);
 			if (!shutdown.signal.aborted) terminalState.record(new Error("cloud smoke RPC stopped"));
@@ -188,9 +136,9 @@ export function createCloudSmokePiRunner({ root, model, shutdown, buildEnv, buil
 					tracking,
 					() => terminateChild(child, { graceMs: 15_000 }),
 				);
-				if (shutdownReason) rejectPending(shutdownReason);
+				if (shutdownReason) rpc.close(shutdownReason);
 			} catch (error) {
-				rejectPending(error);
+				rpc.close(error);
 				throw error;
 			}
 		};
@@ -198,15 +146,15 @@ export function createCloudSmokePiRunner({ root, model, shutdown, buildEnv, buil
 			await tracking;
 			if (shutdown.signal.aborted) throw await awaitCloudSmokeShutdown(shutdown, tracking);
 		} catch (error) {
-			rejectPending(error);
+			rpc.close(error);
 			throw error;
 		}
 		return {
-			events,
+			events: rpc.events,
 			send,
 			stop,
 			throwIfFailed: terminalState.throwIfFailed,
-			get stderr() { return stderr; },
+			get stderr() { return rpc.stderr; },
 		};
 	};
 

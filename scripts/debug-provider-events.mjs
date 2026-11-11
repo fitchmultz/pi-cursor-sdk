@@ -19,7 +19,6 @@ import {
 	CHILD_PROCESS_TREE_SPAWN_OPTIONS,
 	parseJsonLines,
 	terminateChild,
-	waitForChildClose,
 } from "./lib/cursor-child-process.mjs";
 import { scrubSensitiveText } from "../shared/cursor-sensitive-text.mjs";
 import { createScriptFail } from "./lib/cursor-script-fail.mjs";
@@ -71,6 +70,13 @@ Options:
   --session-dir <path>         pi session directory. Default: <out>/session.
   --api-key <key>              Cursor API key. Prefer CURSOR_API_KEY to avoid shell history.
   -h, --help                   Show this help.
+
+Environment:
+  PI_PROVIDER_EVENT_DEBUG_TIMEOUT_MS
+                               Milliseconds to wait for agent_settled, then for pi to exit after
+                               its input closes. Default: 600000. Descendants still holding pi's
+                               output are then terminated with its process tree. A non-finite
+                               value is rejected before pi starts.
 
 Artifacts (gitignored when under .debug/):
   metadata.json                Model, cwd, send plan metadata.
@@ -193,6 +199,8 @@ export async function runDebugProviderEvents(args, envInput = process.env) {
 	}
 	if (!args.prompt?.trim()) fail("--prompt or --prompt-file is required");
 	args.apiKey = requireApiKey(args, envInput, fail);
+	const timeoutMs = Number(envInput.PI_PROVIDER_EVENT_DEBUG_TIMEOUT_MS ?? 600_000);
+	if (!Number.isFinite(timeoutMs)) fail("PI_PROVIDER_EVENT_DEBUG_TIMEOUT_MS must be a finite number of milliseconds");
 
 	const artifactDir = args.out ?? defaultOutDir(args.cwd);
 	const sessionDir = args.sessionDir ?? join(artifactDir, "session");
@@ -245,7 +253,6 @@ export async function runDebugProviderEvents(args, envInput = process.env) {
 	try {
 		send({ type: "prompt", message: args.prompt });
 		await new Promise((resolve, reject) => {
-			const timeoutMs = Number(envInput.PI_PROVIDER_EVENT_DEBUG_TIMEOUT_MS ?? 600_000);
 			const start = Date.now();
 			const tick = () => {
 				const events = parseJsonLines(stdout);
@@ -262,10 +269,24 @@ export async function runDebugProviderEvents(args, envInput = process.env) {
 			tick();
 		});
 		child.stdin.end();
-		const exitCode = await waitForChildClose(child);
+		// Pi's RPC shutdown disposes the session before exiting, so it gets the run's timeout. The
+		// verified tree shutdown then reaps descendants that still hold its stdout or stderr.
+		if (child.exitCode === null && child.signalCode === null) {
+			await new Promise((resolve) => {
+				// Node fires delays above 2^31 - 1 ms after 1 ms; larger timeouts still mean wait.
+				const timer = setTimeout(resolve, Math.min(timeoutMs, 2 ** 31 - 1));
+				child.once("exit", () => {
+					clearTimeout(timer);
+					resolve();
+				});
+			});
+		}
+		await terminateChild(child);
 		closed = true;
+		const exitCode = child.exitCode ?? 1;
 		if (exitCode !== 0) {
-			fail(`pi exited ${exitCode}\nstderr=${scrubSensitiveText(stderr.slice(-2000), args.apiKey)}`, [args.apiKey]);
+			const status = child.signalCode ? `was killed by ${child.signalCode}` : `exited ${exitCode}`;
+			fail(`pi ${status}\nstderr=${scrubSensitiveText(stderr.slice(-2000), args.apiKey)}`, [args.apiKey]);
 		}
 
 		const captureSummary = assertCompleteCaptureSummary(

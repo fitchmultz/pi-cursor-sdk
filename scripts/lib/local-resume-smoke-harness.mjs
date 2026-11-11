@@ -17,6 +17,7 @@ import {
 	CHILD_PROCESS_TREE_SPAWN_OPTIONS,
 	terminateChild,
 } from "./cursor-child-process.mjs";
+import { createPiRpcChannel } from "./cursor-pi-rpc.mjs";
 import { buildCursorSmokeEnv } from "./cursor-smoke-env.mjs";
 import { scrubSensitiveText } from "../../shared/cursor-sensitive-text.mjs";
 
@@ -196,67 +197,25 @@ export function startRpc({
 			...CHILD_PROCESS_TREE_SPAWN_OPTIONS,
 		},
 	);
-	let stdoutBuffer = "";
-	let stderr = "";
-	const events = [];
-	const pending = new Map();
-	let requestId = 0;
-	child.stdout.setEncoding("utf8");
-	child.stderr.setEncoding("utf8");
-	child.stderr.on("data", (chunk) => {
-		stderr += chunk;
-	});
-	child.stdout.on("data", (chunk) => {
-		stdoutBuffer += chunk;
-		let newlineIndex = stdoutBuffer.indexOf("\n");
-		while (newlineIndex >= 0) {
-			const line = stdoutBuffer.slice(0, newlineIndex);
-			stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
-			newlineIndex = stdoutBuffer.indexOf("\n");
-			if (!line.trim()) continue;
-			let message;
-			try {
-				message = JSON.parse(line);
-			} catch {
-				continue;
-			}
-			if (message.type === "response" && pending.has(message.id)) {
-				const request = pending.get(message.id);
-				pending.delete(message.id);
-				clearTimeout(request.timer);
-				request.resolve(message);
-				continue;
-			}
-			events.push(message);
-		}
-	});
-	const send = (type, extra = {}, timeoutMs = 120000) =>
-		new Promise((resolveRequest, rejectRequest) => {
-			const id = `local_resume_smoke_${++requestId}`;
-			const timer = setTimeout(() => {
-				pending.delete(id);
-				rejectRequest(
-					new Error(`timeout waiting for ${type}. Stderr: ${stderr}`),
-				);
-			}, timeoutMs);
-			pending.set(id, {
-				resolve: resolveRequest,
-				reject: rejectRequest,
-				timer,
-			});
-			child.stdin.write(`${JSON.stringify({ id, type, ...extra })}\n`);
-		});
-	const stop = async () => {
-		for (const request of pending.values()) clearTimeout(request.timer);
-		pending.clear();
-		await terminateChild(child, { graceMs: 15_000 });
+	const rpc = createPiRpcChannel(child, { idPrefix: "local_resume_smoke" });
+	child.on("error", rpc.close);
+	child.stdin.on("error", rpc.close);
+	child.once("close", () => rpc.close(new Error(`local resume smoke RPC exited. Stderr: ${rpc.stderr}`)));
+	let stopping;
+	// Repeated and concurrent stops share one termination.
+	const stop = () => {
+		stopping ??= (async () => {
+			rpc.close(new Error("local resume smoke RPC stopped"));
+			await terminateChild(child, { graceMs: 15_000 });
+		})();
+		return stopping;
 	};
 	return {
-		events,
-		send,
+		events: rpc.events,
+		send: rpc.send,
 		stop,
 		get stderr() {
-			return stderr;
+			return rpc.stderr;
 		},
 	};
 }

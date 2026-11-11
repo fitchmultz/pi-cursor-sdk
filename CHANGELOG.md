@@ -4,6 +4,137 @@
 
 ## Unreleased
 
+## 0.5.29 - 2026-11-11
+
+<!-- npm-release:unreleased:start -->
+### Changed
+
+- A local run's resume handle is now recorded at the end of the Pi turn that delivers its result. That is the final answer, or the last replayed tool when the run has no final text. A run that finished while Pi was still replaying its native tools previously recorded the handle before its final answer. A restart then could not resume that agent and bootstrapped a new one from the transcript. A finished run whose result never reaches Pi, for example after an abort, records no handle. When new user input continues the agent, only the continuing send records one. Tree navigation, compaction and session replacement before delivery cancel the handle, so it cannot land on a branch selected afterwards. The entry format is unchanged.
+<!-- npm-release:unreleased:end -->
+
+- Fix durable resume publication at delivered turn boundaries (#459) ([c56a3f3](https://github.com/fitchmultz/pi-cursor-sdk/commit/c56a3f32a7ba9f75bafc99617ba0a80b6be80377))
+
+### What's Changed
+* fix: resume local agents after replayed tool runs by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/459
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.28...v0.5.29
+
+## 0.5.28 - 2026-11-09
+
+<!-- npm-release:unreleased:start -->
+### Changed
+
+- Maintainer reviews receive exact missing-read paths and ranges before native Pi settles, so they can finish the same review without restarting. Complete-read and zero-finding release gates remain unchanged.
+
+- Release version reconciliation and review remediation report fetch failures with the service, HTTP method, public endpoint, and native cause details. Reconciled changelogs retain a final newline.
+
+- Refresh the fallback catalog from the authenticated SDK 1.0.40 catalog-only observation on 2026-11-10, with 49 models.
+  Compared with the 50-model Nov 9 snapshot, it adds Gemini 4 Carbon (`gemini-4-carbon`), removes Gemini 3.6 Flash and 3.7 Flash, and adds Fable 5.2 `fast=false|true` metadata.
+  Fable's 10 variants become 20, with `context=1m`, `effort=high`, and `fast=false` as the default. Its aliases and context/effort values are unchanged, as are the other 47 model records.
+  Carbon exposes `reasoning_effort=low|medium|high`, defaulting to `medium`, with no aliases.
+  The 33 bundled checkpoint-derived entries remain unchanged. This refresh started no Agent/model turn or Cloud run and establishes no new checkpoint limit.
+
+- The authenticated SDK 1.0.40 catalog-only observation on 2026-11-09 returned 50 models.
+  It added Claude Fable 5.2 (`claude-fable-5-2`) and aliases `fable-5-2` and `fable-5.2`, preserving the prior 49 model records and 33 bundled checkpoint-derived entries.
+  That refresh started no Agent/model turn or Cloud run and established no new checkpoint limit.
+<!-- npm-release:unreleased:end -->
+
+<!-- npm-release:carried:start -->
+### Changed
+
+- Event-debug `metadata.json` represents a pooled agent that has not bootstrapped as `providerMeta.sendState: { "bootstrapped": false }`. Fingerprint and incremental-send count fields appear only after a successful bootstrap. Persisted resume entries keep their existing format.
+<!-- npm-release:carried:end -->
+
+- Supersedes unpublished 0.5.27 from d6f45b5ee72e9410a74f3252edbca4b70be8da53. Includes all changes since v0.5.26; the original release records remain unchanged.
+
+- ci: adopt unpublished release recovery (#450) ([4afa039](https://github.com/fitchmultz/pi-cursor-sdk/commit/4afa039e5c59a64b89ab320f25e0ad601b1561a3))
+
+### What's Changed
+* Refactor pooled agent and send-state ownership by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/446
+* chore(release): 0.5.27 by @pi-durable[bot] in https://github.com/fitchmultz/pi-cursor-sdk/pull/447
+* Inline pooled agent bridge callback binding by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/448
+* ci: adopt unpublished release recovery by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/450
+* fix: refresh Cursor fallback catalog by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/452
+* fix: refresh current Cursor fallback catalog by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/454
+* fix: adopt release reconciliation diagnostics by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/456
+* Wake the version workflow only for release events by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/457
+* fix: finish missing evidence reads in native reviews by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/458
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.26...v0.5.28
+
+## 0.5.27 - 2026-11-09
+
+<!-- npm-release:unreleased:start -->
+### Changed
+
+- Event-debug `metadata.json` represents a pooled agent that has not bootstrapped as `providerMeta.sendState: { "bootstrapped": false }`. Fingerprint and incremental-send count fields appear only after a successful bootstrap. Persisted resume entries keep their existing format.
+<!-- npm-release:unreleased:end -->
+
+- Refactor pooled agent and send-state ownership (#446) ([9959087](https://github.com/fitchmultz/pi-cursor-sdk/commit/99590875cf3a52aea96633720550c95cced3e22b))
+
+### What's Changed
+* Refactor pooled agent and send-state ownership by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/446
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.26...v0.5.27
+
+## 0.5.26 - 2026-11-09
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- refactor: make Cursor turn cleanup ownership explicit (#444) ([ae27d81](https://github.com/fitchmultz/pi-cursor-sdk/commit/ae27d81186733974b5e326486bdc28cb17ed6b8f))
+
+### What's Changed
+* refactor: make Cursor turn cleanup ownership explicit by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/444
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.25...v0.5.26
+
+## 0.5.25 - 2026-11-09
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- test: pin the Cursor turn queue cancellation contract (#442) ([a605799](https://github.com/fitchmultz/pi-cursor-sdk/commit/a605799cdd767e0a38a7541bae17ed714c105c0b))
+
+### What's Changed
+* test: pin Cursor turn queue cancellation ownership by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/442
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.24...v0.5.25
+
+## 0.5.24 - 2026-11-09
+
+<!-- npm-release:unreleased:start -->
+### Changed
+
+- Debug capture: `drain-events.jsonl` `turn_start` and `turn_end` records now report the live run's SDK result as `sdkOutcome` (`running`, `finished`, `cancelled` or `error`) instead of `done`. `done: true` used to mean finished, cancelled or failed.
+<!-- npm-release:unreleased:end -->
+
+- refactor: separate live run outcomes from resource release (#419) ([0d95be9](https://github.com/fitchmultz/pi-cursor-sdk/commit/0d95be9b5d4c68f18bb2ef90a975b4a06e74d3cf))
+
+### What's Changed
+* refactor: separate live run outcomes from resource release by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/419
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.23...v0.5.24
+
+## 0.5.23 - 2026-11-09
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- refactor: fold local cleanup outcomes per agent (#418) ([c4a873e](https://github.com/fitchmultz/pi-cursor-sdk/commit/c4a873e0f47c754e07fcc30b86b13cb3d9c758ca))
+
+### What's Changed
+* refactor: fold local cleanup outcomes per agent by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/418
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.22...v0.5.23
+
 ## 0.5.22 - 2026-11-08
 
 <!-- npm-release:unreleased:start -->

@@ -12,6 +12,7 @@ import {
 	hasTrailingUserMessagesAfterToolResults,
 	type CursorLiveQueuedEvent,
 	type CursorLiveRun,
+	type CursorLiveRunOutcome,
 } from "./cursor-live-run-coordinator.js";
 import {
 	deleteCursorNativeToolDisplay,
@@ -111,7 +112,7 @@ export async function settleCursorLiveToolBatch(run: CursorLiveRun): Promise<voi
 
 async function waitForCursorLiveSdkTurnEnded(run: CursorLiveRun, signal?: AbortSignal): Promise<boolean> {
 	const deadline = Date.now() + 125;
-	while (!cursorLiveRuns.hasSdkTurnEnded(run) && !run.done && !run.disposed && !run.cancelled && !run.errorMessage) {
+	while (!cursorLiveRuns.hasSdkTurnEnded(run) && run.outcome.kind === "running" && run.resources.kind === "open") {
 		const remainingMs = deadline - Date.now();
 		if (remainingMs <= 0) return false;
 		await scheduler.wait(Math.min(25, remainingMs));
@@ -126,7 +127,7 @@ export function flushPendingCursorLiveRunTraceEventsToStream(
 	run: CursorLiveRun,
 	options?: { includeTracesBehindQueuedTools?: boolean; emitter?: CursorPartialContentEmitter },
 ): void {
-	if (run.disposed) return;
+	if (run.resources.kind !== "open") return;
 	const turn: CursorLiveTurnState = {
 		emitter: options?.emitter ?? new CursorPartialContentEmitter(stream, partial, -1, true),
 		emittedText: "",
@@ -173,6 +174,19 @@ function emitCursorLiveQueuedEvent(
 	}
 }
 
+/** Replayed tools end Pi's loop once the SDK has settled with no final text left to emit. */
+function isSettledWithoutFinalText(outcome: CursorLiveRunOutcome): boolean {
+	switch (outcome.kind) {
+		case "running":
+			return false;
+		case "finished":
+			return !outcome.finalText.trim();
+		case "cancelled":
+		case "error":
+			return true;
+	}
+}
+
 function emitCursorNativeToolUseTurn(
 	stream: AssistantMessageEventStream,
 	partial: AssistantMessage,
@@ -184,7 +198,7 @@ function emitCursorNativeToolUseTurn(
 	occupancyFloor: number | undefined,
 	debugRecorder?: CursorSdkEventDebugRecorder,
 ): void {
-	const shouldTerminate = run.done && !run.finalText?.trim() && !cursorLiveRuns.peekEvent(run);
+	const shouldTerminate = isSettledWithoutFinalText(run.outcome) && !cursorLiveRuns.peekEvent(run);
 	for (const tool of tools) {
 		const contentIndex = partial.content.length;
 		// Pi persists JSON arguments: keep the completed call identical to its wire delta.
@@ -213,6 +227,9 @@ function emitCursorNativeToolUseTurn(
 		turn: cursorLiveRuns.takeSdkTurnUsage(run),
 		occupancyFloor,
 	});
+	// Terminating replay results end Pi's loop, so this can be the run's last delivery. A replay that fails
+	// instead continues to a stop delivery, which publishes again and supersedes this entry.
+	if (shouldTerminate) run.resumePublication?.publish();
 	partial.stopReason = "toolUse";
 	stream.push({ type: "done", reason: "toolUse", message: partial });
 	cursorLiveRuns.requestIdleDispose(run);
@@ -319,7 +336,7 @@ export async function drainCursorLiveRunTurn(
 		mode: options.mode,
 		runId: run.id,
 		pendingEventCount: run.pendingEvents.length,
-		done: run.done,
+		sdkOutcome: run.outcome.kind,
 	});
 	let outcome: CursorLiveRunDrainOutcome | undefined;
 	let outcomeDetails: Record<string, unknown> = {};
@@ -357,7 +374,7 @@ export async function drainCursorLiveRunTurn(
 				if (options.mode === "emit") emitCursorLiveQueuedEvent(turn, event, run);
 			}
 
-			if (run.disposed) {
+			if (run.resources.kind !== "open") {
 				partial.stopReason = "aborted";
 				partial.errorMessage = formatCursorSdkAbortMessage(
 					resolveCursorSdkAbortCause({ liveRunDisposed: true }),
@@ -367,53 +384,60 @@ export async function drainCursorLiveRunTurn(
 				outcomeDetails = { reason: "disposed" };
 				return outcome;
 			}
-			if (run.cancelled) {
-				partial.stopReason = "aborted";
-				if (run.abortMessage) partial.errorMessage = run.abortMessage;
-				stream.push({ type: "error", reason: "aborted", error: partial });
-				await cursorLiveRuns.release(run);
-				outcome = "aborted";
-				outcomeDetails = { reason: "cancelled" };
-				return outcome;
-			}
-			if (run.errorMessage) {
-				partial.stopReason = "error";
-				partial.errorMessage = run.errorMessage;
-				stream.push({ type: "error", reason: "error", error: partial });
-				await cursorLiveRuns.release(run);
-				outcome = "error";
-				return outcome;
-			}
-			if (run.done) {
-				if (options.mode === "chain_user_input") {
+			const sdkOutcome = run.outcome;
+			switch (sdkOutcome.kind) {
+				case "running":
+					await cursorLiveRuns.waitForProgress(run, options.signal);
+					continue;
+				case "cancelled":
+					partial.stopReason = "aborted";
+					partial.errorMessage = sdkOutcome.abortMessage;
+					stream.push({ type: "error", reason: "aborted", error: partial });
 					await cursorLiveRuns.release(run);
-					outcome = "chain_user_input";
-					outcomeDetails = { reason: "run_done" };
+					outcome = "aborted";
+					outcomeDetails = { reason: "cancelled" };
+					return outcome;
+				case "error":
+					partial.stopReason = "error";
+					partial.errorMessage = sdkOutcome.errorMessage;
+					stream.push({ type: "error", reason: "error", error: partial });
+					await cursorLiveRuns.release(run);
+					outcome = "error";
+					return outcome;
+				case "finished": {
+					if (options.mode === "chain_user_input") {
+						await cursorLiveRuns.release(run);
+						outcome = "chain_user_input";
+						outcomeDetails = { reason: "run_done" };
+						return outcome;
+					}
+					turn.emitter.closeAll();
+					const finalText = trimCurrentTurnAlreadyEmittedCursorText(sdkOutcome.finalText, turn.emittedText, run.emittedText);
+					if (finalText) {
+						await emitTextDeltas(turn.emitter, splitTextIntoReplayDeltas(finalText));
+					}
+					applyCursorUsage(partial, model, context, cursorLiveRuns.takeTurnInputTokens(run, toolResultInputTokens), {
+						runtime: "local",
+						turn: cursorLiveRuns.takeSdkTurnUsage(run),
+						occupancyFloor: options.occupancyFloor,
+					});
+					if (run.resumeNotice) {
+						emitDisplayOnlyTraceBlock(stream, partial, run.resumeNotice);
+						run.resumeNotice = undefined;
+					}
+					run.resumePublication?.publish();
+					partial.stopReason = "stop";
+					stream.push({ type: "done", reason: "stop", message: partial });
+					await cursorLiveRuns.release(run);
+					outcome = "stop";
+					outcomeDetails = { finalTextLength: finalText.length };
 					return outcome;
 				}
-				turn.emitter.closeAll();
-				const finalText = trimCurrentTurnAlreadyEmittedCursorText(run.finalText ?? run.textDeltas.join(""), turn.emittedText, run.emittedText);
-				if (finalText) {
-					await emitTextDeltas(turn.emitter, splitTextIntoReplayDeltas(finalText));
+				default: {
+					const _exhaustive: never = sdkOutcome;
+					return _exhaustive;
 				}
-				applyCursorUsage(partial, model, context, cursorLiveRuns.takeTurnInputTokens(run, toolResultInputTokens), {
-					runtime: "local",
-					turn: cursorLiveRuns.takeSdkTurnUsage(run),
-					occupancyFloor: options.occupancyFloor,
-				});
-				if (run.resumeNotice) {
-					emitDisplayOnlyTraceBlock(stream, partial, run.resumeNotice);
-					run.resumeNotice = undefined;
-				}
-				partial.stopReason = "stop";
-				stream.push({ type: "done", reason: "stop", message: partial });
-				await cursorLiveRuns.release(run);
-				outcome = "stop";
-				outcomeDetails = { finalTextLength: finalText.length };
-				return outcome;
 			}
-
-			await cursorLiveRuns.waitForProgress(run, options.signal);
 		}
 	} catch (error) {
 		if (!outcome) {
@@ -434,7 +458,7 @@ export async function drainCursorLiveRunTurn(
 			outcome: outcome ?? "error",
 			runId: run.id,
 			pendingEventCount: run.pendingEvents.length,
-			done: run.done,
+			sdkOutcome: run.outcome.kind,
 			...outcomeDetails,
 		});
 	}
@@ -454,14 +478,14 @@ export async function drainExistingCursorLiveRunBeforeSend(
 	turnDebugRecorder?.recordDrainEvent("pre_send_start", {});
 	while (true) {
 		const run = getPendingCursorLiveRun(context, scopeKey) ?? getActiveCursorLiveRunForCurrentScope(scopeKey);
-		if (!run || run.disposed) {
+		if (!run) {
 			turnDebugRecorder?.recordDrainEvent("pre_send_end", { outcome: "continue_send", reason: "no_pending_run" });
 			return "continue_send";
 		}
 
 		try {
 			const outcome = await cursorLiveRuns.withRunLease(run, signal, async () => {
-				if (run.disposed) return "continue_send" as const;
+				if (run.resources.kind !== "open") return "continue_send" as const;
 				// Check under the drain lease, before consuming/delivering Pi results:
 				// resolving a bridge waiter can resume the SDK's old tool surface.
 				if ((run.nativeToolsEnabled !== false) !== nativeToolsEnabled) {
@@ -474,7 +498,7 @@ export async function drainExistingCursorLiveRunBeforeSend(
 				while (!cursorLiveRuns.isReady(run)) {
 					await cursorLiveRuns.waitForProgress(run, signal);
 				}
-				if (run.disposed) return "continue_send" as const;
+				if (run.resources.kind !== "open") return "continue_send" as const;
 				const drainOutcome = await drainCursorLiveRunTurn(stream, partial, model, context, run, consumed.toolResultInputTokens, {
 					mode: shouldChainUserInput ? "chain_user_input" : "emit",
 					signal,
@@ -490,7 +514,7 @@ export async function drainExistingCursorLiveRunBeforeSend(
 				});
 				return mapped;
 			});
-			if (outcome === "continue_send" && !run.disposed && cursorLiveRuns.getActiveForScope(run.sessionAgentScopeKey) === run) {
+			if (outcome === "continue_send" && cursorLiveRuns.getActiveForScope(run.sessionAgentScopeKey) === run) {
 				continue;
 			}
 			turnDebugRecorder?.recordDrainEvent("pre_send_end", { outcome, runId: run.id });

@@ -9,6 +9,8 @@ import { __testUtils as cursorSessionScopeTestUtils, registerCursorSessionScope 
 import { __testUtils as resumeTestUtils, registerCursorSessionAgentResume, CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE } from "../src/cursor-session-agent-resume.js";
 import {
 	acquireSessionCursorAgent,
+	MAX_COMPLETED_INCREMENTAL_SENDS_BEFORE_REBOOTSTRAP,
+	planCursorSessionSend,
 	__testUtils as sessionAgentTestUtils,
 } from "../src/cursor-session-agent.js";
 import { createPiHarness, makeAssistantMessage, makeContext } from "./helpers/pi-harness.js";
@@ -18,6 +20,11 @@ import { buildCursorSessionStateRoot } from "../src/cursor-session-store.js";
 // Independent historical persisted bytes, not the current production key builder.
 const historicalPoolKey = (scopeKey: string) => [scopeKey, "/tmp/project", '{"id":"composer-2.5"}', "",
 	'{"autoReview":false,"sandboxEnabled":false}', "http1:default", "62af8704764faf8e", "bridge:absent"].join("\0");
+
+const sessionManagerContext = (manager: SessionManager) => ({
+	getSessionFile: () => manager.getSessionFile(), getSessionId: () => manager.getSessionId(),
+	getBranch: () => manager.getBranch(), getEntries: () => manager.getEntries(),
+});
 
 describe("cursor-session-agent local resume", () => {
 	beforeEach(async () => {
@@ -106,23 +113,19 @@ describe("cursor-session-agent local resume", () => {
 			localResume: true, createAgent, resumeAgent, agents };
 		try {
 			const manager = SessionManager.create(root, join(root, "sessions"));
-			const sessionManager = (manager: SessionManager) => ({
-				getSessionFile: () => manager.getSessionFile(), getSessionId: () => manager.getSessionId(),
-				getBranch: () => manager.getBranch(), getEntries: () => manager.getEntries(),
-			});
 			const pi = createPiHarness();
 			pi.appendEntry.mockImplementation((type, data) => { manager.appendCustomEntry(type, data); });
 			registerCursorSessionScope(pi);
 			registerCursorSessionAgentResume(pi);
-			await pi.runSessionStart({ cwd: root, sessionManager: sessionManager(manager) });
+			await pi.runSessionStart({ cwd: root, sessionManager: sessionManagerContext(manager) });
 			manager.appendMessage({ role: "user", content: "ordinary request", timestamp: 1 });
-			await pi.runBeforeAgentStart({ cwd: root, sessionManager: sessionManager(manager) });
+			await pi.runBeforeAgentStart({ cwd: root, sessionManager: sessionManagerContext(manager) });
 			const lease = await acquireSessionCursorAgent(params);
-			expect(resumeTestUtils.state.pendingHandle).toBeUndefined();
-			lease.commitSend(makeContext(), true);
+			expect(resumeTestUtils.stateFor(lease.scopeKey)?.pendingPublication).toBeUndefined();
+			lease.commitSend(makeContext(), true)?.publish();
 			expect(pi.appendEntry).not.toHaveBeenCalled();
 			manager.appendMessage(makeAssistantMessage("ordinary answer"));
-			await pi.runTurnEnd({}, { cwd: root, sessionManager: sessionManager(manager) });
+			await pi.runTurnEnd({}, { cwd: root, sessionManager: sessionManagerContext(manager) });
 			const file = manager.getSessionFile()!;
 			const persisted = readFileSync(file, "utf8");
 			expect(persisted).toContain("subagents:");
@@ -145,7 +148,7 @@ describe("cursor-session-agent local resume", () => {
 			await sessionAgentTestUtils.disposeAllSessionCursorAgents();
 			resumeTestUtils.reset();
 			const reopened = SessionManager.open(file, join(root, "sessions"), root);
-			await pi.runSessionStart({ cwd: root, sessionManager: sessionManager(reopened) });
+			await pi.runSessionStart({ cwd: root, sessionManager: sessionManagerContext(reopened) });
 			const resumed = await acquireSessionCursorAgent(params);
 			expect(resumed.resumed).toBe(true);
 			expect(resumeAgent.mock.calls[0][1].agents).toEqual(agents);
@@ -153,7 +156,7 @@ describe("cursor-session-agent local resume", () => {
 
 			await sessionAgentTestUtils.disposeAllSessionCursorAgents();
 			resumeTestUtils.reset();
-			await pi.runSessionStart({ cwd: root, sessionManager: sessionManager(SessionManager.open(file, join(root, "sessions"), root)) });
+			await pi.runSessionStart({ cwd: root, sessionManager: sessionManagerContext(SessionManager.open(file, join(root, "sessions"), root)) });
 			const changed = await acquireSessionCursorAgent({ ...params, agents: {
 				reviewer: { ...agents.reviewer, prompt: "changed private prompt" },
 			} });
@@ -173,6 +176,100 @@ describe("cursor-session-agent local resume", () => {
 			await sessionAgentTestUtils.disposeAllSessionCursorAgents();
 			rmSync(root, { recursive: true, force: true });
 		}
+	});
+
+	it("admits a persisted send state that never bootstrapped as fresh, then restarts counting at its first successful bootstrap", async () => {
+		const root = mkdtempSync(join(tmpdir(), "cursor-fresh-resume-"));
+		const createAgent = vi.fn().mockResolvedValue({ agentId: "agent-recorded", [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined) });
+		const resumeAgent = vi.fn().mockResolvedValue({ agentId: "agent-recorded", [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined) });
+		const params = { apiKey: "test-key", cwd: root, agentMode: "agent" as const, modelSelection: { id: "fixture" }, localResume: true, createAgent, resumeAgent };
+		const context = makeContext();
+		try {
+			const manager = SessionManager.create(root, join(root, "sessions"));
+			const pi = createPiHarness();
+			pi.appendEntry.mockImplementation((type, data) => { manager.appendCustomEntry(type, data); });
+			registerCursorSessionScope(pi);
+			registerCursorSessionAgentResume(pi);
+			await pi.runSessionStart({ cwd: root, sessionManager: sessionManagerContext(manager) });
+			manager.appendMessage({ role: "user", content: "ordinary request", timestamp: 1 });
+			const original = await acquireSessionCursorAgent(params);
+			original.commitSend(context, true)?.publish();
+			manager.appendMessage(makeAssistantMessage("ordinary answer"));
+			await pi.runTurnEnd({}, { cwd: root, sessionManager: sessionManagerContext(manager) });
+			const published = manager.getEntries().findLast(entry => entry.type === "custom" && entry.customType === CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE);
+			if (published?.type !== "custom") throw new Error("successful send did not publish a resume handle");
+			// Valid persisted JSON a successful send never writes: stale progress on an agent that never bootstrapped.
+			manager.appendCustomEntry(CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE, {
+				...(published.data as object),
+				sendState: { bootstrapped: false, contextFingerprint: computeCursorContextFingerprint(context), incrementalSendCount: MAX_COMPLETED_INCREMENTAL_SENDS_BEFORE_REBOOTSTRAP },
+			});
+
+			await sessionAgentTestUtils.disposeAllSessionCursorAgents();
+			resumeTestUtils.reset();
+			const reopened = SessionManager.open(manager.getSessionFile()!, join(root, "sessions"), root);
+			await pi.runSessionStart({ cwd: root, sessionManager: sessionManagerContext(reopened) });
+			const resumed = await acquireSessionCursorAgent(params);
+
+			expect(resumed.resumed).toBe(true);
+			expect(planCursorSessionSend(resumed.sendState, context)).toEqual({ mode: "bootstrap", resetAgent: false, reason: "initial" });
+			resumed.commitSend(context, true)?.publish();
+			const bootstrapped = { bootstrapped: true, contextFingerprint: computeCursorContextFingerprint(context), incrementalSendCount: 0 };
+			expect(resumed.sendState).toEqual(bootstrapped);
+			expect(resumeTestUtils.stateFor(resumed.scopeKey)?.pendingPublication).toMatchObject({ agentId: "agent-recorded", sendState: bootstrapped });
+		} finally {
+			await sessionAgentTestUtils.disposeAllSessionCursorAgents();
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it.each([
+		{ disposal: "fulfilled", dispose: () => Promise.resolve(), resumedAgain: true },
+		{ disposal: "rejected", dispose: () => Promise.reject(new Error("SDK disposal failed")), resumedAgain: false },
+	])("releases a resumed agent's exact claim only after $disposal SDK disposal proves closure", async ({ disposal, dispose, resumedAgain }) => {
+		// The claim outlives a failed disposal for the whole process, so each row owns its identities.
+		const scopeKey = `/tmp/sessions/claim-${disposal}.jsonl`;
+		const agentId = `agent-claim-${disposal}`;
+		const resumeAgent = vi.fn().mockImplementation(async () => ({ agentId, [Symbol.asyncDispose]: vi.fn(dispose) }));
+		const createAgent = vi.fn().mockResolvedValue({ agentId: `${agentId}-new`, [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined) });
+		cursorSessionScopeTestUtils.set("/tmp/project", scopeKey);
+		resumeTestUtils.set({
+			scopeKey,
+			sessionFile: scopeKey,
+			cwd: "/tmp/project",
+			branchPathHash: resumeTestUtils.EMPTY_BRANCH_HASH,
+			compactionGeneration: 0,
+			activeHandle: {
+				version: 2,
+				runtime: "local",
+				agentId,
+				scopeKey,
+				sessionFile: scopeKey,
+				cwd: "/tmp/project",
+				poolKey: historicalPoolKey(scopeKey),
+				branchPathHash: resumeTestUtils.EMPTY_BRANCH_HASH,
+				compactionGeneration: 0,
+				sendState: { bootstrapped: true, contextFingerprint: computeCursorContextFingerprint(makeContext()), incrementalSendCount: 0 },
+				createdAt: "2026-07-07T00:00:00.000Z",
+				storeIdentity: { version: 1, stateRoot: buildCursorSessionStateRoot("/tmp/cursor-sdk-state/workspace", scopeKey) },
+			},
+		});
+		const params = {
+			apiKey: "test-key",
+			agentMode: "agent" as const,
+			cwd: "/tmp/project",
+			modelSelection: { id: "composer-2.5" },
+			localResume: true,
+			createAgent,
+			resumeAgent,
+		};
+
+		expect((await acquireSessionCursorAgent(params)).resumed).toBe(true);
+		await sessionAgentTestUtils.resetSessionCursorAgent(scopeKey);
+		const next = await acquireSessionCursorAgent(params);
+
+		expect(resumeAgent).toHaveBeenCalledTimes(resumedAgain ? 2 : 1);
+		expect(next.resumed).toBe(resumedAgain);
+		expect(next.agent.agentId).toBe(resumedAgain ? agentId : `${agentId}-new`);
 	});
 
 	it("resumes a legacy default-store agent before force-creating its session-store replacement", async () => {
@@ -219,7 +316,7 @@ describe("cursor-session-agent local resume", () => {
 
 		sessionAgentTestUtils.invalidateSessionAgent(scopeKey);
 		const lease = await acquireSessionCursorAgent({ ...params, forceCreate: true });
-		lease.commitSend(context, true);
+		lease.commitSend(context, true)?.publish();
 
 		expect(createAgent).toHaveBeenCalledTimes(1);
 		expect(createAgent.mock.calls[0][0].local?.store).toEqual(sessionStoreBackedBy(storeMock.stores[1]));
@@ -232,7 +329,7 @@ describe("cursor-session-agent local resume", () => {
 		]);
 		expect(lease.resumed).toBe(false);
 		expect(lease.sendState).toMatchObject({ bootstrapped: true, incrementalSendCount: 0 });
-		expect(resumeTestUtils.state.pendingHandle).toMatchObject({
+		expect(resumeTestUtils.stateFor(lease.scopeKey)?.pendingPublication).toMatchObject({
 			agentId: "agent-new",
 			poolKey: lease.poolKey,
 		});
@@ -459,18 +556,15 @@ describe("cursor-session-agent local resume", () => {
 		};
 
 		const disabled = await acquireSessionCursorAgent({ ...params, localResume: false });
-		disabled.commitSend(context, true);
-		expect(resumeTestUtils.state.pendingHandle).toBeUndefined();
+		expect(disabled.commitSend(context, true)).toBeUndefined();
 
 		const enabled = await acquireSessionCursorAgent({ ...params, localResume: true });
-		enabled.commitSend(context, false);
-		expect(resumeTestUtils.state.pendingHandle).toMatchObject({ agentId: "agent-1" });
-		resumeTestUtils.state.pendingHandle = undefined;
+		enabled.commitSend(context, false)?.publish();
+		expect(resumeTestUtils.stateFor(scopeKey)?.pendingPublication).toMatchObject({ agentId: "agent-1" });
 		enabled.trackRunCompletion(Promise.resolve());
 
 		const disabledAgain = await acquireSessionCursorAgent({ ...params, localResume: false });
-		disabledAgain.commitSend(context, false);
-		expect(resumeTestUtils.state.pendingHandle).toBeUndefined();
+		expect(disabledAgain.commitSend(context, false)).toBeUndefined();
 		expect(disabled.agent).toBe(enabled.agent);
 		expect(enabled.agent).toBe(disabledAgain.agent);
 		expect(createAgent).toHaveBeenCalledTimes(1);

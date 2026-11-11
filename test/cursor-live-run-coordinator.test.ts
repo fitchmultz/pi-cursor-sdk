@@ -138,10 +138,10 @@ describe("cursor live run coordinator", () => {
 		cursorLiveRuns.attachSdkRun(run, { cancel });
 		cursorLiveRuns.requestIdleDispose(run);
 		await vi.advanceTimersByTimeAsync(expected - 1);
-		expect(run.disposed).toBe(false);
+		expect(run.resources.kind).toBe("open");
 		expect(cancel).not.toHaveBeenCalled();
 		await vi.advanceTimersByTimeAsync(1);
-		expect(run.disposed).toBe(true);
+		expect(run.resources.kind).not.toBe("open");
 		expect(cancel).toHaveBeenCalledOnce();
 	});
 
@@ -152,26 +152,26 @@ describe("cursor live run coordinator", () => {
 		const overridden = startRun(cursorLiveRuns, { id: "override", scopeKey: "override" });
 		cursorLiveRuns.requestIdleDispose(overridden);
 		await vi.advanceTimersByTimeAsync(1);
-		expect(overridden.disposed).toBe(false);
+		expect(overridden.resources.kind).toBe("open");
 		await vi.advanceTimersByTimeAsync(1);
-		expect(overridden.disposed).toBe(true);
+		expect(overridden.resources.kind).not.toBe("open");
 		resetCursorNativeReplayIdleDisposeMs();
 		const configured = startRun(cursorLiveRuns, { id: "reset", scopeKey: "reset" });
 		cursorLiveRuns.requestIdleDispose(configured);
 		await vi.advanceTimersByTimeAsync(899_999);
-		expect(configured.disposed).toBe(false);
+		expect(configured.resources.kind).toBe("open");
 		await vi.advanceTimersByTimeAsync(1);
-		expect(configured.disposed).toBe(true);
+		expect(configured.resources.kind).not.toBe("open");
 		vi.stubEnv("PI_CURSOR_LIVE_RUN_IDLE_DISPOSE_MS", "2147483647");
 		const bridge = makeBridgeRun("explicit-pending", ["question"]);
 		const pending = startRun(cursorLiveRuns, { id: "explicit", scopeKey: "explicit", bridgeRun: bridge });
 		cursorLiveRuns.requestIdleDispose(pending);
 		await cursorLiveRuns.release(pending);
-		expect(pending.disposed).toBe(true);
+		expect(pending.resources.kind).toBe("released");
 		expect(bridge.cancel).toHaveBeenCalledOnce();
 	});
 
-	it("matches context tool results after trailing user messages and ignores disposed runs", async () => {
+	it("matches context tool results after trailing user messages and ignores released runs", async () => {
 		const { coordinator } = makeCoordinator();
 		const run = startRun(coordinator, { id: "cursor-replay-1" });
 		const context = makeContext([
@@ -233,7 +233,7 @@ describe("cursor live run coordinator", () => {
 				args: {},
 			},
 		});
-		cursorLiveRuns.markFinished(run, "done");
+		cursorLiveRuns.settle(run, { kind: "finished", finalText: "done" });
 		const stream = createAssistantMessageEventStream();
 		const push = vi.spyOn(stream, "push");
 
@@ -350,13 +350,13 @@ describe("cursor live run coordinator", () => {
 			await vi.advanceTimersByTimeAsync(100_000);
 			await coordinator.withRunLease(run, undefined, async () => {
 				await vi.advanceTimersByTimeAsync(600_001);
-				expect(run.disposed).toBe(false);
+				expect(run.resources.kind).toBe("open");
 				expect(cancel).not.toHaveBeenCalled();
 			});
 			await vi.advanceTimersByTimeAsync(299_999);
-			expect(run.disposed).toBe(false);
+			expect(run.resources.kind).toBe("open");
 			await vi.advanceTimersByTimeAsync(1);
-			expect(run.disposed).toBe(true);
+			expect(run.resources.kind).not.toBe("open");
 			expect(coordinator.count()).toBe(0);
 			expect(cancel).toHaveBeenCalledOnce();
 			expect(abandonSessionAgent).toHaveBeenCalledExactlyOnceWith("scope-1");
@@ -387,20 +387,20 @@ describe("cursor live run coordinator", () => {
 		coordinator.requestIdleDispose(sibling);
 		coordinator.requestIdleDispose(pendingSibling);
 		await vi.advanceTimersByTimeAsync(900_001);
-		expect(run.disposed).toBe(false);
-		expect(sibling.disposed).toBe(true);
+		expect(run.resources.kind).toBe("open");
+		expect(sibling.resources.kind).not.toBe("open");
 		expect(cancel).not.toHaveBeenCalled();
 		pending = 1;
 		notify();
 		await vi.advanceTimersByTimeAsync(900_001);
-		expect(run.disposed).toBe(false);
+		expect(run.resources.kind).toBe("open");
 		pending = 0;
 		notify();
 		await vi.advanceTimersByTimeAsync(899_999);
-		expect(run.disposed).toBe(false);
+		expect(run.resources.kind).toBe("open");
 		await vi.advanceTimersByTimeAsync(1);
-		expect(run.disposed).toBe(true);
-		expect(pendingSibling.disposed).toBe(false);
+		expect(run.resources.kind).not.toBe("open");
+		expect(pendingSibling.resources.kind).toBe("open");
 		expect(cancel).toHaveBeenCalledOnce();
 		expect(unsubscribe).toHaveBeenCalledOnce();
 	});
@@ -417,7 +417,7 @@ describe("cursor live run coordinator", () => {
 		coordinator.requestIdleDispose(run);
 		pending = true;
 		await vi.advanceTimersByTimeAsync(10);
-		expect(run.disposed).toBe(false);
+		expect(run.resources.kind).toBe("open");
 		expect(bridge.onPendingToolCallsChanged).toHaveBeenCalledOnce();
 		await coordinator.release(run);
 		expect(unsubscribe).toHaveBeenCalledOnce();
@@ -441,9 +441,9 @@ describe("cursor live run coordinator", () => {
 		pending = true;
 		notify();
 		await vi.advanceTimersByTimeAsync(30);
-		expect(run.disposed).toBe(false);
+		expect(run.resources.kind).toBe("open");
 		await coordinator.release(run);
-		expect(run.disposed).toBe(true);
+		expect(run.resources.kind).toBe("released");
 		expect(bridge.cancel).toHaveBeenCalledOnce();
 	});
 
@@ -523,7 +523,7 @@ describe("cursor live run coordinator", () => {
 		run.recordedToolDisplayIds.push("tool-1", "tool-2");
 		const waitForProgress = coordinator.waitForProgress(run);
 
-		coordinator.markFinished(run, "done");
+		coordinator.settle(run, { kind: "finished", finalText: "done" });
 		await waitForProgress;
 		await coordinator.release(run);
 		await coordinator.release(run);
@@ -542,15 +542,22 @@ describe("cursor live run coordinator", () => {
 		expect(abandonSessionAgent).not.toHaveBeenCalled();
 	});
 
-	it("releases unsuccessful session-bridge runs idempotently and abandons the session agent", async () => {
+	it.each([
+		{ label: "still running", settled: undefined, abandonsSdkRun: true },
+		{ label: "cancelled", settled: { kind: "cancelled", abortMessage: "Cancelled: Cursor SDK run was cancelled." }, abandonsSdkRun: false },
+		{ label: "failed", settled: { kind: "error", errorMessage: "run failed" }, abandonsSdkRun: false },
+	] as const)("releases unsuccessful ($label) session-bridge runs idempotently and abandons the session agent", async ({ settled, abandonsSdkRun }) => {
 		const { coordinator, deleteNativeToolDisplay, abandonSessionAgent } = makeCoordinator();
 		const sessionBridgeRun = makeBridgeRun("session-bridge", ["pending-tool"]);
 		const unsubscribe = vi.fn();
 		sessionBridgeRun.onPendingToolCallsChanged = vi.fn(() => unsubscribe);
 		const run = startRun(coordinator, { bridgeRun: sessionBridgeRun, sessionBridgeRun, scopeKey: "scope-error" });
 		const sdkCancel = vi.fn().mockResolvedValue(undefined);
+		const onAbandon = vi.fn().mockResolvedValue(undefined);
 		coordinator.attachSdkRun(run, { cancel: sdkCancel });
+		run.onAbandon = onAbandon;
 		run.recordedToolDisplayIds.push("tool-1");
+		if (settled) coordinator.settle(run, settled);
 		const waitForProgress = coordinator.waitForProgress(run);
 
 		await coordinator.release(run);
@@ -564,9 +571,48 @@ describe("cursor live run coordinator", () => {
 		expect(sessionBridgeRun.onPendingToolCallsChanged).toHaveBeenCalledOnce();
 		expect(unsubscribe).toHaveBeenCalledOnce();
 		expect(sessionBridgeRun.dispose).not.toHaveBeenCalled();
-		expect(sdkCancel).toHaveBeenCalledTimes(1);
+		// Only a run still running at release is cancelled and recorded as abandoned usage.
+		expect(sdkCancel).toHaveBeenCalledTimes(abandonsSdkRun ? 1 : 0);
+		expect(onAbandon).toHaveBeenCalledTimes(abandonsSdkRun ? 1 : 0);
 		expect(abandonSessionAgent).toHaveBeenCalledOnce();
 		expect(abandonSessionAgent).toHaveBeenCalledWith("scope-error");
+	});
+
+	it.each([
+		{ label: "completes", failure: undefined },
+		{ label: "fails", failure: new Error("abandon failed") },
+	])("gives every release caller the same completion and keeps the result when cleanup $label", async ({ failure }) => {
+		const { coordinator, abandonSessionAgent } = makeCoordinator();
+		const cleanup = Promise.withResolvers<void>();
+		abandonSessionAgent.mockReturnValueOnce(cleanup.promise);
+		const run = startRun(coordinator, { scopeKey: "scope-release" });
+		const sdkCancel = vi.fn().mockResolvedValue(undefined);
+		coordinator.attachSdkRun(run, { cancel: sdkCancel });
+		const settledCallers: string[] = [];
+		const callRelease = (caller: string) => coordinator.release(run).then(
+			() => { settledCallers.push(`${caller}: released`); },
+			(error: unknown) => { settledCallers.push(`${caller}: ${error instanceof Error ? error.message : String(error)}`); },
+		);
+
+		const concurrentCallers = [callRelease("first"), callRelease("second")];
+		await vi.waitFor(() => expect(abandonSessionAgent).toHaveBeenCalledOnce(), { interval: 1 });
+		expect(run.resources.kind).toBe("releasing");
+		expect(coordinator.count()).toBe(0);
+		expect(settledCallers).toEqual([]);
+
+		if (failure) cleanup.reject(failure);
+		else cleanup.resolve();
+		await Promise.all(concurrentCallers);
+		const result = failure ? failure.message : "released";
+		expect(settledCallers).toEqual([`first: ${result}`, `second: ${result}`]);
+		expect(run.resources).toEqual({
+			kind: "released",
+			result: failure ? { status: "rejected", reason: failure } : { status: "fulfilled", value: undefined },
+		});
+		await callRelease("later");
+		expect(settledCallers.at(-1)).toBe(`later: ${result}`);
+		expect(sdkCancel).toHaveBeenCalledOnce();
+		expect(abandonSessionAgent).toHaveBeenCalledOnce();
 	});
 
 	it("suppresses process-level SDK abort errors while cancelling an abandoned live run", async () => {

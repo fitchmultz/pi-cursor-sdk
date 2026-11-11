@@ -72,6 +72,7 @@ describe("buildCursorModelSelection", () => {
 	it.each([
 		{ id: "gemini-3.8-flash", defaultEffort: "high" },
 		{ id: "gemini-4-argon", defaultEffort: "medium" },
+		{ id: "gemini-4-carbon", defaultEffort: "medium" },
 	])("maps generated $id reasoning_effort controls without changing catalog defaults", ({ id, defaultEffort }) => {
 		const gemini = FALLBACK_MODEL_ITEMS.find((item) => item.id === id);
 		if (!gemini) throw new Error(`${id} fallback fixture missing`);
@@ -105,6 +106,36 @@ describe("buildCursorModelSelection", () => {
 		}
 		expect(getCursorModelMetadata(gemini.id)?.defaultParams).toEqual([{ id: "reasoning_effort", value: defaultEffort }]);
 		expect(gemini).toEqual(original);
+	});
+
+	it("keeps captured Fable 5.2 context and fast identities with slow defaults", () => {
+		const fable = FALLBACK_MODEL_ITEMS.find(({ id }) => id === "claude-fable-5-2");
+		if (!fable) throw new Error("claude-fable-5-2 fallback fixture missing");
+		const original = structuredClone(fable);
+		const models = register([fable]);
+		const expectedIds: string[] = [];
+		for (const id of ["claude-fable-5-2", "fable-5-2", "fable-5.2"]) {
+			for (const context of ["300k", "1m"]) {
+				for (const suffix of ["", ":fast", ":slow"]) {
+					const modelId = `${id}@${context}${suffix}`;
+					expectedIds.push(modelId);
+					const params = [
+						{ id: "context", value: context },
+						{ id: "effort", value: "high" },
+						{ id: "fast", value: String(suffix === ":fast") },
+					];
+					expect(getCursorModelMetadata(modelId)).toMatchObject({
+						catalogDefaultContext: "1m",
+						supportsFast: true,
+						defaultFast: suffix === ":fast",
+						defaultParams: params,
+					});
+					expect(buildCursorModelSelection(modelId, "high")).toEqual({ id, params });
+				}
+			}
+		}
+		expect(models.map(({ id }) => id).sort()).toEqual(expectedIds.sort());
+		expect(fable).toEqual(original);
 	});
 
 	it("maps generated Muse Wonder contexts and reasoning without mutating its catalog defaults", () => {

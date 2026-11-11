@@ -9,7 +9,7 @@ import { captureProviderTestOwnership } from "./helpers/cursor-provider-ownershi
 import { acquireSessionCursorAgent } from "../src/cursor-session-agent.js";
 import { registerCursorSessionAgentLifecycle } from "../src/cursor-session-agent-lifecycle.js";
 import { registerCursorSessionAgentLineage } from "../src/cursor-session-agent-lineage.js";
-import { registerCursorSessionAgentResume, persistCursorSessionAgentResumeHandle } from "../src/cursor-session-agent-resume.js";
+import { captureCursorSessionAgentResumeOrigin, registerCursorSessionAgentResume } from "../src/cursor-session-agent-resume.js";
 import { captureCursorCloudLifecycleRecorder, registerCursorCloudLifecycleLedger } from "../src/cursor-cloud-lifecycle.js";
 import { configureCursorSdkHttp1 } from "../src/cursor-http1.js";
 
@@ -114,7 +114,7 @@ describe("owned session snapshots and cleanup", () => {
 	it("flushes each pending resume handle only to its own journal", async () => {
 		const a = binding(); await start(a); const b = binding(); await start(b, scopeB);
 		for (const [pi, scope] of [[a, scopeA], [b, scopeB]] as const) {
-			persistCursorSessionAgentResumeHandle({ runtime: "local", agentId: `agent-${scope.id}`, poolKey: scope.id, sendState: { bootstrapped: true, contextFingerprint: "test", incrementalSendCount: 0 }, storeIdentity: { version: 1, stateRoot: `/tmp/${scope.id}` } }, getCursorSessionScopeSnapshot(pi).scopeKey);
+			captureCursorSessionAgentResumeOrigin(getCursorSessionScopeSnapshot(pi).scopeKey)?.capture({ runtime: "local", agentId: `agent-${scope.id}`, poolKey: scope.id, sendState: { bootstrapped: true, contextFingerprint: "test", incrementalSendCount: 0 }, storeIdentity: { version: 1, stateRoot: `/tmp/${scope.id}` } }).publish();
 			await pi.runTurnEnd();
 			expect(pi.appendEntry).toHaveBeenCalledWith("cursor-sdk-agent-resume", expect.objectContaining({ scopeKey: scope.file, sessionId: scope.id, agentId: `agent-${scope.id}` }));
 		}

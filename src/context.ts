@@ -372,6 +372,10 @@ export function computeCursorContextFingerprint(context: Context): string {
 	return JSON.stringify(payload);
 }
 
+/**
+ * Context-only check for standalone boolean/fingerprint snapshots, independent of pooled-agent send state.
+ * planCursorSessionSend() owns pooled-agent state narrowing; standalone snapshots may be unbootstrapped.
+ */
 export function shouldBootstrapCursorContext(
 	sendState: { bootstrapped: boolean; contextFingerprint: string },
 	context: Context,

@@ -9,7 +9,7 @@ import {
 	discardIncompleteToolsFromPrepared,
 	emitCursorLiveTurn,
 } from "./cursor-provider-turn-emit.js";
-import { CursorRunFinalizer, type CursorLiveRunCompletion } from "./cursor-provider-run-finalizer.js";
+import { CursorRunFinalizer } from "./cursor-provider-run-finalizer.js";
 import {
 	prepareCursorProviderTurn,
 	requireCursorApiKey,
@@ -17,9 +17,8 @@ import {
 } from "./cursor-provider-turn-prepare.js";
 import { sendCursorProviderTurn } from "./cursor-provider-turn-send.js";
 import type {
-	CursorProviderTurnPrepareResult,
+	CursorProviderTurnPhase,
 	CursorProviderTurnRunnerParams,
-	CursorProviderTurnSendResult,
 	LiveCursorProviderTurnRuntime,
 	LocalCursorProviderTurnPrepareResult,
 	StartedCursorProviderTurn,
@@ -53,10 +52,7 @@ export class CursorProviderTurnRunner {
 
 	async run(sdkProcessErrorGuard: ReturnType<typeof installCursorSdkProcessErrorGuard>): Promise<void> {
 		const { stream, partial, model, context, options, sdkEventDebugRef } = this.params;
-		let prepared: CursorProviderTurnPrepareResult | undefined;
-		let started: StartedCursorProviderTurn | undefined;
-		let sendResult: CursorProviderTurnSendResult | undefined;
-		let liveCompletion: CursorLiveRunCompletion | undefined;
+		let phase: CursorProviderTurnPhase = { kind: "unprepared" };
 		const runFinalizer = new CursorRunFinalizer({
 			runnerParams: this.params,
 			sdkEventDebug: () => this.sdkEventDebug,
@@ -95,7 +91,7 @@ export class CursorProviderTurnRunner {
 			this.throwIfAborted();
 
 			this.resolvedApiKey = requireCursorApiKey(options);
-			prepared = await prepareCursorProviderTurn({
+			const prepared = await prepareCursorProviderTurn({
 				params: this.params,
 				cwd,
 				resolvedApiKey: this.resolvedApiKey,
@@ -104,6 +100,7 @@ export class CursorProviderTurnRunner {
 				resolvedConfig,
 				nativeToolsEnabled,
 			});
+			phase = { kind: "prepared", prepared };
 
 			const usage = await this.params.usageRecorder.start({
 				agent: prepared.agent,
@@ -118,7 +115,8 @@ export class CursorProviderTurnRunner {
 				this.params.usageRecorder.notePersistenceFailure(error);
 				throw error;
 			});
-			started = { ...prepared, usage };
+			const started: StartedCursorProviderTurn = { ...prepared, usage };
+			phase = { kind: "started", prepared: started };
 			if (started.runtime.liveRun) {
 				started.runtime.liveRun.onAbandon = async () => {
 					try {
@@ -129,7 +127,7 @@ export class CursorProviderTurnRunner {
 				};
 			}
 
-			sendResult = await sendCursorProviderTurn({
+			const { send, abortRegistration } = await sendCursorProviderTurn({
 				params: this.params,
 				prepared: started,
 				sdkEventDebug: this.sdkEventDebug,
@@ -137,16 +135,18 @@ export class CursorProviderTurnRunner {
 				throwIfAborted: () => this.throwIfAborted(),
 				resolvedApiKey: this.resolvedApiKey,
 			});
-			const { send } = sendResult;
+			phase = { kind: "sent", prepared: started, abortRegistration };
 
-			if (prepared.runtime.kind === "live") {
+			if (started.runtime.kind === "live") {
 				const livePrepared = requireLocalLivePreparedTurn(started);
-				liveCompletion = runFinalizer.startLiveRunCompletion({
+				const completion = runFinalizer.startLiveRunCompletion({
 					send,
 					prepared: livePrepared,
 					modelId: model.id,
 					discardIncompleteTools: (outcome) => discardIncompleteToolsFromPrepared(livePrepared, outcome),
 				});
+				// Pi can end this turn (`toolUse`) while the SDK run continues, so cleanup moves to its completion.
+				phase = { kind: "liveCompletionOwnsCleanup", prepared: livePrepared, abortRegistration, completion };
 				await emitCursorLiveTurn({
 					params: this.params,
 					prepared: livePrepared,
@@ -167,9 +167,9 @@ export class CursorProviderTurnRunner {
 				resolvedApiKey: this.resolvedApiKey,
 				optionsApiKey: options?.apiKey,
 				sdkEventDebug: this.sdkEventDebug,
-				contextWindowAgentId: prepared.contextWindowAgentId,
+				contextWindowAgentId: started.contextWindowAgentId,
 			});
-			prepared.lifecycle.trackRunCompletion(outcomePromise);
+			started.lifecycle.trackRunCompletion(outcomePromise);
 			const finalized = await outcomePromise;
 			await runFinalizer.applyTerminalEvent({
 				kind: "direct",
@@ -180,13 +180,13 @@ export class CursorProviderTurnRunner {
 		} catch (error) {
 			// This body owns the session turn lease; a queued request aborted before
 			// entry must not release another request's run in handleOuterCatch().
-			if (!prepared && (error instanceof CursorLiveRunAbortError || options?.signal?.aborted)) {
+			if (phase.kind === "unprepared" && (error instanceof CursorLiveRunAbortError || options?.signal?.aborted)) {
 				const pending = cursorLiveRuns.getActiveForScope(this.params.scope.scopeKey);
-				if (pending && !pending.disposed) await cursorLiveRuns.release(pending);
+				if (pending) await cursorLiveRuns.release(pending);
 			}
-			await runFinalizer.applyTerminalEvent({ kind: "error", prepared: started ?? prepared, error });
+			await runFinalizer.applyTerminalEvent({ kind: "error", prepared: phase.kind === "unprepared" ? undefined : phase.prepared, error });
 		} finally {
-			await runFinalizer.cleanup(prepared, sendResult, liveCompletion);
+			await runFinalizer.cleanup(phase);
 		}
 	}
 
@@ -199,6 +199,6 @@ export class CursorProviderTurnRunner {
 			runtimeTarget: () => this.runtimeTarget,
 		});
 		await runFinalizer.applyTerminalEvent({ kind: "error", prepared: undefined, error });
-		await runFinalizer.cleanup(undefined, undefined, undefined);
+		await runFinalizer.cleanup({ kind: "unprepared" });
 	}
 }

@@ -127,7 +127,7 @@ describe("streamCursor local resume", () => {
 		expect(oldDispose).toHaveBeenCalledTimes(1);
 		expect(mockedCreate).toHaveBeenCalledTimes(1);
 		expect(newSend).toHaveBeenCalledTimes(1);
-		expect(resumeTestUtils.state.pendingHandle).toMatchObject({ agentId: "agent-new" });
+		expect(resumeTestUtils.stateFor(`/tmp/reset-${count}.jsonl`)?.pendingPublication).toMatchObject({ agentId: "agent-new" });
 	});
 
 	it("does not pass a crafted cloud agent ID to local Agent.resume", async () => {

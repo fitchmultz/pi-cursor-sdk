@@ -5,6 +5,8 @@ import { __testUtils as cursorSessionScopeTestUtils, registerCursorSessionScope 
 import { __testUtils as resumeTestUtils } from "../src/cursor-session-agent-resume.js";
 import {
 	acquireSessionCursorAgent,
+	MAX_COMPLETED_INCREMENTAL_SENDS_BEFORE_REBOOTSTRAP,
+	planCursorSessionSend,
 	__testUtils as sessionAgentTestUtils,
 } from "../src/cursor-session-agent.js";
 import { registerCursorSessionAgentLifecycle } from "../src/cursor-session-agent-lifecycle.js";
@@ -212,10 +214,10 @@ describe("cursor-session-agent", () => {
 		await sessionAgentTestUtils.resetSessionCursorAgent(scopeKey);
 		const replacement = await acquireSessionCursorAgent(params);
 
-		lease.commitSend(context, true);
+		void lease.commitSend(context, true);
 		expect(replacement.sendState.bootstrapped).toBe(false);
 
-		replacement.commitSend(context, true);
+		void replacement.commitSend(context, true);
 		expect(replacement.sendState.bootstrapped).toBe(true);
 	});
 
@@ -330,7 +332,7 @@ describe("cursor-session-agent", () => {
 		expect(mockDispose2).not.toHaveBeenCalled();
 	});
 
-	it("tracks incremental send count and resets it after bootstrap commits", async () => {
+	it("tracks incremental send count, rebootstraps at the unchanged threshold, and resets it after bootstrap commits", async () => {
 		const createAgent = vi.fn().mockResolvedValue({
 			agentId: "agent-1",
 			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
@@ -348,15 +350,23 @@ describe("cursor-session-agent", () => {
 		const lease = await acquireSessionCursorAgent(params);
 		const context = makeContext([{ role: "user", content: "Hello", timestamp: 1 }]);
 
-		lease.commitSend(context, true);
-		expect(lease.sendState.incrementalSendCount).toBe(0);
+		expect(planCursorSessionSend(lease.sendState, context)).toEqual({ mode: "bootstrap", resetAgent: false, reason: "initial" });
+		void lease.commitSend(context, true);
+		expect(lease.sendState).toMatchObject({ bootstrapped: true, incrementalSendCount: 0 });
 
-		lease.commitSend(context, false);
-		lease.commitSend(context, false);
-		expect(lease.sendState.incrementalSendCount).toBe(2);
+		void lease.commitSend(context, false);
+		void lease.commitSend(context, false);
+		expect(lease.sendState).toMatchObject({ bootstrapped: true, incrementalSendCount: 2 });
 
-		lease.commitSend(context, true);
-		expect(lease.sendState.incrementalSendCount).toBe(0);
+		for (let committed = 2; committed < MAX_COMPLETED_INCREMENTAL_SENDS_BEFORE_REBOOTSTRAP; committed += 1) {
+			expect(planCursorSessionSend(lease.sendState, context)).toEqual({ mode: "incremental", resetAgent: false, reason: "incremental" });
+			void lease.commitSend(context, false);
+		}
+		expect(lease.sendState).toMatchObject({ bootstrapped: true, incrementalSendCount: 20 });
+		expect(planCursorSessionSend(lease.sendState, context)).toEqual({ mode: "bootstrap", resetAgent: true, reason: "incremental_threshold" });
+
+		void lease.commitSend(context, true);
+		expect(lease.sendState).toMatchObject({ bootstrapped: true, incrementalSendCount: 0 });
 	});
 
 	it("invalidates and recreates the session agent after compaction", async () => {
@@ -420,7 +430,7 @@ describe("cursor-session-agent", () => {
 		await expect(acquirePromise).rejects.toBeInstanceOf(sessionAgentTestUtils.SessionCursorAgentScopeClosedError);
 		expect(mockDisposeLate).toHaveBeenCalledTimes(1);
 		expect(createAgent).toHaveBeenCalledTimes(1);
-		expect(sessionAgentTestUtils.sessionAgentsByScope.has("/tmp/sessions/test.jsonl")).toBe(false);
+		expect(sessionAgentTestUtils.getSessionCursorAgentPoolState("/tmp/sessions/test.jsonl").status).toBe("empty");
 		await expect(acquireSessionCursorAgent(params)).rejects.toBeInstanceOf(sessionAgentTestUtils.SessionCursorAgentScopeClosedError);
 	});
 
@@ -686,9 +696,9 @@ describe("cursor-session-agent", () => {
 			createAgent,
 		});
 
-		expect(sessionAgentTestUtils.sessionAgentsByScope.has("/tmp/sessions/test.jsonl")).toBe(true);
+		expect(sessionAgentTestUtils.getSessionCursorAgentPoolState("/tmp/sessions/test.jsonl").status).toBe("ready");
 		await pi.runSessionTree();
-		expect(sessionAgentTestUtils.sessionAgentsByScope.has("/tmp/sessions/test.jsonl")).toBe(false);
+		expect(sessionAgentTestUtils.getSessionCursorAgentPoolState("/tmp/sessions/test.jsonl").status).toBe("empty");
 		expect(mockDispose).toHaveBeenCalledTimes(1);
 	});
 

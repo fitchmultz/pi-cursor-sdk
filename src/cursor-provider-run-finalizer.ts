@@ -20,10 +20,10 @@ import type { installCursorSdkProcessErrorGuard } from "./cursor-sdk-process-err
 import type { CursorSdkEventDebugSink } from "./cursor-sdk-event-debug.js";
 import { awaitFinalizeCursorRunOutcome, recordCursorProviderTerminalUsage } from "./cursor-provider-turn-finalize.js";
 import type {
+	CursorProviderTurnPhase,
 	CursorProviderTurnPrepareResult,
 	CursorProviderTurnRunnerParams,
 	CursorProviderTurnSend,
-	CursorProviderTurnSendResult,
 	LiveCursorProviderTurnRuntime,
 	LocalCursorProviderTurnPrepareResult,
 	StartedCursorProviderTurn,
@@ -45,26 +45,15 @@ function applyLiveRunOutcome(
 	prepared: StartedCursorProviderTurn & LocalCursorProviderTurnPrepareResult & { runtime: LiveCursorProviderTurnRuntime },
 	context: CursorProviderTurnRunnerParams["context"],
 ): void {
-	if (prepared.runtime.liveRun.disposed) return;
 	const { liveRun } = prepared.runtime;
-	switch (classifyCursorRunEmission(outcome)) {
-		case "finished":
-			prepared.lifecycle.commitSend(context, prepared.meta.bootstrap);
-			if (prepared.meta.resumeNotice) liveRun.resumeNotice = prepared.meta.resumeNotice;
-			cursorLiveRuns.markFinished(liveRun, outcome.kind === "finished" ? outcome.finalText : "");
-			break;
-		case "cancelled":
-			cursorLiveRuns.markCancelled(liveRun, getCursorRunAbortMessage(outcome));
-			break;
-		case "failed":
-			cursorLiveRuns.markError(liveRun, outcome.kind === "error" ? outcome.errorMessage : "Cursor SDK run failed.");
-			break;
+	// A run released before the SDK settled was abandoned; its late outcome must not commit send state.
+	if (liveRun.resources.kind !== "open") return;
+	if (outcome.kind === "finished") {
+		// The SDK run can finish inside an earlier replay turn; the drain publishes at its terminal delivery.
+		liveRun.resumePublication = prepared.lifecycle.commitSend(context, prepared.meta.bootstrap);
+		if (prepared.meta.resumeNotice) liveRun.resumeNotice = prepared.meta.resumeNotice;
 	}
-}
-
-export interface CursorLiveRunCompletion {
-	waitCompletion: Promise<void>;
-	prepared: StartedCursorProviderTurn;
+	cursorLiveRuns.settle(liveRun, outcome);
 }
 
 export interface CursorRunFinalizerParams {
@@ -87,7 +76,8 @@ export class CursorRunFinalizer {
 
 	constructor(private readonly params: CursorRunFinalizerParams) {}
 
-	startLiveRunCompletion(startParams: StartCursorLiveRunCompletionParams): CursorLiveRunCompletion {
+	/** Starts SDK completion handling; the runner hands live-turn cleanup to the returned completion. */
+	startLiveRunCompletion(startParams: StartCursorLiveRunCompletionParams): Promise<void> {
 		const { runnerParams } = this.params;
 		const sdkEventDebug = this.params.sdkEventDebug();
 		const { send, prepared, modelId, discardIncompleteTools } = startParams;
@@ -113,20 +103,19 @@ export class CursorRunFinalizer {
 			.catch((error: unknown) => {
 				const aborted = error instanceof CursorLiveRunAbortError || runnerParams.options?.signal?.aborted === true;
 				this.safeCleanup(() => discardIncompleteTools({ status: aborted ? "cancelled" : "error" }));
-				if (!liveRun.disposed) {
-					if (aborted) cursorLiveRuns.markCancelled(liveRun, this.abortMessage());
-					else cursorLiveRuns.markError(
-						liveRun,
-						sanitizeCursorProviderError(error, this.params.resolvedApiKey() ?? runnerParams.options?.apiKey, "local"),
-					);
-				}
+				cursorLiveRuns.settle(liveRun, aborted
+					? { kind: "cancelled", abortMessage: this.abortMessage() }
+					: {
+						kind: "error",
+						errorMessage: sanitizeCursorProviderError(error, this.params.resolvedApiKey() ?? runnerParams.options?.apiKey, "local"),
+					});
 				this.safeCleanup(() => sdkEventDebug?.recordWaitResult({ status: aborted ? "cancelled" : "error", error: String(error) }));
 				this.safeCleanup(() => sdkEventDebug?.recordError("run_wait", error));
 			});
 		// Mark the pooled local agent busy as soon as the SDK run exists so auto-compaction summarization
 		// (and other concurrent acquires) wait for run.wait() instead of hitting AgentBusyError.
 		prepared.lifecycle.trackRunCompletion(waitCompletion);
-		return { waitCompletion, prepared };
+		return waitCompletion;
 	}
 
 	async applyTerminalEvent(event: CursorTurnTerminalEvent): Promise<void> {
@@ -140,31 +129,34 @@ export class CursorRunFinalizer {
 		this.terminalApplied = true;
 	}
 
-	async cleanup(
-		prepared: CursorProviderTurnPrepareResult | undefined,
-		sendResult: CursorProviderTurnSendResult | undefined,
-		liveCompletion: CursorLiveRunCompletion | undefined,
-	): Promise<void> {
-		const abortRegistration = sendResult?.abortRegistration;
+	/** Releases exactly what the runner's phase owns, deferring to the live completion once it owns cleanup. */
+	async cleanup(phase: CursorProviderTurnPhase): Promise<void> {
 		this.params.runnerParams.sdkEventDebugRef.current = undefined;
-		if (liveCompletion) {
-			void liveCompletion.waitCompletion
-				.finally(async () => {
-					this.safeCleanup(() => prepared?.restoreCursorSdkOutputFilter());
-					if (abortRegistration) {
-						this.safeCleanup(() => abortRegistration.signal.removeEventListener("abort", abortRegistration.listener));
-					}
-					await this.finalizeSdkEventDebugBestEffort();
-					this.safeCleanup(() => this.params.sdkProcessErrorGuard.dispose());
-				})
-				.catch(() => {});
-			return;
+		switch (phase.kind) {
+			case "unprepared":
+				break;
+			case "prepared":
+			case "started":
+			case "sent":
+				this.safeCleanup(() => phase.prepared.restoreCursorSdkOutputFilter());
+				if (phase.kind === "sent") this.safeCleanup(() => phase.abortRegistration?.release());
+				await phase.prepared.lifecycle.dispose().catch(() => {});
+				break;
+			case "liveCompletionOwnsCleanup":
+				void phase.completion
+					.finally(async () => {
+						this.safeCleanup(() => phase.prepared.restoreCursorSdkOutputFilter());
+						this.safeCleanup(() => phase.abortRegistration?.release());
+						await this.finalizeSdkEventDebugBestEffort();
+						this.safeCleanup(() => this.params.sdkProcessErrorGuard.dispose());
+					})
+					.catch(() => {});
+				return;
+			default: {
+				const _exhaustive: never = phase;
+				return _exhaustive;
+			}
 		}
-		this.safeCleanup(() => prepared?.restoreCursorSdkOutputFilter());
-		if (abortRegistration) {
-			this.safeCleanup(() => abortRegistration.signal.removeEventListener("abort", abortRegistration.listener));
-		}
-		await prepared?.lifecycle.dispose().catch(() => {});
 		await this.finalizeSdkEventDebugBestEffort();
 		this.safeCleanup(() => this.params.sdkProcessErrorGuard.dispose());
 	}
@@ -188,7 +180,7 @@ export class CursorRunFinalizer {
 				this.pushTerminalError(partial, "error", outcome.kind === "error" ? outcome.errorMessage : "Cursor SDK run failed.");
 				break;
 			case "finished":
-				prepared.lifecycle.commitSend(context, prepared.meta.bootstrap);
+				prepared.lifecycle.commitSend(context, prepared.meta.bootstrap)?.publish();
 				prepared.runtime.turnCoordinator.flushText(
 					outcome.kind === "finished" && hasUsableText(outcome.finalText) ? [outcome.finalText] : [],
 				);
@@ -216,7 +208,7 @@ export class CursorRunFinalizer {
 			}),
 		));
 		const activeLiveRun = prepared?.runtime.liveRun;
-		if (activeLiveRun && !activeLiveRun.disposed) {
+		if (activeLiveRun?.resources.kind === "open") {
 			await cursorLiveRuns.release(activeLiveRun);
 		} else {
 			await prepared?.lifecycle.abandon();

@@ -48,9 +48,9 @@ jobs:
         (github.event.issue.pull_request != null && github.event.issue.user.login == 'pi-durable[bot]')) &&
       (github.event_name != 'workflow_run' || github.event.workflow_run.event != 'push' ||
         startsWith(github.event.workflow_run.head_commit.message, 'chore(release): '))
-    uses: fitchmultz/.github/.github/workflows/npm-release-bump.yml@85d05a42febdf1418bfa8b42842a8485aade10c1 # main
+    uses: fitchmultz/.github/.github/workflows/npm-release-bump.yml@f407404914bf6d048e4d952c62711df5103cc7ef # main
     with:
-      automation-ref: 85d05a42febdf1418bfa8b42842a8485aade10c1 # main
+      automation-ref: f407404914bf6d048e4d952c62711df5103cc7ef # main
       app-client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
       package-qualified: true
       version-reviewed: true

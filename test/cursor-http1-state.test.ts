@@ -146,6 +146,20 @@ describe("Cursor HTTP/1.1 state", () => {
 		expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("cursor", "cursor:local · fast:off · http1");
 	});
 
+	it("keeps the session preference when cursor-sdk.json cannot be saved", async () => {
+		const blockedAgentDir = join(agentDir, "not-a-directory");
+		writeFileSync(blockedAgentDir, "x");
+		process.env.PI_CODING_AGENT_DIR = blockedAgentDir;
+		const { pi, ctx, commandCtx, commands } = createHarness([customEntry("http-on", CURSOR_HTTP1_ENTRY_TYPE, { enabled: true })]);
+		await pi.invokeEventWithContext("session_start", { type: "session_start", reason: "startup" }, ctx);
+
+		await commands.get("cursor-http")!.handler("off", commandCtx);
+
+		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Failed to save Cursor HTTP/1.1 preference"), "error");
+		expect(pi.appendEntry).not.toHaveBeenCalled();
+		expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("cursor", "cursor:local · fast:off · http1");
+	});
+
 	it("restores the global preference from cursor-sdk.json", async () => {
 		writeFileSync(
 			getCursorSdkUserConfigPath(),

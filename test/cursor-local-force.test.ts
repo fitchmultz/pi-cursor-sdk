@@ -84,6 +84,44 @@ describe("Cursor local force consumption", () => {
 		expect(mockSend.mock.calls[0]?.[1]).toMatchObject({ local: { force: true } });
 	});
 
+	it.each(["environment", "cli"] as const)("keeps %s local force consumed when Agent.send rejects", async (source) => {
+		if (source === "environment") {
+			process.env.PI_CURSOR_LOCAL_FORCE = "1";
+		} else {
+			const pi = createPiHarness({ flagValues: { "cursor-local-force": true } });
+			registerCursorSessionScope(pi);
+			registerCursorRuntimeControls(pi);
+			await pi.runSessionStart({ model: makeModel("gpt-5.5@1m") });
+		}
+		const mockSend = vi.fn()
+			.mockRejectedValueOnce(new Error("forced send rejected"))
+			.mockResolvedValue(finishedRun());
+		mockCreatedAgent({ send: mockSend });
+
+		const rejected = await collectEvents(streamCursor(makeModel("gpt-5.5@1m"), makeContext(), { apiKey: "test-key" }));
+		await collectEvents(streamCursor(makeModel("gpt-5.5@1m"), makeContext(), { apiKey: "test-key" }));
+
+		expect(getErrorEvent(rejected).error.errorMessage).toContain("forced send rejected");
+		expect(mockSend.mock.calls[0]?.[1]).toMatchObject({ local: { force: true } });
+		expect(mockSend.mock.calls[1]?.[1]).not.toHaveProperty("local");
+	});
+
+	it("consumes CLI and environment local force as independent one-shots", async () => {
+		process.env.PI_CURSOR_LOCAL_FORCE = "1";
+		const pi = createPiHarness({ flagValues: { "cursor-local-force": true } });
+		registerCursorSessionScope(pi);
+		registerCursorRuntimeControls(pi);
+		await pi.runSessionStart({ model: makeModel("gpt-5.5@1m") });
+		const mockSend = vi.fn().mockResolvedValue(finishedRun());
+		mockCreatedAgent({ send: mockSend });
+
+		for (let turn = 0; turn < 3; turn++) {
+			await collectEvents(streamCursor(makeModel("gpt-5.5@1m"), makeContext(), { apiKey: "test-key" }));
+		}
+
+		expect(mockSend.mock.calls.map((call) => call[1]?.local)).toEqual([{ force: true }, { force: true }, undefined]);
+	});
+
 	it("does not rearm consumed CLI force on session_start reload", async () => {
 		const pi = createPiHarness({ flagValues: { "cursor-local-force": true } });
 		registerCursorSessionScope(pi);

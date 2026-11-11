@@ -491,6 +491,23 @@ describe("Cursor cloud runtime state", () => {
 		},
 	);
 
+	it("keeps the session runtime when a session-only runtime entry cannot be appended", async () => {
+		const harness = createCursorRuntimeHarness({ confirm: true });
+		await harness.pi.invokeEventWithContext("session_start", { type: "session_start", reason: "startup" }, harness.ctx);
+		harness.pi.appendEntry.mockImplementationOnce(() => {
+			throw new Error("journal unavailable");
+		});
+
+		await harness.commands.get("cursor-runtime")!.handler("cloud", harness.commandCtx);
+
+		expect(harness.ctx.ui.notify).toHaveBeenCalledWith(
+			"Persisting the session runtime entry failed. journal unavailable. Effective runtime is local (source: builtin).",
+			"error",
+		);
+		expect(harness.ctx.ui.setStatus).toHaveBeenLastCalledWith("cursor", "cursor:local · fast:off");
+		expect(getCursorSessionConfig()).toEqual({});
+	});
+
 	it("saves acknowledged cloud runtime to user config", async () => {
 		const harness = createCursorRuntimeHarness({ confirm: true });
 		await harness.pi.invokeEventWithContext("session_start", { type: "session_start", reason: "startup" }, harness.commandCtx);

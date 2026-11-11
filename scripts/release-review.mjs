@@ -5,6 +5,7 @@ import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, 
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { fileURLToPath } from "node:url";
 import spawn from "cross-spawn";
 import { scrubSensitiveText } from "../shared/cursor-sensitive-text.mjs";
 import { sealedNodePath } from "./lib/cursor-smoke-env.mjs";
@@ -14,6 +15,8 @@ import {
 } from "./lib/release-review-evidence.mjs";
 import { hash, writeJson } from "./lib/release-review-io.mjs";
 import { assertExtractedPackages } from "./lib/release-review-package.mjs";
+import { verifyReadEvidence } from "./lib/release-review-read-coverage.mjs";
+import { parseReviewResponse } from "./lib/release-review-report.mjs";
 
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 
@@ -89,91 +92,6 @@ function reviewedAll(actual, required, label) {
 	assert.deepEqual(missing, [], `Reviewer did not inspect every ${label}: ${missing.join(", ")}`);
 }
 
-function verifyReadEvidence(root, scope, inputPath, events) {
-	const starts = new Map();
-	const reads = new Map();
-	let successfulReads = 0;
-	for (const event of events) {
-		if (event.type === "tool_execution_start" && event.toolName === "read" && typeof event.args?.path === "string") {
-			starts.set(event.toolCallId, { ...event.args, path: resolve(root, event.args.path) });
-		}
-		if (event.type === "tool_execution_end" && event.toolName === "read" && event.isError === false && starts.has(event.toolCallId)) {
-			const start = starts.get(event.toolCallId);
-			const entries = reads.get(start.path) ?? [];
-			entries.push({ ...start, result: event.result });
-			reads.set(start.path, entries);
-			successfulReads++;
-		}
-	}
-	const requireRead = (label, ...paths) => {
-		let incomplete;
-		for (const path of paths.map((item) => resolve(item))) {
-			const entries = reads.get(path);
-			if (!entries?.length) continue;
-			const imageReads = entries.filter(({ result }) => result?.content?.some((part) =>
-				part.type === "text" && part.text.startsWith("Read image file [")));
-			if (imageReads.length) {
-				if (imageReads.some(({ result }) => result.content.some((part) => part.type === "image")
-					&& !result.content.some((part) => part.type === "text" && part.text.includes("Current model does not support images.")))) return path;
-				incomplete ??= `Image for ${label} was not available to the reviewer`;
-				continue;
-			}
-			const contents = readFileSync(path, "utf8");
-			const lines = contents ? contents.split("\n").length - Number(contents.endsWith("\n")) : 0;
-			const ranges = entries.map(({ offset, limit, result }) => {
-				const first = offset ? Math.max(1, offset) : 1;
-				const outputLines = result?.details?.truncation?.outputLines ?? Infinity;
-				const last = Math.min(lines, first + Math.min(limit ?? Infinity, outputLines) - 1);
-				return [first, last];
-			}).sort((a, b) => a[0] - b[0]);
-			let next = 1;
-			for (const [first, last] of ranges) {
-				if (first > next) break;
-				next = Math.max(next, last + 1);
-			}
-			if (next > lines) return path;
-			incomplete ??= `Incomplete read of ${label}: line ${next} of ${lines} was not read`;
-		}
-		assert.fail(incomplete ?? `No successful read recorded for ${label}`);
-	};
-	for (const [label, path] of [["review input", inputPath], ["source diff", scope.patch], ["commit context", scope.commits]]) {
-		requireRead(label, path);
-	}
-	if (scope.preparedReviewContext) requireRead("prepared verification context", scope.preparedReviewContext.path);
-	if (scope.reviewContext) requireRead("supplied review context", scope.reviewContext.path);
-	const sourceReads = [];
-	for (const path of scope.sourceFiles) {
-		const target = resolve(root, path);
-		const sourceTree = existsSync(target) ? "target" : "base";
-		const absolutePath = sourceTree === "target" ? target : resolve(scope.sourceBase, path);
-		requireRead(`changed source ${path}`, absolutePath);
-		if (scope.mode === "release") sourceReads.push({ path, sourceTree, absolutePath, sha256: hash(absolutePath) });
-	}
-	const artifactSourceReads = [];
-	if (scope.mode === "release") {
-		for (const path of scope.artifactFiles) {
-			const packagePaths = [resolve(scope.newDir, path), resolve(scope.oldDir, path)];
-			const copies = packagePaths.flatMap((artifact, index) => {
-				if (!reads.has(artifact)) return [];
-				const sha256 = hash(artifact);
-				const source = sourceReads.find((entry) => entry.sha256 === sha256);
-				return source ? [{ artifactTree: index === 0 ? "candidate" : "previous", source, sha256 }] : [];
-			});
-			const readPath = requireRead(`changed package artifact ${path}`, ...packagePaths, ...copies.map(({ source }) => source.absolutePath));
-			const reused = copies.find(({ source }) => source.absolutePath === readPath);
-			if (reused) artifactSourceReads.push({ path, artifactTree: reused.artifactTree, source: reused.source.path,
-				sourceTree: reused.source.sourceTree, sha256: reused.sha256 });
-		}
-		for (const [label, path] of [
-			["package diff", scope.artifactPatch], ["release notes", scope.notes], ["PR and issue context", scope.context],
-			["catalog receipt", scope.catalogReceipt], ["catalog output", scope.catalogOutput],
-			["npm registry receipt", scope.npmReceipt], ["previous GitHub release", scope.previousRelease],
-		]) requireRead(label, path);
-	}
-	return { successfulReads, sourceFiles: scope.sourceFiles.length, artifactFiles: scope.artifactFiles?.length ?? 0,
-		...(artifactSourceReads.length ? { artifactSourceReads } : {}) };
-}
-
 function runReview(root, scope, receipt, directory) {
 	const skillPath = resolve(process.env.PI_RELEASE_REVIEW_SKILL ?? "");
 	assert.ok(process.env.PI_RELEASE_REVIEW_SKILL && existsSync(skillPath), "PI_RELEASE_REVIEW_SKILL must name the actual thermo-nuclear SKILL.md");
@@ -201,13 +119,15 @@ function runReview(root, scope, receipt, directory) {
 	}
 	if (scope.preparedReviewContext) copyFileSync(scope.preparedReviewContext.path, join(evidence, "prepared-review-context.txt"));
 	if (scope.reviewContext) copyFileSync(scope.reviewContext.path, join(evidence, "review-context.txt"));
+	const feedback = fileURLToPath(new URL("./lib/release-review-read-feedback.mjs", import.meta.url));
+	env.PI_RELEASE_REVIEW_FEEDBACK_INPUT = inputPath;
 	const raw = join(directory, "events.jsonl");
 	const errors = join(directory, "stderr.log");
 	const stdout = openSync(raw, "w"), stderr = openSync(errors, "w");
 	let result;
 	try {
 		result = spawn.sync("pi", ["--mode", "json", "--no-session", "--no-extensions", "--no-mcp", "--no-skills",
-			"--no-prompt-templates", "--no-approve", "--tools", "read,grep,find,ls", "--provider", "zai",
+			"--no-prompt-templates", "--no-approve", "--extension", feedback, "--tools", "read,grep,find,ls", "--provider", "zai",
 			"--model", model, "--thinking", "max", "--append-system-prompt", system, `@${promptPath}`],
 		{ cwd: root, env, stdio: ["ignore", stdout, stderr] });
 	} finally {
@@ -235,9 +155,7 @@ function runReview(root, scope, receipt, directory) {
 	assert.equal(final.stopReason, "stop", "Native Pi's final review was incomplete");
 	assert.equal(final.provider, "zai", "Native Pi used an unexpected provider");
 	const text = final.content.filter((part) => part.type === "text").map((part) => part.text).join("");
-	const response = text.trim();
-	const fenced = /(?:^|\n)```json[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/.exec(response);
-	const report = JSON.parse(fenced ? fenced[1] : response);
+	const { report, commentary } = parseReviewResponse(text);
 	assert.equal(report.scopeId, scopeId, "Review result identifies a different scope");
 	assert.equal(report.completed, true, "Reviewer marked the review incomplete");
 	reviewedAll(report.reviewedFiles, scope.sourceFiles, "changed source files");
@@ -257,7 +175,6 @@ function runReview(root, scope, receipt, directory) {
 	assert.deepEqual(report.materialLimitations, [], "Review has material verification limits");
 	const blocking = scope.mode === "release" ? report.findings : report.findings.filter((finding) => finding.material);
 	assert.deepEqual(blocking, [], `Review has findings: ${JSON.stringify(safeValue(blocking))}`);
-	const commentary = fenced ? response.slice(0, fenced.index).trim() : "";
 	return { scopeId, report: safeValue(report), commentary: safeText(commentary), readEvidence, piVersion: version.stdout.trim(),
 		provider: final.provider, model: final.model, thinking: "max",
 		skillSha256: digest(skill), rubricSha256: digest(rubric) };

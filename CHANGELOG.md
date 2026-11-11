@@ -4,6 +4,22 @@
 
 ## Unreleased
 
+## 0.5.30 - 2026-11-11
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- ci: align shared automation pins (#461) ([d2da088](https://github.com/fitchmultz/pi-cursor-sdk/commit/d2da0883f75cf1a6deb0b3a0e1569798e920e578))
+
+### What's Changed
+* ci: align shared automation pins by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/461
+* test: mark intentional resume publication discards by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/462
+* ci: pin shared automation at 508d2e2 by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/463
+* refactor: make Cursor provider binding state explicit by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/464
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.29...v0.5.30
+
 ## 0.5.29 - 2026-11-11
 
 <!-- npm-release:unreleased:start -->

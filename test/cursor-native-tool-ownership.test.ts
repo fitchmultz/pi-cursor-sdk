@@ -17,7 +17,7 @@ import {
 import { expect, it } from "vitest";
 import { installCursorProviderVirtualTime } from "./helpers/cursor-provider-virtual-time.js";
 import { registerCursorNativeToolDisplay } from "../src/cursor-native-tool-display-registration.js";
-import { canRenderCursorToolNatively, nativeToolResults } from "../src/cursor-native-tool-display-state.js";
+import { canRenderCursorToolNatively } from "../src/cursor-native-tool-display-state.js";
 import { registerCursorSessionScope } from "../src/cursor-session-scope.js";
 import { CursorPartialContentEmitter } from "../src/cursor-partial-content-emitter.js";
 import { CursorTurnDisplayRouter } from "../src/cursor-provider-turn-display-router.js";
@@ -122,7 +122,8 @@ it.each(["named", "unnamed"])("tracks the real %s tool owner across native new/r
 				const result = await bash.execute(call.id, call.arguments);
 				if (!thirdPartyOwns) {
 					expect(result.content).toEqual([{ type: "text", text: "RECORDED_ONLY" }]);
-					expect(nativeToolResults.has(call.id)).toBe(false);
+					// The recorded result is single-use: redelivery neither replays it nor runs the command.
+					await expect(bash.execute(call.id, call.arguments)).rejects.toThrow("replay-only call does not execute work");
 				}
 			}
 			expect(readFileSync(marker, "utf8")).toBe("ALREADY_EXECUTED\n");

@@ -89,6 +89,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `src/cursor-native-tool-display-state.ts` owns native replay display state, env gating, and record/consume helpers.
 - `src/cursor-tool-result-display-readers.ts` owns canonical result readers shared by transcript/replay paths, including MCP-like content display normalization.
 - `src/cursor-tool-transcript.ts` owns the raw `unknown toolCall -> transcript/display` façade; `src/cursor-transcript-tool-specs.ts`, `src/cursor-transcript-utils.ts`, and `src/cursor-transcript-tool-formatters.ts` implement spec dispatch and formatting.
+- `src/cursor-local-model-catalog.ts` owns serving the installed SDK's LOCAL model validation from a validation-only projection of the fresh cached catalog via `CURSOR_SDK_LOCAL_MODEL_CATALOG_JSON`, leaving values it did not set untouched.
 - `src/cursor-mcp-timeout-override.ts` owns Cursor SDK MCP timeout overrides: 3600s default for `callTool`, 10s default for verified initialize/listTools paths on first send, and SDK-default behavior for unknown MCP protocol stacks.
 - `src/cursor-config.ts` owns Cursor SDK config loading, parsing, source precedence, safety-cap resolution, cloud environment selection, and legacy fast-default config persistence.
 - `src/cursor-custom-subagent-definitions.ts` maps validated named config to public SDK agents with independent catalog selection; SDK 1.0.37 LOCAL conversion is ID/inherit-only, while Cloud retains params. Ordinary turn acquisition hashes nonempty resolved definitions; summaries remain definition-free.

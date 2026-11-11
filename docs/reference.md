@@ -779,6 +779,8 @@ PI_CURSOR_SETTING_SOURCES=project,plugins,team pi --model cursor/grok-4.6
 
 Or fix/disable the slow MCP server in Cursor settings. Maintainer timing probe: `npm run debug:mcp-coldstart`.
 
+On high-latency networks, loading the `plugins` and `team` setting sources can also add seconds to the first send even without MCP servers; if you do not need them, narrow loading with `PI_CURSOR_SETTING_SOURCES=user,project`. The SDK's model-validation `GET /v1/models` is skipped when the fresh [model catalog cache](#model-catalog-cache) contains the selected model.
+
 ### A Cursor MCP tool times out
 
 The extension raises Cursor SDK's MCP tool-call timeout from 60 seconds to 3600 seconds by default for Cursor SDK MCP `callTool` requests, including the local pi bridge and configured Cursor MCP servers. For longer local MCP tools, set one override:

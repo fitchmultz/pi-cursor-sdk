@@ -1,6 +1,7 @@
 import type { ModelSelection, SDKAgent } from "@cursor/sdk";
 import { buildCursorSummaryPrompt, estimateCursorPromptTokens } from "./context.js";
 import { configureCursorSdkHttp1 } from "./cursor-http1.js";
+import { syncCursorSdkLocalModelCatalog } from "./cursor-local-model-catalog.js";
 import { createCursorNativeReplayId } from "./cursor-provider-live-run-drain.js";
 import type { PrepareCursorProviderTurnParams } from "./cursor-provider-turn-prepare.js";
 import { CursorSdkTurnCoordinator } from "./cursor-provider-turn-coordinator.js";
@@ -38,6 +39,7 @@ export async function prepareCursorSummaryProviderTurn(
 		ensureCursorRipgrepPath();
 		const sdk = await loadCursorSdk();
 		configureCursorSdkHttp1(sdk, resolvedConfig.local.useHttp1ForAgent);
+		syncCursorSdkLocalModelCatalog(resolvedApiKey, selection);
 		restoreCursorSdkOutputFilter = installCursorSdkOutputFilter();
 		sessionStore = (await openCursorSessionStoreForScope({
 			cwd, scopeKey: params.scope.persistentScopeKey ?? params.scope.scopeKey, persistent: false,

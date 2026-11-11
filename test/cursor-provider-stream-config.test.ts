@@ -23,6 +23,12 @@ import { registerCursorRuntimeControls } from "../src/cursor-state.js";
 import { registerCursorSessionScope } from "../src/cursor-session-scope.js";
 import { __testUtils as contextWindowCacheTestUtils } from "../src/context-window-cache.js";
 import { __testUtils as modelDiscoveryTestUtils } from "../src/model-discovery.js";
+import {
+	CURSOR_SDK_LOCAL_MODEL_CATALOG_ENV,
+	projectCursorModelsForLocalValidation,
+	syncCursorSdkLocalModelCatalog,
+} from "../src/cursor-local-model-catalog.js";
+import { fingerprintApiKey, saveModelListCache } from "../src/model-list-cache.js";
 import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
 import type { Context } from "@earendil-works/pi-ai";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -115,6 +121,40 @@ describe("streamCursor prompt and model config", () => {
 		expect(pathAtCreate).toBeTruthy();
 		expect(isAbsolute(pathAtCreate!)).toBe(true);
 		expect(pathAtCreate!.replaceAll("\\", "/")).toContain(`@cursor/sdk-${process.platform}-${process.arch}`);
+	});
+
+	it("serves the fresh cached catalog to SDK model validation before local Agent.create", async () => {
+		const agentDir = mkdtempSync(join(tmpdir(), "pi-cursor-catalog-env-"));
+		const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		delete process.env[CURSOR_SDK_LOCAL_MODEL_CATALOG_ENV];
+		const models = [{ id: "gpt-5.5", displayName: "GPT-5.5", variants: [{ params: [], displayName: "GPT-5.5", isDefault: true }] }];
+		saveModelListCache(fingerprintApiKey("test-key"), models);
+		let catalogAtCreate: string | undefined;
+		mockedCreate.mockImplementation(async () => {
+			catalogAtCreate = process.env[CURSOR_SDK_LOCAL_MODEL_CATALOG_ENV];
+			return asMockSdkAgent({
+				send: vi.fn().mockResolvedValue({
+					id: "run-1",
+					agentId: "agent-1",
+					status: "finished",
+					wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
+					cancel: vi.fn(),
+					supports: () => true,
+					unsupportedReason: () => undefined,
+				}),
+			});
+		});
+		try {
+			await collectEvents(streamCursor(makeModel("gpt-5.5@1m"), makeContext(), { apiKey: "test-key" }));
+			expect(mockedCreate).toHaveBeenCalledTimes(1);
+			expect(JSON.parse(catalogAtCreate!)).toEqual(projectCursorModelsForLocalValidation(models));
+		} finally {
+			syncCursorSdkLocalModelCatalog("test-key-without-cache", { id: "gpt-5.5" });
+			if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+			else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+			rmSync(agentDir, { recursive: true, force: true });
+		}
 	});
 
 	it("passes enabled local safety controls from env into Agent.create", async () => {

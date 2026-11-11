@@ -32,6 +32,7 @@ import type { CursorResolvedSdkConfig } from "./cursor-config.js";
 import { buildCursorCustomSubagentDefinitions } from "./cursor-custom-subagent-definitions.js";
 import { buildCursorModelSelection } from "./model-discovery.js";
 import { getEffectiveCursorSettingSources } from "./cursor-setting-sources.js";
+import { syncCursorSdkLocalModelCatalog } from "./cursor-local-model-catalog.js";
 import {
 	formatCursorCloudPreflightError,
 	buildCursorCloudAgentOptions,
@@ -277,6 +278,7 @@ async function prepareCursorLocalProviderTurn(
 		);
 
 		installCursorMcpToolTimeoutOverride();
+		syncCursorSdkLocalModelCatalog(resolvedApiKey, selection);
 		restoreCursorSdkOutputFilter = installCursorSdkOutputFilter();
 		const settingSources = getEffectiveCursorSettingSources();
 		const queuedBridgeRequestsBeforeLiveRun: CursorPiBridgeToolRequest[] = [];

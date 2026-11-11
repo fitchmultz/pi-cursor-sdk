@@ -6,6 +6,9 @@
 
 ### Changed
 
+- LOCAL turns skip the Cursor SDK's per-process `GET /v1/models` validation when the fresh cached catalog contains the selected model, by passing a validation-only projection of that catalog (ids, aliases and max-mode variants, about 2 KB for 49 models) through the SDK's `CURSOR_SDK_LOCAL_MODEL_CATALOG_JSON`.
+  This removes one catalog round trip from the first LOCAL turn of every pi process. A missing, stale, disabled or non-matching cache keeps live validation, and a user-set value is left untouched.
+
 - Refresh the fallback catalog from the authenticated SDK 1.0.40 catalog-only observation on 2026-11-10, with 49 models.
   Compared with the 50-model Nov 9 snapshot, it adds Gemini 4 Carbon (`gemini-4-carbon`), removes Gemini 3.6 Flash and 3.7 Flash, and adds Fable 5.2 `fast=false|true` metadata.
   Fable's 10 variants become 20, with `context=1m`, `effort=high`, and `fast=false` as the default. Its aliases and context/effort values are unchanged, as are the other 47 model records.

@@ -19,9 +19,9 @@ jobs:
     permissions:
       contents: write
     if: vars.NPM_RELEASE_ENABLED == 'true' && github.ref == 'refs/heads/main' && github.repository_owner == 'fitchmultz'
-    uses: fitchmultz/.github/.github/workflows/npm-release-plan.yml@ab40e0d5429703b9aeae65af33051193a725701b # main
+    uses: fitchmultz/.github/.github/workflows/npm-release-plan.yml@85d05a42febdf1418bfa8b42842a8485aade10c1 # main
     with:
-      automation-ref: ab40e0d5429703b9aeae65af33051193a725701b # main
+      automation-ref: 85d05a42febdf1418bfa8b42842a8485aade10c1 # main
 
   checks:
     needs: plan
@@ -36,9 +36,9 @@ jobs:
     if: needs.plan.outputs.release == 'true'
     permissions:
       contents: write
-    uses: fitchmultz/.github/.github/workflows/npm-release-prepare.yml@ab40e0d5429703b9aeae65af33051193a725701b # main
+    uses: fitchmultz/.github/.github/workflows/npm-release-prepare.yml@85d05a42febdf1418bfa8b42842a8485aade10c1 # main
     with:
-      automation-ref: ab40e0d5429703b9aeae65af33051193a725701b # main
+      automation-ref: 85d05a42febdf1418bfa8b42842a8485aade10c1 # main
       source-ref: ${{ needs.plan.outputs.source }}
       release-source: ${{ needs.plan.outputs.release-source }}
       official-version: ${{ needs.plan.outputs.official-version }}
@@ -68,7 +68,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: fitchmultz/.github
-          ref: ab40e0d5429703b9aeae65af33051193a725701b # main
+          ref: 85d05a42febdf1418bfa8b42842a8485aade10c1 # main
           path: automation
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -110,9 +110,9 @@ jobs:
       actions: read
       contents: write
       id-token: write
-    uses: fitchmultz/.github/.github/workflows/npm-release-qualified.yml@ab40e0d5429703b9aeae65af33051193a725701b # main
+    uses: fitchmultz/.github/.github/workflows/npm-release-qualified.yml@85d05a42febdf1418bfa8b42842a8485aade10c1 # main
     with:
-      automation-ref: ab40e0d5429703b9aeae65af33051193a725701b # main
+      automation-ref: 85d05a42febdf1418bfa8b42842a8485aade10c1 # main
       source-ref: ${{ needs.plan.outputs.source }}
       release-source: ${{ needs.plan.outputs.release-source }}
       official-version: ${{ needs.plan.outputs.official-version }}

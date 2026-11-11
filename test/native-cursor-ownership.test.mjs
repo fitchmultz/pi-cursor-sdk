@@ -325,6 +325,74 @@ test("a replay run finished before an abort cannot publish its resume handle on 
   });
 });
 
+test("a replay run kept by a same-branch tree move replays without publishing its old-generation resume handle", { timeout: 60000 }, async (t) => {
+  await concurrentFixture(t, async ({ create }) => {
+    process.env.PI_CURSOR_LOCAL_RESUME = "1";
+    const a = await create("replay-abort-kept-tree");
+    await a.session.prompt("first request");
+    let aborting;
+    const unsubscribe = a.session.subscribe((event) => {
+      if (event.type === "tool_execution_start") aborting ??= a.session.abort();
+    });
+    await a.session.prompt("REPLAY_FIXTURE interrupted request");
+    await aborting;
+    unsubscribe();
+    const interrupted = state.sends.at(-1);
+    const abortError = a.manager.getBranch().findLast(e => e.type === "message");
+    assert.equal(abortError.message.stopReason, "error");
+    // Naming the session appends under the error, so selecting the error is a real tree move that keeps the run's result.
+    a.session.setSessionName("kept run");
+    await a.session.navigateTree(abortError.id, { summarize: false });
+    assert.equal(a.manager.getLeafId(), abortError.id);
+    assert.equal(state.disposed.includes(interrupted.agentId), false, "the kept run keeps its agent");
+    const sendCount = state.sends.length;
+    await a.session.prompt("continue on the kept branch");
+    assert.equal(state.sends.length, sendCount, "the kept run's queued answer is replayed, not sent again");
+    const branch = a.manager.getBranch();
+    const continued = branch.slice(branch.findLastIndex(e => e.type === "message" && e.message.role === "user"));
+    assert.deepEqual(continued.filter(e => e.type === "custom" && e.customType === "cursor-sdk-agent-resume"), [],
+      "a send issued before the tree move publishes no handle on the selected branch");
+    await retainNativeEvidence("native-replay-abort-kept-tree", a.manager, a.cwd);
+  });
+});
+
+test("tree navigation keeps a pending run when only its already-delivered bridge result remains on the branch", { timeout: 60000 }, async (t) => {
+  await concurrentFixture(t, async ({ create }) => {
+    process.env.PI_CURSOR_LOCAL_RESUME = "1";
+    const a = await create("bridge-delivered-kept-tree");
+    await a.session.prompt("first request");
+    const firstUser = a.manager.getEntries().find(e => e.type === "message" && e.message.role === "user");
+    assert.ok(firstUser);
+
+    const beforeResults = state.bridgeResults.length;
+    let aborting;
+    const unsubscribe = a.session.subscribe((event) => {
+      if (event.type === "tool_execution_start" && event.toolName !== "fixture_bridge") aborting ??= a.session.abort();
+    });
+    await a.session.prompt("BRIDGE_FIXTURE REPLAY_FIXTURE");
+    await aborting;
+    unsubscribe();
+    assert.equal(state.bridgeResults.length, beforeResults + 1, "the bridge result was already delivered before the read replay aborted");
+
+    const interrupted = state.sends.at(-1);
+    const deliveredBridgeResult = a.manager.getBranch().findLast(
+      e => e.type === "message" && e.message.role === "toolResult" && e.message.toolName === "fixture_bridge",
+    );
+    assert.ok(deliveredBridgeResult);
+    await a.session.navigateTree(deliveredBridgeResult.id, { summarize: false });
+    assert.equal(a.manager.getLeafId(), deliveredBridgeResult.id);
+    assert.equal(state.disposed.includes(interrupted.agentId), false, "branch holding the run's delivered bridge result keeps the run and its agent");
+
+    await a.session.navigateTree(firstUser.id, { summarize: false });
+    assert.ok(state.disposed.includes(interrupted.agentId), "navigating off the delivered bridge result releases the kept run and its agent");
+    await a.session.prompt("after off-branch release");
+    assert.equal(a.session.messages.at(-1)?.stopReason, "stop");
+    const isResume = e => e.type === "custom" && e.customType === "cursor-sdk-agent-resume";
+    assert.deepEqual(a.manager.getBranch().filter(e => isResume(e) && e.data.agentId === interrupted.agentId), []);
+    await retainNativeEvidence("native-bridge-delivered-kept-tree", a.manager, a.cwd);
+  });
+});
+
 test("independent concurrent streams retain owned persisted lineage and sibling isolation", { timeout: 60000 }, async (t) => {
   await concurrentFixture(t, async ({ create }) => {
     const a = await create("concurrent-A");
@@ -462,6 +530,13 @@ for (const nativeToolsEnabled of [true, false]) {
       unsubscribe();
       assert.deepEqual(idleAbortEvents, [], "idle Pi abort exposes no extension/provider abort event");
       assert.equal(state.cancelled.includes(originalRun.runId), false, "do not pretend idle Pi abort reached the old SDK run");
+      // A tree move that keeps the run's Pi result on the selected branch leaves the run recoverable.
+      const pendingResult = owner.manager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "toolResult");
+      assert.notEqual(pendingResult.id, owner.manager.getLeafId());
+      await owner.session.navigateTree(pendingResult.id, { summarize: false });
+      assert.equal(owner.manager.getBranch().findLast(entry => entry.type === "message").id, pendingResult.id, "the mismatch error leaves the branch");
+      assert.equal(state.cancelled.includes(originalRun.runId), false, "same-branch tree navigation must not cancel the recoverable run");
+      assert.equal(state.disposed.includes(originalRun.agentId), false, "same-branch tree navigation must keep the recoverable run's agent");
       const sendsBeforeCommand = state.sends.length;
       await owner.session.prompt("/cursor-abort");
       await retainNativeEvidence(`native-policy-explicit-abort-${nativeToolsEnabled}`, owner.manager, owner.cwd);
@@ -590,5 +665,212 @@ test("a failed journal append keeps saved global fast and HTTP authority owned b
       owner: { fast: "false", transport: { local: { useHttp1ForAgent: false } } },
     });
     await retainNativeEvidence("preference-authority-owner", a.manager, a.cwd);
+  });
+});
+
+test("shared runtime requests require their actual session's registration once that registration has started", { timeout: 60000 }, async (t) => {
+  await concurrentFixture(t, async ({ create }) => {
+    const a = await create("shared-A");
+    await a.session.prompt("A before sharing");
+    const b = await create("shared-B", { runtime: a.session.modelRuntime, bind: false });
+    const staleStream = a.session.modelRuntime.getProvider("cursor").streamSimple;
+    await a.session.prompt("unstarted B registration serves A's own receipt");
+    assert.equal(a.session.messages.at(-1).stopReason, "stop", a.session.messages.at(-1).errorMessage);
+    const delegatedAgent = state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId);
+    assert.equal(delegatedAgent?.options.local.cwd, a.cwd);
+    const beforeSends = state.sends.length;
+    await b.session.bindExtensions({ mode: "rpc" });
+    await a.session.prompt("A cannot enter B registration");
+    const ownershipError = a.session.messages.at(-1).errorMessage;
+    assert.match(ownershipError, /request does not belong/);
+    assert.match(ownershipError, /Reload this session's extensions/);
+    assert.match(ownershipError, /use independent ModelRuntime instances for sibling sessions/);
+    assert.doesNotMatch(ownershipError, /refresh Cursor models/);
+    assert.equal(state.sends.length, beforeSends);
+    await b.session.prompt("correct B receipt and registration");
+    assert.equal(b.session.messages.at(-1).stopReason, "stop");
+    const registeredAgent = state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId);
+    assert.equal(registeredAgent?.options.local.cwd, b.cwd);
+    await b.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+    await a.session.prompt("closed B registration is not A");
+    assert.match(a.session.messages.at(-1).errorMessage, /binding is not active/);
+    const staleResult = await staleStream(a.session.model, { messages: [] }, { apiKey: "offline-fixture-only" }).result();
+    assert.match(staleResult.errorMessage, /binding is not active/);
+    await a.session.prompt("/cursor-refresh-models");
+    assert.equal(a.session.modelRuntime.getProvider("cursor").streamSimple, staleStream, "catalog refresh cannot replace the sibling's native registration");
+    await a.session.reload();
+    assert.notEqual(a.session.modelRuntime.getProvider("cursor").streamSimple, staleStream);
+    await a.session.prompt("A recovered with its own request receipt");
+    assert.equal(a.session.messages.at(-1).stopReason, "stop");
+    const reloadedAgent = state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId);
+    assert.equal(reloadedAgent?.options.local.cwd, a.cwd);
+  });
+});
+
+for (const operation of ["ordinary", "bugreport"]) {
+  test(`hidden unstarted shared B ${operation} cannot enter A after C overwrites B, shuts down and A refreshes`, { timeout: 60000 }, async (t) => {
+    await concurrentFixture(t, async ({ create }) => {
+      const a = await create("hidden-A");
+      await a.session.prompt("A before sharing");
+      const b = await create("hidden-B", { runtime: a.session.modelRuntime, bind: false });
+      const c = await create("hidden-C", { runtime: a.session.modelRuntime, bind: false });
+      await a.session.prompt("/cursor-refresh-models");
+      await c.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+      await a.session.prompt("/cursor-refresh-models");
+      await a.session.reload();
+      const beforeA = await readFile(a.manager.getSessionFile(), "utf8");
+      const beforeSends = state.sends.length;
+      const beforeStores = state.stores.length;
+      if (operation === "ordinary") {
+        await b.session.prompt("unbound B must not enter A");
+        assert.match(b.session.messages.at(-1).errorMessage, /request does not belong/);
+      } else {
+        await assert.rejects(b.session.summarizeForBugReport({ hint: "hidden B", signal: t.signal }), /request does not belong/);
+      }
+      assert.equal(state.sends.length, beforeSends);
+      assert.equal(state.stores.length, beforeStores);
+      assert.equal(await readFile(a.manager.getSessionFile(), "utf8"), beforeA);
+      await b.session.bindExtensions({ mode: "rpc" });
+      await b.session.prompt("bound B cannot enter A either");
+      assert.match(b.session.messages.at(-1).errorMessage, /request does not belong/);
+      await a.session.prompt("A with truthful receipt remains safe");
+      assert.equal(a.session.messages.at(-1).stopReason, "stop");
+    });
+  });
+}
+
+test("catalog refresh awaiting auth cannot replace a sibling's native registration", { timeout: 60000 }, async (t) => {
+  await concurrentFixture(t, async ({ create }) => {
+    const a = await create("refresh-A");
+    const ownStream = a.session.modelRuntime.getProvider("cursor").streamSimple;
+    const registry = a.session.extensionRunner.getModelRegistry();
+    const enteredAuth = Promise.withResolvers();
+    const auth = Promise.withResolvers();
+    const getProviderAuth = registry.getProviderAuth.bind(registry);
+    registry.getProviderAuth = async (...args) => { enteredAuth.resolve(); await auth.promise; return getProviderAuth(...args); };
+    const refreshing = a.session.prompt("/cursor-refresh-models");
+    await enteredAuth.promise;
+    const b = await create("refresh-B", { runtime: a.session.modelRuntime });
+    const before = state.sends.length;
+    auth.resolve("offline-fixture-only");
+    await refreshing;
+    assert.notEqual(a.session.modelRuntime.getProvider("cursor").streamSimple, ownStream);
+    await a.session.prompt("A cannot enter B after stale refresh");
+    assert.match(a.session.messages.at(-1).errorMessage, /request does not belong/);
+    assert.equal(state.sends.length, before);
+    await b.session.prompt("B retains its native registration");
+    assert.equal(b.session.messages.at(-1).stopReason, "stop");
+    assert.equal(state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId).options.local.cwd, b.cwd);
+  });
+});
+
+test("native request headers retain identity and other handlers' mutations; missing or reused receipts fail closed", { timeout: 60000 }, async (t) => {
+  await concurrentFixture(t, async ({ root, create }) => {
+    const key = Symbol.for("cursor-native-header-probe");
+    const observed = globalThis[key] = [];
+    const before = join(root, "headers-before.mjs");
+    const after = join(root, "headers-after.mjs");
+    for (const [path, phase] of [[before, "before"], [after, "after"]]) {
+      await writeFile(path, `export default function(pi) { pi.on("before_provider_headers", async (event) => {
+        await Promise.resolve();
+        event.headers["x-fixture-${phase}"] = "preserved";
+        globalThis[Symbol.for("cursor-native-header-probe")].push({ phase: "${phase}", headers: event.headers });
+      }); }`);
+    }
+    try {
+      const a = await create("headers-A", { beforeExtensions: [before], afterExtensions: [after] });
+      const config = a.session.modelRuntime.getProvider("cursor");
+      const headers = [];
+      a.session.extensionRunner.getModelRegistry().registerProvider({ ...config, streamSimple: (model, context, options) => {
+        headers.push(options.headers);
+        return config.streamSimple(model, context, options);
+      } });
+      await a.session.prompt("first headers");
+      const target = a.manager.getEntries().find((entry) => entry.type === "message" && entry.message.role === "user").id;
+      await a.session.prompt("second headers");
+      await a.session.navigateTree(target, { summarize: true });
+      await a.session.prompt("third headers");
+      await a.session.compact();
+      await a.session.summarizeForBugReport({ hint: "headers retained", signal: t.signal });
+      assert.ok(headers.length >= 6, "ordinary, tree, compaction and bug-report calls reached the registered provider");
+      assert.equal(observed.length, headers.length * 2);
+      for (const [index, value] of headers.entries()) {
+        assert.equal(observed[index * 2].headers, value);
+        assert.equal(observed[index * 2 + 1].headers, value);
+        assert.equal(value["x-fixture-before"], "preserved");
+        assert.equal(value["x-fixture-after"], "preserved");
+      }
+      const beforeSends = state.sends.length;
+      for (const options of [{}, { headers: {} }, { headers: headers[0] }]) {
+        const result = await config.streamSimple(a.session.model, { messages: [] }, { apiKey: "offline-fixture-only", ...options }).result();
+        assert.match(result.errorMessage, /no native session request receipt/);
+        assert.match(result.errorMessage, /owning AgentSession's stream path or an independent child AgentSession/);
+      }
+      assert.equal(state.sends.length, beforeSends);
+    } finally { delete globalThis[key]; }
+  });
+});
+
+test("native sibling CLI flags retain owned runtime, mode, fast and per-binding one-shot local force", { timeout: 60000 }, async (t) => {
+  await concurrentFixture(t, async ({ create }) => {
+    const a = await create("cli-A", { flags: {
+      "cursor-runtime": "local", "cursor-mode": "plan", "cursor-fast": true, "cursor-local-force": true,
+    } });
+    const b = await create("cli-B", { flags: {
+      "cursor-runtime": "cloud", "cursor-cloud-env": "CLI_B_ENV", "cursor-cloud-env-type": "poll",
+      "cursor-cloud-env-name": "B environment", "cursor-mode": "agent", "cursor-no-fast": true,
+    } });
+    const beforeB = b.manager.getEntries();
+    await a.session.prompt("A CLI remains owned after cloud B binds");
+    assert.equal(a.session.messages.at(-1).stopReason, "stop", a.session.messages.at(-1).errorMessage);
+    const agent = state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId);
+    assert.equal(agent.options.local.cwd, a.cwd);
+    assert.equal(agent.options.mode, "plan");
+    assert.equal(agent.options.model.params.find((parameter) => parameter.id === "fast").value, "true");
+    assert.equal(state.sends.at(-1).force, true);
+    assert.deepEqual(b.manager.getEntries(), beforeB);
+    const c = await create("cli-C", { flags: { "cursor-runtime": "local", "cursor-local-force": true } });
+    await a.session.prompt("A force was already consumed");
+    assert.equal(state.sends.at(-1).force, undefined);
+    assert.equal(state.sends.at(-1).mode, "plan");
+    await c.session.prompt("C has its own first force");
+    assert.equal(state.sends.at(-1).force, true);
+    await c.session.prompt("C force only once");
+    assert.equal(state.sends.at(-1).force, undefined);
+    await a.session.bindExtensions({ mode: "rpc" });
+    const beforeReloadStream = a.session.modelRuntime.getProvider("cursor").streamSimple;
+    await a.session.reload();
+    assert.notEqual(a.session.modelRuntime.getProvider("cursor").streamSimple, beforeReloadStream, "reload replaces the provider closure");
+    await a.session.prompt("A rebinding/reload does not reset its run's force");
+    assert.equal(a.session.messages.at(-1).stopReason, "stop", a.session.messages.at(-1).errorMessage);
+    assert.equal(state.sends.at(-1).force, undefined);
+    assert.equal(state.sends.at(-1).mode, "plan");
+  });
+});
+
+test("branch runtime, plan, fast and HTTP preferences remain owned by A after differently configured B binds", { timeout: 60000 }, async (t) => {
+  await concurrentFixture(t, async ({ create }) => {
+    const a = await create("settings-A", { preferences: [
+      ["cursor-runtime-state", { runtime: "local" }],
+      ["cursor-mode-state", { mode: "plan" }],
+      ["cursor-fast-state", { modelId: "fixture", fast: true }],
+      ["cursor-http1-state", { enabled: true }],
+    ] });
+    const b = await create("settings-B", { preferences: [
+      ["cursor-runtime-state", { runtime: "cloud", cloudAcknowledged: true }],
+      ["cursor-mode-state", { mode: "agent" }],
+      ["cursor-fast-state", { modelId: "fixture", fast: false }],
+      ["cursor-http1-state", { enabled: false }],
+    ] });
+    const beforeB = b.manager.getEntries();
+    await a.session.prompt("A owned configuration");
+    assert.equal(a.session.messages.at(-1).stopReason, "stop");
+    const agent = state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId);
+    assert.equal(agent.options.local.cwd, a.cwd);
+    assert.equal(agent.options.mode, "plan");
+    assert.equal(state.sends.at(-1).mode, "plan");
+    assert.equal(agent.options.model.params.find((parameter) => parameter.id === "fast").value, "true");
+    assert.deepEqual(state.configured.at(-1), { local: { useHttp1ForAgent: true } });
+    assert.deepEqual(b.manager.getEntries(), beforeB);
   });
 });

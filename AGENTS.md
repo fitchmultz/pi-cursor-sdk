@@ -104,7 +104,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `src/cursor-bridge-contract.ts` owns pi bridge MCP naming, the model-facing bridge preference text, and concise MCP descriptions that point to the bootstrap tool-surface rules.
 - `src/cursor-tool-manifest.ts` owns bootstrap callable-surface manifest text (`PI_CURSOR_TOOL_MANIFEST`, default on).
 - `test/**/*.test.ts` contains Vitest coverage for provider registration, discovery, state, context, bridge, replay, and streaming behavior.
-- `test/native-cursor-ownership.test.mjs` owns native concurrent and same-file-manager lifecycle/resume/bridge/preference ownership contracts, using the shared native harness and explicit compatibility CI routes.
+- `test/native-cursor-ownership.test.mjs` owns native concurrent and same-file-manager lifecycle/resume/bridge/preference ownership contracts plus sibling registration, header-receipt and per-session preference binding, using the shared native harness and explicit compatibility CI routes.
 - `test/helpers/pi-harness.ts` is the canonical fake pi/extension harness (`createPiHarness`, shared model/context/event runners, tool factories).
 - `test/helpers/cursor-provider-harness.ts` owns Cursor SDK provider mocks/stream helpers and re-exports pi-harness fixtures for provider tests.
 - `test/helpers/cursor-provider-ownership.ts` supplies explicit direct-provider fixtures with real public SessionManager/captured accounting; binding/native tests own actual header-receipt proof.

@@ -64,16 +64,17 @@ export interface CursorLiveRun {
 	accounting: CursorLiveRunAccountingState;
 	onAbandon?: () => Promise<void>;
 	pendingEvents: CursorLiveQueuedEvent[];
+	/** Bridge `piToolCallId`s queued by this run, retained after MCP delivery settles pending state. */
+	issuedBridgeToolCallIds: Set<string>;
 	textDeltas: string[];
 	emittedText: string;
 	recordedToolDisplayIds: string[];
 	resumeNotice?: string;
-	/** Committed at SDK completion; only terminal deliveries publish it, which chained or disposed runs never reach. */
+	/** Committed at SDK completion; only terminal deliveries publish it, which replaced or released runs never reach. */
 	resumePublication?: CursorSessionAgentResumePublication;
 	/** Written only by the coordinator's `settle()`; `release()` owns `resources`. */
 	outcome: CursorLiveRunOutcome;
 	resources: CursorLiveRunResources;
-	chainUserInputAfterCompletion: boolean;
 	debugRecorder?: CursorSdkEventDebugRecorder;
 	nativeDisplay?: CursorNativeToolDisplayState;
 }
@@ -91,6 +92,9 @@ export interface CursorLiveRunCreateParams {
 	debugRecorder?: CursorSdkEventDebugRecorder;
 	nativeDisplay?: CursorNativeToolDisplayState;
 }
+
+/** Starts the body only if the run is open after acquisition. Release during the body does not interrupt it. */
+export type CursorLiveRunLeaseResult<T> = { kind: "leased"; value: T } | { kind: "released" };
 
 export interface CursorLiveRunCoordinatorDeps {
 	getScopeKey?: () => string;
@@ -117,7 +121,7 @@ export interface CursorLiveRunCoordinator {
 	getActiveForScope(scopeKey?: string): CursorLiveRun | undefined;
 	isReady(run: CursorLiveRun): boolean;
 	waitForProgress(run: CursorLiveRun, signal?: AbortSignal): Promise<void>;
-	withRunLease<T>(run: CursorLiveRun, signal: AbortSignal | undefined, body: () => Promise<T>): Promise<T>;
+	withRunLease<T>(run: CursorLiveRun, signal: AbortSignal | undefined, body: () => Promise<T>): Promise<CursorLiveRunLeaseResult<T>>;
 	requestIdleDispose(run: CursorLiveRun): void;
 	release(run: CursorLiveRun): Promise<void>;
 	count(): number;
@@ -133,19 +137,13 @@ function isPendingBridgeToolRequest(run: CursorLiveRun, request: CursorPiBridgeT
 export interface CursorLiveRunRecord {
 	id: string;
 	bridgeRun?: CursorLiveBridgeMatcher;
+	readonly issuedBridgeToolCallIds?: ReadonlySet<string>;
 	sessionAgentScopeKey?: string;
 }
 
 type CursorReplayIdResolver = (toolCallId: string) => string | undefined;
 
 interface ProgressWaiter {
-	resolve: () => void;
-	reject: (error: unknown) => void;
-	signal?: AbortSignal;
-	onAbort?: () => void;
-}
-
-interface LeaseWaiter {
 	resolve: () => void;
 	reject: (error: unknown) => void;
 	signal?: AbortSignal;
@@ -163,13 +161,23 @@ async function cancelCursorLiveSdkRun(run: CursorLiveRun): Promise<void> {
 	}
 }
 
+/** Callers queue only behind a held lease; each grant hands the lease to the next caller in FIFO order. */
+interface HeldCursorLiveRunLease {
+	kind: "held";
+	queue: Array<() => void>;
+}
+
+/** Expiry stays requested while a lease or pending bridge call keeps the run busy, then arms one full window. */
+type CursorLiveRunIdleExpiry =
+	| { kind: "none" }
+	| { kind: "requested" }
+	| { kind: "armed"; timer: ReturnType<typeof setTimeout> };
+
 interface CursorLiveRunPrivateState {
 	waiters: Set<ProgressWaiter>;
-	idleDisposeTimer?: ReturnType<typeof setTimeout>;
-	idleDisposeRequested: boolean;
 	pendingCallUnsubscribers?: Array<() => void>;
-	leased: boolean;
-	leaseQueue: LeaseWaiter[];
+	lease: { kind: "free" } | HeldCursorLiveRunLease;
+	idle: CursorLiveRunIdleExpiry;
 }
 
 export function hasTrailingUserMessagesAfterToolResults(context: Context): boolean {
@@ -197,7 +205,8 @@ export function matchesCursorLiveRunToolResult(
 ): boolean {
 	const replayId = getReplayId(message.toolCallId);
 	if (replayId) return replayId === run.id;
-	return run.bridgeRun?.hasPendingPiToolCallId(message.toolCallId) ?? false;
+	return run.issuedBridgeToolCallIds?.has(message.toolCallId)
+		|| (run.bridgeRun?.hasPendingPiToolCallId(message.toolCallId) ?? false);
 }
 
 export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDeps): CursorLiveRunCoordinator {
@@ -209,12 +218,7 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 	function getPrivateState(run: CursorLiveRun): CursorLiveRunPrivateState {
 		let state = privateStates.get(run);
 		if (!state) {
-			state = {
-				waiters: new Set(),
-				idleDisposeRequested: false,
-				leased: false,
-				leaseQueue: [],
-			};
+			state = { waiters: new Set(), lease: { kind: "free" }, idle: { kind: "none" } };
 			privateStates.set(run, state);
 		}
 		return state;
@@ -227,11 +231,29 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 		return run;
 	}
 
-	function clearIdleDisposeTimer(run: CursorLiveRun): void {
-		const state = getPrivateState(run);
-		if (!state.idleDisposeTimer) return;
-		clearTimeout(state.idleDisposeTimer);
-		state.idleDisposeTimer = undefined;
+	function isIdleExpiryEligible(run: CursorLiveRun, state: CursorLiveRunPrivateState): boolean {
+		return state.lease.kind === "free" && ![run.bridgeRun, run.sessionBridgeRun].some((bridge) => bridge?.hasPendingToolCalls());
+	}
+
+	/** Every idle transition goes through here, so leaving `armed` always cancels its timer. */
+	function setIdleExpiry(state: CursorLiveRunPrivateState, idle: CursorLiveRunIdleExpiry): void {
+		if (state.idle.kind === "armed") clearTimeout(state.idle.timer);
+		state.idle = idle;
+	}
+
+	function startIdleExpiryTimer(run: CursorLiveRun, state: CursorLiveRunPrivateState): ReturnType<typeof setTimeout> {
+		const timer = setTimeout(() => {
+			// Bridge calls can become pending without a change notification; recheck before expiring.
+			if (!isIdleExpiryEligible(run, state)) {
+				setIdleExpiry(state, { kind: "requested" });
+				return;
+			}
+			void coordinator.release(run).catch(() => {
+				// Idle dispose must not leave release failures as unhandled rejections.
+			});
+		}, deps.getIdleDisposeMs());
+		timer.unref?.();
+		return timer;
 	}
 
 	function notifyProgress(run: CursorLiveRun): void {
@@ -244,48 +266,40 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 		}
 	}
 
-	function removeLeaseWaiter(state: CursorLiveRunPrivateState, waiter: LeaseWaiter): void {
-		const index = state.leaseQueue.indexOf(waiter);
-		if (index >= 0) state.leaseQueue.splice(index, 1);
-	}
-
-	function grantNextLeaseOrUnlock(run: CursorLiveRun): void {
-		const state = getPrivateState(run);
-		while (state.leaseQueue.length > 0) {
-			const next = state.leaseQueue.shift();
-			if (!next) continue;
-			if (next.onAbort) next.signal?.removeEventListener("abort", next.onAbort);
-			next.resolve();
-			return;
-		}
-		state.leased = false;
-		if (state.idleDisposeRequested && run.resources.kind === "open") {
-			coordinator.requestIdleDispose(run);
-		}
-	}
-
-	async function acquireLease(run: CursorLiveRun, signal?: AbortSignal): Promise<void> {
+	async function acquireLease(state: CursorLiveRunPrivateState, signal?: AbortSignal): Promise<HeldCursorLiveRunLease> {
 		if (signal?.aborted) throw new CursorLiveRunAbortError();
-		const state = getPrivateState(run);
-		if (!state.leased) {
-			state.leased = true;
-			return;
+		if (state.lease.kind === "free") {
+			const lease: HeldCursorLiveRunLease = { kind: "held", queue: [] };
+			state.lease = lease;
+			return lease;
 		}
 
+		const lease = state.lease;
 		await new Promise<void>((resolve, reject) => {
-			const waiter: LeaseWaiter = { resolve, reject, signal };
+			const grant = (): void => {
+				signal?.removeEventListener("abort", onAbort);
+				resolve();
+			};
 			const onAbort = (): void => {
-				removeLeaseWaiter(state, waiter);
+				const index = lease.queue.indexOf(grant);
+				if (index >= 0) lease.queue.splice(index, 1);
 				reject(new CursorLiveRunAbortError());
 			};
-			waiter.onAbort = onAbort;
-			state.leaseQueue.push(waiter);
-			if (signal?.aborted) {
-				onAbort();
-				return;
-			}
+			lease.queue.push(grant);
 			signal?.addEventListener("abort", onAbort, { once: true });
 		});
+		return lease;
+	}
+
+	/** Hands the lease to the next queued caller, or frees it and arms a deferred idle request. */
+	function passLease(run: CursorLiveRun, state: CursorLiveRunPrivateState, lease: HeldCursorLiveRunLease): void {
+		const grant = lease.queue.shift();
+		if (grant) {
+			grant();
+			return;
+		}
+		state.lease = { kind: "free" };
+		if (state.idle.kind === "requested") coordinator.requestIdleDispose(run);
 	}
 
 	function unregister(run: CursorLiveRun): void {
@@ -322,8 +336,7 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 		}
 		state.pendingCallUnsubscribers = [];
 		unregister(run);
-		clearIdleDisposeTimer(run);
-		state.idleDisposeRequested = false;
+		setIdleExpiry(state, { kind: "none" });
 		notifyProgress(run);
 		run.bridgeRun?.cancel("Cursor live run released");
 		for (const toolDisplayId of run.recordedToolDisplayIds) deps.deleteNativeToolDisplay(toolDisplayId);
@@ -376,24 +389,18 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 				nativeDisplay: params.nativeDisplay,
 				accounting: createCursorLiveRunAccountingState(params.promptInputTokens),
 				pendingEvents: [],
+				issuedBridgeToolCallIds: new Set(),
 				textDeltas: params.textDeltas ?? [],
 				emittedText: "",
 				recordedToolDisplayIds: [],
 				outcome: { kind: "running" },
 				resources: { kind: "open" },
-				chainUserInputAfterCompletion: false,
 				debugRecorder: params.debugRecorder,
 			};
-			privateStates.set(run, {
-				waiters: new Set(),
-				idleDisposeRequested: false,
-				leased: false,
-				leaseQueue: [],
-			});
 			const state = getPrivateState(run);
 			state.pendingCallUnsubscribers = [...new Set([run.bridgeRun, run.sessionBridgeRun])].flatMap((bridge) =>
 				bridge ? [bridge.onPendingToolCallsChanged(() => {
-					if (state.idleDisposeRequested || state.idleDisposeTimer) coordinator.requestIdleDispose(run);
+					if (state.idle.kind !== "none") coordinator.requestIdleDispose(run);
 				})] : [],
 			);
 			pendingRuns.set(run.id, run);
@@ -426,6 +433,7 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 
 		queueEvent(run, event): void {
 			if (run.resources.kind !== "open") return;
+			if (event.type === "bridge-tool") run.issuedBridgeToolCallIds.add(event.request.piToolCallId);
 			run.pendingEvents.push(event);
 			run.debugRecorder?.recordLiveRunEvent(event);
 			notifyProgress(run);
@@ -532,36 +540,26 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 			});
 		},
 
-		async withRunLease(run, signal, body): Promise<Awaited<ReturnType<typeof body>>> {
-			await acquireLease(run, signal);
-			clearIdleDisposeTimer(run);
+		async withRunLease<T>(run: CursorLiveRun, signal: AbortSignal | undefined, body: () => Promise<T>): Promise<CursorLiveRunLeaseResult<T>> {
+			const state = getPrivateState(run);
+			const lease = await acquireLease(state, signal);
+			// Holding the lease defers expiry; passing it back rearms a full window.
+			if (state.idle.kind === "armed") setIdleExpiry(state, { kind: "requested" });
 			try {
 				if (signal?.aborted) throw new CursorLiveRunAbortError();
-				return await body();
+				// The previous holder can release the run while this caller is queued.
+				if (run.resources.kind !== "open") return { kind: "released" };
+				return { kind: "leased", value: await body() };
 			} finally {
-				grantNextLeaseOrUnlock(run);
+				passLease(run, state, lease);
 			}
 		},
 
 		requestIdleDispose(run): void {
 			if (run.resources.kind !== "open") return;
 			const state = getPrivateState(run);
-			clearIdleDisposeTimer(run);
-			state.idleDisposeRequested = true;
-			if (state.leased || state.leaseQueue.length > 0 ||
-				[run.bridgeRun, run.sessionBridgeRun].some((bridge) => bridge?.hasPendingToolCalls())) return;
-			state.idleDisposeTimer = setTimeout(() => {
-				state.idleDisposeTimer = undefined;
-				if (state.leased || state.leaseQueue.length > 0 ||
-					[run.bridgeRun, run.sessionBridgeRun].some((bridge) => bridge?.hasPendingToolCalls())) {
-					coordinator.requestIdleDispose(run);
-					return;
-				}
-				void coordinator.release(run).catch(() => {
-					// Idle dispose must not leave release failures as unhandled rejections.
-				});
-			}, deps.getIdleDisposeMs());
-			state.idleDisposeTimer.unref?.();
+			setIdleExpiry(state, { kind: "requested" });
+			if (isIdleExpiryEligible(run, state)) setIdleExpiry(state, { kind: "armed", timer: startIdleExpiryTimer(run, state) });
 		},
 
 		release(run): Promise<void> {

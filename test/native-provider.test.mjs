@@ -37,7 +37,7 @@ test("native replay completes with the same JSON arguments as its streamed delta
   try {
     assert.equal(await drainCursorLiveRunTurn(stream, partial, model,
       { messages: [], tools: [{ name: "read", description: "Read", parameters: Type.Object({ path: Type.String() }) }] },
-      run, 0, { mode: "emit" }), "tool_use");
+      run, 0), "toolUse");
     stream.end();
     const events = [];
     for await (const event of stream) events.push(event);

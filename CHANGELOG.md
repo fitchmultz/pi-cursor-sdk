@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Debug capture: in `drain-events.jsonl`, `pre_send_continuation` replaces `pre_send_iteration` and records whether a pending run is replayed (`replay`) or superseded by user input sent after its tool results (`replaceWithUserInput`). `pre_send_end` reports `toolUse`, `terminal` or `continueSend` instead of `stream_ended` or `continue_send`. `aborted` and `error` outcomes are unchanged. A superseded run no longer records a `chain_user_input` drain turn, `turn_start` drops `mode`, and `turn_end` reports `toolUse` instead of `tool_use`.
+
 ### Fixed
 
 - Ask Pi to abort a running bridged tool only once when the bridge stops it after a call deadline, Cursor cancellation, run release or shutdown. On Windows, the bash process-tree cleanup for that tool now also runs once instead of twice.

@@ -1,4 +1,4 @@
-import { afterEach, expect, vi } from "vitest";
+import { afterEach, expect, vi, type Mock } from "vitest";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 
 const originalFetch = globalThis.fetch;
@@ -62,8 +62,8 @@ import { __testUtils as modelDiscoveryTestUtils } from "../../src/model-discover
 import { __testUtils as nativeToolDisplayTestUtils } from "../../src/cursor-native-tool-display-state.js";
 import { registerCursorNativeToolDisplay } from "../../src/cursor-native-tool-display-registration.js";
 import type { CursorNativeToolDisplayExtensionApi } from "../../src/cursor-native-tool-display-registration.js";
-import type { ModelListItem, Run, SDKAgent, SendOptions } from "@cursor/sdk";
-import type { AssistantMessage, AssistantMessageEvent, TextContent, ImageContent, ToolCall } from "@earendil-works/pi-ai";
+import type { ModelListItem, Run, RunResult, SDKAgent, SendOptions } from "@cursor/sdk";
+import type { AssistantMessage, AssistantMessageEvent, TextContent, ImageContent, ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ToolInfo } from "@earendil-works/pi-coding-agent";
 import { installCursorSessionStoreMock } from "./cursor-session-store.js";
 import {
@@ -135,6 +135,30 @@ export function asMockCursorRun(
 		onDidChangeStatus: vi.fn(),
 		...run,
 	} as Run;
+}
+
+/** A run's `wait()` that stays pending, like a still-working SDK run, until the test settles it. */
+export function deferredRunWait(): { wait: Mock<() => Promise<RunResult>>; settle: (result: RunResult) => void } {
+	const result = Promise.withResolvers<RunResult>();
+	return { wait: vi.fn(() => result.promise), settle: result.resolve };
+}
+
+/** Emits the start/completion pair shared by the replay fixtures. */
+export function emitCompletedSdkToolCall(
+	onDelta: CursorDeltaHandler,
+	call: { callId: string; name: string; args: unknown; value: unknown },
+): void {
+	onDelta({ update: { type: "tool-call-started", toolCall: { name: call.name, args: call.args }, callId: call.callId } });
+	onDelta({ update: { type: "tool-call-completed", toolCall: { name: call.name, result: { status: "success", value: call.value } }, callId: call.callId } });
+}
+
+/** Pi's toolResult message for a native tool call Pi executed successfully. */
+export function toolResultMessage(
+	toolCall: ToolCall,
+	result: Pick<ToolResultMessage, "content" | "details">,
+	timestamp: number,
+): ToolResultMessage {
+	return { role: "toolResult", toolCallId: toolCall.id, toolName: toolCall.name, content: result.content, details: result.details, isError: false, timestamp };
 }
 
 export function getPiToolsMcpUrlFromAgentCreateOptions(options: CursorAgentCreateOptions): string {

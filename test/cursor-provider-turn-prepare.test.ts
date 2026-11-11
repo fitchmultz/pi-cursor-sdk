@@ -35,7 +35,7 @@ vi.mock("../src/cursor-provider-live-run-drain.js", async (importOriginal) => {
 			// Simulate the config changing underneath the turn while the drain await is in flight.
 			mockResolveCursorProviderTurnConfig.mockReturnValue(makeResolvedConfig("cloud"));
 			process.env.PI_CURSOR_NATIVE_TOOLS = "1";
-			return "continue_send";
+			return "continueSend";
 		}),
 	};
 });

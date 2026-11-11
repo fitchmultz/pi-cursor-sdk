@@ -7,6 +7,7 @@ import type {
 	SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { clearCursorSdkHttp1 } from "./cursor-http1.js";
+import { releaseCursorLiveRunOffBranch } from "./cursor-provider-live-run-drain.js";
 import { cursorRuntimeSessionScopeKeyForManager, hasLiveCursorSessions, onCursorSessionScopeKeyChange } from "./cursor-session-scope.js";
 import {
 	disposeSessionCursorAgent,
@@ -47,8 +48,13 @@ export function registerCursorSessionAgentLifecycle(pi: CursorSessionAgentLifecy
 	pi.on("session_before_tree", () => {
 		if (scopeKey !== undefined) invalidateSessionAgent(scopeKey);
 	});
-	pi.on("session_tree", async () => {
-		if (scopeKey !== undefined) await resetSessionCursorAgent(scopeKey);
+	pi.on("session_tree", async (_event, ctx) => {
+		if (scopeKey === undefined) return;
+		const disposition = await releaseCursorLiveRunOffBranch(scopeKey, ctx.sessionManager.getBranch().flatMap((entry) =>
+			entry.type === "message" && entry.message.role === "toolResult" ? [entry.message] : []));
+		// A run kept by the selected branch still owns its agent and bridge; the before-tree invalidation replaces that
+		// agent at the next acquisition, which follows the run's release. Otherwise, like compaction, reset after release.
+		if (disposition !== "kept") await resetSessionCursorAgent(scopeKey);
 	});
 	pi.on("model_select", () => {
 		if (scopeKey !== undefined) invalidateSessionAgent(scopeKey);

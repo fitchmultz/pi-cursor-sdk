@@ -37,6 +37,10 @@
 * chore(release): 0.5.27 by @pi-durable[bot] in https://github.com/fitchmultz/pi-cursor-sdk/pull/447
 * Inline pooled agent bridge callback binding by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/448
 * ci: adopt unpublished release recovery by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/450
+* fix: refresh Cursor fallback catalog by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/452
+* fix: refresh current Cursor fallback catalog by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/454
+* fix: adopt release reconciliation diagnostics by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/456
+* Wake the version workflow only for release events by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/457
 
 
 **Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.26...v0.5.28

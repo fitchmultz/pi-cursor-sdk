@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Type } from "typebox";
+import type { ToolCallCompletedUpdate, ToolCallStartedUpdate } from "@cursor/sdk";
 import {
 	resetCursorProviderTestState,
 	makeModel,
@@ -41,6 +42,27 @@ const mockSlowDebugCapture = () =>
 			await vi.advanceTimersByTimeAsync(slowCleanupMs);
 		},
 	);
+
+const mcpStarted = (callId: string, query: string) => ({
+	type: "tool-call-started",
+	callId,
+	modelCallId: `${callId}-model`,
+	toolCall: { type: "mcp", args: { toolName: "external_search", args: { query } } },
+}) satisfies ToolCallStartedUpdate;
+
+const mcpCompleted = (started: ReturnType<typeof mcpStarted>, resultText = `${started.callId} result`) => ({
+	...started,
+	type: "tool-call-completed",
+	toolCall: {
+		...started.toolCall,
+		result: { status: "success", value: { content: [{ text: { text: resultText } }], isError: false } },
+	},
+}) satisfies ToolCallCompletedUpdate;
+
+const mcpLabelsAndResults = (events: Parameters<typeof collectThinkingDeltas>[0]) =>
+	collectThinkingDeltas(events)
+		.split("\n")
+		.filter((line) => line.startsWith("Cursor MCP:") || line.endsWith(" result"));
 
 describe("streamCursor Cursor tool lifecycle", () => {
 	let artifactDir: string | undefined;
@@ -171,6 +193,95 @@ describe("streamCursor Cursor tool lifecycle", () => {
 		expect(trace.match(/Cursor shell: npm test/g)).toHaveLength(1);
 		expect(trace).not.toContain("Cursor shell: shell");
 		expect(trace.match(/\$ npm test/g)).toHaveLength(2);
+	});
+
+	it("keeps same-label siblings suppressed until their own completion, which releases only their own start", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
+		// Different arguments share one label, so siblings are suppressed rather than skipped as duplicate starts.
+		const owner = mcpStarted("mcp-owner", "alpha");
+		const earlySibling = mcpStarted("mcp-early-sibling", "beta");
+		const lateSibling = mcpStarted("mcp-late-sibling", "beta");
+		const retry = mcpStarted("mcp-retry", "beta");
+		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
+			opts.onDelta({ update: owner });
+			opts.onDelta({ update: earlySibling });
+			await delayBeyondLifecycleDefer();
+			// A suppressed sibling that completes first leaves the owner's label claim in place.
+			opts.onDelta({ update: mcpCompleted(earlySibling) });
+			opts.onDelta({ update: lateSibling });
+			await delayBeyondLifecycleDefer();
+			// The owner's completion does not hand the label to the still-running suppressed sibling.
+			opts.onDelta({ update: mcpCompleted(owner) });
+			await delayBeyondLifecycleDefer();
+			// The suppressed sibling's own completion frees an identical later start to show its label.
+			opts.onDelta({ update: mcpCompleted(lateSibling) });
+			opts.onDelta({ update: retry });
+			await delayBeyondLifecycleDefer();
+			opts.onDelta({ update: mcpCompleted(retry) });
+			opts.onDelta({ update: { type: "text-delta", text: "done" } });
+			return asMockCursorRun({
+				id: "run-1",
+				agentId: "agent-1",
+				status: "finished",
+				wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
+			});
+		});
+		mockCreatedAgent({
+			send: mockSend,
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+
+		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+
+		expect(mcpLabelsAndResults(events)).toEqual([
+			"Cursor MCP: external_search",
+			"mcp-early-sibling result",
+			"mcp-owner result",
+			"mcp-late-sibling result",
+			"Cursor MCP: external_search",
+			"mcp-retry result",
+		]);
+	});
+
+	it("does not let an empty SDK call ID mask the active owner of an identical start", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "0";
+		// The installed SDK admits an empty call ID, which must not block another call's label.
+		const emptyId = mcpStarted("", "beta");
+		const owner = mcpStarted("mcp-owner", "beta");
+		const duplicate = mcpStarted("mcp-duplicate", "beta");
+		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
+			opts.onDelta({ update: emptyId });
+			opts.onDelta({ update: owner });
+			await delayBeyondLifecycleDefer();
+			// The duplicate starts while the owner runs; its window ends after the owner completes.
+			opts.onDelta({ update: duplicate });
+			opts.onDelta({ update: mcpCompleted(owner) });
+			await delayBeyondLifecycleDefer();
+			opts.onDelta({ update: mcpCompleted(emptyId, "empty-id result") });
+			opts.onDelta({ update: mcpCompleted(duplicate) });
+			opts.onDelta({ update: { type: "text-delta", text: "done" } });
+			return asMockCursorRun({
+				id: "run-1",
+				agentId: "agent-1",
+				status: "finished",
+				wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished" }),
+			});
+		});
+		mockCreatedAgent({
+			send: mockSend,
+			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+		});
+
+		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+
+		// The empty-ID start does not block the owner's label, and the owner keeps the duplicate quiet.
+		expect(mcpLabelsAndResults(events)).toEqual([
+			"Cursor MCP: external_search",
+			"Cursor MCP: external_search",
+			"mcp-owner result",
+			"empty-id result",
+			"mcp-duplicate result",
+		]);
 	});
 
 	it("surfaces safe distinct shell lifecycle labels while keeping completed shell results", async () => {

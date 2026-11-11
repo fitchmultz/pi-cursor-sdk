@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { SessionCursorAgentBootstrappedSendState, SessionCursorAgentSendState } from "./cursor-session-agent.js";
 import { asRecord } from "./cursor-record-utils.js";
-import { getCursorSessionScopeSnapshot, getCursorSessionScopeKey } from "./cursor-session-scope.js";
+import { getCursorSessionScopeSnapshot } from "./cursor-session-scope.js";
 import type { CursorSessionStoreIdentity } from "./cursor-session-store.js";
 
 export const CURSOR_SESSION_AGENT_RESUME_ENTRY_TYPE = "cursor-sdk-agent-resume";
@@ -50,13 +50,24 @@ export interface CursorSessionAgentResumeEntryData {
 	cleanupCandidates?: CursorSessionAgentCleanupCandidate[];
 }
 
-interface PendingCursorSessionAgentResumeHandle {
+export interface PendingCursorSessionAgentResumeHandle {
 	runtime: "local";
 	agentId: string;
 	poolKey: string;
 	/** Only successful sends publish handles, so new entries keep the persisted three-field send-state shape. */
 	sendState: SessionCursorAgentBootstrappedSendState;
 	storeIdentity: CursorSessionStoreIdentity;
+}
+
+/** One successful send's handle, published by the Pi turn that delivers the send's terminal output. */
+export interface CursorSessionAgentResumePublication {
+	/** Queues the handle for this turn's boundary unless its origin's lineage changed since the send was issued. */
+	publish(): void;
+}
+
+/** The bound session and its publication generation when a send was issued. */
+export interface CursorSessionAgentResumeOrigin {
+	capture(handle: PendingCursorSessionAgentResumeHandle): CursorSessionAgentResumePublication;
 }
 
 interface CursorSessionResumeState {
@@ -71,25 +82,27 @@ interface CursorSessionResumeState {
 	compactionGeneration: number;
 	activeHandle?: CursorSessionAgentResumeEntryData;
 	lastBranchHandle?: CursorSessionAgentResumeEntryData;
-	pendingHandle?: PendingCursorSessionAgentResumeHandle;
+	/** Advances at start, tree navigation, compaction and shutdown; a send captured in an earlier generation never publishes. */
+	publicationGeneration: number;
+	/** The successful send this turn delivered; it may replace activeHandle, and turn_end appends it once. */
+	pendingPublication?: PendingCursorSessionAgentResumeHandle;
 	unownedUserEntryIds: Set<string>;
 }
 
-let lastBoundState: CursorSessionResumeState = {
-	scopeKey: getCursorSessionScopeKey(),
-	cwd: process.cwd(),
-	branchPathHash: EMPTY_BRANCH_HASH,
-	compactionGeneration: 0,
-	unownedUserEntryIds: new Set(),
-};
-
+/** Runtime scope key → its live binding's state; only bound sessions capture or adopt handles. */
 const statesByScope = new Map<string, CursorSessionResumeState>();
 
-function getResumeState(scopeKey?: string): CursorSessionResumeState {
-	if (scopeKey !== undefined) {
-		return statesByScope.get(scopeKey) ?? lastBoundState;
-	}
-	return lastBoundState;
+function createResumeState(scopeKey: string): CursorSessionResumeState {
+	return {
+		scopeKey, cwd: process.cwd(), branchPathHash: EMPTY_BRANCH_HASH,
+		compactionGeneration: 0, publicationGeneration: 0, unownedUserEntryIds: new Set(),
+	};
+}
+
+/** Start, tree navigation, compaction and shutdown end the turn lineage a captured send belongs to. */
+function cancelResumePublication(state: CursorSessionResumeState): void {
+	state.publicationGeneration += 1;
+	state.pendingPublication = undefined;
 }
 
 function hashParts(parts: readonly string[]): string {
@@ -357,11 +370,10 @@ function restoreFromBranch(branch: readonly SessionEntry[], allEntries: readonly
 	state.lastBranchHandle = lastBranchHandle;
 }
 
-export function getMatchingCursorSessionAgentResumeHandle(poolKey: string, scopeKey?: string): CursorSessionAgentResumeEntryData | undefined {
-	const state = getResumeState(scopeKey);
-	if (scopeKey !== undefined && (state.runtimeScopeKey ?? state.scopeKey) !== scopeKey) return undefined;
-	const handle = state.activeHandle;
-	if (!handle || !isCursorLocalAgentId(handle.agentId)) return undefined;
+export function getMatchingCursorSessionAgentResumeHandle(poolKey: string, scopeKey: string): CursorSessionAgentResumeEntryData | undefined {
+	const state = statesByScope.get(scopeKey);
+	const handle = state?.activeHandle;
+	if (!state || !handle || !isCursorLocalAgentId(handle.agentId)) return undefined;
 	if (handle.poolKey !== poolKey) return undefined;
 	if (handle.scopeKey !== state.scopeKey) return undefined;
 	if (handle.sessionFile !== state.sessionFile) return undefined;
@@ -375,23 +387,38 @@ export function getMatchingCursorSessionAgentResumeHandle(poolKey: string, scope
 	};
 }
 
-export function persistCursorSessionAgentResumeHandle(input: PendingCursorSessionAgentResumeHandle, scopeKey?: string): void {
-	const state = getResumeState(scopeKey);
-	if (scopeKey !== undefined && (state.runtimeScopeKey ?? state.scopeKey) !== scopeKey) return;
-	if (!isCursorLocalAgentId(input.agentId)) return;
-	state.pendingHandle = {
-		runtime: input.runtime,
-		agentId: input.agentId,
-		poolKey: input.poolKey,
-		sendState: { ...input.sendState },
-		storeIdentity: { ...input.storeIdentity },
+/**
+ * Captures the bound session's publication generation for a send issued now. A start, tree navigation,
+ * compaction or shutdown before its publication voids it, even when the send completes afterwards.
+ */
+export function captureCursorSessionAgentResumeOrigin(scopeKey: string): CursorSessionAgentResumeOrigin | undefined {
+	const state = statesByScope.get(scopeKey);
+	if (!state) return undefined;
+	const generation = state.publicationGeneration;
+	return {
+		capture: (input) => {
+			const handle: PendingCursorSessionAgentResumeHandle = {
+				runtime: input.runtime,
+				agentId: input.agentId,
+				poolKey: input.poolKey,
+				sendState: { ...input.sendState },
+				storeIdentity: { ...input.storeIdentity },
+			};
+			return {
+				publish: () => {
+					if (state.publicationGeneration === generation && isCursorLocalAgentId(handle.agentId)) {
+						state.pendingPublication = handle;
+					}
+				},
+			};
+		},
 	};
 }
 
 function flushPendingCursorSessionAgentResumeHandle(branch: readonly SessionEntry[], state: CursorSessionResumeState): void {
 	restoreFromBranch(branch, branch, state);
-	const pending = state.pendingHandle;
-	state.pendingHandle = undefined;
+	const pending = state.pendingPublication;
+	state.pendingPublication = undefined;
 	if (!pending || !state.appendEntry) return;
 	const previousHandle = state.activeHandle ?? state.lastBranchHandle;
 	const cleanupCandidates = state.sessionFile && previousHandle && previousHandle.agentId !== pending.agentId
@@ -432,25 +459,21 @@ interface CursorSessionAgentResumeExtensionApi {
 
 export function registerCursorSessionAgentResume(pi: CursorSessionAgentResumeExtensionApi): void {
 	const scope = getCursorSessionScopeSnapshot(pi);
-	const sessionState: CursorSessionResumeState = {
-		appendEntry: pi.appendEntry, scopeKey: scope.persistentScopeKey ?? scope.scopeKey,
-		cwd: process.cwd(), branchPathHash: EMPTY_BRANCH_HASH,
-		compactionGeneration: 0, unownedUserEntryIds: new Set(),
-	};
-	const state = sessionState;
+	const state = createResumeState(scope.persistentScopeKey ?? scope.scopeKey);
+	state.appendEntry = pi.appendEntry;
 	const restoreFromSessionManager = (sessionManager: { getBranch(): SessionEntry[]; getEntries(): SessionEntry[] }): void => {
 		const branch = sessionManager.getBranch();
 		const entries = sessionManager.getEntries();
 		restoreFromBranch(branch, entries.length > 0 ? entries : branch, state);
 	};
 	pi.on("session_start", (_event, ctx) => {
+		cancelResumePublication(state);
 		const key = state.runtimeScopeKey ?? state.scopeKey;
 		if (statesByScope.get(key) === state) statesByScope.delete(key);
 		const scope = getCursorSessionScopeSnapshot(pi);
 		state.runtimeScopeKey = scope.scopeKey;
 		state.scopeKey = scope.persistentScopeKey ?? scope.scopeKey;
 		statesByScope.set(scope.scopeKey, state);
-		lastBoundState = state;
 		state.sessionFile = ctx.sessionManager.getSessionFile?.() ?? undefined;
 		state.sessionId = ctx.sessionManager.getSessionId?.() ?? undefined;
 		state.cwd = ctx.cwd;
@@ -466,19 +489,20 @@ export function registerCursorSessionAgentResume(pi: CursorSessionAgentResumeExt
 		flushPendingCursorSessionAgentResumeHandle(ctx.sessionManager.getBranch(), state);
 	});
 	pi.on("session_tree", (_event, ctx) => {
+		cancelResumePublication(state);
 		for (const entry of ctx.sessionManager.getBranch()) {
 			if (entry.type === "message" && entry.message.role === "user") state.unownedUserEntryIds.add(entry.id);
 		}
 		restoreFromSessionManager(ctx.sessionManager);
 	});
 	pi.on("session_before_compact", () => {
-		state.pendingHandle = undefined;
+		cancelResumePublication(state);
 	});
 	pi.on("session_compact_failed", () => {
-		state.pendingHandle = undefined;
+		cancelResumePublication(state);
 	});
 	pi.on("session_compact", (event, ctx) => {
-		state.pendingHandle = undefined;
+		cancelResumePublication(state);
 		const branch = ctx.sessionManager.getBranch();
 		if (branch.length > 0) {
 			restoreFromSessionManager(ctx.sessionManager);
@@ -493,36 +517,23 @@ export function registerCursorSessionAgentResume(pi: CursorSessionAgentResumeExt
 		const key = state.runtimeScopeKey ?? state.scopeKey;
 		if (statesByScope.get(key) === state) statesByScope.delete(key);
 		state.appendEntry = undefined;
-		state.pendingHandle = undefined;
+		cancelResumePublication(state);
 	});
 }
 
-function setStateForTests(next: Partial<CursorSessionResumeState>): void {
-	Object.assign(getResumeState(), next);
-}
-
-function resetStateForTests(): void {
-	const state = lastBoundState;
-	state.appendEntry = undefined;
-	state.scopeKey = getCursorSessionScopeKey();
-	state.runtimeScopeKey = undefined;
-	state.sessionFile = undefined;
-	state.sessionId = undefined;
-	state.cwd = process.cwd();
-	state.repoRoot = undefined;
-	state.branchPathHash = EMPTY_BRANCH_HASH;
-	state.compactionGeneration = 0;
-	state.activeHandle = undefined;
-	state.lastBranchHandle = undefined;
-	state.pendingHandle = undefined;
-	state.unownedUserEntryIds = new Set();
-	statesByScope.clear();
+/** Binds state for a scope key without an extension registration, as session_start would. */
+function setStateForTests(next: Partial<CursorSessionResumeState> & Pick<CursorSessionResumeState, "scopeKey">): CursorSessionResumeState {
+	const key = next.runtimeScopeKey ?? next.scopeKey;
+	const state = statesByScope.get(key) ?? createResumeState(next.scopeKey);
+	Object.assign(state, next);
+	statesByScope.set(key, state);
+	return state;
 }
 
 export const __testUtils = {
 	EMPTY_BRANCH_HASH,
 	hashBranchStep,
-	reset: resetStateForTests,
+	reset: () => statesByScope.clear(),
 	set: setStateForTests,
-	get state() { return getResumeState(); },
+	stateFor: (scopeKey: string) => statesByScope.get(scopeKey),
 };

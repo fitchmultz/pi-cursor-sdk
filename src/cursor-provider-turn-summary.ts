@@ -21,7 +21,7 @@ function summaryLifecycle(agent: SDKAgent, sessionStore: OpenCursorSessionStore)
 			await sessionStore.dispose();
 		}
 	})();
-	return { trackRunCompletion: () => {}, commitSend: () => {}, abandon: dispose, dispose };
+	return { trackRunCompletion: () => {}, commitSend: () => undefined, abandon: dispose, dispose };
 }
 
 /** A native summary never enters the conversation pool or inherits its tool/mode/resume state. */

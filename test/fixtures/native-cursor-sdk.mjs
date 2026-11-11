@@ -158,7 +158,7 @@ export const Agent = {
                 result: { status: "success", value: { fileSize: Buffer.byteLength(content), content, totalLines: 1 } },
               } } });
             }
-            finish(`OFFLINE_CURSOR_DONE_${index}`);
+            finish(request.includes("EMPTY_RESULT_FIXTURE") ? "" : `OFFLINE_CURSOR_DONE_${index}`);
           } catch (error) {
             status = "error";
             settle({ id, status, error: { message: String(error) } });

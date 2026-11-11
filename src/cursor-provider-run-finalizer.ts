@@ -49,7 +49,8 @@ function applyLiveRunOutcome(
 	// A run released before the SDK settled was abandoned; its late outcome must not commit send state.
 	if (liveRun.resources.kind !== "open") return;
 	if (outcome.kind === "finished") {
-		prepared.lifecycle.commitSend(context, prepared.meta.bootstrap);
+		// The SDK run can finish inside an earlier replay turn; the drain publishes at its terminal delivery.
+		liveRun.resumePublication = prepared.lifecycle.commitSend(context, prepared.meta.bootstrap);
 		if (prepared.meta.resumeNotice) liveRun.resumeNotice = prepared.meta.resumeNotice;
 	}
 	cursorLiveRuns.settle(liveRun, outcome);
@@ -179,7 +180,7 @@ export class CursorRunFinalizer {
 				this.pushTerminalError(partial, "error", outcome.kind === "error" ? outcome.errorMessage : "Cursor SDK run failed.");
 				break;
 			case "finished":
-				prepared.lifecycle.commitSend(context, prepared.meta.bootstrap);
+				prepared.lifecycle.commitSend(context, prepared.meta.bootstrap)?.publish();
 				prepared.runtime.turnCoordinator.flushText(
 					outcome.kind === "finished" && hasUsableText(outcome.finalText) ? [outcome.finalText] : [],
 				);

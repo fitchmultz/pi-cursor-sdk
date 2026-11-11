@@ -8,6 +8,7 @@ import type {
 } from "@earendil-works/pi-ai";
 import type { AgentModeOption, LocalAgentStore, ModelSelection, SDKAgent, SDKImage } from "@cursor/sdk";
 import type { CursorLiveRun } from "./cursor-live-run-coordinator.js";
+import type { CursorSessionAgentResumePublication } from "./cursor-session-agent-resume.js";
 import type { SessionCursorAgentLease } from "./cursor-session-agent.js";
 import type { planCursorSessionSend } from "./cursor-session-agent.js";
 import type { CursorSdkEventDebugSink } from "./cursor-sdk-event-debug.js";
@@ -72,7 +73,8 @@ interface CursorProviderTurnRuntimeBase {
  */
 export interface CursorProviderTurnLifecycle {
 	trackRunCompletion(completion: Promise<unknown>): void;
-	commitSend(context: Context, bootstrapped: boolean): void;
+	/** The returned resume handle is published by the turn that delivers the send's terminal output. */
+	commitSend(context: Context, bootstrapped: boolean): CursorSessionAgentResumePublication | undefined;
 	abandon(): Promise<void>;
 	dispose(): Promise<void>;
 }

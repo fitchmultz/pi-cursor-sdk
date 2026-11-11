@@ -9,6 +9,7 @@ import type { LiveCursorProviderTurnRuntime, LocalCursorProviderTurnPrepareResul
 import { installCursorSdkProcessErrorGuard } from "../src/cursor-sdk-process-error-guard.js";
 import type { CursorSdkEventDebugSink } from "../src/cursor-sdk-event-debug.js";
 import { cursorLiveRuns } from "../src/cursor-provider-live-run-drain.js";
+import type { CursorSessionAgentResumePublication } from "../src/cursor-session-agent-resume.js";
 import { captureProviderTestOwnership, createProviderTestTurnUsage } from "./helpers/cursor-provider-ownership.js";
 import { asMockCursorRun } from "./helpers/cursor-provider-harness.js";
 import { collectAssistantEvents, makeAssistantMessage, makeContext, makeModel } from "./helpers/pi-harness.js";
@@ -26,7 +27,7 @@ vi.mock("../src/cursor-provider-turn-finalize.js", async (importOriginal) => ({
 function makePrepared(
 	stream: AssistantMessageEventStream,
 	partial: AssistantMessage,
-	commitSend = () => {},
+	commitSend = (): CursorSessionAgentResumePublication | undefined => undefined,
 	trackRunCompletion = (_completion: Promise<unknown>) => {},
 ): StartedCursorProviderTurn & LocalCursorProviderTurnPrepareResult {
 	const agent = { agentId: "agent-1" } as SDKAgent;
@@ -85,7 +86,7 @@ describe("CursorRunFinalizer", () => {
 		mockAwaitFinalizeCursorRunOutcome.mockRejectedValueOnce(new Error("run wait failed"));
 		const stream = createAssistantMessageEventStream();
 		const partial = makeAssistantMessage("");
-		const base = makePrepared(stream, partial, () => {}, trackRunCompletion);
+		const base = makePrepared(stream, partial, () => undefined, trackRunCompletion);
 		const prepared: StartedCursorProviderTurn & LocalCursorProviderTurnPrepareResult & { runtime: LiveCursorProviderTurnRuntime } = {
 			...base,
 			runtime: {

@@ -7,6 +7,15 @@ import { concurrentFixture, retainNativeEvidence, SessionManager, setupNativeCur
 
 setupNativeCursorHarness();
 
+async function sessionlessHost(create, copyExtension) {
+  const bootstrap = await create("bootstrap", { bind: false, extensionPath: await copyExtension("bootstrap") });
+  const runtime = bootstrap.session.modelRuntime;
+  const registerNativeProvider = runtime.registerNativeProvider.bind(runtime);
+  // A session-less host freezes this registration and ignores session registrations.
+  runtime.registerNativeProvider = next => { if (next.id !== "cursor") registerNativeProvider(next); };
+  return { runtime, model: bootstrap.session.model, provider: runtime.getRegisteredNativeProvider("cursor") };
+}
+
 test("independent native managers reopening one persisted file survive terminal sibling shutdown", { timeout: 60000 }, async (t) => {
   await concurrentFixture(t, async ({ create }) => {
     const a = await create("same-file-A");
@@ -37,14 +46,9 @@ test("separate extension graphs preserve live same-file agent claims and process
   await concurrentFixture(t, async ({ create, copyExtension }) => {
     process.env.PI_CURSOR_LOCAL_RESUME = "1";
     process.env.PI_CURSOR_HTTP_1_1 = "1";
-    const bootstrap = await create("bootstrap", { bind: false, extensionPath: await copyExtension("bootstrap") });
-    const runtime = bootstrap.session.modelRuntime;
-    const provider = runtime.getRegisteredNativeProvider("cursor");
-    const registerNativeProvider = runtime.registerNativeProvider.bind(runtime);
-    // A session-less host freezes this registration and ignores session registrations.
-    runtime.registerNativeProvider = next => { if (next.id !== "cursor") registerNativeProvider(next); };
+    const { runtime, model, provider } = await sessionlessHost(create, copyExtension);
     const a = await create("shared-graph-A", {
-      runtime, model: bootstrap.session.model, extensionPath: await copyExtension("owner-a"),
+      runtime, model, extensionPath: await copyExtension("owner-a"),
     });
     await a.session.prompt("record owned durable handle");
     assert.equal(a.session.messages.at(-1).stopReason, "stop", a.session.messages.at(-1).errorMessage);
@@ -88,6 +92,45 @@ test("separate extension graphs preserve live same-file agent claims and process
     await c.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
     assert.deepEqual(state.configured.at(-1), { local: { useHttp1ForAgent: null } },
       "a directly disposed sibling cannot keep the process-global override alive");
+  });
+});
+
+test("session-less bootstrap rejects a pending receipt whose owner was directly disposed", { timeout: 60000 }, async (t) => {
+  await concurrentFixture(t, async ({ root, create, copyExtension }) => {
+    const { runtime, model } = await sessionlessHost(create, copyExtension);
+    const key = Symbol.for("cursor-native-park-headers");
+    const park = join(root, "park-headers.mjs");
+    // Loaded after Cursor, so Cursor has recorded the receipt before Pi dispatches it.
+    await writeFile(park, `export default function(pi) {
+      pi.on("before_provider_headers", () => globalThis[Symbol.for(${JSON.stringify(Symbol.keyFor(key))})]?.());
+    }`);
+    try {
+      const owner = await create("disposed-owner", {
+        runtime, model, afterExtensions: [park], extensionPath: await copyExtension("disposed-owner"),
+      });
+      const sibling = await create("live-sibling", { runtime, model, extensionPath: await copyExtension("live-sibling") });
+      await owner.session.prompt("bootstrap serves the live owner");
+      assert.equal(owner.session.messages.at(-1).stopReason, "stop", owner.session.messages.at(-1).errorMessage);
+      await retainNativeEvidence("native-disposed-receipt-owner", owner.manager, owner.cwd);
+      const persisted = await readFile(owner.manager.getSessionFile());
+      const parked = Promise.withResolvers(), release = Promise.withResolvers();
+      globalThis[key] = () => { delete globalThis[key]; parked.resolve(); return release.promise; };
+      const before = [state.sends.length, state.created.length, state.stores.length];
+      // Disposal does not abort a bug-report summary's caller signal.
+      const summary = owner.session.summarizeForBugReport({ hint: "disposed owner", signal: t.signal });
+      await parked.promise;
+      owner.session.dispose();
+      release.resolve();
+      await assert.rejects(summary, /binding is not active/);
+      assert.deepEqual([state.sends.length, state.created.length, state.stores.length], before, "no SDK work starts for a disposed owner");
+      assert.deepEqual(await readFile(owner.manager.getSessionFile()), persisted);
+      await sibling.session.prompt("bootstrap still serves a live owner");
+      assert.equal(sibling.session.messages.at(-1).stopReason, "stop", sibling.session.messages.at(-1).errorMessage);
+      const siblingAgent = state.created.find(agent => agent.agentId === state.sends.at(-1).agentId);
+      assert.ok(siblingAgent, "the live sibling send belongs to a created agent");
+      assert.equal(siblingAgent.options.local.cwd, sibling.cwd);
+      await retainNativeEvidence("native-disposed-receipt-sibling", sibling.manager, sibling.cwd);
+    } finally { delete globalThis[key]; }
   });
 });
 

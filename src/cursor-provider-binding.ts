@@ -14,10 +14,36 @@ import type { CursorSdkOutputNoticeHandler } from "./cursor-sdk-output-filter.js
 
 export const CURSOR_PROVIDER_OWNERSHIP_ERROR = "Cursor provider ownership is unavailable: this request does not belong to the active Cursor registration. Reload this session's extensions to restore its Cursor registration; use independent ModelRuntime instances for sibling sessions.";
 type BindingExtension = Pick<ExtensionAPI, "on" | "registerProvider" | "appendEntry"> & { getSessionName?(): string | undefined };
-interface ProviderBinding { active: boolean; closed: boolean }
+type ProviderBindingState = "registered" | "active" | "closed";
+interface SharedProviderBinding {
+	get active(): boolean;
+	set active(active: false);
+	get closed(): boolean;
+	set closed(closed: true);
+}
+/**
+ * Registered until its session starts, active until shutdown or observed disposal, then closed.
+ * Receipts and catalog subscribers share bindings with other extension graph copies, including
+ * other package releases, under the v1 keys: every copy reads `active`/`closed` and closes a
+ * binding it may not own by assigning `active = false`, then `closed = true`. Only that `closed`
+ * assignment changes this binding's state.
+ */
+class ProviderBinding implements SharedProviderBinding {
+	#state: ProviderBindingState = "registered";
+	get state(): ProviderBindingState { return this.#state; }
+	activate(): boolean {
+		if (this.#state === "closed") return false;
+		this.#state = "active";
+		return true;
+	}
+	get active(): boolean { return this.#state === "active"; }
+	set active(_active: false) {}
+	get closed(): boolean { return this.#state === "closed"; }
+	set closed(closed: true) { if (closed) this.#state = "closed"; }
+}
 type CatalogListener = (issue?: CursorModelFallbackIssue, metadata?: readonly CursorModelMetadata[]) => void;
 interface RequestReceipt {
-	binding: ProviderBinding;
+	binding: SharedProviderBinding;
 	pi: BindingExtension;
 	serve: ReturnType<typeof createCursorLazyStream>;
 }
@@ -29,7 +55,7 @@ const requestOwners = (processState[REQUEST_OWNERS_KEY] ??= new WeakMap<object, 
 interface CatalogChannel { published: boolean; issue?: CursorModelFallbackIssue; metadata?: readonly CursorModelMetadata[] }
 interface CatalogSubscriber {
 	stream: object;
-	binding: ProviderBinding;
+	binding: SharedProviderBinding;
 	pi: BindingExtension;
 	listener: CatalogListener;
 	servingStream(): object | undefined;
@@ -52,7 +78,7 @@ function catalogChannelFor(stream: object): CatalogChannel {
 	if (!channel) catalogChannels.set(stream, channel = { published: false });
 	return channel;
 }
-function closeBinding(binding: ProviderBinding): void {
+function closeBinding(binding: SharedProviderBinding): void {
 	binding.active = false;
 	binding.closed = true;
 }
@@ -72,7 +98,7 @@ function nativeCursorStream(registry: CursorRegistry | undefined): object | unde
 export function registerCursorProviderBinding(
 	pi: BindingExtension,
 ) {
-	const binding: ProviderBinding = { active: false, closed: false };
+	const binding = new ProviderBinding();
 	let registry: ExtensionContext["modelRegistry"] | undefined;
 	const operations = new WeakMap<AbortSignal, CursorRequestProvenance["purpose"]>();
 	const inactiveError = () => new Error("Cursor provider binding is not active. Bind this session's extensions, or reload the session after shutdown.");
@@ -86,7 +112,7 @@ export function registerCursorProviderBinding(
 		const projection = captureCursorRequestProjection(ctx.sessionManager);
 		const usageRecorder = captureCursorUsageRecorder(pi, ctx);
 		const reportSdkNotice: CursorSdkOutputNoticeHandler = (kind, message) => {
-			if (!binding.active || binding.closed) return false;
+			if (binding.state !== "active") return false;
 			if (notices.has(kind)) return;
 			pi.appendEntry("pi-cursor-sdk:capability-notice", { kind, message });
 			if (ctx.hasUI) ctx.ui.notify(message, "warning");
@@ -97,7 +123,7 @@ export function registerCursorProviderBinding(
 		// serve closes over this module's streamCursor, agent pool, settings and lifecycle.
 		// A shared-runtime bootstrap delegates here instead of executing in its own graph.
 		const serve = createCursorLazyStream((model, context, options) => {
-			if (binding.closed || !binding.active) throw inactiveError();
+			if (binding.state !== "active") throw inactiveError();
 			return {
 				request: resolveCursorRequestProvenance(projection, model, context, operationPurpose(options?.signal) || "normal"),
 				usageRecorder,
@@ -117,11 +143,11 @@ export function registerCursorProviderBinding(
 			const owner = headers && requestOwners.get(headers);
 			if (headers) requestOwners.delete(headers);
 			if (owner && isCursorExtensionDisposed(owner.pi)) closeBinding(owner.binding);
-			if (binding.closed || (!binding.active && !owner)) throw inactiveError();
+			if (binding.state === "closed" || (binding.state === "registered" && !owner)) throw inactiveError();
 			if (!owner) throw new Error("Cursor provider ownership is unavailable: this call has no native session request receipt. Bare modelRegistry.streamSimple calls are unsupported for Cursor; use the owning AgentSession's stream path or an independent child AgentSession.");
 			// A registrant that never started is a shared-runtime host's bootstrap instance
 			// (e.g. PI WEB). It delegates to the module that issued the receipt.
-			if (owner.binding !== binding && binding.active) throw new Error(CURSOR_PROVIDER_OWNERSHIP_ERROR);
+			if (owner.binding !== binding && binding.state === "active") throw new Error(CURSOR_PROVIDER_OWNERSHIP_ERROR);
 			if (!owner.binding.active || owner.binding.closed) throw inactiveError();
 			serve = owner.serve;
 		} catch (error) {
@@ -138,7 +164,7 @@ export function registerCursorProviderBinding(
 		subscriber = undefined;
 	};
 	const emitCatalog = (issue: CursorModelFallbackIssue | undefined, metadata: readonly CursorModelMetadata[]) => {
-		if (binding.closed) return;
+		if (binding.state === "closed") return;
 		ownCatalog.published = true;
 		ownCatalog.issue = issue;
 		ownCatalog.metadata = metadata;
@@ -159,8 +185,7 @@ export function registerCursorProviderBinding(
 		}
 	};
 	pi.on("session_start", async (_event, ctx) => {
-		if (binding.closed) return;
-		binding.active = true;
+		if (!binding.activate()) return;
 		registry = ctx.modelRegistry;
 		unsubscribeServingCatalog();
 		const nextSubscriber: CatalogSubscriber = {
@@ -182,12 +207,12 @@ export function registerCursorProviderBinding(
 		await registry.refresh({ providers: ["cursor"], allowNetwork: false });
 	});
 	pi.on("session_shutdown", () => {
-		closeBinding(binding);
+		binding.closed = true;
 		registry = undefined;
 		unsubscribeServingCatalog();
 	});
 	return (models: Awaited<ReturnType<typeof discoverModels>>, catalogListener: CatalogListener) => {
-		if (binding.closed) return;
+		if (binding.state === "closed") return;
 		onCatalog = catalogListener;
 		const toNative = (definitions: typeof models): Model<"cursor-sdk">[] =>
 			definitions.map(({ compat: _compat, ...definition }) => ({
@@ -201,7 +226,7 @@ export function registerCursorProviderBinding(
 			stream: stream,
 			streamSimple: stream,
 			async refreshModels(context) {
-				if (binding.closed) return;
+				if (binding.state === "closed") return;
 				const resolved = await registry?.getProviderAuth("cursor");
 				context.signal.throwIfAborted();
 				const credential = context.credential;
@@ -222,7 +247,7 @@ export function registerCursorProviderBinding(
 					onFallback: (next) => { issue = next; },
 					publish: (definitions, update) => context.publish({
 						update: () => {
-							if (binding.closed) return;
+							if (binding.state === "closed") return;
 							update();
 							current = toNative(definitions);
 							// Do not infer logout before native composed auth is reachable.

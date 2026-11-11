@@ -126,6 +126,8 @@ jobs:
           node -e "require('node:fs').mkdirSync(process.env.TMPDIR, { recursive: true })"
           node --test test/native-cursor-ownership.test.mjs
       - run: node -e "require('node-pty')"
+      - name: Check the platform live-suite runner through a real node-pty PTY
+        run: node --test test/platform-smoke-live-runner-pty.test.mjs
       - run: npm run check:platform-smoke
       - run: npm test -- --testTimeout=15000
       - run: npm run typecheck

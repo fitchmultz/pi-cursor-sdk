@@ -65,7 +65,7 @@ node scripts/validate-smoke-jsonl.mjs --replay-errors-only "$SMOKE_DIR/session-s
 
 The replay scan flags only error `toolResult` / error assistant messages with `Tool grep/cursor/find/ls not found`, not successful reads of docs that mention those strings. See [Cursor testing lessons](./cursor-testing-lessons.md#what-counts-as-a-replay-failure).
 
-`npm run smoke:live` is a helper only; it polls the section 3 TUI for answer/footer evidence and then cleans up the tmux session, but it does not replace the canonical rendered-PNG visual review in section 4. Run the relevant helper `--self-test` (`smoke:live`, `smoke:visual`, `smoke:steering`, or `smoke:isolated`) when changing sealed PATH or env wrappers. For changed behavior needing new live evidence, select the relevant manual check or existing single-suite/single-target platform run, not both by default. The comprehensive matrix is optional.
+`npm run smoke:live` is a helper only; it polls the section 3 TUI for answer/footer evidence plus the persisted assistant answer in the session JSONL, fails at once with pi's exit status and retained pane if pi exits first, and then cleans up the tmux session, but it does not replace the canonical rendered-PNG visual review in section 4. Run the relevant helper `--self-test` (`smoke:live`, `smoke:visual`, `smoke:steering`, or `smoke:isolated`) when changing sealed PATH or env wrappers. For changed behavior needing new live evidence, select the relevant manual check or existing single-suite/single-target platform run, not both by default. The comprehensive matrix is optional.
 
 Pass criteria:
 

@@ -71,6 +71,8 @@ export function writeVisualManifest(path, options, artifacts, failure) {
 		startupMs: options.startupMs,
 		screenshot: options.screenshot,
 		paths,
+		// pi's pane state when it was read; cleanup's tmux hangup is not proof that pi exited.
+		...(artifacts.pi ? { pi: artifacts.pi } : {}),
 		command: {
 			argv: redactedArgv(process.argv.slice(2)),
 			cwd: process.cwd(),

@@ -97,6 +97,7 @@ npx playwright install chromium
 - `--session-id` forwarded to pi only when explicitly provided, so fresh captures avoid the new-session warning line
 - prompt paste plus carriage return into the interactive TUI
 - bounded post-prompt wait via `--wait-ms`
+- tmux `remain-on-exit` on the owned session; pi's pane state is read before the prompt paste and at capture, and recorded as `pi` in the manifest (`{ kind: "running", pid }` or `{ kind: "exited", status, signal }`). An exited pi fails the run with its status and the retained capture. `running` describes capture time only: cleanup's `kill-session` does not prove pi exited, so use `--leftover-pattern` for termination checks
 - artifacts outside the repo by default
 - `<label>.ansi`, `<label>.txt`, `<label>.html`, `<label>.png`, `<label>.jsonl.path`, and `<label>.manifest.json`
 - `--label`, `--ext`, `--cwd`, `--prompt`, `--prompt-file`, `--wait-ms`, and `--out-dir`

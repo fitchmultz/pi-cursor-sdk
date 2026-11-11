@@ -58,7 +58,7 @@ Coverage:
   - basic non-interactive prompt (single attempt; no automatic paid retries)
   - default ambient settings prompt (strict; no retry)
   - simple non-interactive math prompt (strict; no retry)
-  - interactive TUI math/footer polling with cleanup
+  - interactive TUI math/footer polling plus persisted JSONL answer, with cleanup
   - RPC steering after native replay tool execution (tmux-isolated)
   - diagnostics safety scan
   - JSONL assistant usage validation
@@ -150,7 +150,8 @@ quote_command() {
 run_tui_math_footer_poll() {
 	local name="$1"
 	local timeout_secs="$2"
-	shift 2
+	local session_dir="$3"
+	shift 3
 	local session="pi-cursor-smoke-${name}-$$"
 	local capture="$SMOKE_DIR/${name}.capture.txt"
 	local script
@@ -162,20 +163,39 @@ run_tui_math_footer_poll() {
 cd %q || exit 97
 exec %s
 ' "$SEALED_PATH" "$ROOT" "$command"
-	"$TMUX_BIN" new-session -d -s "$session" -x 120 -y 40 -- "$SHELL_BIN" -lc "$script"
+	# remain-on-exit in the same tmux command keeps pi's pane, output and exit status if pi exits early.
+	"$TMUX_BIN" new-session -d -s "$session" -x 120 -y 40 -- "$SHELL_BIN" -lc "$script" \; set-option -w -t "$session" remain-on-exit on
 	TMUX_SESSIONS+=("$session")
 
 	local elapsed=0
 	local missing=""
+	local pane_state dead_status dead_signal pi_exit
 	while true; do
 		"$TMUX_BIN" capture-pane -pt "$session" >"$capture" 2>/dev/null || true
 		missing=""
 		"$RG_BIN" -q "SUM=42" "$capture" || missing="${missing} SUM=42"
 		"$RG_BIN" -q "\\(cursor\\) grok-4\\.6" "$capture" || missing="${missing} footer (cursor) grok-4.6"
+		# Pane text alone is not success: pi must also have persisted its assistant answer.
+		"$RG_BIN" -q -u --glob '*.jsonl' '"role":"assistant".*SUM=42' "$session_dir" 2>/dev/null || missing="${missing} persisted assistant SUM=42 JSONL"
 		if [[ -z "$missing" ]]; then
 			"$TMUX_BIN" kill-session -t "$session" 2>/dev/null || true
 			log "$name PASS"
 			return 0
+		fi
+
+		pane_state="$("$TMUX_BIN" display-message -p -t "$session" '#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}' 2>/dev/null || true)"
+		if [[ "$pane_state" == 1\|* ]]; then
+			IFS='|' read -r _ dead_status dead_signal <<<"$pane_state"
+			# tmux's string form of the JS describeProcessExit wording (scripts/lib/cursor-child-process.mjs).
+			pi_exit="exit code ${dead_status:-unknown}"
+			[[ -z "$dead_signal" ]] || pi_exit="signal $dead_signal"
+			# Include history: tmux scrolls a dead pane's first output lines off the visible screen.
+			"$TMUX_BIN" capture-pane -p -S - -t "$session" >"$capture" 2>/dev/null || true
+			"$TMUX_BIN" kill-session -t "$session" 2>/dev/null || true
+			printf '[smoke] %s: pi exited (%s) before TUI evidence; missing:%s\n' "$name" "$pi_exit" "$missing" >&2
+			printf '[smoke] %s capture tail:\n' "$name" >&2
+			tail_file "$capture" 120 >&2
+			fail "$name: pi exited ($pi_exit) before TUI evidence"
 		fi
 
 		sleep 2
@@ -368,6 +388,63 @@ EOF_FAKE_DIRECT
 		[[ "$case_name" == "empty" ]] || grep -qx DIRECT_OK "$temp_dir/$case_name.stdout.txt" || fail "self-test failed: $case_name lost output"
 	done
 
+	# Exercise the real TUI poll against a fake tmux that serves a screen and pane state.
+	local fake_tmux="$bin_dir/tmux" poll_case poll_screen poll_pane poll_result
+	cat >"$fake_tmux" <<'EOF_FAKE_TMUX'
+#!/usr/bin/env bash
+case "$1" in
+	new-session)
+		case " $* " in *" remain-on-exit on "*) : >"$FAKE_TMUX_REMAIN_ON_EXIT" ;; esac ;;
+	kill-session) ;;
+	capture-pane|display-message)
+		# Like tmux: once pi exits, its session is gone unless new-session asked for remain-on-exit.
+		if [[ "$(cat "$FAKE_TMUX_PANE")" == 1\|* && ! -e "$FAKE_TMUX_REMAIN_ON_EXIT" ]]; then
+			echo "can't find session" >&2
+			exit 1
+		fi
+		if [[ "$1" == display-message ]]; then cat "$FAKE_TMUX_PANE"
+		# Like tmux: a dead pane's visible screen keeps only the exit notice; history keeps pi's output.
+		elif [[ "$(cat "$FAKE_TMUX_PANE")" == 1\|* && " $* " != *" -S "* ]]; then echo 'Pane is dead'
+		else cat "$FAKE_TMUX_SCREEN"; fi ;;
+	*) echo "unexpected tmux command: $*" >&2; exit 64 ;;
+esac
+EOF_FAKE_TMUX
+	chmod +x "$fake_tmux"
+	printf 'SUM=42\n(cursor) grok-4.6\n' >"$temp_dir/tui-answer.screen"
+	printf 'fake pi crashed before answering\n' >"$temp_dir/tui-exited.screen"
+	mkdir -p "$temp_dir/tui-persisted"
+	printf '%s\n' '{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"SUM=42"}]}}' >"$temp_dir/tui-persisted/session.jsonl"
+	for poll_case in exited text-only persisted; do
+		poll_screen="$temp_dir/tui-answer.screen"
+		poll_pane='0||'
+		[[ "$poll_case" != "exited" ]] || { poll_screen="$temp_dir/tui-exited.screen"; poll_pane='1|3|'; }
+		printf '%s\n' "$poll_pane" >"$temp_dir/tui-$poll_case.pane"
+		if (
+			export FAKE_TMUX_SCREEN="$poll_screen" FAKE_TMUX_PANE="$temp_dir/tui-$poll_case.pane" FAKE_TMUX_REMAIN_ON_EXIT="$temp_dir/tui-$poll_case.remain-on-exit"
+			TMUX_BIN="$fake_tmux" SMOKE_DIR="$temp_dir"
+			run_tui_math_footer_poll "tui-$poll_case" 2 "$temp_dir/tui-$poll_case" "$fake_pi"
+		) >"$temp_dir/tui-$poll_case.result" 2>&1; then
+			poll_result=0
+		else
+			poll_result=$?
+		fi
+		case "$poll_case" in
+			exited)
+				[[ "$poll_result" == "1" ]] || fail "self-test failed: exited pi did not fail the TUI poll"
+				grep -q 'pi exited (exit code 3) before TUI evidence' "$temp_dir/tui-$poll_case.result" || fail "self-test failed: TUI poll lost pi's exit status"
+				grep -q 'fake pi crashed before answering' "$temp_dir/tui-$poll_case.result" || fail "self-test failed: TUI poll lost the exited pane capture"
+				if grep -q 'timed out' "$temp_dir/tui-$poll_case.result"; then fail "self-test failed: exited pi was reported as a timeout"; fi
+				;;
+			text-only)
+				[[ "$poll_result" == "1" ]] || fail "self-test failed: TUI text without a persisted answer passed"
+				grep -q 'missing: persisted assistant SUM=42 JSONL' "$temp_dir/tui-$poll_case.result" || fail "self-test failed: TUI poll did not name the missing persisted answer"
+				;;
+			persisted)
+				[[ "$poll_result" == "0" ]] || fail "self-test failed: TUI text with a persisted answer did not pass"
+				;;
+		esac
+	done
+
 	printf '[smoke] self-test PASS\n'
 }
 
@@ -436,7 +513,7 @@ run_direct noninteractive-math 300 "SUM=42" "SUM=42" \
 	--no-tools \
 	-p 'Noninteractive math smoke. Compute 19 + 23. Reply only with SUM=42.'
 
-run_tui_math_footer_poll tui 420 \
+run_tui_math_footer_poll tui 420 "$SMOKE_DIR/tui" \
 	"${NONE_ENV[@]}" "${PI_BASE[@]}" \
 	--session-dir "$SMOKE_DIR/tui" \
 	--no-tools \

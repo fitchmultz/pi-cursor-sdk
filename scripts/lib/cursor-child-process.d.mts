@@ -8,4 +8,5 @@ export declare function terminateChild(
 	child: ChildProcess,
 	options?: { graceMs?: number },
 ): Promise<void>;
+export declare function describeProcessExit(code: number | null, signal: string | number | null): string;
 export declare function parseJsonLines(stdout: string): unknown[];

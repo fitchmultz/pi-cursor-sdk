@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
+import { describeProcessExit } from "../lib/cursor-child-process.mjs";
 import { redactSecrets, writePlatformArtifactBundle } from "./artifacts.mjs";
 import { extractContentText, jsonlHasAssistantFinalTextMarker } from "./jsonl-text.mjs";
 import { getScenario, renderPrompt } from "./scenarios.mjs";
@@ -303,9 +304,10 @@ async function runPtyPi({ artifactDir, ptyCommand, env, cwd, sessionDir, finalMa
 	const responseStartOffset = 0;
 	events.push({ type: "response_watch_started", elapsedMs: Date.now() - startedAt, offset: responseStartOffset });
 
-	let observed = false;
+	// How observation ended; set once by the branch that leaves the loop. Process exit is a separate
+	// record (ptyExit below): evidence, an interrupt or a quit request never stands in for it.
+	let observation = "wait-expired";
 	let finalMarkerSeen = false;
-	let abortObserved = false;
 	const abortStartedPath = join(cwd, ".debug", "platform-smoke", "abort-started.txt");
 	while (Date.now() - startedAt < waitMs) {
 		// PTY chunks may split an OSC-8 link. Strip the complete captured stream,
@@ -316,18 +318,21 @@ async function runPtyPi({ artifactDir, ptyCommand, env, cwd, sessionDir, finalMa
 		if (finalMarkerSeen && sessionJsonlMeetsRequirements(sessionDir, scenario) && sessionJsonlHasAssistantMarker(sessionDir, finalMarker)) {
 			await waitForSessionJsonl(sessionDir, finalMarker, startedAt, events);
 			if (sessionJsonlMeetsRequirements(sessionDir, scenario) && sessionJsonlHasAssistantMarker(sessionDir, finalMarker)) {
-				observed = true;
+				observation = "evidence-observed";
 				break;
 			}
 		}
 		if (abortMode && existsSync(abortStartedPath)) {
-			abortObserved = true;
 			child.write("\x03");
 			events.push({ type: "interrupt_sent", elapsedMs: Date.now() - startedAt });
+			observation = "interrupt-sent";
 			await delay(5_000);
 			break;
 		}
-		if (exitEvent) break;
+		if (exitEvent) {
+			observation = "pi-exited";
+			break;
+		}
 		await delay(500);
 	}
 
@@ -358,15 +363,40 @@ async function runPtyPi({ artifactDir, ptyCommand, env, cwd, sessionDir, finalMa
 			events.push({ type: "kill_sent", elapsedMs: Date.now() - startedAt });
 		}
 	}
-	await waitForSessionJsonl(sessionDir, null, startedAt, events);
+	// Only a live pi can still persist its session; after node-pty reports exit nothing more will appear.
+	if (!exitEvent) await waitForSessionJsonl(sessionDir, null, startedAt, events);
 	await delay(1_000);
+	const ptyExit = exitEvent
+		? { kind: "exited", exitCode: exitEvent.exitCode, signal: exitEvent.signal ?? null }
+		: { kind: "not-observed" };
 
 	const plain = stripVTControlCharacters(ansi);
 	writeRedactedTextFile(join(artifactDir, "terminal.ansi"), ansi);
 	writeRedactedTextFile(join(artifactDir, "terminal.txt"), plain);
 	writeFileSync(join(artifactDir, "pty.events.jsonl"), events.map((event) => JSON.stringify(event)).join("\n") + "\n");
-	writeFileSync(join(artifactDir, "pty.exit.json"), JSON.stringify(exitEvent ?? null, null, 2));
-	return { observed, abortObserved, exitEvent, plain };
+	writeFileSync(join(artifactDir, "pty.exit.json"), JSON.stringify(ptyExit, null, 2));
+	return { observation, ptyExit, plain };
+}
+
+// The raw receipt (live-status.json ptyExit, pty.exit.json) keeps both exitCode and signal.
+function describePtyExit(ptyExit) {
+	return ptyExit.kind === "exited" ? describeProcessExit(ptyExit.exitCode, ptyExit.signal) : "exit not observed";
+}
+
+// The suite's behavior requirement, reported by the state observation actually ended in.
+function observationFailure({ scenario, abortMode, waitMs }, { observation, ptyExit }) {
+	const exited = `pi exited (${describePtyExit(ptyExit)})`;
+	if (abortMode) {
+		if (observation === "interrupt-sent") return undefined;
+		return observation === "pi-exited"
+			? `${exited} before the abort work-start marker appeared; no interrupt was sent`
+			: `abort work-start marker did not appear within ${waitMs}ms; no interrupt was sent`;
+	}
+	if (!scenario.finalMarker || observation === "evidence-observed") return undefined;
+	const evidence = `final marker ${scenario.finalMarker} and its persisted session JSONL evidence`;
+	return observation === "pi-exited"
+		? `${exited} before ${evidence} were observed`
+		: `${evidence} were not observed within ${waitMs}ms`;
 }
 
 function sessionJsonlHasAssistantMarker(sessionDir, finalMarker) {
@@ -492,6 +522,7 @@ async function main() {
 	const scenario = getScenario(args.suite);
 	if (!scenario) fail(`unknown suite: ${args.suite}`);
 	const platform = platformForTarget(args.target);
+	const abortMode = args.suite === "cursor-abort-cleanup";
 	const runRoot = args.outDir;
 	const artifactDir = join(runRoot, "artifacts");
 	const logDir = join(runRoot, "logs");
@@ -548,13 +579,13 @@ async function main() {
 			...process.env,
 			...scenario.env,
 			PI_OFFLINE: "1",
-			...(args.suite === "cursor-abort-cleanup" ? { PLATFORM_ABORT_MARKER: "SHOULD_NOT_PRINT" } : {}),
+			...(abortMode ? { PLATFORM_ABORT_MARKER: "SHOULD_NOT_PRINT" } : {}),
 			PI_CODING_AGENT_DIR: agentDir,
 			PI_CURSOR_SDK_EVENT_DEBUG_DIR: debugDir,
 			PI_CURSOR_PI_TOOL_BRIDGE_DEBUG_FILE: join(artifactDir, "bridge-diagnostics.jsonl"),
 			TERM: "xterm-256color",
 		};
-		if (args.suite === "cursor-abort-cleanup") writeProcessSnapshot(logDir, "process-before", platform);
+		if (abortMode) writeProcessSnapshot(logDir, "process-before", platform);
 		const prompt = renderPrompt(scenario, platform);
 		writeFileSync(join(artifactDir, "prompt.txt"), prompt);
 		const piArgs = ["--approve", "--cursor-no-fast", "--cursor-mode", "agent", "--model", args.model, "--session-dir", sessionDir, "--session-id", `platform-${args.suite}-${Date.now()}`, prompt];
@@ -574,22 +605,23 @@ async function main() {
 			sessionDir,
 			finalMarker: scenario.finalMarker,
 			waitMs: args.waitMs,
-			abortMode: args.suite === "cursor-abort-cleanup",
+			abortMode,
 			scenario,
 		});
 		const jsonlFiles = writeJsonlArtifacts(artifactDir, sessionDir);
 		status.jsonlCount = jsonlFiles.length;
-		status.finalMarkerObserved = ptyResult.observed;
-		status.abortObserved = ptyResult.abortObserved;
-		if (scenario.finalMarker && !ptyResult.observed) throw new Error(`final marker ${scenario.finalMarker} was not observed before timeout`);
-		if (args.suite === "cursor-abort-cleanup") {
-			const abortStartedPath = join(workspaceDir, ".debug", "platform-smoke", "abort-started.txt");
-			if (existsSync(abortStartedPath)) copyFileSync(abortStartedPath, join(artifactDir, "abort-started.txt"));
-			if (!ptyResult.abortObserved) throw new Error("abort suite did not observe bridge/shell process start before interrupt");
+		status.observation = ptyResult.observation;
+		status.ptyExit = ptyResult.ptyExit;
+		const abortStartedPath = join(workspaceDir, ".debug", "platform-smoke", "abort-started.txt");
+		if (abortMode && existsSync(abortStartedPath)) copyFileSync(abortStartedPath, join(artifactDir, "abort-started.txt"));
+		const behaviorFailure = observationFailure({ scenario, abortMode, waitMs: args.waitMs }, ptyResult);
+		if (behaviorFailure) throw new Error(behaviorFailure);
+		if (abortMode) {
 			if (ptyResult.plain.includes("SHOULD_NOT_PRINT")) throw new Error("abort suite printed SHOULD_NOT_PRINT, so cancellation did not happen in time");
 			writeProcessSnapshot(logDir, "process-after", platform);
 			assertNoAbortLeftover(logDir, platform);
 		}
+		if (ptyResult.ptyExit.kind !== "exited") throw new Error("pi PTY exit was not observed after /quit, EOF, Ctrl+C and kill; pi may still be running");
 		if (jsonlFiles.length === 0) throw new Error("no pi session JSONL artifact was written");
 		ok = true;
 	} catch (caught) {

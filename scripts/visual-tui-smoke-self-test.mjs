@@ -147,7 +147,7 @@ export function runVisualSmokeSelfTest(deps) {
 		const deleteBufferMarker = join(tempDir, "delete-buffer-called");
 		writeFileSync(
 			fakeTmux,
-			`#!/bin/sh\ncase "$1" in\n  -V) echo 'tmux fake'; exit 0 ;;\n  new-session) exit 0 ;;\n  load-buffer) cat >/dev/null; exit 0 ;;\n  paste-buffer) exit 77 ;;\n  delete-buffer) echo deleted > ${shellQuote(deleteBufferMarker)}; exit 0 ;;\n  kill-session) exit 0 ;;\n  *) echo "unexpected tmux command: $*" >&2; exit 64 ;;\nesac\n`,
+			`#!/bin/sh\ncase "$1" in\n  -V) echo 'tmux fake'; exit 0 ;;\n  new-session) exit 0 ;;\n  display-message) echo '0|||4242'; exit 0 ;;\n  load-buffer) cat >/dev/null; exit 0 ;;\n  paste-buffer) exit 77 ;;\n  delete-buffer) echo deleted > ${shellQuote(deleteBufferMarker)}; exit 0 ;;\n  kill-session) exit 0 ;;\n  *) echo "unexpected tmux command: $*" >&2; exit 64 ;;\nesac\n`,
 			"utf8",
 		);
 		chmodSync(fakeTmux, 0o755);
@@ -185,6 +185,7 @@ case "$1" in
   paste-buffer) exit 0 ;;
   send-keys) exit 0 ;;
   delete-buffer) exit 0 ;;
+  display-message) echo '0|||4242'; exit 0 ;;
   capture-pane) echo 'captured visual smoke output'; exit 0 ;;
   kill-session) exit 0 ;;
   *) echo "unexpected tmux command: $*" >&2; exit 64 ;;
@@ -220,6 +221,57 @@ esac
 			const manifest = JSON.parse(readFileSync(noJsonlManifest, "utf8"));
 			assertSelfTest(manifest.failure?.message?.includes("no current-run persisted .jsonl"), "failure manifest should record the missing JSONL reason");
 			assertSelfTest(manifest.paths?.html?.endsWith("self-test-jsonl-missing.html"), "failure manifest should point at partial HTML evidence");
+			assertSelfTest(manifest.pi?.kind === "running" && manifest.pi?.pid === 4242, "failure manifest should record pi's pane state at capture");
+		} finally {
+			if (originalPath === undefined) delete process.env.PATH;
+			else process.env.PATH = originalPath;
+		}
+
+		// Like tmux: once pi exits, its session is gone unless new-session asked for remain-on-exit.
+		const remainOnExitMarker = join(tempDir, "fake-tmux-remain-on-exit");
+		writeFileSync(
+			fakeTmux,
+			`#!/bin/sh
+case "$1" in
+  -V) echo 'tmux fake'; exit 0 ;;
+  new-session)
+    case " $* " in *" remain-on-exit on "*) : > ${shellQuote(remainOnExitMarker)} ;; esac
+    exit 0 ;;
+  display-message|capture-pane)
+    [ -e ${shellQuote(remainOnExitMarker)} ] || { echo "can't find session" >&2; exit 1; }
+    if [ "$1" = display-message ]; then echo '1|3||'; else echo 'fake pi crashed during startup'; fi
+    exit 0 ;;
+  kill-session) exit 0 ;;
+  *) echo "unexpected tmux command: $*" >&2; exit 64 ;;
+esac
+`,
+			"utf8",
+		);
+		chmodSync(fakeTmux, 0o755);
+		try {
+			process.env.PATH = hostilePath;
+			let piExitError = "";
+			try {
+				runVisualSmoke({
+					...baseOptions,
+					label: "self-test-pi-exited",
+					safeLabel: "self-test-pi-exited",
+					prompt: "early exit prompt",
+					startupMs: 1,
+					waitMs: 1,
+					width: 80,
+					height: 24,
+					historyLines: 100,
+					sessionDir: join(tempDir, "pi-exited-session"),
+				});
+			} catch (error) {
+				piExitError = error instanceof Error ? error.message : String(error);
+			}
+			assertSelfTest(piExitError.startsWith("pi exited (exit code 3) before the prompt was pasted"), `an exited pi should fail the run with its own status: ${piExitError || "no error"}`);
+			assertSelfTest(readFileSync(join(tempDir, "self-test-pi-exited.txt"), "utf8").includes("fake pi crashed during startup"), "the exited pi's pane output should be kept as the capture");
+			const manifest = JSON.parse(readFileSync(join(tempDir, "self-test-pi-exited.manifest.json"), "utf8"));
+			assertSelfTest(manifest.pi?.kind === "exited" && manifest.pi?.status === 3, "failure manifest should record pi's exit status");
+			assertSelfTest(manifest.failure?.message === piExitError, "failure manifest should carry the pi exit failure");
 		} finally {
 			if (originalPath === undefined) delete process.env.PATH;
 			else process.env.PATH = originalPath;

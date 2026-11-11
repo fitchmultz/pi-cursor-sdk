@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { commonBooleanFlag, commonRepeatStringFlag, parseArgv } from "./lib/cursor-cli-args.mjs";
+import { describeProcessExit } from "./lib/cursor-child-process.mjs";
 import { buildCursorSmokeEnvPlan, CURSOR_SDK_EVENT_DEBUG_ENV_NAMES, sealedNodePath } from "./lib/cursor-smoke-env.mjs";
 import { writeVisualManifest } from "./lib/cursor-visual-manifest.mjs";
 import { runVisualSmokeSelfTest } from "./visual-tui-smoke-self-test.mjs";
@@ -304,6 +305,22 @@ function capturePane(tmuxBin, sessionName, args) {
 	return result.stdout.toString();
 }
 
+// Needs the owned session's remain-on-exit: an exited pi keeps its pane, output and exit status.
+function readPiPaneState(tmuxBin, sessionName) {
+	const result = run(tmuxBin, ["display-message", "-p", "-t", sessionName, "#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}|#{pane_pid}"]);
+	if (result.status !== 0) {
+		throw new Error(result.stderr?.toString().trim() || `tmux display-message exited ${result.status}`);
+	}
+	const [dead, status, signal, pid] = result.stdout.toString().trim().split("|");
+	if (dead !== "1") return { kind: "running", pid: Number(pid) };
+	return { kind: "exited", status: status === "" ? null : Number(status), signal: signal || null };
+}
+
+// tmux leaves both fields empty when it recorded neither an exit status nor a signal.
+function describePiExit(pi) {
+	return pi.signal || pi.status !== null ? describeProcessExit(pi.status, pi.signal) : "exit code unknown";
+}
+
 function collectJsonlMtimes(root) {
 	const files = [];
 	function visit(dir) {
@@ -446,6 +463,30 @@ function runVisualSmoke(options) {
 	let bufferLoaded = false;
 	const jsonlMtimesBeforeRun = snapshotJsonlMtimes(options.sessionDir);
 	const runStartedAtMs = Date.now();
+	const base = resolve(options.outDir, options.safeLabel);
+	const artifactPaths = {
+		ansiPath: `${base}.ansi`,
+		textPath: `${base}.txt`,
+		htmlPath: `${base}.html`,
+		pngPath: `${base}.png`,
+		jsonlPathFile: `${base}.jsonl.path`,
+		manifestPath: `${base}.manifest.json`,
+	};
+	const captureArtifacts = () => {
+		const historyStart = `-${options.historyLines}`;
+		const ansi = capturePane(commands.tmux, sessionName, ["-e", "-p", "-S", historyStart]);
+		const plain = capturePane(commands.tmux, sessionName, ["-p", "-S", historyStart]);
+		writeUtf8(artifactPaths.ansiPath, ansi);
+		writeUtf8(artifactPaths.textPath, plain);
+		writeUtf8(artifactPaths.htmlPath, buildTerminalHtml({ ansi, plain, options }));
+	};
+	// An exited pi fails the run with its own status; its kept pane is the capture.
+	const failIfPiExited = (pi, phase) => {
+		if (pi.kind !== "exited") return;
+		const message = `pi exited (${describePiExit(pi)}) ${phase}; see ${artifactPaths.textPath}`;
+		writeVisualManifest(artifactPaths.manifestPath, options, { ...artifactPaths, pi }, { message, writtenAt: new Date().toISOString() });
+		throw new Error(message);
+	};
 	try {
 		const start = run(commands.tmux, [
 			"new-session",
@@ -462,11 +503,24 @@ function runVisualSmoke(options) {
 			shell,
 			"-c",
 			script,
+			// Same tmux command, so even an immediate pi exit keeps its pane for capture and status.
+			";",
+			"set-option",
+			"-w",
+			"-t",
+			sessionName,
+			"remain-on-exit",
+			"on",
 		]);
 		if (start.status !== 0) throw new Error(`tmux new-session failed: ${start.stderr?.toString().trim() || start.status}`);
 		sessionStarted = true;
 
 		sleep(options.startupMs);
+		const piAtStartup = readPiPaneState(commands.tmux, sessionName);
+		if (piAtStartup.kind === "exited") {
+			captureArtifacts();
+			failIfPiExited(piAtStartup, "before the prompt was pasted");
+		}
 		const load = run(commands.tmux, ["load-buffer", "-b", bufferName, "-"], { input: Buffer.from(options.prompt, "utf8") });
 		if (load.status !== 0) throw new Error(`tmux load-buffer failed: ${load.stderr?.toString().trim() || load.status}`);
 		bufferLoaded = true;
@@ -484,30 +538,18 @@ function runVisualSmoke(options) {
 
 		sleep(options.waitMs);
 
-		const historyStart = `-${options.historyLines}`;
-		const ansi = capturePane(commands.tmux, sessionName, ["-e", "-p", "-S", historyStart]);
-		const plain = capturePane(commands.tmux, sessionName, ["-p", "-S", historyStart]);
+		captureArtifacts();
+		const pi = readPiPaneState(commands.tmux, sessionName);
+		failIfPiExited(pi, "before the capture");
 
-		const base = resolve(options.outDir, options.safeLabel);
-		const ansiPath = `${base}.ansi`;
-		const textPath = `${base}.txt`;
-		const htmlPath = `${base}.html`;
-		const pngPath = `${base}.png`;
-		const jsonlPathFile = `${base}.jsonl.path`;
-		const manifestPath = `${base}.manifest.json`;
-
-		writeUtf8(ansiPath, ansi);
-		writeUtf8(textPath, plain);
-		writeUtf8(htmlPath, buildTerminalHtml({ ansi, plain, options }));
-
-		const partialArtifacts = { ansiPath, textPath, htmlPath, pngPath, jsonlPathFile, manifestPath };
+		const partialArtifacts = { ...artifactPaths, pi };
 		const jsonlPath = findLatestJsonl(options.sessionDir, { sinceMs: runStartedAtMs, previousMtimes: jsonlMtimesBeforeRun });
 		if (!jsonlPath) {
 			const message = `no current-run persisted .jsonl found under ${options.sessionDir}`;
-			writeVisualManifest(manifestPath, options, partialArtifacts, { message, writtenAt: new Date().toISOString() });
+			writeVisualManifest(artifactPaths.manifestPath, options, partialArtifacts, { message, writtenAt: new Date().toISOString() });
 			throw new Error(message);
 		}
-		writeUtf8(jsonlPathFile, `${jsonlPath}\n`);
+		writeUtf8(artifactPaths.jsonlPathFile, `${jsonlPath}\n`);
 
 		return { ...partialArtifacts, jsonlPath };
 	} finally {

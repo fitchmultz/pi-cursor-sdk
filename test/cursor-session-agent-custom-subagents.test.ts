@@ -58,7 +58,7 @@ describe("session custom subagent identity", () => {
 	] satisfies Array<[string, NonNullable<AgentOptions["agents"]>]>)("replaces and disposes on %s changes with fresh send state", async (_change, changed) => {
 		const base = params();
 		const first = await acquireSessionCursorAgent({ ...base, agents });
-		first.commitSend(makeContext(), true);
+		void first.commitSend(makeContext(), true);
 		const replacement = await acquireSessionCursorAgent({ ...base, agents: changed });
 		expect(first.agent[Symbol.asyncDispose]).toHaveBeenCalledOnce();
 		expect(replacement.agent).not.toBe(first.agent);

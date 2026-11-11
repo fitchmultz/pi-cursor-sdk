@@ -32,7 +32,7 @@ describe("MCP-only conversation compatibility", () => {
 		const enabled = await acquireSessionCursorAgent({ ...base, nativeToolsEnabled: true });
 		expect(enabled.agent).toBe(plain.agent);
 		expect(base.createAgent.mock.calls[0][0]).not.toHaveProperty("tools");
-		plain.commitSend(makeContext(), true);
+		void plain.commitSend(makeContext(), true);
 		const restricted = await acquireSessionCursorAgent({ ...base, nativeToolsEnabled: false });
 		expect(plain.agent[Symbol.asyncDispose]).toHaveBeenCalledOnce();
 		expect(restricted.poolKey).toBe(`${plain.poolKey}\0tools:mcp-only`);

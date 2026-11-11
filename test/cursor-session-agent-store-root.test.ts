@@ -52,7 +52,7 @@ describe("captured session-agent storage compatibility", () => {
 	it.each(["same", "other", "v1"] as const)("admits only recorded current custom storage on restart (%s)", async (kind) => {
 		const options = { ...params(), localResume: true, storeRoot: join(root, "B") };
 		const original = await acquireSessionCursorAgent(options);
-		original.commitSend(makeContext(), true);
+		void original.commitSend(makeContext(), true);
 		await agents.resetSessionCursorAgent(scopeKey);
 		resume.set({ scopeKey, sessionFile: scopeKey, cwd: root, branchPathHash: resume.EMPTY_BRANCH_HASH, compactionGeneration: 0,
 			activeHandle: {

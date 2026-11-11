@@ -214,10 +214,10 @@ describe("cursor-session-agent", () => {
 		await sessionAgentTestUtils.resetSessionCursorAgent(scopeKey);
 		const replacement = await acquireSessionCursorAgent(params);
 
-		lease.commitSend(context, true);
+		void lease.commitSend(context, true);
 		expect(replacement.sendState.bootstrapped).toBe(false);
 
-		replacement.commitSend(context, true);
+		void replacement.commitSend(context, true);
 		expect(replacement.sendState.bootstrapped).toBe(true);
 	});
 
@@ -351,21 +351,21 @@ describe("cursor-session-agent", () => {
 		const context = makeContext([{ role: "user", content: "Hello", timestamp: 1 }]);
 
 		expect(planCursorSessionSend(lease.sendState, context)).toEqual({ mode: "bootstrap", resetAgent: false, reason: "initial" });
-		lease.commitSend(context, true);
+		void lease.commitSend(context, true);
 		expect(lease.sendState).toMatchObject({ bootstrapped: true, incrementalSendCount: 0 });
 
-		lease.commitSend(context, false);
-		lease.commitSend(context, false);
+		void lease.commitSend(context, false);
+		void lease.commitSend(context, false);
 		expect(lease.sendState).toMatchObject({ bootstrapped: true, incrementalSendCount: 2 });
 
 		for (let committed = 2; committed < MAX_COMPLETED_INCREMENTAL_SENDS_BEFORE_REBOOTSTRAP; committed += 1) {
 			expect(planCursorSessionSend(lease.sendState, context)).toEqual({ mode: "incremental", resetAgent: false, reason: "incremental" });
-			lease.commitSend(context, false);
+			void lease.commitSend(context, false);
 		}
 		expect(lease.sendState).toMatchObject({ bootstrapped: true, incrementalSendCount: 20 });
 		expect(planCursorSessionSend(lease.sendState, context)).toEqual({ mode: "bootstrap", resetAgent: true, reason: "incremental_threshold" });
 
-		lease.commitSend(context, true);
+		void lease.commitSend(context, true);
 		expect(lease.sendState).toMatchObject({ bootstrapped: true, incrementalSendCount: 0 });
 	});
 

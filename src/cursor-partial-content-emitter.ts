@@ -1,18 +1,19 @@
-import type { AssistantMessage, AssistantMessageEventStream } from "@earendil-works/pi-ai";
+import type { AssistantMessage, AssistantMessageEventStream, TextContent, ThinkingContent } from "@earendil-works/pi-ai";
 
 const DEFAULT_THINKING_TRACE_MAX_CHARS = 50000;
 export const CURSOR_TEXT_MESSAGE_SEPARATOR = "\n\n";
 
-export interface CursorPartialContentEmitterOptions {
-	stream: AssistantMessageEventStream;
-	partial: AssistantMessage;
-	thinkingMaxChars?: number;
-	mutuallyExclusive?: boolean;
+/** A channel's open block and its index in the partial; a closed channel has none. */
+interface OpenContentBlock<TBlock> {
+	readonly contentIndex: number;
+	readonly block: TBlock;
 }
 
+/** Open slots retain block references; callers append to partial.content without replacing earlier blocks. */
 export class CursorPartialContentEmitter {
-	private thinkingContentIndex = -1;
-	private textContentIndex = -1;
+	// Independent channels: without mutual exclusion, thinking and text can both stay open.
+	private openThinking: OpenContentBlock<ThinkingContent> | undefined;
+	private openText: OpenContentBlock<TextContent> | undefined;
 	private textMessageCompleted = false;
 	private activityTraceChars = 0;
 	private activityTraceTruncated = false;
@@ -25,32 +26,28 @@ export class CursorPartialContentEmitter {
 	) {}
 
 	closeThinking(): void {
-		if (this.thinkingContentIndex < 0) return;
-		const block = this.partial.content[this.thinkingContentIndex];
-		if (block.type === "thinking") {
-			this.stream.push({
-				type: "thinking_end",
-				contentIndex: this.thinkingContentIndex,
-				content: block.thinking,
-				partial: this.partial,
-			});
-		}
-		this.thinkingContentIndex = -1;
+		const open = this.openThinking;
+		if (!open) return;
+		this.openThinking = undefined;
+		this.stream.push({
+			type: "thinking_end",
+			contentIndex: open.contentIndex,
+			content: open.block.thinking,
+			partial: this.partial,
+		});
 	}
 
 	closeText(): string {
-		if (this.textContentIndex < 0) return "";
-		const contentIndex = this.textContentIndex;
-		const block = this.partial.content[contentIndex];
-		this.textContentIndex = -1;
-		if (block.type !== "text") return "";
+		const open = this.openText;
+		if (!open) return "";
+		this.openText = undefined;
 		this.stream.push({
 			type: "text_end",
-			contentIndex,
-			content: block.text,
+			contentIndex: open.contentIndex,
+			content: open.block.text,
 			partial: this.partial,
 		});
-		return block.text;
+		return open.block.text;
 	}
 
 	closeAll(): string {
@@ -69,20 +66,19 @@ export class CursorPartialContentEmitter {
 			text = `${text.slice(0, remainingChars)}\n[Cursor activity trace truncated]\n`;
 			this.activityTraceTruncated = true;
 		}
-		if (!text) return;
 
-		if (this.thinkingContentIndex < 0) {
-			this.thinkingContentIndex = this.partial.content.length;
-			this.partial.content.push({ type: "thinking", thinking: "" });
-			this.stream.push({ type: "thinking_start", contentIndex: this.thinkingContentIndex, partial: this.partial });
+		let open = this.openThinking;
+		if (!open) {
+			open = { contentIndex: this.partial.content.length, block: { type: "thinking", thinking: "" } };
+			this.partial.content.push(open.block);
+			this.openThinking = open;
+			this.stream.push({ type: "thinking_start", contentIndex: open.contentIndex, partial: this.partial });
 		}
-		const block = this.partial.content[this.thinkingContentIndex];
-		if (block.type !== "thinking") return;
-		block.thinking += text;
+		open.block.thinking += text;
 		this.activityTraceChars += text.length;
 		this.stream.push({
 			type: "thinking_delta",
-			contentIndex: this.thinkingContentIndex,
+			contentIndex: open.contentIndex,
 			delta: text,
 			partial: this.partial,
 		});
@@ -103,17 +99,17 @@ export class CursorPartialContentEmitter {
 			this.appendTextDelta(CURSOR_TEXT_MESSAGE_SEPARATOR, { closeThinking: false });
 			this.closeText();
 		}
-		if (this.textContentIndex < 0) {
-			this.textContentIndex = this.partial.content.length;
-			this.partial.content.push({ type: "text", text: "" });
-			this.stream.push({ type: "text_start", contentIndex: this.textContentIndex, partial: this.partial });
+		let open = this.openText;
+		if (!open) {
+			open = { contentIndex: this.partial.content.length, block: { type: "text", text: "" } };
+			this.partial.content.push(open.block);
+			this.openText = open;
+			this.stream.push({ type: "text_start", contentIndex: open.contentIndex, partial: this.partial });
 		}
-		const block = this.partial.content[this.textContentIndex];
-		if (block.type !== "text") return;
-		block.text += delta;
+		open.block.text += delta;
 		this.stream.push({
 			type: "text_delta",
-			contentIndex: this.textContentIndex,
+			contentIndex: open.contentIndex,
 			delta,
 			partial: this.partial,
 		});

@@ -2,6 +2,7 @@
 import "./helpers/cursor-provider-harness.js";
 import { readFileSync } from "node:fs";
 import type { SendOptions } from "@cursor/sdk";
+import type { AssistantMessageEvent } from "@earendil-works/pi-ai";
 import { AgentSession } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { streamCursor } from "./helpers/cursor-provider-ownership.js";
@@ -48,6 +49,28 @@ function installSend(callbacks: TextCallback[], result: string, status: "finishe
 
 const text = (value: string): TextCallback => ({ channel: "onDelta", args: { update: { type: "text-delta", text: value } } });
 const complete = (value: string): TextCallback => ({ channel: "onStep", args: { step: { type: "assistantMessage", message: { text: value } } } });
+const thinking = (value: string): TextCallback => ({ channel: "onDelta", args: { update: { type: "thinking-delta", text: value } } });
+const thinkingCompleted: TextCallback = { channel: "onDelta", args: { update: { type: "thinking-completed", thinkingDurationMs: 1 } } };
+
+// Keep block-pairing fields for sequence assertions; final content is checked separately.
+type BlockEvent = [type: string, contentIndex: number] | [type: string, contentIndex: number, payload: string];
+function blockEvents(events: readonly AssistantMessageEvent[]): BlockEvent[] {
+	return events.flatMap((event): BlockEvent[] => {
+		switch (event.type) {
+			case "text_start":
+			case "thinking_start":
+				return [[event.type, event.contentIndex]];
+			case "text_delta":
+			case "thinking_delta":
+				return [[event.type, event.contentIndex, event.delta]];
+			case "text_end":
+			case "thinking_end":
+				return [[event.type, event.contentIndex, event.content]];
+			default:
+				return [];
+		}
+	});
+}
 
 describe("Cursor completed assistant-message boundaries", () => {
 	beforeEach(resetCursorProviderTestState);
@@ -130,16 +153,72 @@ describe("Cursor completed assistant-message boundaries", () => {
 			process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 			await registerNativeToolDisplayForTest([]);
 		}
-		installSend([text("Working"), complete("Working"),
-			{ channel: "onDelta", args: { update: { type: "thinking-delta", text: "Considering" } } },
-			{ channel: "onDelta", args: { update: { type: "thinking-completed", thinkingDurationMs: 1 } } },
-			text("NO_MARKER"), complete("NO_MARKER"),
-		], "NO_MARKER");
+		installSend([text("Working"), complete("Working"), thinking("Considering"), thinkingCompleted, text("NO_MARKER"), complete("NO_MARKER")], "NO_MARKER");
 		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 		expect(collectTextDeltas(events)).toBe("Working\n\nNO_MARKER");
 		const message = getDoneEvent(events).message;
 		expect(message.content.some((block) => block.type === "thinking" && block.thinking.includes("Considering"))).toBe(true);
 		expect(getFinalAssistantText(message)).toBe("NO_MARKER");
+	});
+
+	it.each([
+		{
+			// Direct turns keep thinking and text open together; each delta grows its own block.
+			live: false,
+			blocks: [
+				["thinking_start", 0], ["thinking_delta", 0, "Planning"],
+				["text_start", 1], ["text_delta", 1, "Working"],
+				["thinking_delta", 0, " still"], ["thinking_end", 0, "Planning still"],
+				["text_delta", 1, "\n\n"], ["text_end", 1, "Working\n\n"],
+				["text_start", 2], ["text_delta", 2, "NO_MARKER"], ["text_end", 2, "NO_MARKER"],
+			],
+			content: [
+				{ type: "thinking", thinking: "Planning still" },
+				{ type: "text", text: "Working\n\n" },
+				{ type: "text", text: "NO_MARKER" },
+			],
+		},
+		{
+			// Live drain closes one channel before opening the other.
+			live: true,
+			blocks: [
+				["thinking_start", 0], ["thinking_delta", 0, "Planning"], ["thinking_end", 0, "Planning"],
+				["text_start", 1], ["text_delta", 1, "Working"], ["text_end", 1, "Working"],
+				["thinking_start", 2], ["thinking_delta", 2, " still"], ["thinking_end", 2, " still"],
+				["text_start", 3], ["text_delta", 3, "\n\n"], ["text_end", 3, "\n\n"],
+				["text_start", 4], ["text_delta", 4, "NO_MARKER"], ["text_end", 4, "NO_MARKER"],
+			],
+			content: [
+				{ type: "thinking", thinking: "Planning" },
+				{ type: "text", text: "Working" },
+				{ type: "thinking", thinking: " still" },
+				{ type: "text", text: "\n\n" },
+				{ type: "text", text: "NO_MARKER" },
+			],
+		},
+	])("pairs interleaved thinking and text block events by content index (live=$live)", async ({ live, blocks, content }) => {
+		if (live) {
+			process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+			await registerNativeToolDisplayForTest([]);
+		}
+		installSend([thinking("Planning"), text("Working"), thinking(" still"), thinkingCompleted, complete("Working"), text("NO_MARKER"), complete("NO_MARKER")], "NO_MARKER");
+		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		expect(blockEvents(events)).toEqual(blocks);
+		const done = getDoneEvent(events);
+		expect(done.message.content).toEqual(content);
+		expect(getFinalAssistantText(done.message)).toBe("NO_MARKER");
+	});
+
+	it("truncates the direct activity trace once at its budget and keeps text", async () => {
+		const trace = "x".repeat(49_995);
+		const marker = "\n[Cursor activity trace truncated]\n";
+		installSend([thinking(trace), thinking("abcdefghij"), thinking("ignored"), thinkingCompleted, thinking("ignored again"), text("answer"), complete("answer")], "answer");
+		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		expect(blockEvents(events)).toEqual([
+			["thinking_start", 0], ["thinking_delta", 0, trace], ["thinking_delta", 0, `abcde${marker}`],
+			["thinking_end", 0, `${trace}abcde${marker}`],
+			["text_start", 1], ["text_delta", 1, "answer"], ["text_end", 1, "answer"],
+		]);
 	});
 
 	it("ignores empty deltas and repeated completion callbacks without adding extra boundaries", async () => {

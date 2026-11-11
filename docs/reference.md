@@ -478,7 +478,7 @@ If the agent intent cannot be persisted, pi does not send; if the returned run c
 
 `/cursor-cloud list`, `/cursor-cloud archive <bc-agentId>`, and `/cursor-cloud delete <bc-agentId> --yes` only accept exact recorded `bc-` cloud IDs.
 
-Archive/delete require resolved Cursor auth and unchanged originating session/branch authority before SDK work, fsync a durable intent before the mutation, and fsync its actual success result afterward. Once started, the result stays in the original journal even if that owner changes branch, reloads, or shuts down; it is not mirrored into a replacement branch. An unresolved intent blocks retries and directs manual dashboard inspection instead of guessing whether an irreversible request completed.
+Archive/delete require resolved Cursor auth and unchanged originating session/branch authority before SDK work, fsync a durable intent before the mutation, and fsync its actual success result afterward. Once started, the result stays in the original journal even if that owner changes branch, reloads, or shuts down; it is not mirrored into a replacement branch. An unresolved intent blocks retries and directs manual dashboard inspection instead of guessing whether an irreversible request completed. Status follows each operation's recorded intent and result, not timestamps, so a recorded success stays final even if the system clock moved backward during the request.
 
 ### Cloud boundaries
 

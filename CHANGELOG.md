@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Ask Pi to abort a running bridged tool only once when the bridge stops it after a call deadline, Cursor cancellation, run release or shutdown. On Windows, the bash process-tree cleanup for that tool now also runs once instead of twice.
+
 ## 0.5.31 - 2026-11-11
 
 <!-- npm-release:unreleased:start -->

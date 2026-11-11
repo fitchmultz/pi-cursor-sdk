@@ -474,6 +474,9 @@ for (const cleanup of ["answer", "abort", "shutdown", "deadline"]) {
         finally { signal.removeEventListener("abort", abort); }
         return { content: [{ type: "text", text: "delayed owned answer" }], details: {} };
       } });
+      // ctx.abort() reaches Pi through session.abort(); the user abort below calls the original directly.
+      const userAbort = owner.session.abort;
+      const extensionAbortRequests = t.mock.method(owner.session, "abort").mock;
       const before = { sends: state.sends.length, results: state.bridgeResults.length };
       const outputReady = Promise.withResolvers(), outputEmitted = Promise.withResolvers();
       const proof = process.env.PI_CURSOR_BOOTSTRAP_PROOF_DIR;
@@ -501,12 +504,13 @@ for (const cleanup of ["answer", "abort", "shutdown", "deadline"]) {
           assert.equal(state.bridgeResults.length, before.results);
         }
         if (cleanup === "answer") answer.resolve();
-        else if (cleanup === "abort") await owner.session.abort();
+        else if (cleanup === "abort") await userAbort.call(owner.session);
         else if (cleanup === "shutdown") await owner.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
         await running;
         assert.equal(state.sends.length, before.sends + 1, "no fresh SDK send for continuation or cleanup");
         if (cleanup === "answer") {
           assert.equal(executionAborts, 0);
+          assert.equal(extensionAbortRequests.callCount(), 0);
           assert.equal(state.bridgeResults.length, before.results + 1);
           assert.deepEqual(state.bridgeResults.at(-1).content, [{ type: "text", text: "delayed owned answer" }]);
           assert.equal(owner.session.messages.at(-1).stopReason, "stop", owner.session.messages.at(-1).errorMessage);
@@ -529,6 +533,7 @@ for (const cleanup of ["answer", "abort", "shutdown", "deadline"]) {
           // SDK/MCP completion and its existing fail-closed finalizer are asynchronous.
           while (!state.disposed.includes(send.agentId)) await delay(5, undefined, { signal: t.signal });
           assert.equal(executionAborts, 1);
+          assert.equal(extensionAbortRequests.callCount(), 1, "cleanup asks Pi to abort the owned execution once");
           assert.equal(state.cancelled.filter(id => id === send.runId).length, 1);
           assert.equal(state.disposed.filter(id => id === send.agentId).length, 1);
           assert.ok(state.stores.filter(store => store.workspaceRef === owner.cwd).every(store => store.disposed));

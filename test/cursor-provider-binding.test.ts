@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { SessionManager, convertToLlm, createAgentSession, DefaultResourceLoader, ModelRuntime, SettingsManager, type AgentSession, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createAssistantMessageEventStream, InMemoryCredentialStore, type Context } from "@earendil-works/pi-ai";
-import type { CursorModelFallbackIssue } from "../src/model-discovery.js";
+import type { CursorModelCatalogProvenance } from "../src/model-discovery.js";
 import { createPiHarness, makeAssistantMessage, makeModel, collectEvents, createExtensionTestContext } from "./helpers/pi-harness.js";
 import type { createCursorLazyStream } from "../src/cursor-provider-lazy.js";
-import { registerCursorProviderBinding } from "../src/cursor-provider-binding.js";
+import { registerCursorProviderBinding, type CursorServedCatalogProvenance } from "../src/cursor-provider-binding.js";
 import { registerCursorNativeToolDisplayState } from "../src/cursor-native-tool-display-state.js";
 import { registerCursorSessionScope } from "../src/cursor-session-scope.js";
 import { captureCursorRequestProjection, resolveCursorRequestProvenance } from "../src/cursor-request-provenance.js";
@@ -177,14 +177,14 @@ describe("provider header receipts and operation membership", () => {
 		});
 
 		it("reports the serving provider's catalog provenance, including through a composed wrapper, until shutdown or dispose", async () => {
-			let nextIssue: CursorModelFallbackIssue | undefined = { reason: "missing-api-key", message: "bootstrap had no key" };
+			const missingKey: CursorModelCatalogProvenance = { source: "bundled", issue: { reason: "missing-api-key", message: "bootstrap had no key" } };
+			let next: CursorModelCatalogProvenance = missingKey;
 			const fastMetadata = { piModelId: "live-fast-model", baseModelId: "live-fast-model", selectionModelId: "live-fast-model", displayName: "Live", defaultParams: [], contextWindow: 1, supportsFast: true, defaultFast: false, supportsReasoning: false, parameterIds: { context: false, reasoning: false, effort: false, thinking: false, reasoning_effort: false, fast: true } };
 			vi.doMock("../src/model-discovery.js", async () => {
 				const actual = await vi.importActual<typeof import("../src/model-discovery.js")>("../src/model-discovery.js");
-				return { ...actual, discoverModels: vi.fn(async (options: { publish?: (definitions: [], update: () => void) => Promise<unknown>; onFallback?: (issue: CursorModelFallbackIssue) => void }) => {
-					await options.publish?.([], () => {
-						if (nextIssue) options.onFallback?.(nextIssue);
-						actual.replaceCursorModelMetadata(nextIssue ? [] : [fastMetadata]);
+				return { ...actual, discoverModels: vi.fn(async (options: { publish?: (definitions: [], provenance: CursorModelCatalogProvenance, update: () => void) => Promise<unknown> }) => {
+					await options.publish?.([], next, () => {
+						actual.replaceCursorModelMetadata(next.issue ? [] : [fastMetadata]);
 					});
 					return [];
 				}) };
@@ -198,33 +198,33 @@ describe("provider header receipts and operation membership", () => {
 				const provider = bootstrap._registered[0]!.provider!;
 				const refresh = () => provider.refreshModels!({ allowNetwork: true, force: true, signal: new AbortController().signal, publish: async (publication) => { publication.update?.(); return true; } });
 				await refresh();
-				const session = createPiHarness(); const seen: (CursorModelFallbackIssue | undefined)[] = [];
+				const session = createPiHarness(); const seen: CursorServedCatalogProvenance[] = [];
 				onTestFinished(async () => { await session.runSessionShutdown({ reason: "quit" }); });
 				const sessionMods = await load();
-				sessionMods.binding.registerCursorProviderBinding(session)([], (issue, metadata) => {
-					seen.push(issue);
+				sessionMods.binding.registerCursorProviderBinding(session)([], (provenance, metadata) => {
+					seen.push(provenance);
 					if (metadata) sessionMods.discovery.replaceCursorModelMetadata(metadata);
 				});
-				nextIssue = undefined;
+				next = { source: "live" };
 				const wrapped = { ...provider, streamSimple: () => { throw new Error("composed stream"); } };
 				const modelRegistry = { getProvider: () => wrapped, getRegisteredNativeProvider: () => provider, refresh } as unknown as ExtensionContext["modelRegistry"];
 				await session.invokeEventWithContext("session_start", { type: "session_start", reason: "startup" }, createExtensionTestContext({ modelRegistry }));
-				expect(seen).toEqual([{ reason: "missing-api-key", message: "bootstrap had no key" }, undefined]);
+				expect(seen).toEqual([missingKey, { source: "live" }]);
 				expect(sessionMods.discovery.getCursorModelMetadata("live-fast-model")?.supportsFast).toBe(true);
 				await session.runSessionShutdown({ reason: "quit" });
-				nextIssue = { reason: "cache-only", message: "after shutdown" };
+				next = { source: "bundled", issue: { reason: "cache-only", message: "after shutdown" } };
 				await refresh();
 				expect(seen).toHaveLength(2);
-				const disposedSession = createPiHarness(); const disposedSeen: (CursorModelFallbackIssue | undefined)[] = [];
+				const disposedSession = createPiHarness(); const disposedSeen: CursorServedCatalogProvenance[] = [];
 				onTestFinished(async () => { await disposedSession.runSessionShutdown({ reason: "quit" }); });
 				let disposeProbe = false;
 				Object.assign(disposedSession, { getSessionName: () => { if (disposeProbe) throw new Error("This extension ctx is stale after session replacement or reload."); return "disposed"; } });
-				(await load()).binding.registerCursorProviderBinding(disposedSession)([], (issue) => { disposedSeen.push(issue); });
-				nextIssue = undefined;
+				(await load()).binding.registerCursorProviderBinding(disposedSession)([], (provenance) => { disposedSeen.push(provenance); });
+				next = { source: "live" };
 				await disposedSession.invokeEventWithContext("session_start", { type: "session_start", reason: "startup" }, createExtensionTestContext({ modelRegistry }));
 				const beforeDispose = disposedSeen.length;
 				disposeProbe = true;
-				nextIssue = { reason: "cache-only", message: "after dispose" };
+				next = { source: "bundled", issue: { reason: "cache-only", message: "after dispose" } };
 				await refresh();
 				expect(disposedSeen).toHaveLength(beforeDispose);
 			} finally {
@@ -234,11 +234,12 @@ describe("provider header receipts and operation membership", () => {
 		});
 
 		it("follows a native provider that replaces the registration after session_start", async () => {
-			let nextIssue: CursorModelFallbackIssue | undefined;
+			const ownStartup: CursorModelCatalogProvenance = { source: "bundled", issue: { reason: "missing-api-key", message: "own startup" } };
+			let next: CursorModelCatalogProvenance = ownStartup;
 			vi.doMock("../src/model-discovery.js", async () => {
 				const actual = await vi.importActual<typeof import("../src/model-discovery.js")>("../src/model-discovery.js");
-				return { ...actual, discoverModels: vi.fn(async (options: { publish?: (definitions: [], update: () => void) => Promise<unknown>; onFallback?: (issue: CursorModelFallbackIssue) => void }) => {
-					await options.publish?.([], () => { if (nextIssue) options.onFallback?.(nextIssue); });
+				return { ...actual, discoverModels: vi.fn(async (options: { publish?: (definitions: [], provenance: CursorModelCatalogProvenance, update: () => void) => Promise<unknown> }) => {
+					await options.publish?.([], next, () => {});
 					return [];
 				}) };
 			});
@@ -247,32 +248,30 @@ describe("provider header receipts and operation membership", () => {
 				const slot: { provider?: NonNullable<ReturnType<typeof createPiHarness>["_registered"][number]["provider"]> } = {};
 				const refreshCurrent = () => slot.provider?.refreshModels?.({ allowNetwork: true, force: true, signal: new AbortController().signal, publish: async (publication: { update?: () => void }) => { publication.update?.(); return true; } });
 				const modelRegistry = { getProvider: () => slot.provider && { ...slot.provider, streamSimple: () => undefined }, getRegisteredNativeProvider: () => slot.provider, refresh: async () => ({ aborted: false, errors: new Map() }) } as unknown as ExtensionContext["modelRegistry"];
-				const started = createPiHarness(); const seen: (CursorModelFallbackIssue | undefined)[] = [];
+				const started = createPiHarness(); const seen: CursorServedCatalogProvenance[] = [];
 				onTestFinished(async () => { await started.runSessionShutdown({ reason: "quit" }); });
-				(await load()).registerCursorProviderBinding(started)([], (issue) => { seen.push(issue); });
+				(await load()).registerCursorProviderBinding(started)([], (provenance) => { seen.push(provenance); });
 				slot.provider = started._registered[0]!.provider;
-				nextIssue = { reason: "missing-api-key", message: "own startup" };
 				await refreshCurrent();
 				await started.invokeEventWithContext("session_start", { type: "session_start", reason: "startup" }, createExtensionTestContext({ modelRegistry }));
-				expect(seen).toEqual([{ reason: "missing-api-key", message: "own startup" }]);
+				expect(seen).toEqual([ownStartup]);
 				const replacement = createPiHarness();
 				(await load()).registerCursorProviderBinding(replacement)([], () => {});
 				slot.provider = replacement._registered[0]!.provider;
-				nextIssue = undefined;
+				next = { source: "live" };
 				await refreshCurrent();
-				expect(seen).toEqual([{ reason: "missing-api-key", message: "own startup" }, undefined]);
+				expect(seen).toEqual([ownStartup, { source: "live" }]);
 			} finally {
 				vi.doUnmock("../src/model-discovery.js");
 				vi.resetModules();
 			}
 		});
 
-		it("keeps a published live catalog when an unstarted provider is refreshed offline without a key", async () => {
+		it.each(["live", "cache"] as const)("keeps a published %s catalog when an unstarted provider is refreshed offline without a key", async (source) => {
 			const previousKey = process.env.CURSOR_API_KEY;
 			delete process.env.CURSOR_API_KEY;
-			const discover = vi.fn(async (options: { allowNetwork?: boolean; onFallback?: (issue: CursorModelFallbackIssue) => void; publish?: (definitions: [], update: () => void) => Promise<unknown> }) => {
-				if (options.allowNetwork === false) options.onFallback?.({ reason: "missing-api-key", message: "no key" });
-				await options.publish?.([], () => {});
+			const discover = vi.fn(async (options: { allowNetwork?: boolean; publish?: (definitions: [], provenance: CursorModelCatalogProvenance, update: () => void) => Promise<unknown> }) => {
+				await options.publish?.([], options.allowNetwork === false ? { source: "bundled", issue: { reason: "missing-api-key", message: "no key" } } : { source }, () => {});
 				return [];
 			});
 			vi.doMock("../src/model-discovery.js", async () => {
@@ -282,14 +281,16 @@ describe("provider header receipts and operation membership", () => {
 			try {
 				vi.resetModules();
 				const { registerCursorProviderBinding: register } = await import("../src/cursor-provider-binding.js");
-				const bootstrap = createPiHarness(); const seen: (CursorModelFallbackIssue | undefined)[] = [];
-				register(bootstrap)([], (issue) => { seen.push(issue); });
+				const bootstrap = createPiHarness(); const seen: CursorServedCatalogProvenance[] = [];
+				register(bootstrap)([], (provenance) => { seen.push(provenance); });
 				const provider = bootstrap._registered[0]!.provider!;
 				const publish = async (publication: { update?: () => void }) => { publication.update?.(); return true; };
-				await provider.refreshModels!({ allowNetwork: true, force: true, signal: new AbortController().signal, credential: { type: "api_key", key: "live-key" }, publish });
+				// A forced refresh fetches live; an ordinary one can serve the fresh matching cache.
+				await provider.refreshModels!({ allowNetwork: true, force: source === "live", signal: new AbortController().signal, credential: { type: "api_key", key: "live-key" }, publish });
 				await provider.refreshModels!({ allowNetwork: false, signal: new AbortController().signal, publish });
 				expect(discover).toHaveBeenCalledTimes(1);
-				expect(seen).toEqual([undefined, undefined]);
+				// The kept catalog is republished, not fetched again.
+				expect(seen).toEqual([{ source }, { source: "cache" }]);
 			} finally {
 				if (previousKey === undefined) delete process.env.CURSOR_API_KEY;
 				else process.env.CURSOR_API_KEY = previousKey;

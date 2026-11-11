@@ -64,7 +64,7 @@ describe("discoverModels", () => {
 	it("returns generated fallback models when no API key", async () => {
 		delete process.env.CURSOR_API_KEY;
 		const issues: CursorModelFallbackIssue[] = [];
-		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY, onFallback: (issue) => issues.push(issue) });
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY, onCatalog: ({ issue }) => { if (issue) issues.push(issue); } });
 		expect(models.length).toBeGreaterThan(0);
 		expect(issues).toEqual([
 			expect.objectContaining({
@@ -110,7 +110,7 @@ describe("discoverModels", () => {
 		writeStoredCursorApiKey("unrelated-default-key");
 		process.env.CURSOR_API_KEY = "unrelated-ambient-key";
 		const issues: CursorModelFallbackIssue[] = [];
-		const models = await discoverModels({ apiKey, onFallback: (issue) => issues.push(issue) });
+		const models = await discoverModels({ apiKey, onCatalog: ({ issue }) => { if (issue) issues.push(issue); } });
 		expect(models.some((model) => model.id === "composer-2.5")).toBe(true);
 		expect(issues[0].reason).toBe("missing-api-key");
 		expect(mockedList).not.toHaveBeenCalled();

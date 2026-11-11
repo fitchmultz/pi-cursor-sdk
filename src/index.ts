@@ -1,11 +1,11 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { discoverModels, replaceCursorModelMetadata, type CursorModelFallbackIssue } from "./model-discovery.js";
+import { discoverModels, replaceCursorModelMetadata } from "./model-discovery.js";
 import { registerCursorRuntimeControls } from "./cursor-state.js";
 import { registerCursorNativeToolDisplay } from "./cursor-native-tool-display-registration.js";
 import { registerCursorPiToolBridge } from "./cursor-pi-tool-bridge.js";
 import { registerCursorQuestionTool } from "./cursor-question-tool.js";
 import { registerCursorSkillTool } from "./cursor-skill-tool.js";
-import { registerCursorProviderBinding } from "./cursor-provider-binding.js";
+import { registerCursorProviderBinding, type CursorServedCatalogProvenance } from "./cursor-provider-binding.js";
 import { getCursorSessionScopeSnapshot, registerCursorSessionScope } from "./cursor-session-scope.js";
 import { registerCursorSessionAgentLifecycle } from "./cursor-session-agent-lifecycle.js";
 import { registerCursorSessionAgentLineage } from "./cursor-session-agent-lineage.js";
@@ -59,7 +59,7 @@ export default async function (pi: CursorExtensionApi) {
 			else process.stderr.write(`${message}\n`);
 		},
 	});
-	let fallbackIssue: CursorModelFallbackIssue | undefined;
+	let catalog: CursorServedCatalogProvenance | undefined;
 	const registerCursorProvider = registerCursorProviderBinding(pi);
 	const setFallbackWarning = registerCursorFallbackIssueWarning(pi);
 	registerCursorSessionAgentLineage(pi);
@@ -78,12 +78,12 @@ export default async function (pi: CursorExtensionApi) {
 	const models = await discoverModels({
 		apiKey: normalizeCursorApiKey(process.env.CURSOR_API_KEY),
 		allowNetwork: false,
-		onFallback: (issue) => {
-			fallbackIssue = issue;
+		onCatalog: (provenance) => {
+			catalog = provenance;
 		},
 	});
 
-	setFallbackWarning(fallbackIssue);
+	setFallbackWarning(catalog?.issue);
 
 	pi.registerCommand("cursor-refresh-models", {
 		description: "Refresh the live Cursor model catalog without restarting pi",
@@ -94,8 +94,14 @@ export default async function (pi: CursorExtensionApi) {
 				ctx.ui.notify("Cursor model catalog refresh was cancelled.", "warning");
 			} else if (result.errors.has("cursor")) {
 				ctx.ui.notify("Cursor model catalog refresh failed; the previous catalog was retained.", "warning");
-			} else if (fallbackIssue) {
-				ctx.ui.notify(`Cursor model catalog refresh did not use a live catalog: ${fallbackIssue.message}`, "warning");
+			} else if (catalog?.issue) {
+				ctx.ui.notify(`Cursor model catalog refresh did not use a live catalog: ${catalog.issue.message}`, "warning");
+			} else if (catalog?.source === "unknown") {
+				// Retrying cannot help: the serving provider's extension copy predates catalog provenance.
+				ctx.ui.notify("Cursor model catalog freshness is unknown because the host's Cursor extension does not report it. Update and reload pi-cursor-sdk in the host, then reload this session.", "warning");
+			} else if (catalog?.source !== "live") {
+				// Another refresh can supersede this one and leave the matching cache published.
+				ctx.ui.notify("Cursor model catalog refresh did not confirm a live catalog. Run /cursor-refresh-models to retry.", "warning");
 			} else {
 				const count = ctx.modelRegistry.getAll().filter((model) => model.provider === "cursor").length;
 				ctx.ui.notify(`Cursor model catalog refreshed with ${count} model${count === 1 ? "" : "s"}.`, "info");
@@ -103,9 +109,9 @@ export default async function (pi: CursorExtensionApi) {
 		},
 	});
 
-	registerCursorProvider(models, (issue, metadata) => {
-		fallbackIssue = issue;
-		setFallbackWarning(issue);
+	registerCursorProvider(models, (provenance, metadata) => {
+		catalog = provenance;
+		setFallbackWarning(provenance.issue);
 		if (metadata) replaceCursorModelMetadata(metadata);
 	});
 	// Register last so session_shutdown cleanup remains protected until other Cursor handlers finish.

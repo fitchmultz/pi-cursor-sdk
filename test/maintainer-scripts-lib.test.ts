@@ -362,7 +362,8 @@ grandchild.stdout.once("data", () => {
 	it("waits for stdio close, not exit, while a grandchild holds the parent's stdout", async () => {
 		const root = mkdtempSync(join(tmpdir(), "pi-cursor-child-close-"));
 		const releasePath = join(root, "release");
-		const parent = spawn(process.execPath, ["-e", stdoutHoldingParentSource(releasePath, false)], { stdio: ["ignore", "pipe", "pipe"] });
+		// On Windows, libuv assigns non-detached children to a kill-on-close job object tied to the parent.
+		const parent = spawn(process.execPath, ["-e", stdoutHoldingParentSource(releasePath, process.platform === "win32")], { stdio: ["ignore", "pipe", "pipe"] });
 		const exited = once(parent, "exit");
 		let stdout = "";
 		parent.stdout.setEncoding("utf8");

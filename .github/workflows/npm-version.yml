@@ -42,11 +42,15 @@ jobs:
       vars.NPM_RELEASE_ENABLED == 'true' && github.ref == 'refs/heads/main' &&
       github.repository_owner == 'fitchmultz' &&
       (github.event_name != 'check_run' ||
-        github.event.check_run.app.slug == 'pi-durable' || github.event.check_run.app.slug == 'cursor') &&
-      (github.event_name != 'issue_comment' || github.event.issue.pull_request != null)
-    uses: fitchmultz/.github/.github/workflows/npm-release-bump.yml@ab40e0d5429703b9aeae65af33051193a725701b # main
+        ((github.event.check_run.app.slug == 'pi-durable' || github.event.check_run.app.slug == 'cursor') &&
+          startsWith(github.event.check_run.check_suite.head_branch, 'npm-version/'))) &&
+      (github.event_name != 'issue_comment' ||
+        (github.event.issue.pull_request != null && github.event.issue.user.login == 'pi-durable[bot]')) &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.event != 'push' ||
+        startsWith(github.event.workflow_run.head_commit.message, 'chore(release): '))
+    uses: fitchmultz/.github/.github/workflows/npm-release-bump.yml@85d05a42febdf1418bfa8b42842a8485aade10c1 # main
     with:
-      automation-ref: ab40e0d5429703b9aeae65af33051193a725701b # main
+      automation-ref: 85d05a42febdf1418bfa8b42842a8485aade10c1 # main
       app-client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
       package-qualified: true
       version-reviewed: true

@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { join, toNamespacedPath } from "node:path";
 import type { RunResult } from "@cursor/sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { streamCursor } from "./helpers/cursor-provider-ownership.js";
+import { captureProviderTestOwnership, streamCursor } from "./helpers/cursor-provider-ownership.js";
+import { streamCursor as streamOwnedCursor } from "../src/cursor-provider.js";
 import { __testUtils as cursorSessionScopeTestUtils } from "../src/cursor-session-scope.js";
 import { buildCursorSessionStateRoot } from "../src/cursor-session-store.js";
 import {
@@ -102,5 +103,33 @@ describe("streamCursor session store", () => {
 
 		expect(run.cancel).toHaveBeenCalledTimes(1);
 		expect(getErrorEvent(events).error).toMatchObject({ stopReason: "error", errorMessage: expect.stringContaining(failure) });
+	});
+
+	it.each([
+		{ outcome: "finished", terminal: "done", wait: async (): Promise<RunResult> => ({ id: "run-summary", status: "finished", result: "SUMMARY" }) },
+		{ outcome: "failed", terminal: "error", wait: async (): Promise<RunResult> => { throw new Error("summary wait failed"); } },
+	] as const)("disposes the isolated summary agent and ephemeral store before the $outcome summary result", async ({ terminal, wait }) => {
+		const storeMock = installCursorSessionStoreMock();
+		const agentDispose = vi.fn().mockResolvedValue(undefined);
+		mockCreatedAgent({
+			send: vi.fn().mockResolvedValue(asMockCursorRun({ id: "run-summary", agentId: "agent-1", status: "running", wait: vi.fn(wait) })),
+			[Symbol.asyncDispose]: agentDispose,
+		});
+		const model = makeModel();
+		const context = makeContext();
+		const stream = streamOwnedCursor(model, context, { apiKey: "test-key" }, { ...captureProviderTestOwnership(model, context), request: { purpose: "compaction" } });
+		// Pi's summarization awaits this result, so the temporary agent and store must already be released.
+		const resultObserved = vi.fn();
+		void stream.result().then(resultObserved);
+
+		const events = await collectEvents(stream);
+
+		expect(events.at(-1)?.type).toBe(terminal);
+		const storeDispose = vi.mocked(storeMock.stores[0]!.dispose);
+		expect(agentDispose).toHaveBeenCalledOnce();
+		expect(storeDispose).toHaveBeenCalledOnce();
+		expect(resultObserved).toHaveBeenCalledOnce();
+		expect(agentDispose.mock.invocationCallOrder[0]).toBeLessThan(resultObserved.mock.invocationCallOrder[0]!);
+		expect(storeDispose.mock.invocationCallOrder[0]).toBeLessThan(resultObserved.mock.invocationCallOrder[0]!);
 	});
 });

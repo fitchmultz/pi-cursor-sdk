@@ -182,7 +182,7 @@ describe("Cursor completed assistant-message boundaries", () => {
 		expect(send).toHaveBeenCalledTimes(1);
 	});
 
-	it.each([false, true])("keeps completed progress on cancellation without a dangling separator (live=%s)", async (live) => {
+	it.each([false, true])("keeps completed progress and the SDK abort reason on cancellation without a dangling separator (live=%s)", async (live) => {
 		if (live) {
 			process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 			await registerNativeToolDisplayForTest([]);
@@ -190,6 +190,7 @@ describe("Cursor completed assistant-message boundaries", () => {
 		installSend([text("Working"), complete("Working")], "NO_MARKER", "cancelled");
 		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 		expect(getErrorEvent(events).reason).toBe("aborted");
+		expect(getErrorEvent(events).error.errorMessage).toBe("Cancelled: Cursor SDK run was cancelled.");
 		expect(collectTextDeltas(events)).toBe("Working");
 		expect(getFinalAssistantText(getErrorEvent(events).error)).toBe("Working");
 	});

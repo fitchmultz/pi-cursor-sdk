@@ -12,13 +12,13 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `src/cursor-provider.ts` is a thin `streamCursor()` wrapper that delegates turn execution to the turn runner.
 - `src/cursor-provider-turn-runner.ts` orchestrates provider turns (pre-send drain, prepare, send, finalize, emit, cleanup).
 - `src/cursor-provider-turn-prepare.ts` owns turn prepare (auth, MCP timeout install, effective local HTTP transport configuration, session agent, live-run setup, coordinator).
-- `src/cursor-provider-turn-send.ts` owns SDK `agent.send()` wiring and abort listener registration.
+- `src/cursor-provider-turn-send.ts` owns SDK `agent.send()` wiring, the turn's single SDK run attachment, and its abort registration until a successful handoff.
 - `src/cursor-provider-turn-finalize.ts` owns unified `awaitFinalizeCursorRunOutcome()` (wait, transcript replay, incomplete tools, artifacts, context cache).
 - `src/cursor-provider-turn-emit.ts` owns live vs direct emission from finalized outcomes.
 - `src/cursor-provider-turn-types.ts` owns immutable turn phase data and explicit phase result types; phase-local cleanup stays inside the owning phase.
 - `src/cursor-provider-run-outcome.ts` owns the discriminated `CursorRunOutcome` model and terminal emission classification.
 - `src/cursor-local-run-terminal-error.ts` owns cancelling a failed LOCAL run from its SDK terminal error run-row write (before the SDK changes `run.status`, so native tool processes stop) and restoring the SDK error from the resulting cancelled wait result; session stores are wrapped at open.
-- `src/cursor-provider-run-finalizer.ts` owns live-run wait completion, outcome application, debug finalization, and SDK abort-suppression disposal.
+- `src/cursor-provider-run-finalizer.ts` owns live-run wait completion, outcome application, phase-owned cleanup (including the handoff to live completion), debug finalization, and SDK abort-suppression disposal.
 - `src/cursor-run-final-text.ts` owns final assistant text selection for run outcomes and live-run drain.
 - `src/cursor-provider-errors.ts` owns scrubbed Cursor SDK run failure detail, abort reason formatting, and provider error sanitization.
 - `src/cursor-provider-lazy.ts` owns the `streamSimple` wrapper that defers Cursor provider execution to invocation and converts provider runtime failures into stream errors; the provider module stays in Pi's static extension graph so host peers resolve through Pi's loader.
@@ -30,6 +30,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `src/cursor-http1.ts` owns branch-scoped local HTTP/1.1 session state, global-preference override tracking, and the process-wide configured SDK handle/null reset.
 - `src/cursor-ripgrep-path.ts` owns shared SDK-relative platform package resolution and local-agent ripgrep initialization; `src/cursor-sdk-runtime.ts` initializes the native parser vendor path before shared SDK imports.
 - `src/cursor-session-agent.ts` owns runtime-scoped SDK agent pooling, durable transport-aware compatibility identity, send-state commits, busy tracking for in-flight SDK `run.wait()` work, and scoped acquire/dispose state; `src/cursor-local-agent-ownership.ts` owns atomic process-wide exact store/agent claims shared across extension copies and resume cleanup (release only on proven SDK disposal).
+- `src/cursor-session-agent-resume.ts` owns durable resume entries: the shared branch fold for adoption, and one publication slot per bound session that `turn_end` appends. A lease captures its send's origin generation. Start, tree navigation, compaction and shutdown advance that generation, which voids earlier captures. Direct turns publish at commit; live runs publish at the drain delivery that can end Pi's loop.
 - `src/cursor-session-agent-lineage.ts` owns non-resumable per-session local agent lineage custom entries independent of local resume.
 - `src/cursor-session-agent-lifecycle.ts` owns lazy session-agent lifecycle invalidation on model select, compaction, tree navigation, shutdown, and scope changes, including shutdown-time HTTP transport reset when no started live session remains across module copies.
 - `src/cursor-session-compaction-prep.ts` owns `prepareCursorSessionForCompaction()` (release scoped live runs and reset the conversation pool) wired from `session_before_compact` in `src/index.ts`; isolated summary agents never commit ordinary resume handles.

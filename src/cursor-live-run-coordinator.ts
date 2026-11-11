@@ -13,6 +13,8 @@ import {
 import type { CursorSdkTurnUsage } from "./cursor-usage-accounting.js";
 import type { CursorNativeToolDisplayItem, CursorNativeToolDisplayState } from "./cursor-native-tool-display-state.js";
 import type { CursorPiBridgeToolRequest, CursorPiToolBridgeRun } from "./cursor-pi-tool-bridge.js";
+import type { CursorRunOutcome } from "./cursor-provider-run-outcome.js";
+import type { CursorSessionAgentResumePublication } from "./cursor-session-agent-resume.js";
 import { getCursorSessionScopeKey } from "./cursor-session-scope.js";
 import type { CursorSdkEventDebugRecorder } from "./cursor-sdk-event-debug.js";
 import { installCursorSdkProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
@@ -36,6 +38,20 @@ export interface CursorLiveSdkRun {
 	cancel(): Promise<void>;
 }
 
+/** Terminal facts replay needs from `CursorRunOutcome`; a thrown `wait()` has no RunResult to keep. */
+export type CursorLiveRunSettledOutcome =
+	| Pick<Extract<CursorRunOutcome, { kind: "finished" }>, "kind" | "finalText">
+	| Pick<Extract<CursorRunOutcome, { kind: "cancelled" }>, "kind" | "abortMessage">
+	| Pick<Extract<CursorRunOutcome, { kind: "error" }>, "kind" | "errorMessage">;
+
+export type CursorLiveRunOutcome = { kind: "running" } | CursorLiveRunSettledOutcome;
+
+/** Independent of the SDK outcome: a finished run stays open while its queued replay drains. */
+export type CursorLiveRunResources =
+	| { kind: "open" }
+	| { kind: "releasing"; completion: Promise<void> }
+	| { kind: "released"; result: PromiseSettledResult<void> };
+
 export interface CursorLiveRun {
 	id: string;
 	agent: SDKAgent;
@@ -52,13 +68,12 @@ export interface CursorLiveRun {
 	textDeltas: string[];
 	emittedText: string;
 	recordedToolDisplayIds: string[];
-	finalText?: string;
 	resumeNotice?: string;
-	done: boolean;
-	cancelled: boolean;
-	disposed: boolean;
-	errorMessage?: string;
-	abortMessage?: string;
+	/** Committed at SDK completion; only terminal deliveries publish it, which chained or disposed runs never reach. */
+	resumePublication?: CursorSessionAgentResumePublication;
+	/** Written only by the coordinator: `settle()` and `release()`. */
+	outcome: CursorLiveRunOutcome;
+	resources: CursorLiveRunResources;
 	chainUserInputAfterCompletion: boolean;
 	debugRecorder?: CursorSdkEventDebugRecorder;
 	nativeDisplay?: CursorNativeToolDisplayState;
@@ -88,9 +103,7 @@ export interface CursorLiveRunCoordinatorDeps {
 export interface CursorLiveRunCoordinator {
 	start(params: CursorLiveRunCreateParams): CursorLiveRun;
 	attachSdkRun(run: CursorLiveRun, sdkRun: CursorLiveSdkRun): void;
-	markFinished(run: CursorLiveRun, finalText: string): void;
-	markCancelled(run: CursorLiveRun, abortMessage?: string): void;
-	markError(run: CursorLiveRun, errorMessage: string): void;
+	settle(run: CursorLiveRun, outcome: CursorLiveRunSettledOutcome): void;
 	recordSdkTurnEnded(run: CursorLiveRun, usage?: CursorSdkTurnUsage): void;
 	ignoreFutureSdkTurnUsage(run: CursorLiveRun): void;
 	hasSdkTurnEnded(run: CursorLiveRun): boolean;
@@ -121,7 +134,6 @@ function isPendingBridgeToolRequest(run: CursorLiveRun, request: CursorPiBridgeT
 
 export interface CursorLiveRunRecord {
 	id: string;
-	disposed: boolean;
 	bridgeRun?: CursorLiveBridgeMatcher;
 	sessionAgentScopeKey?: string;
 }
@@ -160,7 +172,6 @@ interface CursorLiveRunPrivateState {
 	pendingCallUnsubscribers?: Array<() => void>;
 	leased: boolean;
 	leaseQueue: LeaseWaiter[];
-	releasing?: Promise<void>;
 }
 
 export function hasTrailingUserMessagesAfterToolResults(context: Context): boolean {
@@ -191,10 +202,6 @@ export function matchesCursorLiveRunToolResult(
 	return run.bridgeRun?.hasPendingPiToolCallId(message.toolCallId) ?? false;
 }
 
-function isSuccessfulCursorLiveRun(run: CursorLiveRun): boolean {
-	return run.done && !run.cancelled && !run.errorMessage;
-}
-
 export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDeps): CursorLiveRunCoordinator {
 	const pendingRuns = new Map<string, CursorLiveRun>();
 	const pendingRunIdsByScopeKey = new Map<string, string>();
@@ -215,10 +222,10 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 		return state;
 	}
 
-	function getUndisposed(runId: string | undefined): CursorLiveRun | undefined {
+	function getOpen(runId: string | undefined): CursorLiveRun | undefined {
 		if (!runId) return undefined;
 		const run = pendingRuns.get(runId);
-		if (!run || run.disposed) return undefined;
+		if (!run || run.resources.kind !== "open") return undefined;
 		return run;
 	}
 
@@ -254,7 +261,7 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 			return;
 		}
 		state.leased = false;
-		if (state.idleDisposeRequested && !run.disposed) {
+		if (state.idleDisposeRequested && run.resources.kind === "open") {
 			coordinator.requestIdleDispose(run);
 		}
 	}
@@ -291,6 +298,73 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 		}
 	}
 
+	/** Enters `releasing` before any cleanup side effect so every caller shares one completion. */
+	function beginRelease(run: CursorLiveRun): Promise<void> {
+		const completion = Promise.withResolvers<void>();
+		run.resources = { kind: "releasing", completion: completion.promise };
+		void releaseResources(run, run.outcome).then(
+			() => {
+				run.resources = { kind: "released", result: { status: "fulfilled", value: undefined } };
+				completion.resolve();
+			},
+			(reason: unknown) => {
+				run.resources = { kind: "released", result: { status: "rejected", reason } };
+				completion.reject(reason);
+			},
+		);
+		return completion.promise;
+	}
+
+	async function releaseResources(run: CursorLiveRun, outcome: CursorLiveRunOutcome): Promise<void> {
+		const state = getPrivateState(run);
+		for (const unsubscribe of state.pendingCallUnsubscribers ?? []) {
+			try { unsubscribe(); } catch {
+				// Cleanup continues even if an observer cannot detach.
+			}
+		}
+		state.pendingCallUnsubscribers = [];
+		unregister(run);
+		clearIdleDisposeTimer(run);
+		state.idleDisposeRequested = false;
+		notifyProgress(run);
+		run.bridgeRun?.cancel("Cursor live run released");
+		for (const toolDisplayId of run.recordedToolDisplayIds) deps.deleteNativeToolDisplay(toolDisplayId);
+		run.recordedToolDisplayIds = [];
+		if (run.sessionBridgeRun) {
+			run.sessionBridgeRun.setOnToolRequest(undefined);
+		}
+		if (run.bridgeRun && run.bridgeRun !== run.sessionBridgeRun) {
+			try {
+				await run.bridgeRun.dispose();
+			} catch {
+				// bridge disposal failure should not mask the provider result
+			}
+		}
+		switch (outcome.kind) {
+			case "finished":
+				// The pooled agent stays reusable after a successful run.
+				return;
+			case "running": {
+				const usageCompletion = run.onAbandon?.();
+				try {
+					await cancelCursorLiveSdkRun(run);
+				} catch {
+					// cancellation failure should not block session-agent abandonment
+				}
+				await usageCompletion;
+				break;
+			}
+			case "cancelled":
+			case "error":
+				break;
+			default: {
+				const _exhaustive: never = outcome;
+				return _exhaustive;
+			}
+		}
+		await deps.abandonSessionAgent(run.sessionAgentScopeKey);
+	}
+
 	const coordinator: CursorLiveRunCoordinator = {
 		start(params): CursorLiveRun {
 			const sessionAgentScopeKey = params.sessionAgentScopeKey ?? getScopeKey();
@@ -307,9 +381,8 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 				textDeltas: params.textDeltas ?? [],
 				emittedText: "",
 				recordedToolDisplayIds: [],
-				done: false,
-				cancelled: false,
-				disposed: false,
+				outcome: { kind: "running" },
+				resources: { kind: "open" },
 				chainUserInputAfterCompletion: false,
 				debugRecorder: params.debugRecorder,
 			};
@@ -331,38 +404,20 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 		},
 
 		attachSdkRun(run, sdkRun): void {
-			if (run.disposed) return;
+			if (run.resources.kind !== "open") return;
 			run.sdkRun = sdkRun;
 		},
 
-		markFinished(run, finalText): void {
-			if (run.disposed) return;
-			run.finalText = finalText;
-			run.cancelled = false;
-			run.done = true;
-			notifyProgress(run);
-			coordinator.requestIdleDispose(run);
-		},
-
-		markCancelled(run, abortMessage): void {
-			if (run.disposed) return;
-			run.cancelled = true;
-			run.abortMessage = abortMessage;
-			run.done = true;
-			notifyProgress(run);
-			coordinator.requestIdleDispose(run);
-		},
-
-		markError(run, errorMessage): void {
-			if (run.disposed) return;
-			run.errorMessage = errorMessage;
-			run.done = true;
+		settle(run, outcome): void {
+			// Release already fixed this run's disposition; a later SDK outcome cannot change it.
+			if (run.resources.kind !== "open") return;
+			run.outcome = outcome;
 			notifyProgress(run);
 			coordinator.requestIdleDispose(run);
 		},
 
 		recordSdkTurnEnded(run, usage): void {
-			if (run.disposed) return;
+			if (run.resources.kind !== "open") return;
 			if (run.ignoreFutureSdkTurnUsage) {
 				run.accounting = { ...run.accounting, sdkTurnEnded: false, sdkTurnUsage: undefined };
 				notifyProgress(run);
@@ -373,7 +428,7 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 		},
 
 		ignoreFutureSdkTurnUsage(run): void {
-			if (!run.disposed) run.ignoreFutureSdkTurnUsage = true;
+			if (run.resources.kind === "open") run.ignoreFutureSdkTurnUsage = true;
 		},
 
 		hasSdkTurnEnded(run): boolean {
@@ -381,7 +436,7 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 		},
 
 		queueEvent(run, event): void {
-			if (run.disposed) return;
+			if (run.resources.kind !== "open") return;
 			run.pendingEvents.push(event);
 			run.debugRecorder?.recordLiveRunEvent(event);
 			notifyProgress(run);
@@ -436,7 +491,7 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 		},
 
 		getPendingFromContext(context, getReplayId, scopeKey): CursorLiveRun | undefined {
-			const run = getUndisposed(pendingRunIdsByScopeKey.get(scopeKey));
+			const run = getOpen(pendingRunIdsByScopeKey.get(scopeKey));
 			if (!run) return undefined;
 			const messages = getCursorConversationMessages(context);
 			let index = messages.length - 1;
@@ -453,11 +508,11 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 		},
 
 		getActiveForScope(scopeKey = getScopeKey()): CursorLiveRun | undefined {
-			return getUndisposed(pendingRunIdsByScopeKey.get(scopeKey));
+			return getOpen(pendingRunIdsByScopeKey.get(scopeKey));
 		},
 
 		isReady(run): boolean {
-			return run.disposed || run.pendingEvents.length > 0 || run.done || run.cancelled || run.errorMessage !== undefined;
+			return run.resources.kind !== "open" || run.pendingEvents.length > 0 || run.outcome.kind !== "running";
 		},
 
 		async waitForProgress(run, signal): Promise<void> {
@@ -500,7 +555,7 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 		},
 
 		requestIdleDispose(run): void {
-			if (run.disposed) return;
+			if (run.resources.kind !== "open") return;
 			const state = getPrivateState(run);
 			clearIdleDisposeTimer(run);
 			state.idleDisposeRequested = true;
@@ -520,50 +575,17 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 			state.idleDisposeTimer.unref?.();
 		},
 
-		async release(run): Promise<void> {
-			const state = getPrivateState(run);
-			if (state.releasing) return state.releasing;
-			state.releasing = (async () => {
-				if (run.disposed) return;
-				const abandoned = !isSuccessfulCursorLiveRun(run);
-				run.disposed = true;
-				for (const unsubscribe of state.pendingCallUnsubscribers ?? []) {
-					try { unsubscribe(); } catch {
-						// Cleanup continues even if an observer cannot detach.
-					}
+		release(run): Promise<void> {
+			switch (run.resources.kind) {
+				case "open":
+					return beginRelease(run);
+				case "releasing":
+					return run.resources.completion;
+				case "released": {
+					const { result } = run.resources;
+					return result.status === "fulfilled" ? Promise.resolve() : Promise.reject(result.reason);
 				}
-				state.pendingCallUnsubscribers = [];
-				unregister(run);
-				clearIdleDisposeTimer(run);
-				state.idleDisposeRequested = false;
-				notifyProgress(run);
-				run.bridgeRun?.cancel("Cursor live run released");
-				for (const toolDisplayId of run.recordedToolDisplayIds) deps.deleteNativeToolDisplay(toolDisplayId);
-				run.recordedToolDisplayIds = [];
-				if (run.sessionBridgeRun) {
-					run.sessionBridgeRun.setOnToolRequest(undefined);
-				}
-				if (run.bridgeRun && run.bridgeRun !== run.sessionBridgeRun) {
-					try {
-						await run.bridgeRun.dispose();
-					} catch {
-						// bridge disposal failure should not mask the provider result
-					}
-				}
-				if (abandoned) {
-					if (!run.done) {
-						const usageCompletion = run.onAbandon?.();
-						try {
-							await cancelCursorLiveSdkRun(run);
-						} catch {
-							// cancellation failure should not block session-agent abandonment
-						}
-						await usageCompletion;
-					}
-					await deps.abandonSessionAgent(run.sessionAgentScopeKey);
-				}
-			})();
-			return state.releasing;
+			}
 		},
 
 		count(): number {

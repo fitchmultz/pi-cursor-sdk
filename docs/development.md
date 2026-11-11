@@ -48,6 +48,24 @@ Before retrying a failed or unpublished candidate, inspect its exact source/run 
 
 Publication records are independent: npm published 0.5.2, while GitHub's `v0.5.2` release remains a draft bound to source `9820ae7`. Preserve that tag, draft, and candidate assets unchanged. Verify npm and GitHub records independently for each new release.
 
+The pinned shared versioner preserves a final newline when merging changelogs. When fetch rejects during version reconciliation or review remediation, the CLI reports the service, HTTP method, and public endpoint with Node's native error and cause details. A transport failure does not establish whether a remote write completed. See the [shared recovery guidance](https://github.com/fitchmultz/.github/blob/main/docs/npm-releases.md#recovery) before retrying.
+
+### Replace a failed unpublished version
+
+The version workflow supports paired `supersede-version` and `supersede-source` inputs through the pinned shared automation. Merge the source fix through normal PR checks before dispatching. Follow the [shared replacement procedure](https://github.com/fitchmultz/.github/blob/main/docs/npm-releases.md#replace-a-failed-unpublished-version-with-fixed-source).
+
+Dispatch `npm-version.yml` only on `main`, with both inputs. For failed unpublished 0.5.27, `supersede-source` is the full failed automatic version PR merge SHA, not the earlier `99590875` queue source:
+
+```bash
+gh workflow run npm-version.yml --repo fitchmultz/pi-cursor-sdk --ref main \
+	-f supersede-version=0.5.27 \
+	-f supersede-source=d6f45b5ee72e9410a74f3252edbca4b70be8da53
+```
+
+The shared versioner verifies that the version is still unpublished and its original release run failed. The existing release App opens a normal version PR from fixed `main`. It chooses the replacement version above the manifest, all npm versions, and version tags. Leave both inputs empty for ordinary reconciliation.
+
+Preserve the failed source and its history, tag, draft, assets, candidate, failed run, and receipts unchanged. Do not relabel old proof or publish fixed bytes as 0.5.27. Keep all normal pre-commit/pre-push reviews, current-head CI and Pi/Cursor reviews, prospective candidate qualification, actual post-merge candidate/catalog/installer gates, and OIDC publication checks. Verify the new npm and GitHub records independently; a local workflow check does not prove real recovery.
+
 ### Review and catalog qualification commands
 
 Run these maintainer commands from the repository root.
@@ -66,6 +84,12 @@ To supply retained verification evidence or prior finding dispositions, add `--r
 For a release candidate, `catalog --receipt PATH` runs the authenticated catalog check on a clean tracked checkout using `CURSOR_API_KEY` and binds its receipt and output to the current source, GitHub run, and attempt. For local staged changes, `catalog --staged` instead binds the staged tree; unstaged tracked changes are still rejected. In a separate step, `release-prepare --source SHA --release-source SHA --artifact DIR --catalog-receipt PATH --evidence DIR` collects the exact previous published tag-to-source diff, previous npm package and registry receipt, candidate artifacts, release notes, and associated PR/issue closure context. For a prospective release PR, add `--pull NUMBER` to include its current PR, review threads, and linked issue context; preparation rejects a PR whose head does not match the candidate source. The evidence directory must not already exist. Preparation requires `GITHUB_REPOSITORY`, `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, and a read-only `GH_TOKEN`.
 
 Run `release --source SHA --release-source SHA --evidence DIR --receipt PATH` in another process with the model key but no GitHub or Cursor credentials. It must retain the same `GITHUB_RUN_ID` and `GITHUB_RUN_ATTEMPT` as preparation, such as in a separate step of that GitHub Actions run. It revalidates source, run, catalog, package bytes and extracted trees before and after the review. Release qualification requires every finding, including polish, to be resolved. A successful receipt is evidence of the review and catalog scope; it does not replace the other release checks or publish anything.
+
+Before an otherwise completed native review settles, an isolated review-only extension checks the same read-coverage ledger as the independent final gate. It gives the reviewer exact missing paths and inclusive line ranges, then lets Pi continue the same review. Existing target files cannot borrow base-tree reads; deleted files use the recorded base. Feedback never substitutes for reading, changes a verdict, or clears findings. Incomplete verdicts, stated material limitations, native errors and aborts exit normally to the fail-closed gate. Unchanged missing coverage receives no repeated continuation; only meaningful read progress can produce further feedback. Pi owns continuation, retries, compaction and cancellation; the command does not restart the reviewer.
+
+The static feedback module is loaded explicitly only inside this review's isolated native process, alongside disabled extension discovery. The command supplies its immutable review-input path through the internal child-only `PI_RELEASE_REVIEW_FEEDBACK_INPUT` binding; users do not configure it. The native child's working directory supplies the repository root. Ordinary Cursor extension sessions do not load it. Review commands and receipt fields are unchanged. Redacted native events and stderr remain beside the receipt, including all corrective reads. Use a current official or maintained-fork native CLI for this maintainer command; the package's runtime floor is unchanged.
+
+Offline continuation regression checks use the real selected native CLI, loader, built-in read tool, provider parser and scheduler, substituting only the external model HTTP transport. Run `PI_HOST_CLI=/absolute/path/to/current/pi/dist/bundle/cli.js node --test test/native-release-review.test.mjs` for each selected host. Set `PI_CURSOR_TEST_EVIDENCE_DIR` to retain provider requests, native events and receipts. Current-host compatibility CI includes this check. `npm run check:compat` runs build, verify, then the native phase through `scripts/ci-compatibility-native.mjs`, preserving forwarded native test arguments; both compatibility routes take their native file list from `NATIVE_COMPATIBILITY_TEST_FILES`. The npm route remains unbounded; the isolated-host command watchdogs are unchanged. Run `node --test test/release-review.test.mjs test/release-review-read-coverage.test.mjs test/release-review-github.test.mjs test/release-review-npm.test.mjs` for the focused coverage and final-gate contracts.
 
 A release reviewer must open every changed package path. A complete changed-source read can also cover a byte-identical package copy. The receipt verifies the SHA-256 match and records both paths and trees in `readEvidence.artifactSourceReads`. Different package content still requires a complete read.
 

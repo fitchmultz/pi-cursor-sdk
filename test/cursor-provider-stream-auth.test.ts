@@ -370,6 +370,28 @@ describe("streamCursor auth and abort", () => {
 		removeListenerSpy.mockRestore();
 	});
 
+	it("ends the abort registration with a completed direct turn", async () => {
+		const controller = new AbortController();
+		const cancel = vi.fn().mockResolvedValue(undefined);
+		mockCreatedAgent({
+			send: vi.fn().mockResolvedValue(asMockCursorRun({
+				id: "run-1",
+				agentId: "agent-1",
+				status: "finished",
+				wait: vi.fn().mockResolvedValue({ id: "run-1", status: "finished", result: "done" }),
+				cancel,
+			})),
+		});
+
+		const events = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key", signal: controller.signal }));
+		expect(hasEventType(events, "done")).toBe(true);
+
+		// Pi reuses one signal across an agent run, so a later task's abort must not reach this finished SDK run.
+		await new Promise(resolve => setImmediate(resolve));
+		controller.abort();
+		expect(cancel).not.toHaveBeenCalled();
+	});
+
 	it("emits start before sanitized error and disposes abort suppression when debug run dir setup fails", async () => {
 		const invalidRunDirFile = join(tmpdir(), `pi-cursor-sdk-debug-run-dir-${process.pid}`);
 		writeFileSync(invalidRunDirFile, "not-a-directory");

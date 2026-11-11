@@ -13,6 +13,17 @@ on:
   schedule:
     - cron: "17 12 * * *"
   workflow_dispatch:
+    inputs:
+      supersede-version:
+        description: Failed unpublished automatic version
+        required: false
+        type: string
+        default: ''
+      supersede-source:
+        description: Failed automatic version merge SHA
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -31,14 +42,20 @@ jobs:
       vars.NPM_RELEASE_ENABLED == 'true' && github.ref == 'refs/heads/main' &&
       github.repository_owner == 'fitchmultz' &&
       (github.event_name != 'check_run' ||
-        github.event.check_run.app.slug == 'pi-durable' || github.event.check_run.app.slug == 'cursor') &&
-      (github.event_name != 'issue_comment' || github.event.issue.pull_request != null)
-    uses: fitchmultz/.github/.github/workflows/npm-release-bump.yml@81643f314e88cba668cc68c2d06abcefcbba44ee # main
+        ((github.event.check_run.app.slug == 'pi-durable' || github.event.check_run.app.slug == 'cursor') &&
+          startsWith(github.event.check_run.check_suite.head_branch, 'npm-version/'))) &&
+      (github.event_name != 'issue_comment' ||
+        (github.event.issue.pull_request != null && github.event.issue.user.login == 'pi-durable[bot]')) &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.event != 'push' ||
+        startsWith(github.event.workflow_run.head_commit.message, 'chore(release): '))
+    uses: fitchmultz/.github/.github/workflows/npm-release-bump.yml@508d2e23c75cab8fdd28bc62fc7fed2a9a0d1cca # main
     with:
-      automation-ref: 81643f314e88cba668cc68c2d06abcefcbba44ee # main
+      automation-ref: 508d2e23c75cab8fdd28bc62fc7fed2a9a0d1cca # main
       app-client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
       package-qualified: true
       version-reviewed: true
+      supersede-version: ${{ inputs.supersede-version || '' }}
+      supersede-source: ${{ inputs.supersede-source || '' }}
     secrets:
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
       PI_DURABLE_ACCESS_TOKEN: ${{ secrets.PI_DURABLE_ACCESS_TOKEN }}

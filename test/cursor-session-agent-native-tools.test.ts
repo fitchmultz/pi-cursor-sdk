@@ -32,7 +32,7 @@ describe("MCP-only conversation compatibility", () => {
 		const enabled = await acquireSessionCursorAgent({ ...base, nativeToolsEnabled: true });
 		expect(enabled.agent).toBe(plain.agent);
 		expect(base.createAgent.mock.calls[0][0]).not.toHaveProperty("tools");
-		plain.commitSend(makeContext(), true);
+		void plain.commitSend(makeContext(), true);
 		const restricted = await acquireSessionCursorAgent({ ...base, nativeToolsEnabled: false });
 		expect(plain.agent[Symbol.asyncDispose]).toHaveBeenCalledOnce();
 		expect(restricted.poolKey).toBe(`${plain.poolKey}\0tools:mcp-only`);
@@ -63,7 +63,7 @@ describe("MCP-only conversation compatibility", () => {
 			manager.appendMessage({ role: "user", content: "request", timestamp: 1 });
 			await pi.runBeforeAgentStart(context());
 			const first = await acquireSessionCursorAgent(options);
-			first.commitSend(makeContext(), true);
+			first.commitSend(makeContext(), true)?.publish();
 			manager.appendMessage(makeAssistantMessage("answer"));
 			await pi.runTurnEnd({}, context());
 			const file = manager.getSessionFile()!;

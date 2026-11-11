@@ -64,17 +64,17 @@ describe("prepareCursorSessionForCompaction", () => {
 			await prepareCursorSessionForCompaction(scopeKey);
 			expect(await call).toBeInstanceOf(Error);
 			expect(bridgeRun.hasPendingToolCalls()).toBe(false);
-			expect(liveRun.disposed).toBe(true);
+			expect(liveRun.resources.kind).toBe("released");
 			expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
-			expect(sessionAgentTestUtils.sessionAgentsByScope.has(scopeKey)).toBe(false);
+			expect(sessionAgentTestUtils.getSessionCursorAgentPoolState(scopeKey).status).toBe("empty");
 			expect(sdkCancel).toHaveBeenCalledOnce();
 			expect(mockDispose).toHaveBeenCalledTimes(1);
 			expect(cleanupOrder).toEqual(["cancel", "dispose"]);
 
 			await acquireSessionCursorAgent(acquireParams);
-			expect(sessionAgentTestUtils.sessionAgentsByScope.has(scopeKey)).toBe(true);
+			expect(sessionAgentTestUtils.getSessionCursorAgentPoolState(scopeKey).status).toBe("ready");
 			await prepareCursorSessionForCompaction(scopeKey);
-			expect(sessionAgentTestUtils.sessionAgentsByScope.has(scopeKey)).toBe(false);
+			expect(sessionAgentTestUtils.getSessionCursorAgentPoolState(scopeKey).status).toBe("empty");
 			expect(mockDispose).toHaveBeenCalledTimes(2);
 		} finally {
 			await client.close();

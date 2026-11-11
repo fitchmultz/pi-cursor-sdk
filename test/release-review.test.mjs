@@ -51,6 +51,9 @@ const kind = ${JSON.stringify(behavior)};
 if (kind === "automation-context" && (!input.automation?.versioner || !prompt.includes(input.automation.versioner))) process.exit(4);
 if (kind === "interrupted") { process.kill(process.ppid, "SIGTERM"); process.exit(0); }
 const inputPath = /Read ((?:[A-Za-z]:)?[\\\\/][^\\r\\n]+?[\\\\/]review-input\\.json) for immutable identities/.exec(prompt)[1];
+const extension = process.argv[process.argv.indexOf("--extension") + 1];
+if (!path.isAbsolute(extension) || !fs.existsSync(extension) || path.basename(extension) !== "release-review-read-feedback.mjs"
+  || process.env.PI_RELEASE_REVIEW_FEEDBACK_INPUT !== inputPath) process.exit(5);
 let call = 0;
 async function read(path, offset, limit) {
   const id = String(call++);
@@ -112,7 +115,8 @@ if (kind !== "unsettled") console.log(JSON.stringify({type:"agent_settled",abort
 	}
 	const receipt = join(directory, "review.json");
 	const env = { ...process.env, PATH: [bin, process.env.PATH].join(delimiter), PI_RELEASE_REVIEW_SKILL: join(skill, "SKILL.md"),
-		ZAI_API_KEY: "model-key-for-test", UNRELATED_SECRET: "not-for-the-model" };
+		ZAI_API_KEY: "model-key-for-test", UNRELATED_SECRET: "not-for-the-model",
+		PI_RELEASE_REVIEW_FEEDBACK_INPUT: "ambient-value-must-not-reach-the-review" };
 	delete env.PI_RELEASE_REVIEW_MODEL;
 	delete env.PI_RELEASE_REVIEW_AUTOMATION_VERSIONER;
 	for (const name of ["GH_TOKEN", "GITHUB_TOKEN", "RELEASE_GH_TOKEN", "RELEASE_APP_PRIVATE_KEY", "CURSOR_API_KEY",

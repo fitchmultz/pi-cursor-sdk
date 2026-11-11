@@ -9,6 +9,8 @@
 <!-- npm-release:unreleased:start -->
 ### Changed
 
+- Maintainer reviews receive exact missing-read paths and ranges before native Pi settles, so they can finish the same review without restarting. Complete-read and zero-finding release gates remain unchanged.
+
 - Release version reconciliation and review remediation report fetch failures with the service, HTTP method, public endpoint, and native cause details. Reconciled changelogs retain a final newline.
 
 - Refresh the fallback catalog from the authenticated SDK 1.0.40 catalog-only observation on 2026-11-10, with 49 models.
@@ -41,6 +43,7 @@
 * fix: refresh current Cursor fallback catalog by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/454
 * fix: adopt release reconciliation diagnostics by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/456
 * Wake the version workflow only for release events by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/457
+* fix: finish missing evidence reads in native reviews by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/458
 
 
 **Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.26...v0.5.28

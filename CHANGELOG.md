@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+## 0.5.32 - 2026-11-12
+
+<!-- npm-release:unreleased:start -->
 ### Changed
 
 - Debug capture: in `drain-events.jsonl`, `pre_send_continuation` replaces `pre_send_iteration` and records whether a pending run is replayed (`replay`) or superseded by user input sent after its tool results (`replaceWithUserInput`). `pre_send_end` reports `toolUse`, `terminal` or `continueSend` instead of `stream_ended` or `continue_send`. `aborted` and `error` outcomes are unchanged. A superseded run no longer records a `chain_user_input` drain turn, `turn_start` drops `mode`, and `turn_end` reports `toolUse` instead of `tool_use`.
@@ -19,6 +22,29 @@
 - Report platform-smoke artifact extraction outcomes truthfully. The native extractor previously exited with the same status whether it created nothing, removed every entry it created, or could not remove an entry it created, and the host reported each case as the same `ok: false`. `extractPlatformArtifactBundle()` now also returns `extraction` (`committed`, `rejected`, `rolled-back`, `rollback-incomplete` or `unknown`), and the suite's bundle-extraction check records it in `failures.md`, so a failed suite says whether partial bundle files may remain. Rollback still removes only entries whose identity is unchanged, and Windows controllers still reject nonempty bundles before writing.
 - Always stop the Crabbox lease that a single-suite platform smoke run (`node scripts/platform-smoke.mjs run --target <target> --suite <suite>`) warms, including when the suite throws after warmup, such as on an artifact write failure. The lease previously stayed running. The suite's error is still the reported error; if the stop also fails, the report includes both failures. If the stop's output files can't be written, the report still gives the stop's exit code. Whole-target runs still warm, sync and stop their shared lease once, and now record that stop in `lease-cleanup/` and report a failed stop with the suite's error, also when a suite throws.
 - Make the smoke helpers report what actually happened to pi, keeping "evidence seen" apart from "pi exited". The platform live-suite runner previously passed `cursor-http1-live` when pi never exited after `/quit`, EOF, Ctrl+C and kill, and reported an early pi exit as a marker timeout after a 60-second wait. `live-status.json` now records what ended the wait (`observation`) separately from node-pty's exit (`ptyExit`: `exited` or `not-observed`). A missing exit fails the run and the new host `pi-exit` check. `smoke:steering` now fails at once when pi exits before a phase, instead of polling for 300 seconds. `smoke:visual` keeps an exited pi's pane, fails with pi's exit status, and records pi's pane state in the manifest. `smoke:live`'s TUI check now also requires the persisted assistant answer in the session JSONL, and fails at once with pi's status when pi exits. The shared shell timeout now kills a command that ignores TERM after the kill grace, and its fallback no longer leaves the watcher's `sleep` running.
+<!-- npm-release:unreleased:end -->
+
+- refactor: centralize Cursor tool completion identities (#467) ([616f885](https://github.com/fitchmultz/pi-cursor-sdk/commit/616f8855638e1746436692dacaaf40577327a9a6))
+
+### What's Changed
+* refactor: centralize Cursor tool completion identities (1/15) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/467
+* refactor: make deferred Cursor tool lifecycle state explicit (2/15) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/468
+* refactor: retain typed open Cursor content blocks (3/15) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/470
+* refactor: model bridge listener ownership explicitly (4/15) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/471
+* refactor: keep verified Cloud smoke cleanup evidence (5/15) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/472
+* refactor: make usage terminal attempts and billing folds explicit (6/15) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/473
+* refactor: own SDK usage observation in live-run accounting (7/15) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/474
+* fix: settle Cursor bridge requests before abort callbacks (8/15) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/475
+* fix: keep completed Cloud operations final across clock changes (9/15) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/476
+* fix: report served catalog provenance truthfully (10/15) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/477
+* fix: keep partial preference saves and CLI local-force state in their owning session (11/15) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/478
+* fix: settle smoke RPC requests on shutdown (12/15) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/479
+* refactor: model live-run drain continuation and branch disposition explicitly (13/15) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/480
+* fix: report artifact extraction and rollback outcomes (14/15) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/438
+* fix: stop owned smoke leases and separate smoke observations from pi exit (15/15) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/481
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.31...v0.5.32
 
 ## 0.5.31 - 2026-11-11
 

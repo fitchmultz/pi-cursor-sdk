@@ -254,19 +254,20 @@ function preflightExtraction(outputDir, files) {
 	}
 }
 
-/** Write prevalidated `{path, content}` files through descriptor-relative POSIX extraction.
+/** Write prevalidated `{path, content}` files through descriptor-relative POSIX extraction and return
+ * the `writeExtractedFilesAnchored` outcome; a destination that fails preflight is `rejected`.
  * Windows controllers reject nonempty extraction because Node lacks handle-relative creation. */
 export function writeExtractedFiles(outputDir, files) {
 	let preflight;
-	let succeeded = false;
+	let outcome = "rejected";
 	try {
 		preflight = preflightExtraction(outputDir, files);
-		succeeded = writeExtractedFilesAnchored(preflight.root.path, files, preflight.root.stat);
+		outcome = writeExtractedFilesAnchored(preflight.root.path, files, preflight.root.stat);
 	} catch {}
 	if (preflight?.root.descriptor !== undefined) {
 		try { closeSync(preflight.root.descriptor); } catch {}
 	}
-	return succeeded;
+	return outcome;
 }
 
 /** Exclusively create `path` (no-follow, fails if it already exists) and write `content` to it,

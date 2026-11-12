@@ -2,7 +2,89 @@
 
 Back to the canonical [Platform Smoke runbook](./platform-smoke.md) for cost-conscious verification, focused suite selection, optional comprehensive targets/suites, artifacts, assertions, security, and the release bar. Offline/faux checks and exact-input retained evidence come first; only necessary changed-behavior proof warrants the smallest live check on one representative environment. No paid Cloud testing for generic PRs/releases; only explicitly Cursor Cloud-focused PRs/issues may select a necessary focused Cloud check. Automated Cursor PR reviews continue unchanged.
 
-This document records detailed detector, registry, command-rendering, implementation-history, replacement, and portability material. The phase plan is retained as implementation history, not as active release instructions.
+This document records detailed artifact transport/extraction, detector, registry, command-rendering, implementation-history, replacement, and portability material. The phase plan is retained as implementation history, not as active release instructions.
+
+## Artifact transport and extraction
+
+The target-side live and local-resume runners encode only canonical bounded text evidence as gzip-compressed JSON/base64.
+
+### Evidence eligibility and secret scanning
+
+Unknown extensions are secret-scanned and then omitted when benign; a secret finding still fails the run. Binary content under a transport-eligible text extension fails with bounded `binary-content` evidence, and direct bundles containing either unknown extensions or binary content are never extracted.
+
+Every regular artifact file, regardless of name or extension, is binary-safe scanned from a descriptor-bounded snapshot before transport eligibility is checked. Binary scans retain exact `CURSOR_API_KEY`, generic auth assignments, and structured bearer/cookie/bridge/JSON signatures in UTF-8/ASCII, UTF-16LE/BE, and UTF-32LE/BE at any byte alignment; the intentionally broad generic credential-URL and SCP-style heuristics run only on valid UTF-8 text so random compressed/executable bytes cannot create false failures.
+
+Sensitive files (`.env*`, `auth.json`, `id_rsa`, `id_ed25519`, `*.pem`, and `*.key`) therefore fail the run when they contain secrets but are never transported. `node_modules/` and `.git/` are non-artifact infrastructure and are pruned before recursion.
+
+File size is checked before allocation or reading. An unreadable, changed, or oversized file fails closed; oversized files are not read and produce bounded limit evidence, while the host scanner reports an oversized or otherwise unscannable artifact as a finding so the suite fails.
+
+### Root and traversal guards
+
+The caller-selected artifact root is a trust boundary. Its final component must be a real directory, and its real path must equal the same relative path mapped beneath the canonical real CWD or temp base. This permits expected platform base aliases such as macOS `/var` → `/private/var` but rejects user-created intermediate root links.
+
+Every traversed directory is secured with lstat/open/fstat/post-lstat identity checks (POSIX opens use `O_DIRECTORY|O_NOFOLLOW`), its descriptor stays open while descendants are visited, and all current/ancestor identities plus the original ctime, mtime, size, link count, and mode are rechecked around directory reads and bounded file reads. These immutable metadata checks apply only to traversal guards; extraction uses identity-only guards because creating destination entries legitimately mutates parent metadata.
+
+Static child symlinks fail as non-regular entries; a nested rename/symlink ABA invalidates the whole traversal, discarding collected findings and bytes in favor of bounded failure evidence.
+
+Windows uses lstat identity checks for directories and lstat/fstat identity checks for regular files and the spill, without POSIX-only flags.
+
+### Bundle schema, limits, and preflight
+
+The inner bundle schema is exactly `{files}`, and each entry is exactly `{path, contentBase64, size}`: source-root and per-file metadata are rejected, canonical paths and decoded content are secret-scanned, secret-bearing paths are rejected, and filenames in findings are redacted.
+
+Bundles allow at most 512 files, 5 MiB per file, 40 MiB aggregate decoded content, 4,096 UTF-8 bytes per path, 4,096 total path components, 64 MiB inflated JSON, and 20 MiB compressed transport. The writer and extractor enforce the same limits; limit overflow emits only a bounded `bundle-limit-exceeded.json` failure artifact.
+
+Before host filesystem mutation, extraction rejects duplicate and file-prefix-conflicting paths, symlink/non-directory destination components, and pre-existing final paths.
+
+### POSIX extraction and rollback
+
+On POSIX controllers, extraction sends the already prevalidated bounded files to the packaged `artifact-openat-extract.c` helper, compiled once into a private temporary directory. The helper independently validates the complete frame before mutation, requires its opened root identity to match the caller's pinned root, and uses descriptor-relative `mkdirat`/`openat` with `O_NOFOLLOW` one canonical component at a time.
+
+Substituted symlinks and pre-open path swaps therefore fail without following them, final files use `O_EXCL`, and detected identity drift rolls created files back through retained parent descriptors even when a directory was moved. Rollback removes an entry only while its recorded name still has the identity this run created.
+
+### Extraction outcomes and controller limits
+
+The helper exits 0 after commit, 2 when it created nothing, 3 when it removed every entry it created, and 4 when an entry it created cannot be confirmed removed.
+
+`extractPlatformArtifactBundle()` reports this as `extraction`: `committed`; `rejected` when extraction stopped before creating anything, such as an invalid envelope or bundle, failed preflight, unavailable helper, or native frame/root check; `rolled-back`; `rollback-incomplete`; or `unknown` when the helper ended by signal, spawn error or an unrecognized status, so created entries may remain. A failed bundle-extraction check records the extraction outcome (and the structured-artifact violation count when extraction committed malformed JSON/JSONL) in `assertions.json` and `failures.md`.
+
+This is race-safe extraction, not a sandbox against a hostile same-owner process: such a process can transiently relocate an already-open directory or the pinned root itself, although it cannot make extraction overwrite an existing destination.
+
+Windows controllers reject every nonempty extraction bundle before mutation because Node exposes no handle-relative Windows creation API; Windows remains a supported release target when the matrix is orchestrated from the macOS/POSIX controller.
+
+### Inline, spill, and chunk transport
+
+Small bundles stay between `PLATFORM_LIVE_BUNDLE_JSON_START` and `PLATFORM_LIVE_BUNDLE_JSON_END`; larger bundles exclusively create and descriptor-write the exact CWD-relative `.platform-artifact-bundle.gz` final component (`O_NOFOLLOW` on POSIX), emit that exact marker path, and allow chunk reads only for that one-component path. No intermediate spill path is accepted.
+
+The host retrieves exact 32 KiB chunks through no-sync Crabbox runs before releasing the lease. Compact control output is collected through Crabbox's local `--capture-stdout` file.
+
+This works on scenario failure and preserves the original command exit code; chunk transport success is not substituted for suite success, and no tar/zip side channel exists.
+
+### Assertion output format
+
+Each suite produces `assertions.json` with `ok`, `checks`, and an ISO timestamp in `writtenAt`:
+
+```json
+{
+  "ok": true,
+  "checks": [
+    { "id": "final-marker", "ok": true },
+    { "id": "card-read", "ok": true },
+    { "id": "jsonl-read", "ok": true }
+  ],
+  "writtenAt": "2026-11-08T12:00:00.000Z"
+}
+```
+
+Each check result has `id` and `ok`. Failed checks include `error` when provided by the check or a thrown exception. Passing checks omit `error`.
+
+`failures.md` is written only when at least one check fails. It contains:
+
+- the heading `# Assertion Failures` and a blank line;
+- one `- **<id>**: <error>` line per failed check, using `failed` if `error` is null or absent;
+- a blank line and `Total: <count> failure(s)`.
+
+Artifact paths, command context, and diagnostic hints appear only if a check includes them in its error text.
 
 ## Visual evidence detector
 

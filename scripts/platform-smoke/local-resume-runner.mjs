@@ -10,6 +10,7 @@ import {
 import { stopLease, warmupLease } from "./crabbox-runner.mjs";
 import { LOCAL_RESUME_SUITE_BY_NAME } from "./local-resume-suites.mjs";
 import {
+	bundleExtractedCheck,
 	failSuite,
 	fetchPlatformArtifactBundle,
 	finalizeSuiteArtifacts,
@@ -126,7 +127,7 @@ export async function executeLocalResumeSuite(
 
 	const checks = [
 		{ id: "local-resume-exit-zero", fn: () => result.code === 0 },
-		{ id: "local-resume-bundle-extracted", fn: () => bundle.ok },
+		bundleExtractedCheck("local-resume-bundle-extracted", bundle),
 		{ id: "local-resume-session-evidence", fn: () => evidence.sessionFiles > 0 },
 		{ id: "local-resume-debug-evidence", fn: () => evidence.debugFiles > 0 },
 		{ id: "local-resume-runtime-evidence", fn: () => evidence.runtimeFiles > 0 },

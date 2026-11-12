@@ -390,8 +390,11 @@ export function isSafePlatformBundlePath(outputDir, bundlePath) {
 	return rel === bundlePath && !isAbsolute(rel);
 }
 
+/** Extract a transported bundle into `outputDir`. `extraction` is the `writeExtractedFiles` outcome, or
+ * `rejected` for an invalid envelope or bundle. `ok` requires a committed extraction of well-formed
+ * structured evidence; malformed structured files are still written verbatim with `ok: false`. */
 export function extractPlatformArtifactBundle(outputDir, stdout) {
-	const failed = { ok: false, violations: [] };
+	const failed = { ok: false, violations: [], extraction: "rejected" };
 	const start = stdout.indexOf(PLATFORM_ARTIFACT_BUNDLE_START);
 	const end = stdout.indexOf(PLATFORM_ARTIFACT_BUNDLE_END, start);
 	if (start === -1 || end === -1) return failed;
@@ -431,8 +434,8 @@ export function extractPlatformArtifactBundle(outputDir, stdout) {
 		files.push({ path: file.path, content: /\.jsonl?$/i.test(file.path) ? file.content : Buffer.from(redactSecrets(text)) });
 	}
 
-	const succeeded = writeExtractedFiles(outputDir, files);
-	return succeeded ? { ok: structuredValid, violations } : failed;
+	const extraction = writeExtractedFiles(outputDir, files);
+	return extraction === "committed" ? { ok: structuredValid, violations, extraction } : { ...failed, extraction };
 }
 
 function collectFiles(root) {

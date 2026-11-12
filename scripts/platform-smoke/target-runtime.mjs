@@ -9,7 +9,7 @@ import {
 	PLATFORM_ARTIFACT_BUNDLE_PATH,
 	PLATFORM_ARTIFACT_BUNDLE_START,
 } from "./artifact-bundle-contract.mjs";
-import { redactSecrets } from "./artifact-secrets.mjs";
+import { isStructuredArtifactViolation, redactSecrets } from "./artifact-secrets.mjs";
 import {
 	scanArtifacts,
 	writeCommand,
@@ -24,13 +24,27 @@ export function platformFor(targetName) {
 	return targetName === "windows-native" ? "powershell" : "posix";
 }
 
+export function bundleExtractedCheck(id, bundle) {
+	const structuredViolations = bundle.extraction === "committed"
+		? bundle.violations.filter(({ violation }) => isStructuredArtifactViolation(violation)).length
+		: 0;
+	const detail = structuredViolations > 0
+		? ` (${structuredViolations} structured artifact violation${structuredViolations === 1 ? "" : "s"})`
+		: "";
+	return {
+		id,
+		fn: () => bundle.ok,
+		error: `extraction ${bundle.extraction}${detail}`,
+	};
+}
+
 export function finalizeSuiteArtifacts(
 	suiteDir,
 	checks,
 	summaryData,
 	expectedFiles,
 ) {
-	const malformed = scanArtifacts(suiteDir).filter(({ violation }) => violation.startsWith("invalid JSON"));
+	const malformed = scanArtifacts(suiteDir).filter(({ violation }) => isStructuredArtifactViolation(violation));
 	checks = [...checks, {
 		id: "structured-artifacts-parseable",
 		fn: () => malformed.length === 0,

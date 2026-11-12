@@ -29,6 +29,7 @@ import { extractContentText, extractFinalTextContent } from "./jsonl-text.mjs";
 import { executeLocalResumeSuite } from "./local-resume-runner.mjs";
 import { LOCAL_RESUME_SUITE_BY_NAME } from "./local-resume-suites.mjs";
 import {
+	bundleExtractedCheck,
 	failSuite,
 	fetchPlatformArtifactBundle,
 	finalizeSuiteArtifacts,
@@ -607,7 +608,7 @@ async function executeLiveSuite(config, targetName, suiteName, suiteDir, slug, l
 
 	const checks = [
 		{ id: "live-exit-zero", fn: () => result.code === 0 },
-		{ id: "bundle-extracted", fn: () => bundle.ok },
+		bundleExtractedCheck("bundle-extracted", bundle),
 		{ id: "live-status-ok", fn: () => status?.ok === true },
 		{ id: "cursor-no-fast", fn: () => readJson(resolve(liveArtifactDir, "pi-command.json"))?.args?.includes("--cursor-no-fast") === true },
 		{ id: "cursor-model", fn: () => readJson(resolve(liveArtifactDir, "pi-command.json"))?.args?.includes(config.cursorModel) === true },

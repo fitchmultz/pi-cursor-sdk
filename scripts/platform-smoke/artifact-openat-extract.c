@@ -45,6 +45,10 @@ typedef struct {
 	int directory;
 } CreatedEntry;
 
+/* Run-level destination facts that select the failure exit status in main. */
+static int entries_created;
+static int cleanup_incomplete;
+
 static uint32_t read_u32(const unsigned char *bytes) {
 	return (uint32_t)bytes[0] | ((uint32_t)bytes[1] << 8) | ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24);
 }
@@ -162,11 +166,12 @@ static int open_root(const char *path, struct stat *identity) {
 	return fd;
 }
 
-static void unlink_if_identity(int parent_fd, const char *name, const struct stat *identity, int flags) {
+/* Removes an entry this run created only while its recorded name still has its recorded identity.
+ * A refused removal, changed identity, or missing name leaves cleanup unconfirmed. */
+static void remove_created_entry(int parent_fd, const char *name, const struct stat *identity, int flags) {
 	struct stat current;
-	if (fstatat(parent_fd, name, &current, AT_SYMLINK_NOFOLLOW) == 0 && same_identity(identity, &current)) {
-		unlinkat(parent_fd, name, flags);
-	}
+	if (fstatat(parent_fd, name, &current, AT_SYMLINK_NOFOLLOW) != 0 || !same_identity(identity, &current) ||
+		unlinkat(parent_fd, name, flags) != 0) cleanup_incomplete = 1;
 }
 
 static int add_created(CreatedEntry *entries, size_t *count, const char *path, const char *name,
@@ -203,10 +208,14 @@ static int open_parent(int root_fd, const char *path, CreatedEntry *created, siz
 		int next = openat(current, cursor, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
 		if (next < 0 && errno == ENOENT && create) {
 			if (mkdirat(current, cursor, 0700) != 0) goto fail;
+			entries_created = 1;
 			struct stat created_stat;
-			if (fstatat(current, cursor, &created_stat, AT_SYMLINK_NOFOLLOW) != 0 || !S_ISDIR(created_stat.st_mode)) goto fail;
+			if (fstatat(current, cursor, &created_stat, AT_SYMLINK_NOFOLLOW) != 0 || !S_ISDIR(created_stat.st_mode)) {
+				cleanup_incomplete = 1;
+				goto fail;
+			}
 			if (!add_created(created, created_count, prefix, cursor, &created_stat, current, 1)) {
-				unlink_if_identity(current, cursor, &created_stat, AT_REMOVEDIR);
+				remove_created_entry(current, cursor, &created_stat, AT_REMOVEDIR);
 				goto fail;
 			}
 			next = openat(current, cursor, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
@@ -245,7 +254,7 @@ static void rollback(int root_fd, CreatedEntry *entries, size_t count) {
 	while (count > 0) {
 		CreatedEntry *entry = &entries[--count];
 		const struct stat identity = { .st_dev = entry->dev, .st_ino = entry->ino };
-		unlink_if_identity(entry->parent_fd, entry->name, &identity, entry->directory ? AT_REMOVEDIR : 0);
+		remove_created_entry(entry->parent_fd, entry->name, &identity, entry->directory ? AT_REMOVEDIR : 0);
 	}
 }
 
@@ -271,15 +280,17 @@ static int extract_files(int root_fd, InputFile *files, uint32_t count, CreatedE
 		if (parent < 0) return 0;
 		const int fd = openat(parent, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
 		if (fd < 0) { close(parent); free(name); return 0; }
+		entries_created = 1;
 		struct stat stat;
 		if (fstat(fd, &stat) != 0) {
+			cleanup_incomplete = 1;
 			close(fd); close(parent); free(name); return 0;
 		}
 		if (!S_ISREG(stat.st_mode)) {
-			close(fd); unlink_if_identity(parent, name, &stat, 0); close(parent); free(name); return 0;
+			close(fd); remove_created_entry(parent, name, &stat, 0); close(parent); free(name); return 0;
 		}
 		if (!add_created(created, created_count, files[index].path, name, &stat, parent, 0)) {
-			close(fd); unlink_if_identity(parent, name, &stat, 0); close(parent); free(name); return 0;
+			close(fd); remove_created_entry(parent, name, &stat, 0); close(parent); free(name); return 0;
 		}
 		size_t offset = 0;
 		while (offset < files[index].size) {
@@ -298,6 +309,8 @@ static int extract_files(int root_fd, InputFile *files, uint32_t count, CreatedE
 	return 1;
 }
 
+/* Exit status: 0 committed; otherwise 2 when nothing was created, 3 when every created entry was
+ * removed, and 4 when an entry this run created could not be confirmed removed. */
 int main(int argc, char **argv) {
 	if (argc != 4) return 2;
 	char *dev_end = NULL;
@@ -331,5 +344,5 @@ int main(int argc, char **argv) {
 	free(created);
 	free(files);
 	free(buffer);
-	return ok ? 0 : 2;
+	return ok ? 0 : cleanup_incomplete ? 4 : entries_created ? 3 : 2;
 }

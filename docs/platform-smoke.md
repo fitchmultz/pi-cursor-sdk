@@ -2,7 +2,7 @@
 
 Status: optional comprehensive local-runtime matrix plus focused changed-behavior checks. Offline/faux verification and exact-input retained-evidence reuse come first. Paid checks are only the smallest meaningful proof needed for changed behavior on one representative environment; docs/metadata-only changes need none. No full paid campaign replay, matrix-only host coverage, or automatic paid retries. No paid Cloud testing for generic PRs/releases; only PRs/issues explicitly focused on Cursor Cloud may select a necessary focused Cloud check. Automated Cursor PR reviews continue unchanged. The Crabbox runner, packed-install platform-build suite, and real live PTY/ConPTY suite runner are implemented for macOS, Ubuntu, and Windows native targets with one-lease-per-target orchestration.
 
-Detailed detector, registry, command-rendering, implementation-history, replacement, and portability reference: [Platform Smoke Implementation Reference](./platform-smoke-implementation.md).
+Detailed artifact transport/extraction, detector, registry, command-rendering, implementation-history, replacement, and portability reference: [Platform Smoke Implementation Reference](./platform-smoke-implementation.md).
 
 Branch introduced by: `feat/crabbox-platform-smoke`
 
@@ -218,9 +218,12 @@ Files:
 ```text
 platform-smoke.config.mjs
 scripts/platform-smoke.mjs
+scripts/platform-smoke/artifact-anchored-extract.d.mts
+scripts/platform-smoke/artifact-anchored-extract.mjs
 scripts/platform-smoke/artifact-bundle-chunk.mjs
 scripts/platform-smoke/artifact-bundle-contract.mjs
 scripts/platform-smoke/artifact-fs-safety.mjs
+scripts/platform-smoke/artifact-openat-extract.c
 scripts/platform-smoke/artifact-secrets.mjs
 scripts/platform-smoke/assertions.mjs
 scripts/platform-smoke/artifacts.mjs
@@ -230,10 +233,12 @@ scripts/platform-smoke/doctor.mjs
 scripts/platform-smoke/jsonl-text.mjs
 scripts/platform-smoke/live-suite-runner.mjs
 scripts/platform-smoke/local-resume-runner.mjs
+scripts/platform-smoke/local-resume-suites.d.mts
 scripts/platform-smoke/local-resume-suites.mjs
 scripts/platform-smoke/platform-build-windows.ps1
 scripts/platform-smoke/pty-capture.mjs
 scripts/platform-smoke/render-ansi.mjs
+scripts/platform-smoke/scenarios.d.mts
 scripts/platform-smoke/scenarios.mjs
 scripts/platform-smoke/target-runtime.mjs
 scripts/platform-smoke/targets.mjs
@@ -244,9 +249,13 @@ scripts/platform-smoke/wrapped-line-match.mjs
 `artifact-bundle-contract.mjs` owns bundle transport markers/path/size caps and the canonical
 exact-size base64 decoder. `artifact-secrets.mjs` owns redaction patterns and scanning.
 `artifact-fs-safety.mjs` owns no-follow traversal/identity primitives, bounded reads, safe
-extraction writes/cleanup, and the exclusive bundle spill writer. `artifacts.mjs` retains
+extraction writes/cleanup, and the exclusive bundle spill writer.
+`artifact-anchored-extract.mjs` owns the native helper adapter, compilation, and result mapping.
+`artifact-anchored-extract.d.mts` declares the adapter's inputs and extraction outcome type.
+`artifact-openat-extract.c` owns descriptor-relative creation, identity verification, and rollback.
+`artifacts.mjs` retains
 retention/manifest/index bookkeeping and bundle build/format/extract orchestration on top of
-those three modules, re-exporting their public names for backward compatibility.
+the contract, secrets, and fs-safety modules, re-exporting their public names for backward compatibility.
 
 Package scripts:
 
@@ -926,7 +935,13 @@ Provider debug artifacts are required for every live suite through `PI_CURSOR_SD
 
 ## Artifact collection on failure
 
-The target-side live and local-resume runners encode only canonical bounded text evidence as gzip-compressed JSON/base64. Unknown extensions are secret-scanned and then omitted when benign; a secret finding still fails the run. Binary content under a transport-eligible text extension fails with bounded `binary-content` evidence, and direct bundles containing either unknown extensions or binary content are never extracted. The inner bundle schema is exactly `{files}`, and each entry is exactly `{path, contentBase64, size}`: source-root and per-file metadata are rejected, canonical paths and decoded content are secret-scanned, secret-bearing paths are rejected, and filenames in findings are redacted. The caller-selected artifact root is a trust boundary. Its final component must be a real directory, and its real path must equal the same relative path mapped beneath the canonical real CWD or temp base. This permits expected platform base aliases such as macOS `/var` → `/private/var` but rejects user-created intermediate root links. Every traversed directory is secured with lstat/open/fstat/post-lstat identity checks (POSIX opens use `O_DIRECTORY|O_NOFOLLOW`), its descriptor stays open while descendants are visited, and all current/ancestor identities plus the original ctime, mtime, size, link count, and mode are rechecked around directory reads and bounded file reads. These immutable metadata checks apply only to traversal guards; extraction uses identity-only guards because creating destination entries legitimately mutates parent metadata. Every regular artifact file, regardless of name or extension, is binary-safe scanned from a descriptor-bounded snapshot before transport eligibility is checked. Binary scans retain exact `CURSOR_API_KEY`, generic auth assignments, and structured bearer/cookie/bridge/JSON signatures in UTF-8/ASCII, UTF-16LE/BE, and UTF-32LE/BE at any byte alignment; the intentionally broad generic credential-URL and SCP-style heuristics run only on valid UTF-8 text so random compressed/executable bytes cannot create false failures. Static child symlinks fail as non-regular entries; a nested rename/symlink ABA invalidates the whole traversal, discarding collected findings and bytes in favor of bounded failure evidence. Sensitive files (`.env*`, `auth.json`, `id_rsa`, `id_ed25519`, `*.pem`, and `*.key`) therefore fail the run when they contain secrets but are never transported. `node_modules/` and `.git/` are non-artifact infrastructure and are pruned before recursion. File size is checked before allocation or reading. An unreadable, changed, or oversized file fails closed; oversized files are not read and produce bounded limit evidence, while the host scanner reports an oversized or otherwise unscannable artifact as a finding so the suite fails. Bundles allow at most 512 files, 5 MiB per file, 40 MiB aggregate decoded content, 4,096 UTF-8 bytes per path, 4,096 total path components, 64 MiB inflated JSON, and 20 MiB compressed transport. The writer and extractor enforce the same limits; limit overflow emits only a bounded `bundle-limit-exceeded.json` failure artifact. Before host filesystem mutation, extraction rejects duplicate and file-prefix-conflicting paths, symlink/non-directory destination components, and pre-existing final paths. On POSIX controllers it sends the already prevalidated bounded files to the packaged `artifact-openat-extract.c` helper, compiled once into a private temporary directory. The helper independently validates the complete frame before mutation, requires its opened root identity to match the caller's pinned root, and uses descriptor-relative `mkdirat`/`openat` with `O_NOFOLLOW` one canonical component at a time. Substituted symlinks and pre-open path swaps therefore fail without following them, final files use `O_EXCL`, and detected identity drift rolls created files back through retained parent descriptors even when a directory was moved. This is race-safe extraction, not a sandbox against a hostile same-owner process: such a process can transiently relocate an already-open directory or the pinned root itself, although it cannot make extraction overwrite an existing destination. Windows controllers reject every nonempty extraction bundle before mutation because Node exposes no handle-relative Windows creation API; Windows remains a supported release target when the matrix is orchestrated from the macOS/POSIX controller. Small bundles stay between `PLATFORM_LIVE_BUNDLE_JSON_START` and `PLATFORM_LIVE_BUNDLE_JSON_END`; larger bundles exclusively create and descriptor-write the exact CWD-relative `.platform-artifact-bundle.gz` final component (`O_NOFOLLOW` on POSIX), emit that exact marker path, and allow chunk reads only for that one-component path. No intermediate spill path is accepted. Windows uses lstat identity checks for directories and lstat/fstat identity checks for regular files and the spill, without POSIX-only flags. The host retrieves exact 32 KiB chunks through no-sync Crabbox runs before releasing the lease. Compact control output is collected through Crabbox's local `--capture-stdout` file. This works on scenario failure and preserves the original command exit code; chunk transport success is not substituted for suite success, and no tar/zip side channel exists.
+Evidence collection runs even when a scenario fails. Only bounded, secret-scanned canonical text evidence is transported; unsafe or missing content fails the suite.
+
+On POSIX controllers, extraction reports `committed`, `rejected` (nothing created), `rolled-back`, `rollback-incomplete`, or `unknown`. The last two outcomes can leave created entries. A failed bundle-extraction check records the extraction outcome in `assertions.json` and `failures.md`.
+
+The artifact root is a trust boundary, not a sandbox against hostile same-owner processes. Windows controllers reject nonempty bundles; Windows targets remain supported from macOS/POSIX controllers.
+
+See [Artifact transport and extraction](./platform-smoke-implementation.md#artifact-transport-and-extraction) for the schema, limits, scanning, identity guards, outcome semantics, and inline/chunk protocol.
 
 Required fail-through behavior:
 
@@ -941,29 +956,7 @@ There is no tar/zip side channel. Crabbox stdout carries the inline bundle or it
 
 ## Assertion contract
 
-Each suite produces `assertions.json`:
-
-```json
-{
-  "ok": true,
-  "target": "ubuntu",
-  "suite": "cursor-native-visual-matrix",
-  "checks": [
-    { "id": "final-marker", "ok": true },
-    { "id": "card-read", "ok": true },
-    { "id": "jsonl-read", "ok": true }
-  ]
-}
-```
-
-Failures produce `failures.md` with:
-
-- target;
-- suite;
-- failed assertion IDs;
-- artifact paths;
-- command summary;
-- next diagnostic command.
+Each suite produces `assertions.json` with `ok`, `checks`, and `writtenAt`. Failed checks can include error text; `failures.md` lists their IDs and errors (or `failed`), plus a failure count. Artifact paths and diagnostic hints appear only if a check includes them in its error text. See the [assertion output format](./platform-smoke-implementation.md#assertion-output-format) for details.
 
 ## Security and redaction
 

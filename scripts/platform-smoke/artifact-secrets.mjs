@@ -120,6 +120,13 @@ export function scanArtifactSecrets(path, content) {
 	return [...violations];
 }
 
+const INVALID_JSON_VIOLATION = "invalid JSON";
+const INVALID_JSONL_VIOLATION_PREFIX = "invalid JSONL at line ";
+
+export function isStructuredArtifactViolation(violation) {
+	return violation === INVALID_JSON_VIOLATION || violation.startsWith(INVALID_JSONL_VIOLATION_PREFIX);
+}
+
 export function structuredArtifactViolations(path, content) {
 	if (!/\.jsonl?$/i.test(path)) return [];
 	const lines = /\.jsonl$/i.test(path) ? String(content).split(/\r?\n/) : [String(content)];
@@ -127,7 +134,7 @@ export function structuredArtifactViolations(path, content) {
 	for (const [index, line] of lines.entries()) {
 		if (/\.jsonl$/i.test(path) && !line.trim()) continue;
 		try { JSON.parse(line); } catch {
-			violations.push(/\.jsonl$/i.test(path) ? `invalid JSONL at line ${index + 1}` : "invalid JSON");
+			violations.push(/\.jsonl$/i.test(path) ? `${INVALID_JSONL_VIOLATION_PREFIX}${index + 1}` : INVALID_JSON_VIOLATION);
 		}
 	}
 	return violations;

@@ -63,4 +63,33 @@ describe("platform target runtime", () => {
 		expect(args.slice(args.indexOf("--id"))).toEqual(["--id", "lease-1", "--no-sync", "--capture-stdout", captureStdoutPath, "--shell", "echo ok"]);
 		expect(existsSync(captureStdoutPath)).toBe(false);
 	});
+
+	it("formats bundle extraction check errors for non-committed and malformed-structured bundles", async () => {
+		const suiteDir = mkdtempSync(join(tmpdir(), "platform-bundle-check-"));
+		tempDirs.push(suiteDir);
+		const runtimeModule = "../scripts/platform-smoke/target-runtime.mjs";
+		const assertionsModule = "../scripts/platform-smoke/assertions.mjs";
+		const { bundleExtractedCheck } = await import(runtimeModule);
+		const { runAssertions } = await import(assertionsModule);
+
+		const assertions = runAssertions(suiteDir, [
+			bundleExtractedCheck("bundle-extracted", { ok: true, violations: [], extraction: "committed" }),
+			bundleExtractedCheck("rolled-back-check", { ok: false, violations: [], extraction: "rolled-back" }),
+			bundleExtractedCheck("malformed-check", {
+				ok: false,
+				extraction: "committed",
+				violations: [
+					{ file: "metadata.json", violation: "invalid JSON" },
+					{ file: "process-output", violation: "CURSOR_API_KEY literal found" },
+				],
+			}),
+		]);
+
+		expect(assertions.ok).toBe(false);
+		expect(assertions.checks).toEqual([
+			{ id: "bundle-extracted", ok: true },
+			{ id: "rolled-back-check", ok: false, error: "extraction rolled-back" },
+			{ id: "malformed-check", ok: false, error: "extraction committed (1 structured artifact violation)" },
+		]);
+	});
 });

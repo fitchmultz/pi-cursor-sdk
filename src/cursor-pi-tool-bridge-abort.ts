@@ -6,6 +6,7 @@ interface CursorPiToolBridgeActiveToolExecution {
 	onAbort?: () => void;
 }
 
+/** For tracked executions, finish before callbacks: Pi's ctx.abort() synchronously aborts the signal. */
 class CursorPiToolBridgeToolExecutionAbortTracker {
 	private readonly activeExecutions = new Map<string, CursorPiToolBridgeActiveToolExecution>();
 	private processSignalHandlersInstalled = false;
@@ -32,9 +33,9 @@ class CursorPiToolBridgeToolExecutionAbortTracker {
 		}
 
 		execution.onAbort = () => {
+			this.finish(toolCallId);
 			this.cancelExecution(execution, "Cursor pi bridge tool execution was aborted");
 			this.abortExecution(execution);
-			this.finish(toolCallId);
 		};
 		execution.signal?.addEventListener("abort", execution.onAbort, { once: true });
 		this.activeExecutions.set(toolCallId, execution);
@@ -50,16 +51,12 @@ class CursorPiToolBridgeToolExecutionAbortTracker {
 		this.uninstallProcessSignalHandlersIfIdle();
 	}
 
-	finishAll(): void {
-		for (const toolCallId of [...this.activeExecutions.keys()]) this.finish(toolCallId);
-	}
-
 	abort(toolCallId: string, reason: string): boolean {
 		const execution = this.activeExecutions.get(toolCallId);
 		if (!execution) return false;
+		this.finish(toolCallId);
 		this.cancelExecution(execution, reason);
 		this.abortExecution(execution);
-		this.finish(toolCallId);
 		return true;
 	}
 

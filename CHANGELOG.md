@@ -4,6 +4,19 @@
 
 ## Unreleased
 
+## 0.5.35 - 2026-11-12
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- chore: remove unsupported platform qualification (#488) ([4d39383](https://github.com/fitchmultz/pi-cursor-sdk/commit/4d39383b15bd377348c19d6510d7b095c424fe48))
+
+### What's Changed
+* chore: remove unsupported platform qualification by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/488
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.34...v0.5.35
+
 ## 0.5.34 - 2026-11-12
 
 <!-- npm-release:unreleased:start -->

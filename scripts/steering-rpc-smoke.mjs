@@ -72,7 +72,7 @@ async function waitForChildCloseWithTimeout(child, timeoutMs, outputSummary = ()
 			new Promise((_, reject) => {
 				timeout = setTimeout(() => {
 					const summary = outputSummary();
-					reject(new Error(`pi did not exit within ${timeoutMs}ms after agent_settled${summary ? `\n${summary}` : ""}`));
+					reject(new Error(`pi did not exit and close its output within ${timeoutMs}ms after agent_settled${summary ? `\n${summary}` : ""}`));
 				}, timeoutMs);
 			}),
 		]);
@@ -239,7 +239,8 @@ async function runPiRpcSmoke(sessionDir, piBin) {
 		const exitCode = await waitForChildCloseWithTimeout(child, DEFAULT_CHILD_CLOSE_TIMEOUT_MS, () => smokeOutputTail(stdout, stderr));
 		closed = true;
 		if (exitCode !== 0) {
-			fail(`pi exited ${exitCode}\nstderr=${scrubForReport(stderr.slice(-2000))}`);
+			const status = child.signalCode ? `was killed by ${child.signalCode}` : `exited ${exitCode}`;
+			fail(`pi ${status}\nstderr=${scrubForReport(stderr.slice(-2000))}`);
 		}
 
 		return {
@@ -313,7 +314,7 @@ async function runSelfTest() {
 				await waitForChildCloseWithTimeout(hangingChild, 10, () => smokeOutputTail("STEER_OK=yes", ""));
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
-				closeTimedOut = message.includes("pi did not exit within 10ms after agent_settled") && message.includes("stdoutTail=STEER_OK=yes");
+				closeTimedOut = message.includes("pi did not exit and close its output within 10ms after agent_settled") && message.includes("stdoutTail=STEER_OK=yes");
 			}
 			if (!closeTimedOut) fail("self-test failed: post-agent_settled child close wait should be bounded and report output tail");
 		} finally {

@@ -89,6 +89,8 @@
     "scripts/lib/cursor-cli-args.d.mts",
     "scripts/lib/cursor-child-process.mjs",
     "scripts/lib/cursor-child-process.d.mts",
+    "scripts/lib/cursor-pi-rpc.mjs",
+    "scripts/lib/cursor-pi-rpc.d.mts",
     "scripts/lib/local-resume-smoke-harness.mjs",
     "scripts/lib/cursor-script-fail.mjs",
     "scripts/lib/cursor-script-fail.d.mts",

@@ -1,6 +1,9 @@
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import {
 	CURSOR_SDK_EVENT_DEBUG_ENV,
@@ -15,6 +18,7 @@ import {
 	__testUtils as sdkEventDebugTestUtils,
 } from "../src/cursor-sdk-event-debug.js";
 import { backfillPiSessionSnapshot, parseDebugProviderEventsArgs } from "../scripts/debug-provider-events.mjs";
+import { DEFAULT_CHILD_SHUTDOWN_GRACE_MS } from "../scripts/lib/cursor-child-process.mjs";
 import {
 	resolveCursorSettingSources,
 	serializeCursorSettingSources,
@@ -734,6 +738,124 @@ describe("debug-provider-events maintainer probe", () => {
 			rmSync(baseDir, { recursive: true, force: true });
 		}
 	});
+
+	const isRunning = (pid: number) => {
+		try {
+			process.kill(pid, 0);
+			return true;
+		} catch {
+			return false;
+		}
+	};
+
+	// Runs main() minus ensureBuilt() in its own process, because failures call process.exit(1),
+	// with a fake Pi RPC child as `pi` on PATH. POSIX only: spawn("pi") cannot launch a script
+	// shim on Windows without a shell.
+	const startDebugProviderEventsRun = (env: NodeJS.ProcessEnv = {}) => {
+		const baseDir = mkdtempSync(join(tmpdir(), "pi-cursor-debug-provider-held-output-"));
+		const bin = join(baseDir, "bin");
+		const out = join(baseDir, "artifacts");
+		const launchesPath = join(baseDir, "pi-launches");
+		const pidsPath = join(baseDir, "pids");
+		const fakePi = join(baseDir, "fake-pi.cjs");
+		mkdirSync(bin);
+		// Pi RPC stand-in: settles the prompt with a complete capture and leaves a descendant on its
+		// stdout/stderr. Like Pi's RPC mode, it disposes for a while after stdin EOF and exits 143 on
+		// SIGTERM; here disposal outlasts the default termination grace.
+		writeFileSync(fakePi, `const { spawn } = require("node:child_process");
+const { writeFileSync } = require("node:fs");
+const { join } = require("node:path");
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  for (let index = buffer.indexOf("\\n"); index >= 0; index = buffer.indexOf("\\n")) {
+    const command = JSON.parse(buffer.slice(0, index));
+    buffer = buffer.slice(index + 1);
+    if (command.type !== "prompt") continue;
+    const runDir = process.env.PI_CURSOR_SDK_EVENT_DEBUG_RUN_DIR;
+    writeFileSync(join(runDir, "summary.json"), JSON.stringify({ artifactDir: runDir, artifacts: {}, counts: { errors: 0 }, elapsedMs: 1, waitResultRecorded: true }));
+    const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: ["ignore", "inherit", "inherit"] });
+    writeFileSync(${JSON.stringify(pidsPath)}, process.pid + " " + descendant.pid);
+    process.stdout.write(JSON.stringify({ type: "agent_settled" }) + "\\n");
+  }
+});
+process.stdin.on("end", () => setTimeout(() => process.exit(0), ${DEFAULT_CHILD_SHUTDOWN_GRACE_MS + 1_000}));
+process.on("SIGTERM", () => process.exit(143));
+`);
+		const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+		writeFileSync(join(bin, "pi"), `#!/bin/sh\necho launched >> ${shellQuote(launchesPath)}\nexec ${shellQuote(process.execPath)} ${shellQuote(fakePi)}\n`, { mode: 0o755 });
+		const moduleUrl = pathToFileURL(resolve("scripts/debug-provider-events.mjs")).href;
+		const driver = spawn(
+			process.execPath,
+			[
+				"--input-type=module",
+				"-e",
+				`import { parseDebugProviderEventsArgs, runDebugProviderEvents } from ${JSON.stringify(moduleUrl)};
+console.log(JSON.stringify(await runDebugProviderEvents(parseDebugProviderEventsArgs(process.argv.slice(1)))));`,
+				"--",
+				...["--cwd", baseDir, "--out", out, "--model", "cursor/test", "--prompt", "hello", "--api-key", "test-dummy-key"],
+			],
+			{ env: { PATH: `${bin}${delimiter}${process.env.PATH}`, HOME: baseDir, ...env }, stdio: ["ignore", "pipe", "pipe"] },
+		);
+		let stdout = "";
+		let stderr = "";
+		driver.stdout.setEncoding("utf8");
+		driver.stderr.setEncoding("utf8");
+		driver.stdout.on("data", (chunk: string) => { stdout += chunk; });
+		driver.stderr.on("data", (chunk: string) => { stderr += chunk; });
+		const closed = new Promise<number | null>((resolveClose) => driver.once("close", resolveClose));
+		const piAndDescendantPids = () => (existsSync(pidsPath) ? readFileSync(pidsPath, "utf8").split(" ").map(Number) : []);
+		return {
+			out,
+			exitCodeWithin: (ms: number) => Promise.race([closed, delay(ms, "still running")]),
+			stdout: () => stdout,
+			stderr: () => stderr,
+			piLaunched: () => existsSync(launchesPath),
+			piAndDescendantPids,
+			async cleanup() {
+				for (const pid of piAndDescendantPids()) if (isRunning(pid)) process.kill(pid, "SIGKILL");
+				driver.kill("SIGKILL");
+				await Promise.race([closed, delay(10_000)]);
+				rmSync(baseDir, { recursive: true, force: true });
+			},
+		};
+	};
+
+	it.skipIf(process.platform === "win32")("returns the capture after pi's own shutdown and terminates a descendant still holding pi's output", async () => {
+		const run = startDebugProviderEventsRun();
+		try {
+			expect(await run.exitCodeWithin(15_000)).toBe(0);
+			expect(JSON.parse(run.stdout())).toMatchObject({ artifactDir: run.out, counts: { errors: 0 }, waitResultRecorded: true });
+			expect(run.piAndDescendantPids().map(isRunning)).toEqual([false, false]);
+		} finally {
+			await run.cleanup();
+		}
+	}, 40_000);
+
+	it.skipIf(process.platform === "win32")("waits for pi's own shutdown when PI_PROVIDER_EVENT_DEBUG_TIMEOUT_MS exceeds Node's timer limit", async () => {
+		const run = startDebugProviderEventsRun({ PI_PROVIDER_EVENT_DEBUG_TIMEOUT_MS: String(2 ** 31) });
+		try {
+			expect(await run.exitCodeWithin(15_000)).toBe(0);
+			expect(run.piAndDescendantPids().map(isRunning)).toEqual([false, false]);
+		} finally {
+			await run.cleanup();
+		}
+	}, 40_000);
+
+	it.skipIf(process.platform === "win32")("rejects a non-finite PI_PROVIDER_EVENT_DEBUG_TIMEOUT_MS before creating artifacts or launching pi", async () => {
+		const run = startDebugProviderEventsRun({ PI_PROVIDER_EVENT_DEBUG_TIMEOUT_MS: "10m" });
+		try {
+			expect(await run.exitCodeWithin(15_000)).toBe(1);
+			expect(run.stderr()).toContain("PI_PROVIDER_EVENT_DEBUG_TIMEOUT_MS must be a finite number of milliseconds");
+			// The run creates its artifact directory before spawning pi, so this is the ordering
+			// proof; a pi launched just before process.exit(1) may not have written its marker yet.
+			expect(existsSync(run.out)).toBe(false);
+			expect(run.piLaunched()).toBe(false);
+		} finally {
+			await run.cleanup();
+		}
+	}, 40_000);
 
 	it("parses provider probe prompt and option overrides", () => {
 		expect(

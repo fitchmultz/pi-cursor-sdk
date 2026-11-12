@@ -57,6 +57,7 @@ import {
 	waitForChildClose,
 } from "../scripts/lib/cursor-child-process.mjs";
 import { createCloudSmokeShutdownController } from "../scripts/lib/cloud-smoke-shutdown.mjs";
+import { createPiRpcChannel } from "../scripts/lib/cursor-pi-rpc.mjs";
 import { createScriptFail } from "../scripts/lib/cursor-script-fail.mjs";
 import {
 	CURSOR_SDK_STARTUP_NOISE_PATTERNS,
@@ -145,6 +146,7 @@ type _sdkTimingSnapshotShape = AssertEqual<CursorSdkEventTimingSnapshot["eventCo
 
 const _settingSourcesReturn: AssertEqual<ReturnType<typeof defaultSettingSourcesFromEnv>, string[] | undefined> = true;
 const _waitForChildCloseReturn: AssertEqual<Awaited<ReturnType<typeof waitForChildClose>>, number> = true;
+const _piRpcResponseSuccess: AssertEqual<Awaited<ReturnType<ReturnType<typeof createPiRpcChannel>["send"]>>["success"], boolean> = true;
 const _startupNoisePatterns: AssertEqual<typeof CURSOR_SDK_STARTUP_NOISE_PATTERNS, readonly string[]> = true;
 const _parseDebugSdkEventsArgs: (argv: string[], env?: NodeJS.ProcessEnv) => CursorDebugSdkEventsArgs = parseDebugSdkEventsArgs;
 const _parseDebugProviderEventsArgs: (argv: string[], env?: NodeJS.ProcessEnv) => CursorDebugProviderEventsArgs = parseDebugProviderEventsArgs;
@@ -283,6 +285,7 @@ const _invalidRunSummary = {
 void [
 	_settingSourcesReturn,
 	_waitForChildCloseReturn,
+	_piRpcResponseSuccess,
 	_startupNoisePatterns,
 	_parseDebugSdkEventsArgs,
 	_parseDebugProviderEventsArgs,

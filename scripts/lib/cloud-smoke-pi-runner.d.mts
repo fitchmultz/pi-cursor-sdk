@@ -1,16 +1,8 @@
 import type { CloudSmokeShutdownController } from "./cloud-smoke-shutdown.mjs";
+import type { PiRpcRecord, PiRpcResponse } from "./cursor-pi-rpc.mjs";
 
-interface CloudSmokeRpcEvent {
-	type: string;
-	[key: string]: unknown;
-}
-
-interface CloudSmokeRpcResponse extends CloudSmokeRpcEvent {
-	type: "response";
-	id: string;
-	success: boolean;
+interface CloudSmokeRpcResponse extends PiRpcResponse {
 	data?: { text?: string; [key: string]: unknown };
-	error?: unknown;
 }
 
 export function createCloudSmokePiRunner(options: {
@@ -33,7 +25,7 @@ export function createCloudSmokePiRunner(options: {
 		sessionId: string;
 		envOptions?: Record<string, unknown>;
 	}): Promise<{
-		events: CloudSmokeRpcEvent[];
+		events: PiRpcRecord[];
 		send(type: string, extra?: Record<string, unknown>, timeoutMs?: number): Promise<CloudSmokeRpcResponse>;
 		stop(): Promise<void>;
 		throwIfFailed(): void;

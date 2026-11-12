@@ -5,8 +5,15 @@ export const CHILD_PROCESS_TREE_SPAWN_OPTIONS = Object.freeze({
 	detached: process.platform !== "win32",
 });
 
+// Node emits 'close' only after the process ends and its piped output streams close; 'exit' can
+// come first, e.g. while a descendant still holds the inherited stdout.
+function isChildClosed(child) {
+	if (child.exitCode === null && child.signalCode === null) return false;
+	return child.stdio.every((stream, fd) => fd === 0 || !stream || stream.closed);
+}
+
 export function waitForChildClose(child) {
-	if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(child.exitCode ?? 1);
+	if (isChildClosed(child)) return Promise.resolve(child.exitCode ?? 1);
 	return new Promise((resolve) => {
 		child.once("close", (code) => resolve(code ?? 1));
 	});
@@ -96,7 +103,7 @@ exit 1
 }
 
 function waitForChildCloseWithin(child, timeoutMs) {
-	if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+	if (isChildClosed(child)) return Promise.resolve(true);
 	return new Promise((resolve) => {
 		const finish = (closed) => {
 			clearTimeout(timer);

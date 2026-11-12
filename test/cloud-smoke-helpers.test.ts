@@ -24,6 +24,8 @@ import {
 	routeCloudSmokeChildError,
 	stopCloudSmokeTrackedChild,
 } from "../scripts/lib/cloud-smoke-shutdown.mjs";
+import { createCloudSmokePiRunner } from "../scripts/lib/cloud-smoke-pi-runner.mjs";
+import { terminateChild } from "../scripts/lib/cursor-child-process.mjs";
 import {
 	assertOwnedThrowawayRepositoryHandle,
 	cloudSmokeRepositoryDescription,
@@ -676,6 +678,80 @@ describe("cloud smoke helper contracts", () => {
 			await closed;
 		}
 	}, 10_000);
+
+	it.skipIf(process.platform === "win32")("settles Cloud smoke RPC requests on stop, child exit and shutdown without resolving late responses", async () => {
+		const root = mkdtempSync(join(tmpdir(), "cloud-smoke-rpc-test-"));
+		const bin = join(root, "node_modules", ".bin");
+		mkdirSync(bin, { recursive: true });
+		// Answers immediately, except "hold" (answered only after stdin ends) and "exit" (never answered).
+		const fakePi = join(root, "fake-pi.cjs");
+		writeFileSync(fakePi, `let buffer = "";
+const held = [];
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  for (let index = buffer.indexOf("\\n"); index >= 0; index = buffer.indexOf("\\n")) {
+    const command = JSON.parse(buffer.slice(0, index));
+    buffer = buffer.slice(index + 1);
+    if (command.type === "exit") process.exit(0);
+    const response = JSON.stringify({ id: command.id, type: "response", command: command.type, success: true, data: { pid: process.pid } }) + "\\n";
+    if (command.type === "hold") held.push(response);
+    else process.stdout.write(response);
+  }
+});
+process.stdin.on("end", () => process.stdout.write(held.join("")));
+`);
+		const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+		writeFileSync(join(bin, "pi"), `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(fakePi)}\n`, { mode: 0o755 });
+		const isRunning = (pid: number) => {
+			try {
+				process.kill(pid, 0);
+				return true;
+			} catch {
+				return false;
+			}
+		};
+		const outcome = (request: Promise<unknown>) => request.then(() => "resolved", (error: Error) => error.message);
+		const shutdown = createCloudSmokeShutdownController((child) => terminateChild(child, { graceMs: 2_000 }));
+		const { startRpc } = createCloudSmokePiRunner({
+			root,
+			model: "cursor/test",
+			shutdown,
+			buildEnv: () => ({ PATH: process.env.PATH }),
+			buildWorkspace: (artifactDir) => artifactDir,
+		});
+		try {
+			const stopped = await startRpc({ artifactDir: join(root, "stop"), sessionId: "stop" });
+			expect(await stopped.send("get_state")).toMatchObject({ type: "response", success: true });
+			const stoppedHold = outcome(stopped.send("hold"));
+			await stopped.stop();
+			expect(await stoppedHold).toBe("cloud smoke RPC stopped");
+			expect(await outcome(stopped.send("get_state"))).toBe("cloud smoke RPC stopped");
+			expect(() => stopped.throwIfFailed()).toThrow("cloud smoke RPC stopped");
+
+			const exiting = await startRpc({ artifactDir: join(root, "exit"), sessionId: "exit" });
+			const exitingRequests = Promise.all([outcome(exiting.send("hold")), outcome(exiting.send("exit"))]);
+			expect(await exitingRequests).toEqual([expect.stringMatching(/^cloud smoke RPC exited/), expect.stringMatching(/^cloud smoke RPC exited/)]);
+			expect(() => exiting.throwIfFailed()).toThrow("cloud smoke RPC exited");
+			await exiting.stop();
+
+			const interrupted = await startRpc({ artifactDir: join(root, "shutdown"), sessionId: "shutdown" });
+			const pid = Number((await interrupted.send("get_state")).data?.pid);
+			// Termination closes stdin, so the held response arrives during shutdown and must not resolve.
+			const interruptedHold = interrupted.send("hold").then(
+				() => "resolved",
+				(error: Error) => ({ message: error.message, childRunning: isRunning(pid) }),
+			);
+			const request = shutdown.request("SIGTERM");
+			expect(await interruptedHold).toEqual({ message: "cloud smoke interrupted by SIGTERM", childRunning: false });
+			await expect(request).resolves.toMatchObject({ signal: "SIGTERM" });
+			expect(await outcome(interrupted.send("get_state"))).toBe("cloud smoke interrupted by SIGTERM");
+			await interrupted.stop();
+		} finally {
+			await shutdown.request("SIGTERM");
+			rmSync(root, { recursive: true, force: true });
+		}
+	}, 15_000);
 
 	it("waits for detached child termination before signal-triggered resource cleanup", async () => {
 		const processLike = new EventEmitter();

@@ -2,7 +2,7 @@
  * Platform smoke doctor — preflight checks before any Cursor token spend.
  *
  * Implements doctor checks from docs/platform-smoke.md:
- * env vars, Crabbox, providers, Docker, SSH, Parallels, Node, tools,
+ * env vars, Crabbox, providers, Docker, SSH, Node, tools,
  * artifacts, git status, forbidden files, Cursor auth, node-pty.
  */
 
@@ -51,82 +51,7 @@ function commandPath(command) {
 	return shell(`command -v ${command}`);
 }
 
-function parseLeaseId(output) {
-	return output.match(/\bleased\s+(\S+)/)?.[1]
-		?? output.match(/\blease=(\S+)/)?.[1]
-		?? null;
-}
 
-function windowsParallelsDefaults(config = {}) {
-	const windows = config?.windowsParallels ?? {};
-	return {
-		vm: windows.sourceVm || "pi-extension-windows-template",
-		snapshot: windows.snapshot || "crabbox-ready",
-		user: windows.user || env("USER"),
-		workRoot: windows.workRoot || "C:\\crabbox\\pi-cursor-sdk",
-	};
-}
-
-function windowsCrabboxBaseArgs(config = {}) {
-	const defaults = windowsParallelsDefaults(config);
-	const vm = env("PLATFORM_SMOKE_WINDOWS_VM") || defaults.vm;
-	const snap = env("PLATFORM_SMOKE_WINDOWS_SNAPSHOT") || defaults.snapshot;
-	const user = env("PLATFORM_SMOKE_WINDOWS_USER") || defaults.user;
-	const workRoot = env("PLATFORM_SMOKE_WINDOWS_NATIVE_WORK_ROOT") || defaults.workRoot;
-	return [
-		"--provider", "parallels",
-		"--target", "windows",
-		"--windows-mode", "normal",
-		"--parallels-source", vm,
-		"--parallels-source-snapshot", snap,
-		"--parallels-user", user,
-		"--parallels-work-root", workRoot,
-	];
-}
-
-function crabbox(cbox, args, timeout = 300_000) {
-	try {
-		return {
-			ok: true,
-			stdout: execFileSync(cbox, args, {
-				timeout,
-				stdio: "pipe",
-				env: safeChildEnv({ CRABBOX_SYNC_GIT_SEED: "false" }),
-			}).toString(),
-			stderr: "",
-		};
-	} catch (error) {
-		return {
-			ok: false,
-			stdout: error.stdout?.toString?.() ?? "",
-			stderr: error.stderr?.toString?.() ?? error.message,
-		};
-	}
-}
-
-function disposableWindowsSshProbe(cbox, config = {}) {
-	const slug = "pi-cursor-sdk-doctor-windows";
-	const baseArgs = windowsCrabboxBaseArgs(config);
-	const warm = crabbox(cbox, ["warmup", ...baseArgs, "--slug", slug, "--keep", "--reclaim"], 300_000);
-	const leaseId = parseLeaseId(warm.stdout) ?? parseLeaseId(warm.stderr) ?? slug;
-	try {
-		if (!warm.ok) return { ok: false, message: `disposable Windows warmup failed: ${(warm.stderr || warm.stdout).slice(-500)}` };
-		const probeCommand = "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command 'Get-Command node,npm,git,tar -ErrorAction Stop | Out-Null; node --version; npm --version; git --version; tar --version | Select-Object -First 1; whoami'";
-		const run = crabbox(cbox, ["run", ...baseArgs, "--id", leaseId, "--no-sync", "--shell", probeCommand], 120_000);
-		if (!run.ok) return { ok: false, message: `disposable Windows probe failed: ${(run.stderr || run.stdout).slice(-500)}` };
-		const lines = run.stdout.trim().split(/\r?\n/).slice(-5);
-		if (!/^v\d+\./.test(lines[0] ?? "")) return { ok: false, message: `disposable Windows node probe missing or invalid: ${lines.join(" | ")}` };
-		if (!/^\d+\.\d+\./.test(lines[1] ?? "")) return { ok: false, message: `disposable Windows npm probe missing or invalid: ${lines.join(" | ")}` };
-		if (!/^git version/i.test(lines[2] ?? "")) return { ok: false, message: `disposable Windows git probe missing or invalid: ${lines.join(" | ")}` };
-		if (!/tar/i.test(lines[3] ?? "")) return { ok: false, message: `disposable Windows tar probe missing or invalid: ${lines.join(" | ")}` };
-		if (!(lines[4] ?? "").trim()) return { ok: false, message: `disposable Windows whoami probe missing: ${lines.join(" | ")}` };
-		return { ok: true, message: lines.join(" | ") };
-	} finally {
-		crabbox(cbox, ["stop", ...baseArgs, "--id", leaseId], 60_000);
-	}
-}
-
-function hasBin(name) { return silent("which", [name]) !== null; }
 
 async function runRenderProbe(artifactRoot) {
 	const probeDir = resolve(artifactRoot, `.doctor-render-${process.pid}-${Date.now()}`);
@@ -186,27 +111,15 @@ async function runChecks(config) {
 		"PLATFORM_SMOKE_MAC_USER",
 		"PLATFORM_SMOKE_MAC_WORK_ROOT",
 		"PLATFORM_SMOKE_UBUNTU_IMAGE",
-		"PLATFORM_SMOKE_WINDOWS_VM",
-		"PLATFORM_SMOKE_WINDOWS_SNAPSHOT",
-		"PLATFORM_SMOKE_WINDOWS_USER",
-		"PLATFORM_SMOKE_WINDOWS_NATIVE_WORK_ROOT",
 	];
 	for (const name of requiredVars) {
 		const v = env(name);
 		v ? ok(`${name} = ${name === "CURSOR_API_KEY" ? "(present, redacted)" : (v.length > 50 ? v.slice(0, 50) + "..." : v)}`)
 			: fail(`${name} missing`);
 	}
-	const windowsDefaults = windowsParallelsDefaults(config);
-	const optionalDefaults = {
-		PLATFORM_SMOKE_WINDOWS_VM: windowsDefaults.vm,
-		PLATFORM_SMOKE_WINDOWS_SNAPSHOT: windowsDefaults.snapshot,
-		PLATFORM_SMOKE_WINDOWS_USER: windowsDefaults.user,
-		PLATFORM_SMOKE_WINDOWS_NATIVE_WORK_ROOT: windowsDefaults.workRoot,
-	};
 	for (const name of optionalVars) {
 		const v = env(name);
-		const fallback = optionalDefaults[name] ? `(default: ${optionalDefaults[name]})` : "(default)";
-		ok(`${name} = ${v || fallback}`);
+		ok(`${name} = ${v || "(default)"}`);
 	}
 
 	// ── Phase 2: Crabbox binary ──
@@ -252,7 +165,7 @@ async function runChecks(config) {
 	if (cboxPath) {
 		const providerList = silent(cbox, ["providers"]);
 		if (providerList) {
-			for (const provider of ["ssh", "local-container", "parallels"]) {
+			for (const provider of ["ssh", "local-container"]) {
 				new RegExp(`^${provider}$`, "m").test(providerList)
 					? ok(`provider listed: ${provider}`)
 					: fail(`crabbox providers missing required provider: ${provider}`);
@@ -321,87 +234,6 @@ async function runChecks(config) {
 		if (lines[5]) ok(`remote ${lines[5]}`); else fail("remote tar probe missing output");
 	} else {
 		fail(`SSH to ${host} failed`);
-	}
-
-	// ── Phase 6: Parallels ──
-	console.log("\n── Parallels ──");
-	if (!hasBin("prlctl")) {
-		fail("prlctl not found");
-	} else {
-		ok("prlctl found");
-		const vmName = env("PLATFORM_SMOKE_WINDOWS_VM") || windowsParallelsDefaults(config).vm;
-		const list = shell("prlctl list -a --no-header 2>/dev/null");
-		if (list) {
-			const vms = list.split("\n").filter(Boolean);
-			const tpl = vms.find(l => l.includes(vmName));
-			if (tpl) {
-				ok(`template VM "${vmName}" found`);
-				const status = tpl.split(/\s+/)[1];
-				if (status === "stopped") {
-					ok(`VM "${vmName}" is stopped — ready for linked clones`);
-				} else {
-					fail(`VM "${vmName}" state: ${status} — source VM must be stopped for linked clones`);
-				}
-
-				const snapName = env("PLATFORM_SMOKE_WINDOWS_SNAPSHOT") || windowsParallelsDefaults(config).snapshot;
-				const snapsJson = shell(`prlctl snapshot-list "${vmName}" -j 2>/dev/null`);
-				let snapshotFound = false;
-				let snapshotPowerOff = false;
-				if (snapsJson) {
-					try {
-						const snapshots = JSON.parse(snapsJson);
-						const matches = Object.values(snapshots).filter((item) => item?.name === snapName);
-						if (matches.length > 1) fail(`snapshot "${snapName}" is ambiguous (${matches.length} snapshots); keep exactly one named release snapshot`);
-						const snapshot = matches[0];
-						snapshotFound = Boolean(snapshot);
-						snapshotPowerOff = snapshot?.state === "poweroff";
-					} catch {
-						fail(`could not parse snapshot JSON for "${vmName}"`);
-					}
-				}
-				if (!snapshotFound) {
-					const snapsText = shell(`prlctl snapshot-list "${vmName}" 2>/dev/null`);
-					snapshotFound = Boolean(snapsText && snapsText.includes(snapName));
-				}
-				if (snapshotFound) {
-					ok(`snapshot "${snapName}" exists`);
-					if (snapshotPowerOff) ok(`snapshot "${snapName}" state is poweroff — forkable for linked clones`);
-					else fail(`snapshot "${snapName}" is not poweroff — linked clone baseline must be powered off`);
-				} else {
-					fail(`snapshot "${snapName}" not found — run: prlctl snapshot "${vmName}" --name "${snapName}"`);
-				}
-
-				// SSH probe on Windows VM. Do not let a stopped template hide missing Windows prep.
-				const ipLine = shell(`prlctl list -f --no-header "${vmName}" 2>/dev/null`);
-				if (ipLine) {
-					const parts = ipLine.trim().split(/\s+/);
-					const ip = parts.length >= 3 ? parts[2] : null;
-					if (ip && ip !== "-") {
-						ok(`VM IP: ${ip}`);
-						const portCheck = shell(`nc -z -w 3 ${ip} 22 2>/dev/null && echo open || echo closed`);
-						if (portCheck?.includes("open")) {
-							ok(`SSH open on ${ip}:22`);
-						} else {
-							fail(`SSH not open on ${ip}:22 — enable OpenSSH Server in Windows template VM`);
-						}
-					} else {
-						ok(`template "${vmName}" has no IP; verifying Windows SSH/tools through a disposable Crabbox clone`);
-						if (cbox && snapshotFound && snapshotPowerOff) {
-							const probe = disposableWindowsSshProbe(cbox, config);
-							probe.ok ? ok(`disposable Windows clone SSH/tool probe OK: ${probe.message}`) : fail(probe.message);
-						} else {
-							fail(`Windows SSH probe could not run because "${vmName}" has no IP and no verified snapshot was available`);
-						}
-					}
-				} else {
-					fail(`could not inspect Windows VM IP for "${vmName}"`);
-				}
-			} else {
-				fail(`VM "${vmName}" not found. Available: ${vms.map(v => v.split(/\s+/).pop()).join(", ")}`);
-			}
-		} else {
-			fail("prlctl list returned no output");
-		}
 	}
 
 	// ── Phase 7: Node.js ──

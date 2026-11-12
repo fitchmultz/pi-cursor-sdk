@@ -2,7 +2,7 @@
  * Target runner — real suite execution, artifact writing, and fail-through.
  *
  * Each target session: warmup → run suites → artifacts → stop.
- * Live suites execute real Cursor-backed PTY/ConPTY runs and fail through with artifacts.
+ * Live suites execute real Cursor-backed PTY runs and fail through with artifacts.
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -441,8 +441,6 @@ export function buildPlatformBuildCommand(targetName, packageName = "pi-cursor-s
 		lines.push("  exit 1");
 		lines.push("fi");
 		lines.push('echo "PLATFORM_BUILD_OK"');
-	} else {
-		lines.push(`powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\platform-smoke\\platform-build-windows.ps1 -PackageName ${packageName} -NodeValidationMajor ${nodeValidationMajor}`);
 	}
 	return lines.join("\n");
 }
@@ -605,10 +603,8 @@ async function executeLiveSuite(config, targetName, suiteName, suiteDir, slug, l
 function buildLiveSuiteCommand(config, targetName, suiteName, prepDir) {
 	const model = config.cursorModel ?? "cursor/grok-4.6";
 	const packageName = config.packageName ?? "pi-cursor-sdk";
-	const prepArgs = prepDir ? ` --prep-dir ${platformFor(targetName) === "powershell" ? prepDir : shellQuote(prepDir)}` : "";
-	if (platformFor(targetName) === "powershell") {
-		return `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "node scripts/platform-smoke/live-suite-runner.mjs --suite ${suiteName} --target ${targetName} --model ${model} --package-name ${packageName}${prepArgs}"`;
-	}
+	const prepArgs = prepDir ? ` --prep-dir ${shellQuote(prepDir)}` : "";
+
 	return `node scripts/platform-smoke/live-suite-runner.mjs --suite ${shellQuote(suiteName)} --target ${shellQuote(targetName)} --model ${shellQuote(model)} --package-name ${shellQuote(packageName)}${prepArgs}`;
 }
 

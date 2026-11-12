@@ -66,7 +66,6 @@
     "scripts/platform-smoke/local-resume-runner.mjs",
     "scripts/platform-smoke/local-resume-suites.mjs",
     "scripts/platform-smoke/local-resume-suites.d.mts",
-    "scripts/platform-smoke/platform-build-windows.ps1",
     "scripts/platform-smoke/pty-capture.mjs",
     "scripts/platform-smoke/render-ansi.mjs",
     "scripts/platform-smoke/scenarios.mjs",
@@ -161,8 +160,7 @@
     "smoke:platform:doctor": "node scripts/platform-smoke.mjs doctor",
     "smoke:platform:macos": "node scripts/platform-smoke.mjs run --target macos",
     "smoke:platform:ubuntu": "node scripts/platform-smoke.mjs run --target ubuntu",
-    "smoke:platform:windows-native": "node scripts/platform-smoke.mjs run --target windows-native",
-    "smoke:platform:all": "npm run smoke:platform:doctor && node scripts/platform-smoke.mjs run --target macos,ubuntu,windows-native"
+    "smoke:platform:all": "npm run smoke:platform:doctor && node scripts/platform-smoke.mjs run --target macos,ubuntu"
   },
   "dependencies": {
     "@cursor/sdk": "1.0.40",

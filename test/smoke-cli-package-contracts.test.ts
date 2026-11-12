@@ -270,7 +270,7 @@ describe("smoke CLI and package contracts", () => {
 				expect(result.stderr).toContain("usage error:");
 				if (args.includes("plan9")) {
 					expect(result.stderr).toContain("unknown target(s): plan9");
-					expect(result.stderr).toContain("macos, ubuntu, windows-native");
+					expect(result.stderr).toContain("macos, ubuntu");
 				}
 				if (args.includes("stdout-only")) {
 					expect(result.stderr).toContain("unknown suite(s): stdout-only");
@@ -287,21 +287,15 @@ describe("smoke CLI and package contracts", () => {
 	it("preserves local-resume target command construction in its focused runner", () => {
 		const code = String.raw`
 import { buildLocalResumeSuiteCommand } from "./scripts/platform-smoke/local-resume-runner.mjs";
-const prepDir = ".platform-smoke-runs/local-resume-prep-1783794405965-windows-native";
+const prepDir = ".platform-smoke-runs/local-resume-prep-1783794405965-ubuntu";
 const posix = buildLocalResumeSuiteCommand("ubuntu", "smoke:local-resume:safety", prepDir, "pi-cursor-sdk", "cursor-local-resume-safety");
-const windowsCommand = buildLocalResumeSuiteCommand("windows-native", "smoke:local-resume:cleanup", prepDir, "pi-cursor-sdk", "cursor-local-resume-cleanup");
-const encoded = windowsCommand.split(" -EncodedCommand ")[1];
-const windows = encoded ? Buffer.from(encoded, "base64").toString("utf16le") : "";
-const result = { posix, windowsCommand, windows };
+const result = { posix };
 console.log(JSON.stringify(result));
-for (const command of [posix, windows]) {
+for (const command of [posix]) {
   if (!command.includes("--prepare-only") || !command.includes("packed-workspace") || !command.includes("CURSOR_LOCAL_RESUME_SMOKE_EXTENSION_PATH") || !command.includes("CURSOR_LOCAL_RESUME_SMOKE_EMIT_BUNDLE")) process.exit(1);
   if (command.includes(" -e .") || command.includes("npm ci && npm run smoke:local-resume")) process.exit(1);
 }
 if (!posix.includes("npm run smoke:local-resume:safety")) process.exit(1);
-if (!windowsCommand.startsWith("powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand ") || windowsCommand.includes("$") || windowsCommand.length >= 2400) process.exit(1);
-if (!windows.includes("npm run smoke:local-resume:cleanup") || !windows.includes("/lr") || windows.includes("local-resume-cursor-local-resume-cleanup")) process.exit(1);
-if (!windows.includes("for($i=0;$i -lt 10") || !windows.includes("$w=$e.Replace('/','\\')") || !windows.includes("cmd.exe /d /c rd /s /q $w") || !windows.includes("Start-Sleep -Milliseconds 200") || !windows.includes("local-resume evidence cleanup failed") || windows.includes("SilentlyContinue")) process.exit(1);
 `;
 		const result = run(process.execPath, ["--input-type=module", "-e", code]);
 		expect(result.status).toBe(0);

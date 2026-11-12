@@ -131,7 +131,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 ## Setup and commands
 
 - Install dependencies: `npm install` (runs `prepare`, which compiles `src/` into `dist/` — the manifest entry pi loads)
-- Use Node 24+. The platform smoke baseline is Node 24 on macOS, Ubuntu, and Windows.
+- Use Node 24.22.3+ (24.x). The platform smoke baseline is Node 24 on macOS, Ubuntu, and Windows.
 - Build after editing `src/`: `npm run build` — required before any direct `pi -e .` run, or pi loads the previous build. The cloud/steering/local-resume/provider-debug launchers rebuild automatically (even when run directly with `node scripts/...`), `smoke:live`/`smoke:visual`/`smoke:isolated` build via their npm scripts, and `smoke:platform*` builds inside its packed installs; only direct `pi -e .` runs need a manual build.
 - Run tests: `npm test`
 - Typecheck (src + tests): `npm run typecheck`

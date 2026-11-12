@@ -404,7 +404,7 @@ Required:
 
 - OpenSSH enabled on localhost.
 - Configured SSH user logs in without interactive prompts.
-- `git`, `rsync`, `tar`, `curl`, Node 24+, and npm are available.
+- `git`, `rsync`, `tar`, `curl`, Node 24.22.3+ (24.x), and npm are available.
 - Work root is writable.
 - `node-pty` self-test passes.
 
@@ -414,7 +414,7 @@ Required:
 
 - Docker-compatible runtime is active.
 - `crabbox doctor --provider local-container --json` passes.
-- Required local image exists with Node 24+, npm, OpenSSH prerequisites, `git`, `rsync`, `curl`, `sudo`, `python3`, `tar`, and `ripgrep`.
+- Required local image exists with Node 24.22.3+ (24.x), npm, OpenSSH prerequisites, `git`, `rsync`, `curl`, `sudo`, `python3`, `tar`, and `ripgrep`.
 - `node-pty` self-test passes in the container.
 
 ### Windows template VM
@@ -433,7 +433,7 @@ Template requirements:
 - Parallels Tools installed.
 - OpenSSH Server enabled.
 - Stable SSH user configured.
-- Node 24+ and npm installed for native Windows.
+- Node 24.22.3+ (24.x) and npm installed for native Windows.
 - Git for Windows installed.
 - PowerShell available.
 - `tar` available in native Windows PATH.
@@ -473,7 +473,7 @@ Doctor checks:
 10. Windows source snapshot exists.
 11. Windows source VM is stopped and the configured snapshot is power-off/forkable for linked clones.
 12. Disposable Windows native clone probe passes and sees Node, npm, Git, tar, and the configured SSH user.
-13. Node 24+ is available on every target.
+13. Node's major version is at least 24 on every target. Use the patched versions listed in Requirements; this doctor check does not enforce patch versions.
 14. npm is available on every target.
 15. `git` is available on every target.
 16. `rsync` is available on macOS and Ubuntu.

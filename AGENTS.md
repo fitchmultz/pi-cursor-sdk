@@ -116,7 +116,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 ## Operating rules
 
 - Prefer the smallest change that preserves the current pi user contract.
-- This package requires Node 24+ and official Pi 1.5.0+. Current locked development Pi packages are 1.5.0 snapshots; development Pi/TypeBox dependencies are reproducible build inputs, not qualification targets or user runtime upgrades. Compatibility requires latest stable official Pi and current `fitchmultz/pi` main, resolving version/commit once per workflow run and retaining exact SDK/CLI evidence; optional Pi and TypeBox peer ranges stay `"*"` per Pi guidance.
+- This package requires official Pi 1.5.0+ and Node 24.22.3 (24.x) or 26.13.1 and newer. Current locked development Pi packages are 1.5.0 snapshots; development Pi/TypeBox dependencies are reproducible build inputs, not qualification targets or user runtime upgrades. Compatibility requires latest stable official Pi and current `fitchmultz/pi` main, resolving version/commit once per workflow run and retaining exact SDK/CLI evidence; optional Pi and TypeBox peer ranges stay `"*"` per Pi guidance.
 - Treat Cursor SDK model metadata as the source of truth for model IDs, parameters, variants, thinking controls, and context variants. Do not hardcode new model-specific behavior unless it is a documented fallback.
 - HARD REPO RULE: never guess what the Cursor SDK outputs, expects, or does. Always verify Cursor SDK behavior against the installed `@cursor/sdk` package and/or the official TypeScript SDK docs at `https://cursor.com/docs/sdk/typescript` before making claims or implementation changes.
 - Contract-test external behavior before relying on it: when code depends on Cursor SDK/pi runtime payloads, timing, lifecycle, errors, usage accounting, or tool/event shapes, add or update a focused test that asserts the observed installed-package/docs/captured-fixture contract and fails if that contract drifts. Do not replace this with mocks based on guesses.
@@ -235,7 +235,7 @@ Keep this file concise and repo-specific. Update it when commands, package layou
 This is a `pi` provider extension (not a server/web app). "Running the app" means launching `pi` with this extension loaded. Standard commands live in `## Setup and commands`; only the non-obvious caveats are below.
 
 - Dependencies install with `npm install` (this triggers `prepare`, which compiles `src/` to `dist/`; the pi manifest loads `dist/index.js`). After editing `src/`, run `npm run build` before any `pi -e .` run or the extension loads the previous build.
-- Node: `engines` requires `>=24`. Use Node 24 on `PATH` for tests and live `pi`. Older Node is unsupported.
+- Node: `engines` requires `>=24.22.3 <25 || >=26.13.1`. Use Node 24 on `PATH` for tests and live `pi`. Older Node is unsupported.
 - `CURSOR_API_KEY` is provided as a cloud-agent secret, so live Cursor runs and full live model discovery work without `/login`. `npm test`, `npm run typecheck`, and `npm pack --dry-run` need no key.
 - Run the extension locally with `./node_modules/.bin/pi -e . --model cursor/grok-4.6` (the bare `pi` is not on `PATH`). Add `--approve` for interactive sessions; print-mode smoke: `./node_modules/.bin/pi -e . --model cursor/grok-4.6 --cursor-no-fast --no-session -p "..."`.
 - Cold-start gotcha: the first necessary Cursor SDK run in a fresh VM can take longer during SDK/transport warm-up. Do not add a paid throwaway warm-up turn; record cold-start conditions and inspect evidence before treating a slow run as a hang.

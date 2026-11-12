@@ -318,8 +318,9 @@ export default {
     install: "Homebrew package or PLATFORM_SMOKE_CRABBOX override",
     minVersion: "0.26.0",
   },
-  ubuntuContainerImage: "pi-cursor-sdk-platform-node:24.21-root",
+  ubuntuContainerImage: "pi-cursor-sdk-platform-node:24.22.3-root",
   ubuntuContainerBaseImage: "cimg/node:24.21",
+  ubuntuContainerNodeImage: "node:24.22.3-bookworm@sha256:9d266751ca3d7fdbe651c878ffd5ad0a42fed49a18c283509267c97f025b7496",
   nodeValidationMajor: 24,
   windowsParallels: {
     sourceVm: "pi-extension-windows-template",
@@ -329,7 +330,7 @@ export default {
 };
 ```
 
-`ubuntuContainerBaseImage` is `cimg/node:24.21`, the Ubuntu 24.04 Node 24 base with the current glibc baseline for native test dependencies. The runner builds the local `ubuntuContainerImage` wrapper with only `USER root` changed before warmup because Crabbox 0.36.0 must install SSH/Git/rsync/curl during bootstrap and `cimg/node` defaults to an unprivileged user. An explicit `PLATFORM_SMOKE_UBUNTU_IMAGE` bypasses that build and must already support Crabbox bootstrap. The package requires Node 24+, and this gate validates Node 24 on macOS, Ubuntu, and Windows.
+`ubuntuContainerBaseImage` is `cimg/node:24.21`, the Ubuntu 24.04 Node 24 base with the current glibc baseline for native test dependencies. The runner replaces the base image’s Node executable with the checksum-pinned Node 24.22.3 executable from `ubuntuContainerNodeImage` and sets `USER root` before warmup because Crabbox 0.36.0 must install SSH/Git/rsync/curl during bootstrap and `cimg/node` defaults to an unprivileged user. An explicit `PLATFORM_SMOKE_UBUNTU_IMAGE` bypasses that build and must already support Crabbox bootstrap. The package requires Node 24.22.3 (24.x) or 26.13.1 and newer, and this gate validates Node 24 on macOS, Ubuntu, and Windows.
 
 `windowsParallels` records this repo's default shared Windows template contract. Environment overrides may point at a temporary candidate template during infrastructure work, but release runs should use the shared `pi-extension-windows-template` / `crabbox-ready` baseline unless this document is updated.
 

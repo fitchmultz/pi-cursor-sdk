@@ -4,6 +4,24 @@
 
 ## Unreleased
 
+## 0.5.34 - 2026-11-12
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Supersedes unpublished 0.5.33 from f15d296e1122ab3fdd51797eda1ff2820a5e79c1. Includes all changes since v0.5.32; the original release records remain unchanged.
+
+- docs: use consistent apostrophe in platform requirements (#485) ([6f05520](https://github.com/fitchmultz/pi-cursor-sdk/commit/6f0552078a6c3042e197d60cac257fb916f25fe7))
+
+### What's Changed
+* fix: require patched Node security releases by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/483
+* chore(release): 0.5.33 by @pi-durable[bot] in https://github.com/fitchmultz/pi-cursor-sdk/pull/484
+* docs: use consistent apostrophe in platform requirements by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/485
+* fix: refresh bundled Cursor catalog for release qualification by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/487
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.32...v0.5.34
+
 ## 0.5.33 - 2026-11-12
 
 <!-- npm-release:unreleased:start -->

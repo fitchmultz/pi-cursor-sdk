@@ -71,7 +71,7 @@ export interface CursorLiveRun {
 	resumeNotice?: string;
 	/** Committed at SDK completion; only terminal deliveries publish it, which chained or disposed runs never reach. */
 	resumePublication?: CursorSessionAgentResumePublication;
-	/** Written only by the coordinator: `settle()` and `release()`. */
+	/** Written only by the coordinator's `settle()`; `release()` owns `resources`. */
 	outcome: CursorLiveRunOutcome;
 	resources: CursorLiveRunResources;
 	chainUserInputAfterCompletion: boolean;

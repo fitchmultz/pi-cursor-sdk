@@ -16,13 +16,32 @@ import { captureProviderTestOwnership, streamCursor } from "./helpers/cursor-pro
 import { registerCursorNativeToolDisplayState } from "../src/cursor-native-tool-display-state.js";
 import { streamCursor as streamOwnedCursor } from "../src/cursor-provider.js";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createExtensionTestContext } from "./helpers/pi-harness.js";
 import { captureCursorUsageRecorder, readCursorUsageView } from "../src/cursor-usage-ledger.js";
 import { __testUtils as scopeTestUtils } from "../src/cursor-session-scope.js";
 import { writeRawTestEvidence } from "./helpers/raw-test-evidence.mjs";
+
+/** Durable public SessionManager origin with the real usage ledger and its warning surface. */
+function createDurableUsageSession(root: string) {
+	const manager = SessionManager.create(root, join(root, "sessions"));
+	manager.appendMessage({ role: "user", content: "Hello", timestamp: 1 });
+	scopeTestUtils.set(root, manager.getSessionFile());
+	const model = makeModel(), context = makeContext(), pi = createPiHarness(), notify = vi.fn();
+	registerCursorNativeToolDisplayState(pi);
+	const ownership = captureProviderTestOwnership(model, context, undefined, pi);
+	pi.appendEntry.mockImplementation((type, data) => { manager.appendCustomEntry(type, data); });
+	const base = createExtensionTestContext({ cwd: root });
+	const ctx = { ...base, sessionManager: manager, ui: { ...base.ui, notify } };
+	ownership.usageRecorder = captureCursorUsageRecorder(pi, ctx);
+	return {
+		manager, model, pi, ctx, notify,
+		journal: () => join(root, "sessions", readdirSync(join(root, "sessions")).find(name => name.endsWith(".journal"))!),
+		stream: () => streamOwnedCursor(model, context, { apiKey: "test-key" }, ownership),
+	};
+}
 
 describe("streamCursor usage accounting", () => {
 	beforeEach(resetCursorProviderTestState);
@@ -105,15 +124,7 @@ describe("streamCursor usage accounting", () => {
 	it("ignores returned RunResult usage for occupancy but persists its terminal-only facts", async () => {
 		const root = mkdtempSync(join(tmpdir(), "cursor-terminal-usage-"));
 		try {
-			const manager = SessionManager.create(root, join(root, "sessions"));
-			manager.appendMessage({ role: "user", content: "Hello", timestamp: 1 });
-			scopeTestUtils.set(root, manager.getSessionFile());
-			const model = makeModel(), context = makeContext(), pi = createPiHarness();
-			registerCursorNativeToolDisplayState(pi);
-			const ownership = captureProviderTestOwnership(model, context, undefined, pi);
-			pi.appendEntry.mockImplementation((type, data) => { manager.appendCustomEntry(type, data); });
-			const ctx = { ...createExtensionTestContext({ cwd: root }), sessionManager: manager };
-			ownership.usageRecorder = captureCursorUsageRecorder(pi, ctx);
+			const { manager, model, pi, ctx, journal, stream } = createDurableUsageSession(root);
 			const usage = { inputTokens: 1_405_237, outputTokens: 9_680, cacheReadTokens: 1_297_860,
 				cacheWriteTokens: 107_320, totalTokens: 2_820_097, reasoningTokens: 3_641 };
 			const handleUsage = { inputTokens: 40, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 42 };
@@ -123,7 +134,7 @@ describe("streamCursor usage accounting", () => {
 				})),
 				[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
 			});
-			const done = getDoneEvent(await collectEvents(streamOwnedCursor(model, context, { apiKey: "test-key" }, ownership)));
+			const done = getDoneEvent(await collectEvents(stream()));
 			expect(done.message.usage.cacheRead).toBe(0);
 			expect(done.message.usage.cacheWrite).toBe(0);
 			expect(done.message.usage.input).toBeLessThan(model.contextWindow);
@@ -143,8 +154,33 @@ describe("streamCursor usage accounting", () => {
 			if (evidence) {
 				writeRawTestEvidence(evidence, "terminal-only.jsonl", readFileSync(reopened.getSessionFile()!));
 				writeRawTestEvidence(evidence, "terminal-only.json", JSON.stringify({ records: view.records, nativeUsage: done.message.usage }));
-				writeRawTestEvidence(evidence, "terminal-only.journal", readFileSync(join(root, "sessions", readdirSync(join(root, "sessions")).find(name => name.endsWith(".journal"))!)));
+				writeRawTestEvidence(evidence, "terminal-only.journal", readFileSync(journal()));
 			}
+		} finally { rmSync(root, { recursive: true, force: true }); }
+	});
+
+	it("keeps a successful result when its terminal fact cannot persist and reports incomplete accounting once", async () => {
+		const root = mkdtempSync(join(tmpdir(), "cursor-terminal-persistence-"));
+		try {
+			const { manager, pi, ctx, notify, journal, stream } = createDurableUsageSession(root);
+			mockCreatedAgent({
+				send: vi.fn().mockResolvedValue(asMockCursorRun({ id: "run-1", agentId: "agent-1", status: "finished",
+					wait: vi.fn(async () => {
+						// An interrupted append leaves an unrecognized tail, so the terminal fact cannot persist.
+						appendFileSync(journal(), "{\"version\":1");
+						return { id: "run-1", status: "finished" as const, result: "done" };
+					}),
+				})),
+				[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+			});
+			const events = await collectEvents(stream());
+			expect(events.filter(event => event.type === "error")).toEqual([]);
+			expect(getDoneEvent(events).message.content).toMatchObject([{ type: "text", text: "done" }]);
+			expect(notify).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("accounting is incomplete"), "warning");
+			const view = readCursorUsageView(pi, { ...ctx, sessionManager: SessionManager.open(manager.getSessionFile()!) });
+			expect(view.records.map(record => record.kind)).toEqual(["start", "run"]);
+			expect(view.persistenceStatus).toBe("incomplete");
+			expect(view.incompleteJournals).toContain(manager.getSessionId());
 		} finally { rmSync(root, { recursive: true, force: true }); }
 	});
 

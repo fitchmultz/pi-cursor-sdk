@@ -61,7 +61,12 @@ interface CursorProviderTurnRuntimeBase {
 	turnCoordinator: CursorSdkTurnCoordinator;
 	/** The one run attachment: written by send when `agent.send()` resolves, read by abort and terminal accounting. */
 	sdkRun?: Awaited<ReturnType<SDKAgent["send"]>>;
-	usageTerminalRecorded?: boolean;
+	/**
+	 * Set when this turn's first terminal is handed to usage accounting, before persistence.
+	 * A failed write is reported as incomplete accounting, never retried with a later status.
+	 * Local live-run abandonment is recorded separately and does not claim this SDK terminal attempt.
+	 */
+	usageTerminalAttempted?: boolean;
 }
 
 /**

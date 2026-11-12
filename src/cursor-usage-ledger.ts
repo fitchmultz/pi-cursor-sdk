@@ -55,7 +55,8 @@ type Event =
 	| { kind: "refresh"; agentId: string; sourceOrigin: CursorUsageOrigin; observation: BillingRevision };
 export type CursorUsageRecord = Event & { version: 1; id: string; turnId: string; timestamp: string; origin: CursorUsageOrigin };
 type UsageAggregate = Pick<AgentUsage, "usage" | "cost">;
-type OriginObservation = { origin: CursorUsageOrigin; lastAttempt: BillingRevision; latestAggregate?: UsageAggregate; wholeAgent?: AgentUsage; incompleteHistory: boolean };
+type BillingFold = { origin: CursorUsageOrigin; lastAttempt: BillingRevision; latestAggregate?: UsageAggregate; wholeAgent?: AgentUsage };
+type OriginObservation = BillingFold & { incompleteHistory: boolean };
 export interface CursorUsageAgentView {
 	agentId: string;
 	unknownHistory: boolean;
@@ -195,27 +196,36 @@ function validateRecord(value: unknown): CursorUsageRecord {
 	if (clean.kind === "terminal") { clean.waitUsage = readCursorUsageTokens(clean.waitUsage); clean.handleUsage = readCursorUsageTokens(clean.handleUsage); }
 	return clean;
 }
-function applyBillingRevision(revision: BillingRevision, previous?: AgentUsage): CursorBillingObservation {
-	if (revision.status === "unavailable") return revision;
-	const rows = new Map(previous?.runs.map(row => [row.runId, row]));
-	for (const id of revision.deletedRunIds) rows.delete(id);
-	for (const row of revision.upsertRuns) rows.set(row.runId, row);
-	const snapshot = readCursorBilledSnapshot({ usage: revision.usage, cost: revision.cost, runs: [...rows.values()] });
-	if (!snapshot) throw new Error("invalid Cursor billing revision history");
-	return { status: "observed-pending-settlement", snapshot };
-}
-function latestAgentSnapshot(records: CursorUsageRecord[], agentId: string): AgentUsage | undefined {
+function indexTurnAgents(records: CursorUsageRecord[]): Map<string, string> {
 	const turns = new Map<string, string>();
-	let snapshot: AgentUsage | undefined;
 	for (const record of records) {
 		if (record.kind === "start") turns.set(record.turnId, record.data.agentId);
 		if (record.kind === "refresh") turns.set(record.turnId, record.agentId);
-		if ((record.kind === "billing" || record.kind === "refresh") && turns.get(record.turnId) === agentId) {
-			const observation = applyBillingRevision(record.observation, snapshot);
-			if (observation.status === "observed-pending-settlement") snapshot = observation.snapshot;
-		}
 	}
-	return snapshot;
+	return turns;
+}
+/** Canonical per-agent billing fold for one origin, in append order. Runs are rebuilt only from complete history; a revision that cannot rebuild is invalid history. */
+function foldOriginBilling(records: CursorUsageRecord[], { reconstructRuns }: { reconstructRuns: boolean }): Map<string, BillingFold> {
+	const turns = indexTurnAgents(records);
+	const folds = new Map<string, BillingFold>();
+	for (const record of records) {
+		const agentId = turns.get(record.turnId);
+		if ((record.kind !== "billing" && record.kind !== "refresh") || !agentId) continue;
+		const revision = record.observation;
+		let { latestAggregate, wholeAgent } = folds.get(agentId) ?? {};
+		if (revision.status === "observed-pending-settlement") {
+			latestAggregate = { usage: revision.usage, cost: revision.cost };
+			if (reconstructRuns) {
+				const rows = new Map(wholeAgent?.runs.map(row => [row.runId, row]));
+				for (const id of revision.deletedRunIds) rows.delete(id);
+				for (const row of revision.upsertRuns) rows.set(row.runId, row);
+				wholeAgent = readCursorBilledSnapshot({ ...latestAggregate, runs: [...rows.values()] });
+				if (!wholeAgent) throw new Error("invalid Cursor billing revision history");
+			}
+		}
+		folds.set(agentId, { origin: record.origin, lastAttempt: revision, latestAggregate, wholeAgent });
+	}
+	return folds;
 }
 function billingRevision(observation: CursorBillingObservation, previous?: AgentUsage): BillingRevision {
 	if (observation.status === "unavailable") return observation;
@@ -249,13 +259,7 @@ function validateHistory(values: unknown[], origin: CursorUsageOrigin): CursorUs
 			}
 		}
 	}
-	const snapshots = new Map<string, AgentUsage>();
-	for (const record of records) if (record.kind === "billing" || record.kind === "refresh") {
-		const start = starts.get(record.turnId)!;
-		const agentId = start.kind === "start" ? start.data.agentId : start.agentId;
-		const observation = applyBillingRevision(record.observation, snapshots.get(agentId));
-		if (observation.status === "observed-pending-settlement") snapshots.set(agentId, observation.snapshot);
-	}
+	foldOriginBilling(records, { reconstructRuns: true }); // Rejects revisions that cannot rebuild their history.
 	return records;
 }
 function readOrigin(pi: CursorUsageApi, origin: CursorUsageOrigin): CursorUsageRecord[] {
@@ -325,7 +329,7 @@ export function captureCursorUsageRecorder(pi: CursorUsageApi, ctx: ExtensionCon
 		write({ kind: "start", data });
 		const recordSnapshot = async () => {
 			const observation = await fetchCursorSdkAgentUsage(input.agent);
-			write({ kind: "billing", observation: billingRevision(observation, latestAgentSnapshot(readOrigin(pi, origin), input.agent.agentId)) });
+			write({ kind: "billing", observation: billingRevision(observation, foldOriginBilling(readOrigin(pi, origin), { reconstructRuns: true }).get(input.agent.agentId)?.wholeAgent) });
 			return observation;
 		};
 		return {
@@ -403,12 +407,8 @@ export function readCursorUsageView(pi: CursorUsageApi, ctx: ExtensionContext): 
 	const unclaimedRecords = outsideBranch.filter(record => !knownClaims.has(record.turnId) && storageKey(record.origin) === storageKey(origin));
 	const inheritedUnclaimedRecords = outsideBranch.filter(record => !knownClaims.has(record.turnId) && storageKey(record.origin) !== storageKey(origin));
 	const agents = new Map<string, CursorUsageAgentView>();
-	const turnAgents = new Map<string, string>();
+	const turnAgents = indexTurnAgents(all);
 	const correctedRawTotal = zero();
-	for (const record of all) {
-		if (record.kind === "start") turnAgents.set(record.turnId, record.data.agentId);
-		if (record.kind === "refresh") turnAgents.set(record.turnId, record.agentId);
-	}
 	for (const record of records) {
 		if (record.kind === "raw" && record.corrected) for (const key of tokenKeys) {
 			correctedRawTotal[key] += record.corrected[key];
@@ -419,29 +419,17 @@ export function readCursorUsageView(pi: CursorUsageApi, ctx: ExtensionContext): 
 			agentId, unknownHistory: true, sharedAcrossBranches: false, billingStatus: "pending", observationsByOrigin: [],
 		});
 	}
+	const originBilling = [...groups].map(([key, group]) => {
+		const incompleteHistory = incompleteGroups.has(key);
+		return { incompleteHistory, folds: foldOriginBilling(group, { reconstructRuns: !incompleteHistory }) };
+	});
 	for (const agent of agents.values()) {
 		const agentRecords = all.filter(record => turnAgents.get(record.turnId) === agent.agentId);
 		agent.sharedAcrossBranches = agentRecords.some(record => !selected.has(record.turnId)) || new Set(agentRecords.map(record => ownerKey(record.origin))).size > 1;
 		agent.unknownHistory = !agentRecords.some(record => record.kind === "start" && record.data.newlyCreated);
-		for (const [key, group] of groups) {
-			let observation: OriginObservation | undefined;
-			const incompleteHistory = incompleteGroups.has(key);
-			const rows = new Map<string, AgentUsage["runs"][number]>();
-			for (const record of group) if ((record.kind === "billing" || record.kind === "refresh") && turnAgents.get(record.turnId) === agent.agentId) {
-				const revision = record.observation;
-				let wholeAgent = observation?.wholeAgent;
-				let latestAggregate = observation?.latestAggregate;
-				if (revision.status === "observed-pending-settlement") {
-					latestAggregate = { usage: revision.usage, cost: revision.cost };
-					if (!incompleteHistory) {
-						for (const id of revision.deletedRunIds) rows.delete(id);
-						for (const row of revision.upsertRuns) rows.set(row.runId, row);
-						wholeAgent = readCursorBilledSnapshot({ ...latestAggregate, runs: [...rows.values()] });
-					}
-				}
-				observation = { origin: record.origin, lastAttempt: revision, latestAggregate, wholeAgent, incompleteHistory };
-			}
-			if (observation) agent.observationsByOrigin.push(observation);
+		for (const { incompleteHistory, folds } of originBilling) {
+			const fold = folds.get(agent.agentId);
+			if (fold) agent.observationsByOrigin.push({ ...fold, incompleteHistory });
 		}
 		if (agent.observationsByOrigin.length > 1) { agent.billingStatus = "ambiguous-shared-lineage"; continue; }
 		const observation = agent.observationsByOrigin[0];
@@ -482,7 +470,7 @@ export async function refreshCursorUsageView(pi: CursorUsageApi, ctx: ExtensionC
 		// Refresh belongs to the invoking branch, never to an inherited or switched sibling journal.
 		const record: CursorUsageRecord = {
 			version: 1, id: randomUUID(), turnId, timestamp: new Date().toISOString(), origin,
-			kind: "refresh", agentId: agent.agentId, sourceOrigin: source.origin, observation: billingRevision(await fetchAgent(agent.agentId), latestAgentSnapshot(readOrigin(pi, origin), agent.agentId)),
+			kind: "refresh", agentId: agent.agentId, sourceOrigin: source.origin, observation: billingRevision(await fetchAgent(agent.agentId), foldOriginBilling(readOrigin(pi, origin), { reconstructRuns: true }).get(agent.agentId)?.wholeAgent),
 		};
 		persist(pi, record);
 		if (currentMatches(pi, origin)) { try { pi.appendEntry(CUSTOM_TYPE, record); } catch { /* Unique claim retains ownership. */ } }

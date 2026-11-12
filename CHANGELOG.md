@@ -17,6 +17,7 @@
 * fix: require patched Node security releases by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/483
 * chore(release): 0.5.33 by @pi-durable[bot] in https://github.com/fitchmultz/pi-cursor-sdk/pull/484
 * docs: use consistent apostrophe in platform requirements by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/485
+* fix: refresh bundled Cursor catalog for release qualification by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/487
 
 
 **Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.32...v0.5.34

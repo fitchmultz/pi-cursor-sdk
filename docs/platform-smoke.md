@@ -1,12 +1,12 @@
 # Platform Smoke
 
-Status: optional comprehensive local-runtime matrix plus focused changed-behavior checks. Offline/faux verification and exact-input retained-evidence reuse come first. Paid checks are only the smallest meaningful proof needed for changed behavior on one representative environment; docs/metadata-only changes need none. No full paid campaign replay, matrix-only host coverage, or automatic paid retries. No paid Cloud testing for generic PRs/releases; only PRs/issues explicitly focused on Cursor Cloud may select a necessary focused Cloud check. Automated Cursor PR reviews continue unchanged. The Crabbox runner, packed-install platform-build suite, and real live PTY/ConPTY suite runner are implemented for macOS, Ubuntu, and Windows native targets with one-lease-per-target orchestration.
+Status: optional comprehensive local-runtime matrix plus focused changed-behavior checks. Offline/faux verification and exact-input retained-evidence reuse come first. Paid checks are only the smallest meaningful proof needed for changed behavior on one representative environment; docs/metadata-only changes need none. No full paid campaign replay, matrix-only host coverage, or automatic paid retries. No paid Cloud testing for generic PRs/releases; only PRs/issues explicitly focused on Cursor Cloud may select a necessary focused Cloud check. Automated Cursor PR reviews continue unchanged. The Crabbox runner, packed-install platform-build suite, and real live PTY suite runner are implemented for Apple Silicon macOS and Ubuntu targets with one-lease-per-target orchestration.
 
 Detailed artifact transport/extraction, detector, registry, command-rendering, implementation-history, replacement, and portability reference: [Platform Smoke Implementation Reference](./platform-smoke-implementation.md).
 
 Branch introduced by: `feat/crabbox-platform-smoke`
 
-Oracle review incorporated: this gate resolves the packed-install workspace conflict, Cursor budget contradiction, Windows shell drift, artifact-on-failure gap, render-location ambiguity, provider-debug ambiguity, and registry-classification gap called out during review.
+Oracle review incorporated: this gate resolves the packed-install workspace conflict, Cursor budget contradiction, artifact-on-failure gap, render-location ambiguity, provider-debug ambiguity, and registry-classification gap called out during review.
 
 Crabbox best-practice baseline applied from `~/Projects/crabbox`: Crabbox owns lease, sync, run, evidence transport, and cleanup; this repo owns target policy, package setup, scenario meaning, assertions, artifacts, auth forwarding, redaction, and release criteria.
 
@@ -72,7 +72,6 @@ Required Crabbox providers:
 
 - `local-container` for Ubuntu.
 - `ssh` static localhost for macOS. Static localhost leases use Crabbox's shared `static_localhost` lease id, so the runner passes `--reclaim` during macOS warmup to claim that lease for this repository before running suites.
-- `parallels` for Windows native.
 
 ## Architecture
 
@@ -93,7 +92,7 @@ platform-smoke.config.mjs
   -> target definition
   -> target session manager
   -> scenario suite runner
-  -> PTY/ConPTY capture on the target
+  -> PTY capture on the target
   -> artifact package/download
   -> host-side xterm/Playwright render
   -> visual evidence screenshot/assertion engine
@@ -101,7 +100,7 @@ platform-smoke.config.mjs
   -> artifact manifest
 ```
 
-Rendering is host-side. Targets capture the real ANSI stream; the macOS host renders it and captures per-evidence screenshots from the rendered xterm DOM. This keeps the renderer identical across macOS, Ubuntu, and Windows native and avoids browser dependency drift inside test targets.
+Rendering is host-side. Targets capture the real ANSI stream; the macOS host renders it and captures per-evidence screenshots from the rendered xterm DOM. This keeps the renderer identical across Apple Silicon macOS and Ubuntu and avoids browser dependency drift inside test targets.
 
 ## Target session model
 
@@ -151,11 +150,10 @@ Runtime budget is part of the contract:
 
 | Target | Crabbox provider | Execution contract | TUI visual contract |
 | --- | --- | --- | --- |
-| `macos` | `ssh` static localhost | native macOS shell | PTY ANSI capture and host-side render |
+| `macos` | `ssh` static localhost | native Apple Silicon macOS shell | PTY ANSI capture and host-side render |
 | `ubuntu` | `local-container` | Docker Ubuntu container | PTY ANSI capture and host-side render |
-| `windows-native` | `parallels` | Windows 11 clone, native PowerShell/Node | ConPTY ANSI capture and host-side render |
 
-Ubuntu is covered as its own local-container target, and Windows native remains a full visual TUI target.
+Ubuntu is covered as its own local-container target.
 
 ## Explicit Cursor Cloud-focused testing exception
 
@@ -186,7 +184,7 @@ Cloud product capabilities and offline contracts remain supported. Neither this 
 
 ## Focused local resume smoke
 
-The optional comprehensive platform matrix includes these local-resume lanes: restart, safety, tool-surface, abort, tree, copy/switch, fallback, compaction, default/opt-out proof, and recorded-ID-only cleanup. Platform lanes run those scripts against the target's shared packed package path, then copy each lane's session JSONL, Cursor SDK debug metadata, runtime-launch record, and other bounded smoke artifacts into its canonical platform suite directory. The same scripts still load the source checkout by default when run directly as focused host-local inner-loop checks. Windows uses the intentionally short target-side evidence component `lr` so the Cursor SDK's derived SQLite path remains below legacy `MAX_PATH`; every suite removes and verifies that directory before use, failing closed on stale or locked evidence.
+The optional comprehensive platform matrix includes these local-resume lanes: restart, safety, tool-surface, abort, tree, copy/switch, fallback, compaction, default/opt-out proof, and recorded-ID-only cleanup. Platform lanes run those scripts against the target's shared packed package path, then copy each lane's session JSONL, Cursor SDK debug metadata, runtime-launch record, and other bounded smoke artifacts into its canonical platform suite directory. The same scripts still load the source checkout by default when run directly as focused host-local inner-loop checks.
 
 The smoke starts one sessionful local Cursor run with local resume enabled by default, records the SDK agent id from provider debug metadata, restarts pi against the same session, asks for the remembered marker, and verifies:
 
@@ -237,7 +235,6 @@ scripts/platform-smoke/live-suite-runner.mjs
 scripts/platform-smoke/local-resume-runner.mjs
 scripts/platform-smoke/local-resume-suites.d.mts
 scripts/platform-smoke/local-resume-suites.mjs
-scripts/platform-smoke/platform-build-windows.ps1
 scripts/platform-smoke/pty-capture.mjs
 scripts/platform-smoke/render-ansi.mjs
 scripts/platform-smoke/scenarios.d.mts
@@ -268,8 +265,7 @@ Package scripts:
   "smoke:platform:doctor": "node scripts/platform-smoke.mjs doctor",
   "smoke:platform:macos": "node scripts/platform-smoke.mjs run --target macos",
   "smoke:platform:ubuntu": "node scripts/platform-smoke.mjs run --target ubuntu",
-  "smoke:platform:windows-native": "node scripts/platform-smoke.mjs run --target windows-native",
-  "smoke:platform:all": "npm run smoke:platform:doctor && node scripts/platform-smoke.mjs run --target macos,ubuntu,windows-native",
+  "smoke:platform:all": "npm run smoke:platform:doctor && node scripts/platform-smoke.mjs run --target macos,ubuntu",
   "smoke:cloud": "node scripts/cloud-runtime-smoke.mjs",
   "smoke:cloud:context": "node scripts/cloud-runtime-smoke.mjs --context-matrix",
   "smoke:local-resume": "node scripts/local-resume-smoke.mjs",
@@ -305,7 +301,7 @@ export default {
     maxAgeDays: 14,
     preserveRecentHours: 24,
   },
-  requiredTargets: ["macos", "ubuntu", "windows-native"],
+  requiredTargets: ["macos", "ubuntu"],
   requiredSuites: [
     "platform-build",
     "cursor-native-visual-matrix",
@@ -322,17 +318,11 @@ export default {
   ubuntuContainerBaseImage: "cimg/node:24.21",
   ubuntuContainerNodeImage: "node:24.22.3-bookworm@sha256:9d266751ca3d7fdbe651c878ffd5ad0a42fed49a18c283509267c97f025b7496",
   nodeValidationMajor: 24,
-  windowsParallels: {
-    sourceVm: "pi-extension-windows-template",
-    snapshot: "crabbox-ready",
-    workRoot: "C:\\crabbox\\pi-cursor-sdk",
-  },
 };
 ```
 
-`ubuntuContainerBaseImage` is `cimg/node:24.21`, the Ubuntu 24.04 Node 24 base with the current glibc baseline for native test dependencies. The runner replaces the base image's Node executable with the checksum-pinned Node 24.22.3 executable from `ubuntuContainerNodeImage` and sets `USER root` before warmup because Crabbox 0.36.0 must install SSH/Git/rsync/curl during bootstrap and `cimg/node` defaults to an unprivileged user. An explicit `PLATFORM_SMOKE_UBUNTU_IMAGE` bypasses that build and must already support Crabbox bootstrap. The package requires Node 24.22.3 (24.x) or 26.13.1 and newer, and this gate validates Node 24 on macOS, Ubuntu, and Windows.
+`ubuntuContainerBaseImage` is `cimg/node:24.21`, the Ubuntu 24.04 Node 24 base with the current glibc baseline for native test dependencies. The runner replaces the base image's Node executable with the checksum-pinned Node 24.22.3 executable from `ubuntuContainerNodeImage` and sets `USER root` before warmup because Crabbox 0.36.0 must install SSH/Git/rsync/curl during bootstrap and `cimg/node` defaults to an unprivileged user. An explicit `PLATFORM_SMOKE_UBUNTU_IMAGE` bypasses that build and must already support Crabbox bootstrap. The package requires Node 24.22.3 (24.x) or 26.13.1 and newer, and this gate validates Node 24 on Apple Silicon macOS and Ubuntu.
 
-`windowsParallels` records this repo's default shared Windows template contract. Environment overrides may point at a temporary candidate template during infrastructure work, but release runs should use the shared `pi-extension-windows-template` / `crabbox-ready` baseline unless this document is updated.
 
 `artifactRetention` bounds local host evidence growth under `artifactRoot`. `smoke:platform:run` prunes only top-level directories named `run-<timestamp>-<suffix>` before starting a new matrix; it leaves non-run/manual directories untouched and preserves directories newer than `preserveRecentHours` to avoid deleting evidence from active or very recent runs. Doctor is read-only and does not prune artifacts.
 
@@ -351,10 +341,6 @@ PLATFORM_SMOKE_MAC_WORK_ROOT="/Users/$USER/crabbox/pi-cursor-sdk"
 PLATFORM_SMOKE_UBUNTU_IMAGE="registry.example.com/ubuntu-node24-crabbox:latest"
 
 # Optional Parallels overrides; defaults come from platform-smoke.config.mjs.
-PLATFORM_SMOKE_WINDOWS_VM="pi-extension-windows-template"
-PLATFORM_SMOKE_WINDOWS_SNAPSHOT="crabbox-ready"
-PLATFORM_SMOKE_WINDOWS_USER="<windows-ssh-user>"
-PLATFORM_SMOKE_WINDOWS_NATIVE_WORK_ROOT="C:\\crabbox\\pi-cursor-sdk"
 
 # Required for live suites; doctor fails before spending Cursor tokens if absent.
 CURSOR_API_KEY="..."
@@ -417,67 +403,24 @@ Required:
 - Required local image exists with Node 24.22.3+ (24.x), npm, OpenSSH prerequisites, `git`, `rsync`, `curl`, `sudo`, `python3`, `tar`, and `ripgrep`.
 - `node-pty` self-test passes in the container.
 
-### Windows template VM
-
-The user's daily Windows VM is not the long-term test target. Use the shared pi-extension Parallels template unless this project documents a replacement with equal evidence:
-
-```text
-source VM: pi-extension-windows-template
-snapshot: crabbox-ready
-work root: C:\\crabbox\\pi-cursor-sdk
-```
-
-Template requirements:
-
-- Windows 11.
-- Parallels Tools installed.
-- OpenSSH Server enabled.
-- Stable SSH user configured.
-- Node 24.22.3+ (24.x) and npm installed for native Windows.
-- Git for Windows installed.
-- PowerShell available.
-- `tar` available in native Windows PATH.
-- `node-pty` self-test passes in native Windows.
-- Source VM is powered off.
-- Snapshot named `crabbox-ready` exists.
-- The template contains reusable platform tools only; no repo checkout, `.pi` state, Cursor API key, browser auth, smoke artifacts, or temp files.
-
-Crabbox Parallels creates linked clones from the powered-off snapshot. The source template VM is never used directly for smoke runs. If a run has to install a missing global tool or browser on every Windows clone, treat that as template drift and refresh the shared template instead of making the per-run fallback normal.
-
-### Windows native
-
-Required native probe:
-
-```powershell
-node --version
-npm --version
-git --version
-tar --version
-```
-
 ## Doctor command
 
-`npm run smoke:platform:doctor` runs before any token-spending suite. The canonical `npm run smoke:platform:all` script enforces doctor first before it starts macOS, Ubuntu, or Windows suites.
+`npm run smoke:platform:doctor` runs before any token-spending suite. The canonical `npm run smoke:platform:all` script enforces doctor first before it starts Apple Silicon macOS or Ubuntu suites.
 
 Doctor checks:
 
 1. Required auth is present and optional target overrides resolve against config defaults.
 2. Homebrew `crabbox` is available on PATH, or `PLATFORM_SMOKE_CRABBOX` points at an executable override.
 3. Crabbox build matches the configured baseline.
-4. Crabbox provider registry includes `local-container`, `ssh`, and `parallels`.
+4. Crabbox provider registry includes `local-container` and `ssh`.
 5. `crabbox doctor --provider local-container --target linux --json` passes.
 6. Docker runtime is active.
 7. Crabbox macOS static SSH doctor with `--doctor-probe-ssh` passes, and the localhost SSH probe sees Node, npm, Git, rsync, and tar.
-8. `prlctl` exists.
-9. Windows source VM exists.
-10. Windows source snapshot exists.
-11. Windows source VM is stopped and the configured snapshot is power-off/forkable for linked clones.
-12. Disposable Windows native clone probe passes and sees Node, npm, Git, tar, and the configured SSH user.
 13. Node's major version is at least 24 on every target. Use the patched versions listed in Requirements; this doctor check does not enforce patch versions.
 14. npm is available on every target.
 15. `git` is available on every target.
 16. `rsync` is available on macOS and Ubuntu.
-17. `tar` is available on macOS and native Windows.
+17. `tar` is available on Apple Silicon macOS and Ubuntu.
 18. `node-pty` self-test passes on every target.
 19. Target pi tool probe proves the shell tool accepts platform-rendered commands on every target.
 20. Host-side xterm/Playwright render self-test passes by rendering a minimal ANSI fixture through the repo xterm helper and launching Playwright Chromium to write a tiny PNG. If this fails, run `npm install` and `npx playwright install chromium` before live suites.
@@ -490,13 +433,12 @@ Doctor does not fail merely because the branch has uncommitted source or doc cha
 
 ## Dependency spike before implementation
 
-Before adding `node-pty` as a dev dependency, run a phase-zero spike on all three targets:
+Before adding `node-pty` as a dev dependency, run a phase-zero spike on both targets:
 
 ```text
 node -e "require('node-pty'); console.log('node-pty ok')"
 ```
 
-Windows native must use either verified prebuilt `node-pty` binaries for Node 24 or a documented build toolchain. If Node 24 + Windows native + `node-pty` cannot be made reliable, reject Crabbox as the required platform runner.
 
 ## Packed-install rule
 
@@ -680,7 +622,7 @@ Purpose:
 - prove bridge shell card;
 - prove bridge diagnostics and JSONL use real pi tool names.
 
-The bridge shell call uses pi's `bash` tool on every target, including Windows native. The command is shell-neutral and relies only on Node, which every target already validates:
+The bridge shell call uses pi's `bash` tool on every target. The command is shell-neutral and relies only on Node, which every target already validates:
 
 ```text
 node -e "console.log('bridge visual smoke')"
@@ -808,7 +750,7 @@ cursor-local-resume-cleanup: 4
 
 Maximum per target: `37` Cursor invocations.
 
-Declared maximum full matrix: `111` Cursor invocations (`37` per target across three targets). These are scenario budgets, not measured fixed billable model-call or SDK-step counts; actual service usage can differ.
+Declared maximum full matrix: `74` Cursor invocations (`37` per target across two targets). These are scenario budgets, not measured fixed billable model-call or SDK-step counts; actual service usage can differ.
 
 `npm run smoke:platform:all` is optional comprehensive coverage; it runs doctor first and then the matrix within these declared budgets. Routine verification selects only necessary changed-behavior proof on one representative environment. No suite adds a new Cursor invocation without updating this plan and the scenario source of truth (`scripts/platform-smoke/scenarios.mjs`, plus `scripts/platform-smoke/local-resume-suites.mjs` for local-resume lanes).
 
@@ -897,7 +839,7 @@ terminal.full.png
 terminal.final-viewport.png
 ```
 
-`artifacts/live-status.json` keeps two facts apart. `observation` is what ended the PTY wait: `evidence-observed` (final marker plus persisted session JSONL), `interrupt-sent` (abort lane), `pi-exited`, or `wait-expired`. `ptyExit` is node-pty's own exit receipt: `{ "kind": "exited", "exitCode", "signal" }`, or `{ "kind": "not-observed" }` when `/quit`, EOF, Ctrl+C and kill produced no exit. Failure text names a POSIX signal death as `signal N`, because node-pty then reports `exitCode` 0 as a placeholder; the receipt keeps both fields. The host `final-marker` check reads `observation`; the `pi-exit` check fails unless `ptyExit.kind` is `exited`. A marker or an interrupt request alone never passes a suite, and a missing exit fails it even after the marker. Offline owners: `node --test test/platform-smoke-live-runner-pty.test.mjs` runs the real runner through a real `node-pty` PTY against `test/fixtures/fake-pi-tui.mjs`. It needs a built `node-pty`, so CI runs it only in the macOS and Windows native-platforms job; on Windows two cases are skipped: the unobserved-exit case, because the runner's `taskkill /T /F` always ends pi, and the POSIX signal-death case, because node-pty's Windows exit callback carries no signal. `test/platform-target-runtime.test.ts` sends recorded `live-status.json` outcomes through the artifact bundle into the host checks on POSIX controllers; Windows controllers fail closed on nonempty bundle extraction.
+`artifacts/live-status.json` keeps two facts apart. `observation` is what ended the PTY wait: `evidence-observed` (final marker plus persisted session JSONL), `interrupt-sent` (abort lane), `pi-exited`, or `wait-expired`. `ptyExit` is node-pty's own exit receipt: `{ "kind": "exited", "exitCode", "signal" }`, or `{ "kind": "not-observed" }` when `/quit`, EOF, Ctrl+C and kill produced no exit. Failure text names a POSIX signal death as `signal N`, because node-pty then reports `exitCode` 0 as a placeholder; the receipt keeps both fields. The host `final-marker` check reads `observation`; the `pi-exit` check fails unless `ptyExit.kind` is `exited`. A marker or an interrupt request alone never passes a suite, and a missing exit fails it even after the marker. Offline owners: `node --test test/platform-smoke-live-runner-pty.test.mjs` runs the real runner through a real `node-pty` PTY against `test/fixtures/fake-pi-tui.mjs`. It needs a built `node-pty`, so CI runs it only in the Apple Silicon macOS native-platforms job. `test/platform-target-runtime.test.ts` sends recorded `live-status.json` outcomes through the artifact bundle into the host checks on POSIX controllers; Windows controllers fail closed on nonempty bundle extraction.
 
 Required card artifacts:
 
@@ -945,7 +887,7 @@ Evidence collection runs even when a scenario fails. Only bounded, secret-scanne
 
 On POSIX controllers, extraction reports `committed`, `rejected` (nothing created), `rolled-back`, `rollback-incomplete`, or `unknown`. The last two outcomes can leave created entries. A failed bundle-extraction check records the extraction outcome in `assertions.json` and `failures.md`.
 
-The artifact root is a trust boundary, not a sandbox against hostile same-owner processes. Windows controllers reject nonempty bundles; Windows targets remain supported from macOS/POSIX controllers.
+The artifact root is a trust boundary, not a sandbox against hostile same-owner processes. Windows controllers reject nonempty bundles.
 
 See [Artifact transport and extraction](./platform-smoke-implementation.md#artifact-transport-and-extraction) for the schema, limits, scanning, identity guards, outcome semantics, and inline/chunk protocol.
 

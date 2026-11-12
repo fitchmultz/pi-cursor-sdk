@@ -131,7 +131,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 ## Setup and commands
 
 - Install dependencies: `npm install` (runs `prepare`, which compiles `src/` into `dist/` — the manifest entry pi loads)
-- Use Node 24.22.3+ (24.x). The platform smoke baseline is Node 24 on macOS, Ubuntu, and Windows.
+- Use Node 24.22.3+ (24.x). The platform smoke baseline is Node 24 on Apple Silicon macOS and Ubuntu.
 - Build after editing `src/`: `npm run build` — required before any direct `pi -e .` run, or pi loads the previous build. The cloud/steering/local-resume/provider-debug launchers rebuild automatically (even when run directly with `node scripts/...`), `smoke:live`/`smoke:visual`/`smoke:isolated` build via their npm scripts, and `smoke:platform*` builds inside its packed installs; only direct `pi -e .` runs need a manual build.
 - Run tests: `npm test`
 - Typecheck (src + tests): `npm run typecheck`
@@ -242,6 +242,6 @@ This is a `pi` provider extension (not a server/web app). "Running the app" mean
 - When capturing print-mode (`-p`) output, redirect stdout to a file rather than piping through `tail`/`head` — those pipes buffer until the process exits, hiding streaming progress.
 - Use sessionful runs (`--session-dir`/`--session-id`, not `--no-session`) when testing session ledgers, resume identity, branch/fork/clone/switch behavior, or slash commands such as `/cursor-cloud`; `--no-session` is only proof for one-shot provider behavior.
 - For slow cloud or slash-command probes, prefer print mode for model turns or raw JSONL RPC with an explicit timeout; the packaged `RpcClient` has a fixed 30s request timeout that can falsely fail long cloud operations.
-- Start with offline unit/type/native/package checks. A Linux-only environment can supply representative changed-behavior proof when that is the necessary check; do not claim full macOS/Ubuntu/Windows coverage from it. `npm run smoke:platform:all` is an optional comprehensive matrix, not a mandatory ship step. Paid Cloud testing remains restricted to explicitly Cursor Cloud-focused PRs/issues.
+- Start with offline unit/type/native/package checks. A Linux-only environment can supply representative changed-behavior proof when that is the necessary check; do not claim full Apple Silicon macOS/Ubuntu coverage from it. `npm run smoke:platform:all` is an optional comprehensive matrix, not a mandatory ship step. Paid Cloud testing remains restricted to explicitly Cursor Cloud-focused PRs/issues.
 - Visual smoke (`npm run smoke:visual`) needs `pi` on `PATH` (`export PATH="$PWD/node_modules/.bin:$PATH"`) and Playwright Chromium (`npx playwright install chromium`) for PNG capture; use `--no-screenshot` if Chromium is unavailable.
 - `npm run smoke:live` needs `pi` on `PATH`. Prefer `./node_modules/.bin` on `PATH` rather than relying on a global install.

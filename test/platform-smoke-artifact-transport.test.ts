@@ -931,11 +931,7 @@ const redacted = redactSecrets(raw);
 const stripped = await execCrabbox(["-e", "process.stdout.write(process.env.CURSOR_API_KEY || 'missing')"]);
 const allowed = await execCrabbox(["-e", "process.stdout.write(process.env.CURSOR_API_KEY || 'missing')"], { allowEnv: ["CURSOR_API_KEY"] });
 delete process.env.PLATFORM_SMOKE_UBUNTU_IMAGE;
-delete process.env.PLATFORM_SMOKE_WINDOWS_VM;
-delete process.env.PLATFORM_SMOKE_WINDOWS_SNAPSHOT;
-delete process.env.PLATFORM_SMOKE_WINDOWS_NATIVE_WORK_ROOT;
 const ubuntuArgs = buildTargetBaseArgs("ubuntu", { ubuntuContainerImage: "example/node:24" });
-const windowsArgs = buildTargetBaseArgs("windows-native", smokeConfig);
 const result = {
   rawViolations: scanForSecrets(raw),
   redactedViolations: scanForSecrets(redacted),
@@ -944,9 +940,6 @@ const result = {
   allowed: allowed.stdout,
   ubuntuImage: ubuntuArgs[ubuntuArgs.indexOf("--local-container-image") + 1],
   crabboxMinVersion: smokeConfig.requiredCrabbox.minVersion,
-  windowsVm: windowsArgs[windowsArgs.indexOf("--parallels-source") + 1],
-  windowsSnapshot: windowsArgs[windowsArgs.indexOf("--parallels-source-snapshot") + 1],
-  windowsWorkRoot: windowsArgs[windowsArgs.indexOf("--parallels-work-root") + 1],
 };
 console.log(JSON.stringify(result));
 if (!result.rawViolations.includes("CURSOR_API_KEY literal found") || !result.rawViolations.includes("potential credential-bearing URL") || !result.rawViolations.includes("potential credential-bearing SCP URL")) process.exit(1);
@@ -954,14 +947,12 @@ if (result.redacted.includes("cursor-secret-token-12345") || result.redacted.inc
 if (result.stripped !== "missing" || result.allowed !== "cursor-secret-token-12345") process.exit(1);
 if (result.ubuntuImage !== "example/node:24") process.exit(1);
 if (result.crabboxMinVersion !== "0.26.0") process.exit(1);
-if (result.windowsVm !== "pi-extension-windows-template" || result.windowsSnapshot !== "crabbox-ready" || result.windowsWorkRoot !== "C:\\crabbox\\pi-cursor-sdk") process.exit(1);
 `;
 		const result = run(process.execPath, ["--input-type=module", "-e", code]);
 		expect(result.status).toBe(0);
 		expect(result.stdout).toContain('"stripped":"missing"');
 		expect(result.stdout).toContain('"ubuntuImage":"example/node:24"');
 		expect(result.stdout).toContain('"crabboxMinVersion":"0.26.0"');
-		expect(result.stdout).toContain('"windowsVm":"pi-extension-windows-template"');
 	});
 
 });

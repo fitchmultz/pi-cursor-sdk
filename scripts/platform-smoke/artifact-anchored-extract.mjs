@@ -111,7 +111,7 @@ function writePosix(outputDir, files, expectedRoot) {
  * - `rollback-incomplete`: failed, and an entry it created could not be confirmed removed.
  * - `unknown`: the native helper ended without reporting, so created entries may remain.
  * Node has no handle-relative Windows creation API, so Windows controllers fail closed before
- * mutating nonempty bundles. Windows remains a supported target of POSIX-hosted release matrices. */
+ * mutating nonempty bundles. */
 export function writeExtractedFilesAnchored(outputDir, files, expectedRoot) {
 	if (process.platform === "win32") return files.length === 0 ? "committed" : "rejected";
 	return writePosix(outputDir, files, expectedRoot);

@@ -12,7 +12,7 @@ export default {
 		maxAgeDays: 14,
 		preserveRecentHours: 24,
 	},
-	requiredTargets: ["macos", "ubuntu", "windows-native"],
+	requiredTargets: ["macos", "ubuntu"],
 	requiredSuites: [
 		"platform-build",
 		"cursor-native-visual-matrix",
@@ -29,9 +29,5 @@ export default {
 	ubuntuContainerBaseImage: "cimg/node:24.21",
 	ubuntuContainerNodeImage: "node:24.22.3-bookworm@sha256:9d266751ca3d7fdbe651c878ffd5ad0a42fed49a18c283509267c97f025b7496",
 	nodeValidationMajor: 24,
-	windowsParallels: {
-		sourceVm: "pi-extension-windows-template",
-		snapshot: "crabbox-ready",
-		workRoot: "C:\\crabbox\\pi-cursor-sdk",
-	},
+
 };

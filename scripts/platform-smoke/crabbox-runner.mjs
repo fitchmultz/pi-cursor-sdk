@@ -117,22 +117,6 @@ export function buildTargetBaseArgs(targetName, config = {}) {
 				"--local-container-image", image,
 			];
 		}
-		case "windows-native": {
-			const windows = config.windowsParallels ?? {};
-			const vm = env("PLATFORM_SMOKE_WINDOWS_VM") || windows.sourceVm || "pi-extension-windows-template";
-			const snap = env("PLATFORM_SMOKE_WINDOWS_SNAPSHOT") || windows.snapshot || "crabbox-ready";
-			const user = env("PLATFORM_SMOKE_WINDOWS_USER") || windows.user || env("USER");
-			const workRoot = env("PLATFORM_SMOKE_WINDOWS_NATIVE_WORK_ROOT") || windows.workRoot || "C:\\crabbox\\pi-cursor-sdk";
-			return [
-				"--provider", "parallels",
-				"--target", "windows",
-				"--windows-mode", "normal",
-				"--parallels-source", vm,
-				"--parallels-source-snapshot", snap,
-				"--parallels-user", user,
-				"--parallels-work-root", workRoot,
-			];
-		}
 		default:
 			throw new Error(`unknown target: ${targetName}`);
 	}

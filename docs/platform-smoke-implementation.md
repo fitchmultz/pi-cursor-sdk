@@ -50,7 +50,7 @@ The helper exits 0 after commit, 2 when it created nothing, 3 when it removed ev
 
 This is race-safe extraction, not a sandbox against a hostile same-owner process: such a process can transiently relocate an already-open directory or the pinned root itself, although it cannot make extraction overwrite an existing destination.
 
-Windows controllers reject every nonempty extraction bundle before mutation because Node exposes no handle-relative Windows creation API; Windows remains a supported release target when the matrix is orchestrated from the macOS/POSIX controller.
+Windows controllers reject every nonempty extraction bundle before mutation because Node exposes no handle-relative Windows creation API.
 
 ### Inline, spill, and chunk transport
 
@@ -143,7 +143,6 @@ Adding a registry entry requires adding it to the required or excluded list with
 Scenario commands are not raw shell strings. The runner renders commands per target:
 
 - `posix` for macOS and Ubuntu.
-- `powershell` for Windows native.
 
 Scenario shape:
 
@@ -155,7 +154,6 @@ Scenario shape:
   commands: {
     shellSmoke: {
       posix: "printf 'cursor visual smoke\\n'",
-      powershell: "Write-Output 'cursor visual smoke'",
     },
   },
   assertions: ["final-marker", "required-cards", "jsonl-tools"],
@@ -172,13 +170,12 @@ Create this plan on `feat/crabbox-platform-smoke`. Do not implement code in this
 
 ### Phase 1: dependency spike
 
-Verify `node-pty` and ConPTY on every target before committing the dependency.
+Verify `node-pty` on every target before committing the dependency.
 
 Exit criteria:
 
 - node-pty self-test passes on macOS;
 - node-pty self-test passes on Ubuntu local-container;
-- node-pty self-test passes on Windows native Node 24.
 
 ### Phase 2: config and doctor
 
@@ -194,7 +191,7 @@ passes only when all required local setup exists.
 
 ### Phase 3: target session manager
 
-Implement Crabbox target lifecycle for all three targets.
+Implement Crabbox target lifecycle for both targets.
 
 Exit criteria:
 
@@ -213,7 +210,7 @@ Exit criteria: `platform-build` passes on all targets through `smoke:platform:al
 
 ### Phase 5: PTY capture and host render
 
-Implement PTY/ConPTY capture and host-side xterm/Playwright render.
+Implement PTY capture and host-side xterm/Playwright render.
 
 Exit criteria:
 
@@ -273,15 +270,12 @@ They must state:
 
 Replace or redesign this platform runner if any of these become true:
 
-- Parallels Windows linked clones are unreliable.
-- Windows native cannot run the required ConPTY visual matrix.
 - macOS static SSH localhost cannot run the required PTY visual matrix.
 - Ubuntu local-container cannot run the required PTY visual matrix.
 - Packed install cannot be tested uniformly across all targets.
 - Artifact transfer cannot be made uniform across success and failure.
 - The visual card detector cannot reliably identify required deterministic cards.
 - The full gate exceeds the fixed Cursor invocation budget.
-- Node 24 + `node-pty` cannot be made reliable on Windows native.
 
 If the runner is replaced, document the new verification process before removing it. Keep offline cross-platform contracts and selected-suite evidence fidelity; the comprehensive paid matrix is optional, not a default ship step.
 
@@ -299,7 +293,7 @@ Repo-specific pieces:
 Reusable pieces:
 
 - Crabbox target session manager
-- PTY/ConPTY capture
+- PTY capture
 - host-side ANSI render
 - artifact manifest writer
 - JSONL parser

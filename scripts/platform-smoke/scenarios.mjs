@@ -6,7 +6,7 @@ import { LOCAL_RESUME_SUITES } from "./local-resume-suites.mjs";
  * Each scenario defines the prompt template, environment, command rendering,
  * required artifacts, and assertion contracts.
  *
- * Platform rendering: posix (macOS/Ubuntu) or powershell (Windows native).
+ * Platform rendering: posix (Apple Silicon macOS/Ubuntu).
  */
 
 export const SCENARIOS = {

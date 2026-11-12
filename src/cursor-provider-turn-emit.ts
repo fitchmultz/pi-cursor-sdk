@@ -3,6 +3,7 @@ import { CursorPartialContentEmitter } from "./cursor-partial-content-emitter.js
 import {
 	cursorLiveRuns,
 	drainCursorLiveRunTurn,
+	emitReleasedCursorLiveRunTurn,
 	flushPendingCursorLiveRunTraceEventsToStream,
 	settleCursorLiveToolBatch,
 } from "./cursor-provider-live-run-drain.js";
@@ -34,18 +35,22 @@ export async function emitCursorLiveTurn(emitParams: EmitCursorLiveTurnParams): 
 	// and deferred message boundary together; a new Pi turn still gets a new emitter.
 	const emitter = new CursorPartialContentEmitter(params.stream, params.partial, -1, true);
 	try {
-		await cursorLiveRuns.withRunLease(liveRun, options?.signal, async () => {
+		const lease = await cursorLiveRuns.withRunLease(liveRun, options?.signal, async () => {
 			await cursorLiveRuns.waitForProgress(liveRun, options?.signal);
 			await settleCursorLiveToolBatch(liveRun);
 			turnCoordinator.closeTraceBlock();
 			await drainCursorLiveRunTurn(params.stream, params.partial, model, params.context, liveRun, 0, {
-				mode: "emit",
 				emitter,
 				signal: options?.signal,
 				debugRecorder: sdkEventDebug,
 				occupancyFloor: params.request.occupancyFloor,
 			});
 		});
+		if (lease.kind === "released") {
+			// The lease body did not run, so close its pending trace here.
+			turnCoordinator.closeTraceBlock();
+			emitReleasedCursorLiveRunTurn(params.stream, params.partial);
+		}
 	} catch (caught) {
 		if (caught instanceof CursorLiveRunAbortError) {
 			discardIncompleteTools({ status: "cancelled", signalAborted: true });

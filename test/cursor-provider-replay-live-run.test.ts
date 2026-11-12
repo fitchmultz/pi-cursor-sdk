@@ -19,6 +19,9 @@ import {
 	type RegisteredTool,
 	mockCreatedAgent,
 	asMockCursorRun,
+	deferredRunWait,
+	emitCompletedSdkToolCall,
+	toolResultMessage,
 	createPiHarness,
 	createExtensionTestContext,
 } from "./helpers/cursor-provider-harness.js";
@@ -34,6 +37,7 @@ import { tmpdir } from "node:os";
 import { writeRawTestEvidence } from "./helpers/raw-test-evidence.mjs";
 import { join } from "node:path";
 
+const GIT_STATUS_CALL = { name: "bash", args: { command: "git status" }, value: { stdout: "clean", stderr: "", exitCode: 0 } };
 
 describe("streamCursor native replay live run", () => {
 	beforeEach(resetCursorProviderTestState);
@@ -45,51 +49,13 @@ describe("streamCursor native replay live run", () => {
 		const registeredTools: RegisteredTool[] = [];
 		await registerNativeToolDisplayForTest(registeredTools);
 
-		let resolveRun: (result: {
-			id: string;
-			status: "finished";
-			result: string;
-			usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; totalTokens: number };
-		}) => void = () => {};
-		const runWait = vi.fn(
-			() =>
-				new Promise<{
-					id: string;
-					status: "finished";
-					result: string;
-					usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; totalTokens: number };
-				}>((resolve) => {
-					resolveRun = resolve;
-				}),
-		);
+		const run = deferredRunWait();
 		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
 			opts.onDelta({ update: { type: "text-delta", text: "I am checking files." } });
-			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "read", args: { path: "README.md" } }, callId: "c1" } });
-			opts.onDelta({
-				update: {
-					type: "tool-call-completed",
-					toolCall: {
-						name: "read",
-						result: { status: "success", value: { content: "# pi-cursor-sdk" } },
-					},
-					callId: "c1",
-				},
-			});
-			return asMockCursorRun({
-				id: "run-1",
-				agentId: "agent-1",
-				status: "running",
-				wait: runWait,
-				cancel: vi.fn(),
-				supports: () => true,
-				unsupportedReason: () => undefined,
-			});
+			emitCompletedSdkToolCall(opts.onDelta, { callId: "c1", name: "read", args: { path: "README.md" }, value: { content: "# pi-cursor-sdk" } });
+			return asMockCursorRun({ id: "run-1", agentId: "agent-1", status: "running", wait: run.wait });
 		});
-		mockCreatedAgent({
-			agentId: "agent-1",
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
+		mockCreatedAgent({ send: mockSend });
 
 		const firstEvents = await collectEvents(streamCursor(model, makeContext(), { apiKey: "test-key" }));
 		const firstDone = getDoneEvent(firstEvents);
@@ -99,7 +65,7 @@ describe("streamCursor native replay live run", () => {
 		const readTool = registeredTools.find((tool) => tool.name === "read");
 		const toolResult = await readTool!.execute(toolCall!.id, toolCall!.arguments, undefined, undefined, createExtensionTestContext());
 
-		resolveRun({
+		run.settle({
 			id: "run-1",
 			status: "finished",
 			result: "Final answer only.",
@@ -107,19 +73,7 @@ describe("streamCursor native replay live run", () => {
 		});
 
 		const replayContext = makeContext();
-		replayContext.messages = [
-			...replayContext.messages,
-			firstDone.message,
-			{
-				role: "toolResult",
-				toolCallId: toolCall!.id,
-				toolName: "read",
-				content: toolResult.content,
-				details: toolResult.details,
-				isError: false,
-				timestamp: 2,
-			},
-		];
+		replayContext.messages = [...replayContext.messages, firstDone.message, toolResultMessage(toolCall!, toolResult, 2)];
 
 		const replayEvents = await collectEvents(streamCursor(model, replayContext, { apiKey: "test-key" }));
 		const replayDone = getDoneEvent(replayEvents);
@@ -143,38 +97,12 @@ describe("streamCursor native replay live run", () => {
 		const registeredTools: RegisteredTool[] = [];
 		await registerNativeToolDisplayForTest(registeredTools);
 
-		let resolveRun: (result: {
-			id: string;
-			status: "finished";
-			result: string;
-			usage?: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; totalTokens: number };
-		}) => void = () => {};
-		const runWait = vi.fn(
-			() =>
-				new Promise<{
-					id: string;
-					status: "finished";
-					result: string;
-					usage?: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; totalTokens: number };
-				}>((resolve) => {
-					resolveRun = resolve;
-				}),
-		);
+		const run = deferredRunWait();
 		let firstOnDelta: CursorDeltaHandler | undefined;
 		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
 			firstOnDelta = opts.onDelta;
 			opts.onDelta({ update: { type: "text-delta", text: "I am checking files." } });
-			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "read", args: { path: "README.md" } }, callId: "c1" } });
-			opts.onDelta({
-				update: {
-					type: "tool-call-completed",
-					toolCall: {
-						name: "read",
-						result: { status: "success", value: { content: "# pi-cursor-sdk" } },
-					},
-					callId: "c1",
-				},
-			});
+			emitCompletedSdkToolCall(opts.onDelta, { callId: "c1", name: "read", args: { path: "README.md" }, value: { content: "# pi-cursor-sdk" } });
 			setTimeout(() => {
 				opts.onDelta({
 					update: {
@@ -183,24 +111,12 @@ describe("streamCursor native replay live run", () => {
 					},
 				});
 			}, 100);
-			return asMockCursorRun({
-				id: "run-1",
-				agentId: "agent-1",
-				status: "running",
-				wait: runWait,
-				cancel: vi.fn(),
-				supports: () => true,
-				unsupportedReason: () => undefined,
-			});
+			return asMockCursorRun({ id: "run-1", agentId: "agent-1", status: "running", wait: run.wait });
 		});
-		mockCreatedAgent({
-			agentId: "agent-1",
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
+		mockCreatedAgent({ send: mockSend });
 
 		const firstEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
-		expect(runWait).toHaveBeenCalledTimes(1);
+		expect(run.wait).toHaveBeenCalledTimes(1);
 		const firstDone = getDoneEvent(firstEvents);
 		const firstText = collectTextDeltas(firstEvents);
 		const toolCall = firstDone.message.content.find(isToolCallBlock);
@@ -228,7 +144,7 @@ describe("streamCursor native replay live run", () => {
 			terminate: false,
 		});
 
-		resolveRun({
+		run.settle({
 			id: "run-1",
 			status: "finished",
 			result: "Final answer only.",
@@ -236,19 +152,7 @@ describe("streamCursor native replay live run", () => {
 		});
 
 		const replayContext = makeContext();
-		replayContext.messages = [
-			...replayContext.messages,
-			firstDone.message,
-			{
-				role: "toolResult",
-				toolCallId: toolCall!.id,
-				toolName: "read",
-				content: toolResult.content,
-				details: toolResult.details,
-				isError: false,
-				timestamp: 2,
-			},
-		];
+		replayContext.messages = [...replayContext.messages, firstDone.message, toolResultMessage(toolCall!, toolResult, 2)];
 
 		const replayEvents = await collectEvents(streamCursor(makeModel(), replayContext, { apiKey: "test-key" }));
 		const replayText = collectTextDeltas(replayEvents);
@@ -280,17 +184,13 @@ describe("streamCursor native replay live run", () => {
 			const usage = { inputTokens: 1_405_237, outputTokens: 9_680, cacheReadTokens: 1_297_860,
 				cacheWriteTokens: 107_320, totalTokens: 2_820_097, reasoningTokens: 3_641 };
 			let firstOnDelta: CursorDeltaHandler | undefined;
-			let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
-			const runWait = vi.fn(() => new Promise<{ id: string; status: "finished"; result: string }>(resolve => { resolveRun = resolve; }));
+			const run = deferredRunWait();
 			const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
 				firstOnDelta = opts.onDelta;
-				opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "read", args: { path: "README.md" } }, callId: "late-1" } });
-				opts.onDelta({ update: { type: "tool-call-completed",
-					toolCall: { name: "read", result: { status: "success", value: { content: "# pi-cursor-sdk" } } }, callId: "late-1" } });
-				return asMockCursorRun({ id: "run-late", agentId: "agent-1", status: "running", wait: runWait,
-					cancel: vi.fn(), supports: () => true, unsupportedReason: () => undefined });
+				emitCompletedSdkToolCall(opts.onDelta, { callId: "late-1", name: "read", args: { path: "README.md" }, value: { content: "# pi-cursor-sdk" } });
+				return asMockCursorRun({ id: "run-late", agentId: "agent-1", status: "running", wait: run.wait });
 			});
-			mockCreatedAgent({ agentId: "agent-1", send: mockSend, [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined) });
+			mockCreatedAgent({ send: mockSend });
 			const firstEventsPromise = collectEvents(streamOwnedCursor(model, context, { apiKey: "test-key" }, ownership));
 			while (!firstOnDelta) await vi.advanceTimersByTimeAsync(0);
 			const firstDone = getDoneEvent(await firstEventsPromise);
@@ -299,16 +199,11 @@ describe("streamCursor native replay live run", () => {
 			const readTool = registeredTools.find((tool) => tool.name === "read");
 			const toolResult = await readTool!.execute(toolCall!.id, toolCall!.arguments, undefined, undefined, createExtensionTestContext());
 			const replayContext = makeContext();
-			replayContext.messages = [...replayContext.messages, firstDone.message, {
-				role: "toolResult", toolCallId: toolCall!.id, toolName: "read", content: toolResult.content,
-				details: toolResult.details, isError: false, timestamp: 2,
-			}];
+			replayContext.messages = [...replayContext.messages, firstDone.message, toolResultMessage(toolCall!, toolResult, 2)];
 			await vi.advanceTimersByTimeAsync(300);
 			const secondEventsPromise = collectEvents(streamOwnedCursor(model, replayContext, { apiKey: "test-key" }, ownership));
 			setTimeout(() => {
-				firstOnDelta?.({ update: { type: "tool-call-started", toolCall: { name: "read", args: { path: "package.json" } }, callId: "second-1" } });
-				firstOnDelta?.({ update: { type: "tool-call-completed",
-					toolCall: { name: "read", result: { status: "success", value: { content: "{\"name\":\"pi-cursor-sdk\"}" } } }, callId: "second-1" } });
+				emitCompletedSdkToolCall(firstOnDelta!, { callId: "second-1", name: "read", args: { path: "package.json" }, value: { content: "{\"name\":\"pi-cursor-sdk\"}" } });
 				firstOnDelta?.({ update: { type: "turn-ended", usage } });
 				firstOnDelta?.({ update: { type: "turn-ended",
 					usage: { inputTokens: 40_000, outputTokens: 800, cacheReadTokens: 39_000, cacheWriteTokens: 0 } } });
@@ -322,11 +217,8 @@ describe("streamCursor native replay live run", () => {
 			expect(secondDone.message.usage.cacheRead).toBe(0);
 			expect(secondDone.message.usage.cacheWrite).toBe(0);
 			const secondToolResult = await readTool!.execute(secondToolCall!.id, secondToolCall!.arguments, undefined, undefined, createExtensionTestContext());
-			resolveRun({ id: "run-late", status: "finished", result: "Final answer." });
-			replayContext.messages.push(secondDone.message, {
-				role: "toolResult", toolCallId: secondToolCall!.id, toolName: "read", content: secondToolResult.content,
-				details: secondToolResult.details, isError: false, timestamp: 3,
-			});
+			run.settle({ id: "run-late", status: "finished", result: "Final answer." });
+			replayContext.messages.push(secondDone.message, toolResultMessage(secondToolCall!, secondToolResult, 3));
 			expect(getDoneEvent(await collectEvents(streamOwnedCursor(model, replayContext, { apiKey: "test-key" }, ownership))).reason).toBe("stop");
 			const reopened = SessionManager.open(manager.getSessionFile()!);
 			const view = readCursorUsageView(pi, { ...ctx, sessionManager: reopened });
@@ -357,15 +249,10 @@ describe("streamCursor native replay live run", () => {
 		await registerNativeToolDisplayForTest(registeredTools);
 
 		let firstOnDelta: CursorDeltaHandler | undefined;
-		let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
-		const runWait = vi.fn(
-			() =>
-				new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
-					resolveRun = resolve;
-				}),
-		);
+		const run = deferredRunWait();
 		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
 			firstOnDelta = opts.onDelta;
+			// Unlike emitCompletedSdkToolCall, this completion repeats its arguments.
 			opts.onDelta({
 				update: {
 					type: "tool-call-started",
@@ -384,21 +271,9 @@ describe("streamCursor native replay live run", () => {
 					callId: "task-1",
 				},
 			});
-			return asMockCursorRun({
-				id: "run-1",
-				agentId: "agent-1",
-				status: "running",
-				wait: runWait,
-				cancel: vi.fn(),
-				supports: () => true,
-				unsupportedReason: () => undefined,
-			});
+			return asMockCursorRun({ id: "run-1", agentId: "agent-1", status: "running", wait: run.wait });
 		});
-		mockCreatedAgent({
-			agentId: "agent-1",
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
+		mockCreatedAgent({ send: mockSend });
 
 		const context = makeContext();
 		context.tools = [{ name: "read", description: "Read files", parameters: Type.Object({}) }];
@@ -412,7 +287,7 @@ describe("streamCursor native replay live run", () => {
 				usage: { inputTokens: 31_000, outputTokens: 700, cacheReadTokens: 30_000, cacheWriteTokens: 0 },
 			},
 		});
-		resolveRun({ id: "run-1", status: "finished", result: "Task complete." });
+		run.settle({ id: "run-1", status: "finished", result: "Task complete." });
 		const events = await eventsPromise;
 		const done = getDoneEvent(events);
 
@@ -428,38 +303,13 @@ describe("streamCursor native replay live run", () => {
 		await registerNativeToolDisplayForTest(registeredTools);
 
 		let firstOnDelta: CursorDeltaHandler | undefined;
-		let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
-		const runWait = vi.fn(
-			() =>
-				new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
-					resolveRun = resolve;
-				}),
-		);
+		const run = deferredRunWait();
 		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
 			firstOnDelta = opts.onDelta;
-			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "read", args: { path: "README.md" } }, callId: "read-1" } });
-			opts.onDelta({
-				update: {
-					type: "tool-call-completed",
-					toolCall: { name: "read", result: { status: "success", value: { content: "# Project" } } },
-					callId: "read-1",
-				},
-			});
-			return asMockCursorRun({
-				id: "run-1",
-				agentId: "agent-1",
-				status: "running",
-				wait: runWait,
-				cancel: vi.fn(),
-				supports: () => true,
-				unsupportedReason: () => undefined,
-			});
+			emitCompletedSdkToolCall(opts.onDelta, { callId: "read-1", name: "read", args: { path: "README.md" }, value: { content: "# Project" } });
+			return asMockCursorRun({ id: "run-1", agentId: "agent-1", status: "running", wait: run.wait });
 		});
-		mockCreatedAgent({
-			agentId: "agent-1",
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
+		mockCreatedAgent({ send: mockSend });
 
 		const firstEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 		const firstDone = getDoneEvent(firstEvents);
@@ -467,31 +317,14 @@ describe("streamCursor native replay live run", () => {
 		const readTool = registeredTools.find((tool) => tool.name === "read");
 		const readResult = await readTool!.execute(readCall!.id, readCall!.arguments, undefined, undefined, createExtensionTestContext());
 
-		firstOnDelta?.({ update: { type: "tool-call-started", toolCall: { name: "grep", args: { pattern: "metric-link", path: "src/app/globals.css" } }, callId: "grep-1" } });
-		firstOnDelta?.({
-			update: {
-				type: "tool-call-completed",
-				toolCall: { name: "grep", result: { status: "success", value: { matches: ["src/app/globals.css"] } } },
-				callId: "grep-1",
-			},
+		emitCompletedSdkToolCall(firstOnDelta!, {
+			callId: "grep-1", name: "grep", args: { pattern: "metric-link", path: "src/app/globals.css" }, value: { matches: ["src/app/globals.css"] },
 		});
-		resolveRun({ id: "run-1", status: "finished", result: "Done." });
+		run.settle({ id: "run-1", status: "finished", result: "Done." });
 
 		const replayContext = makeContext();
 		replayContext.tools = [{ name: "read", description: "Read files", parameters: Type.Object({}) }];
-		replayContext.messages = [
-			...replayContext.messages,
-			firstDone.message,
-			{
-				role: "toolResult",
-				toolCallId: readCall!.id,
-				toolName: "read",
-				content: readResult.content,
-				details: readResult.details,
-				isError: false,
-				timestamp: 2,
-			},
-		];
+		replayContext.messages = [...replayContext.messages, firstDone.message, toolResultMessage(readCall!, readResult, 2)];
 
 		const replayEvents = await collectEvents(streamCursor(makeModel(), replayContext, { apiKey: "test-key" }));
 
@@ -499,44 +332,20 @@ describe("streamCursor native replay live run", () => {
 		expect(collectThinkingDeltas(replayEvents)).toContain("grep");
 	});
 
-	it("resumes an active live run when a steering user message follows tool results", async () => {
+	it("replaces an active live run when a steering user message follows tool results", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		const registeredTools: RegisteredTool[] = [];
 		await registerNativeToolDisplayForTest(registeredTools);
 
-		let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
-		const runWait = vi.fn(
-			() =>
-				new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
-					resolveRun = resolve;
-				}),
-		);
+		const run = deferredRunWait();
 		let sendCallCount = 0;
 		let firstOnDelta: CursorDeltaHandler | undefined;
 		const mockSend = vi.fn().mockImplementation(async (message: { text?: string }, opts: { onDelta: CursorDeltaHandler }) => {
 			sendCallCount += 1;
 			if (sendCallCount === 1) {
 				firstOnDelta = opts.onDelta;
-				opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "bash", args: { command: "git status" } }, callId: "c1" } });
-				opts.onDelta({
-					update: {
-						type: "tool-call-completed",
-						toolCall: {
-							name: "bash",
-							result: { status: "success", value: { stdout: "clean", stderr: "", exitCode: 0 } },
-						},
-						callId: "c1",
-					},
-				});
-				return asMockCursorRun({
-					id: "run-1",
-					agentId: "agent-1",
-					status: "running",
-					wait: runWait,
-					cancel: vi.fn(),
-					supports: () => true,
-					unsupportedReason: () => undefined,
-				});
+				emitCompletedSdkToolCall(opts.onDelta, { callId: "c1", ...GIT_STATUS_CALL });
+				return asMockCursorRun({ id: "run-1", agentId: "agent-1", status: "running", wait: run.wait });
 			}
 
 			return asMockCursorRun({
@@ -544,16 +353,9 @@ describe("streamCursor native replay live run", () => {
 				agentId: "agent-1",
 				status: "finished",
 				wait: vi.fn().mockResolvedValue({ id: "run-2", status: "finished", result: message.text ?? "" }),
-				cancel: vi.fn(),
-				supports: () => true,
-				unsupportedReason: () => undefined,
 			});
 		});
-		mockCreatedAgent({
-			agentId: "agent-1",
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
+		mockCreatedAgent({ send: mockSend });
 
 		const firstEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 		const firstDone = getDoneEvent(firstEvents);
@@ -568,15 +370,7 @@ describe("streamCursor native replay live run", () => {
 		steerContext.messages = [
 			...steerContext.messages,
 			firstDone.message,
-			{
-				role: "toolResult",
-				toolCallId: toolCall!.id,
-				toolName: "bash",
-				content: toolResult.content,
-				details: toolResult.details,
-				isError: false,
-				timestamp: 2,
-			},
+			toolResultMessage(toolCall!, toolResult, 2),
 			{ role: "user", content: "and push", timestamp: 3 },
 		];
 
@@ -584,7 +378,7 @@ describe("streamCursor native replay live run", () => {
 		await vi.waitFor(() => expect(mockSend).toHaveBeenCalledTimes(1));
 
 		firstOnDelta?.({ update: { type: "text-delta", text: "Old run text that should not leak." } });
-		resolveRun({ id: "run-1", status: "finished", result: "Would have kept going without steer." });
+		run.settle({ id: "run-1", status: "finished", result: "Would have kept going without steer." });
 
 		const steerEvents = await steerEventsPromise;
 		expect(steerEvents.some((event) => event.type === "error")).toBe(false);
@@ -604,43 +398,15 @@ describe("streamCursor native replay live run", () => {
 		const registeredTools: RegisteredTool[] = [];
 		await registerNativeToolDisplayForTest(registeredTools);
 
-		let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
-		const runWait = vi.fn(
-			() =>
-				new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
-					resolveRun = resolve;
-				}),
-		);
+		const run = deferredRunWait();
 		const cancelRun = vi.fn().mockResolvedValue(undefined);
 		let firstOnDelta: CursorDeltaHandler | undefined;
 		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
 			firstOnDelta = opts.onDelta;
-			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "bash", args: { command: "git status" } }, callId: "c1" } });
-			opts.onDelta({
-				update: {
-					type: "tool-call-completed",
-					toolCall: {
-						name: "bash",
-						result: { status: "success", value: { stdout: "clean", stderr: "", exitCode: 0 } },
-					},
-					callId: "c1",
-				},
-			});
-			return asMockCursorRun({
-				id: "run-1",
-				agentId: "agent-1",
-				status: "running",
-				wait: runWait,
-				cancel: cancelRun,
-				supports: () => true,
-				unsupportedReason: () => undefined,
-			});
+			emitCompletedSdkToolCall(opts.onDelta, { callId: "c1", ...GIT_STATUS_CALL });
+			return asMockCursorRun({ id: "run-1", agentId: "agent-1", status: "running", wait: run.wait, cancel: cancelRun });
 		});
-		mockCreatedAgent({
-			agentId: "agent-1",
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
+		mockCreatedAgent({ send: mockSend });
 
 		const firstEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 		expect(getDoneEvent(firstEvents).reason).toBe("toolUse");
@@ -655,7 +421,7 @@ describe("streamCursor native replay live run", () => {
 		expect(cancelRun).not.toHaveBeenCalled();
 		expect(mockSend).toHaveBeenCalledTimes(1);
 
-		resolveRun({ id: "run-1", status: "finished", result: "Scoped final." });
+		run.settle({ id: "run-1", status: "finished", result: "Scoped final." });
 		const scopedEvents = await scopedEventsPromise;
 
 		expect(collectTextDeltas(scopedEvents)).toBe("Late scoped text.Scoped final.");
@@ -669,7 +435,7 @@ describe("streamCursor native replay live run", () => {
 		const registeredTools: RegisteredTool[] = [];
 		await registerNativeToolDisplayForTest(registeredTools);
 
-		const runWait = vi.fn(() => new Promise<{ id: string; status: "finished"; result: string }>(() => {}));
+		const run = deferredRunWait();
 		const cancelRun = vi.fn().mockResolvedValue(undefined);
 		let sendCallCount = 0;
 		let firstOnDelta: CursorDeltaHandler | undefined;
@@ -677,26 +443,8 @@ describe("streamCursor native replay live run", () => {
 			sendCallCount += 1;
 			if (sendCallCount === 1) {
 				firstOnDelta = opts.onDelta;
-				opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "bash", args: { command: "git status" } }, callId: "c1" } });
-				opts.onDelta({
-					update: {
-						type: "tool-call-completed",
-						toolCall: {
-							name: "bash",
-							result: { status: "success", value: { stdout: "clean", stderr: "", exitCode: 0 } },
-						},
-						callId: "c1",
-					},
-				});
-				return asMockCursorRun({
-					id: "run-1",
-					agentId: "agent-1",
-					status: "running",
-					wait: runWait,
-					cancel: cancelRun,
-					supports: () => true,
-					unsupportedReason: () => undefined,
-				});
+				emitCompletedSdkToolCall(opts.onDelta, { callId: "c1", ...GIT_STATUS_CALL });
+				return asMockCursorRun({ id: "run-1", agentId: "agent-1", status: "running", wait: run.wait, cancel: cancelRun });
 			}
 
 			return asMockCursorRun({
@@ -704,16 +452,9 @@ describe("streamCursor native replay live run", () => {
 				agentId: "agent-2",
 				status: "finished",
 				wait: vi.fn().mockResolvedValue({ id: "run-2", status: "finished", result: "Fresh chained answer." }),
-				cancel: vi.fn(),
-				supports: () => true,
-				unsupportedReason: () => undefined,
 			});
 		});
-		mockCreatedAgent({
-			agentId: "agent-1",
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
+		mockCreatedAgent({ send: mockSend });
 
 		const firstEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 		const firstDone = getDoneEvent(firstEvents);
@@ -725,31 +466,15 @@ describe("streamCursor native replay live run", () => {
 		steerContext.messages = [
 			...steerContext.messages,
 			firstDone.message,
-			{
-				role: "toolResult",
-				toolCallId: firstToolCall!.id,
-				toolName: "bash",
-				content: firstToolResult.content,
-				details: firstToolResult.details,
-				isError: false,
-				timestamp: 2,
-			},
+			toolResultMessage(firstToolCall!, firstToolResult, 2),
 			{ role: "user", content: "and push after the first tool", timestamp: 3 },
 		];
 
 		const steerEventsPromise = collectEvents(streamCursor(makeModel(), steerContext, { apiKey: "test-key" }));
 		await Promise.resolve();
 		firstOnDelta?.({ update: { type: "text-delta", text: "Old run text that should not leak." } });
-		firstOnDelta?.({ update: { type: "tool-call-started", toolCall: { name: "bash", args: { command: "git log -1" } }, callId: "c2" } });
-		firstOnDelta?.({
-			update: {
-				type: "tool-call-completed",
-				toolCall: {
-					name: "bash",
-					result: { status: "success", value: { stdout: "commit abc", stderr: "", exitCode: 0 } },
-				},
-				callId: "c2",
-			},
+		emitCompletedSdkToolCall(firstOnDelta!, {
+			callId: "c2", name: "bash", args: { command: "git log -1" }, value: { stdout: "commit abc", stderr: "", exitCode: 0 },
 		});
 		const steerEvents = await steerEventsPromise;
 
@@ -763,42 +488,72 @@ describe("streamCursor native replay live run", () => {
 		expect(getDoneEvent(steerEvents).reason).toBe("stop");
 	});
 
+	it("sends user input after tool results instead of surfacing the error of a run that failed meanwhile", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		const registeredTools: RegisteredTool[] = [];
+		await registerNativeToolDisplayForTest(registeredTools);
+
+		const run = deferredRunWait();
+		const cancelRun = vi.fn().mockResolvedValue(undefined);
+		let sendCallCount = 0;
+		const mockSend = vi.fn().mockImplementation(async (_message: { text?: string }, opts: { onDelta: CursorDeltaHandler }) => {
+			sendCallCount += 1;
+			if (sendCallCount === 1) {
+				emitCompletedSdkToolCall(opts.onDelta, { callId: "c1", ...GIT_STATUS_CALL });
+				return asMockCursorRun({ id: "run-1", agentId: "agent-1", status: "running", wait: run.wait, cancel: cancelRun });
+			}
+
+			return asMockCursorRun({
+				id: "run-2",
+				agentId: "agent-2",
+				status: "finished",
+				wait: vi.fn().mockResolvedValue({ id: "run-2", status: "finished", result: "Fresh answer." }),
+			});
+		});
+		mockCreatedAgent({ send: mockSend });
+
+		const firstEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		const firstDone = getDoneEvent(firstEvents);
+		const firstToolCall = firstDone.message.content.find(isToolCallBlock);
+		expect(firstDone.reason).toBe("toolUse");
+		const bashTool = registeredTools.find((tool) => tool.name === "bash");
+		const firstToolResult = await bashTool!.execute(firstToolCall!.id, firstToolCall!.arguments, undefined, undefined, createExtensionTestContext());
+		// The SDK run fails while Pi holds its tool result: the run stays open with nothing queued.
+		run.settle({ id: "run-1", status: "error", error: { message: "OLD_RUN_FAILURE" } });
+
+		const nextContext = makeContext();
+		nextContext.messages = [
+			...nextContext.messages,
+			firstDone.message,
+			toolResultMessage(firstToolCall!, firstToolResult, 2),
+			{ role: "user", content: "try the other branch", timestamp: 3 },
+		];
+		const nextEvents = await collectEvents(streamCursor(makeModel(), nextContext, { apiKey: "test-key" }));
+
+		expect(hasEventType(nextEvents, "error")).toBe(false);
+		expect(JSON.stringify(nextEvents)).not.toContain("OLD_RUN_FAILURE");
+		// Released as failed, not running: the agent is abandoned without cancelling the settled run.
+		expect(cancelRun).not.toHaveBeenCalled();
+		expect(mockedCreate).toHaveBeenCalledTimes(2);
+		expect(mockSend).toHaveBeenCalledTimes(2);
+		expect((mockSend.mock.calls[1]?.[0] as { text?: string }).text).toContain("User: try the other branch");
+		expect(collectTextDeltas(nextEvents)).toBe("Fresh answer.");
+		expect(getDoneEvent(nextEvents).reason).toBe("stop");
+		expect(cursorProviderTestUtils.pendingCursorNativeRunCount()).toBe(0);
+	});
+
 	it("awaits pooled-agent idle before compaction-style follow-up send", async () => {
 		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
 		const registeredTools: RegisteredTool[] = [];
 		await registerNativeToolDisplayForTest(registeredTools);
 
 		let sendCallCount = 0;
-		let resolveRun: (result: { id: string; status: "finished"; result: string }) => void = () => {};
-		const runWait = vi.fn(
-			() =>
-				new Promise<{ id: string; status: "finished"; result: string }>((resolve) => {
-					resolveRun = resolve;
-				}),
-		);
+		const run = deferredRunWait();
 		const mockSend = vi.fn().mockImplementation(async (_message: { text?: string }, opts: { onDelta: CursorDeltaHandler }) => {
 			sendCallCount += 1;
 			if (sendCallCount === 1) {
-				opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "bash", args: { command: "git status" } }, callId: "c1" } });
-				opts.onDelta({
-					update: {
-						type: "tool-call-completed",
-						toolCall: {
-							name: "bash",
-							result: { status: "success", value: { stdout: "clean", stderr: "", exitCode: 0 } },
-						},
-						callId: "c1",
-					},
-				});
-				return asMockCursorRun({
-					id: "run-1",
-					agentId: "agent-1",
-					status: "running",
-					wait: runWait,
-					cancel: vi.fn(),
-					supports: () => true,
-					unsupportedReason: () => undefined,
-				});
+				emitCompletedSdkToolCall(opts.onDelta, { callId: "c1", ...GIT_STATUS_CALL });
+				return asMockCursorRun({ id: "run-1", agentId: "agent-1", status: "running", wait: run.wait });
 			}
 
 			opts.onDelta({ update: { type: "text-delta", text: "Follow-up answer." } });
@@ -807,16 +562,9 @@ describe("streamCursor native replay live run", () => {
 				agentId: "agent-1",
 				status: "running",
 				wait: vi.fn().mockResolvedValue({ id: "run-2", status: "finished", result: "Follow-up answer." }),
-				cancel: vi.fn(),
-				supports: () => true,
-				unsupportedReason: () => undefined,
 			});
 		});
-		mockCreatedAgent({
-			agentId: "agent-1",
-			send: mockSend,
-			[Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
-		});
+		mockCreatedAgent({ send: mockSend });
 
 		const scopeKey = cursorSessionScopeTestUtils.ANONYMOUS_SESSION_SCOPE_KEY;
 		const firstEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
@@ -830,14 +578,7 @@ describe("streamCursor native replay live run", () => {
 		followUpContext.messages = [
 			...followUpContext.messages,
 			firstDone.message,
-			{
-				role: "toolResult",
-				toolCallId: toolCall!.id,
-				toolName: toolCall!.name,
-				content: [{ type: "text", text: "clean" }],
-				isError: false,
-				timestamp: 2,
-			},
+			toolResultMessage(toolCall!, { content: [{ type: "text", text: "clean" }] }, 2),
 			{ role: "user", content: [{ type: "text", text: "Continue with the summary." }], timestamp: 3 },
 		];
 		const followUpEventsPromise = collectEvents(streamCursor(makeModel(), followUpContext, { apiKey: "test-key" }));
@@ -846,7 +587,7 @@ describe("streamCursor native replay live run", () => {
 
 		expect(mockSend).toHaveBeenCalledTimes(1);
 
-		resolveRun({ id: "run-1", status: "finished", result: "Follow-up answer." });
+		run.settle({ id: "run-1", status: "finished", result: "Follow-up answer." });
 		const followUpEvents = await followUpEventsPromise;
 
 		expect(mockSend).toHaveBeenCalledTimes(2);
@@ -862,34 +603,12 @@ describe("streamCursor native replay live run", () => {
 		const controller = new AbortController();
 		const mockDispose = vi.fn().mockResolvedValue(undefined);
 		const cancelRun = vi.fn().mockResolvedValue(undefined);
-		const runWait = vi.fn(() => new Promise<{ id: string; status: "finished"; result: string }>(() => {}));
+		const run = deferredRunWait();
 		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
-			opts.onDelta({ update: { type: "tool-call-started", toolCall: { name: "bash", args: { command: "git status" } }, callId: "c1" } });
-			opts.onDelta({
-				update: {
-					type: "tool-call-completed",
-					toolCall: {
-						name: "bash",
-						result: { status: "success", value: { stdout: "clean", stderr: "", exitCode: 0 } },
-					},
-					callId: "c1",
-				},
-			});
-			return asMockCursorRun({
-				id: "run-1",
-				agentId: "agent-1",
-				status: "running",
-				wait: runWait,
-				cancel: cancelRun,
-				supports: () => true,
-				unsupportedReason: () => undefined,
-			});
+			emitCompletedSdkToolCall(opts.onDelta, { callId: "c1", ...GIT_STATUS_CALL });
+			return asMockCursorRun({ id: "run-1", agentId: "agent-1", status: "running", wait: run.wait, cancel: cancelRun });
 		});
-		mockCreatedAgent({
-			agentId: "agent-1",
-			send: mockSend,
-			[Symbol.asyncDispose]: mockDispose,
-		});
+		mockCreatedAgent({ send: mockSend, [Symbol.asyncDispose]: mockDispose });
 
 		const firstEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
 		expect(getDoneEvent(firstEvents).reason).toBe("toolUse");

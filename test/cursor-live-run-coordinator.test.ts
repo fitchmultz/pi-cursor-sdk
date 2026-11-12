@@ -8,6 +8,7 @@ import { Type } from "typebox";
 import { createBridgePiHarness, createTestToolInfo, getCursorPiBridgeMcpUrl } from "./helpers/pi-harness.js";
 import { __testUtils as bridgeTestUtils, type CursorPiBridgeToolRequest } from "../src/cursor-pi-tool-bridge.js";
 import {
+	CursorLiveRunAbortError,
 	createCursorLiveRunCoordinator,
 	hasTrailingUserMessagesAfterToolResults,
 	type CursorLiveRun,
@@ -16,6 +17,7 @@ import type { CursorPiToolBridgeRun } from "../src/cursor-pi-tool-bridge.js";
 import {
 	cursorLiveRuns,
 	drainCursorLiveRunTurn,
+	drainExistingCursorLiveRunBeforeSend,
 	resetCursorNativeReplayIdleDisposeMs,
 	setCursorNativeReplayIdleDisposeMs,
 } from "../src/cursor-provider-live-run-drain.js";
@@ -244,12 +246,11 @@ describe("cursor live run coordinator", () => {
 			makeContext(),
 			run,
 			0,
-			{ mode: "emit" },
 		);
 
-		expect(outcome).toBe("stop");
+		expect(outcome).toBe("terminal");
 		expect(push.mock.calls.map(([event]) => event.type)).not.toContain("toolcall_start");
-		expect(push.mock.calls.some(([event]) => event.type === "done" && event.reason === "toolUse")).toBe(false);
+		expect(push.mock.calls.flatMap(([event]) => event.type === "done" ? [event.reason] : [])).toEqual(["stop"]);
 	});
 
 	it("indexes active runs per scope without letting an older release clear a newer run", async () => {
@@ -273,6 +274,7 @@ describe("cursor live run coordinator", () => {
 		const order: string[] = [];
 		let releaseFirst: () => void = () => {};
 		const entered = Promise.withResolvers<void>();
+		const abortQueued = new AbortController();
 
 		const firstLease = coordinator.withRunLease(run, undefined, async () => {
 			order.push("first-enter");
@@ -282,16 +284,54 @@ describe("cursor live run coordinator", () => {
 			});
 			order.push("first-exit");
 		});
+		// An aborted queued caller leaves the queue without entering or stranding the lease.
+		const abortedLease = coordinator.withRunLease(run, abortQueued.signal, async () => {
+			order.push("aborted-enter");
+		});
 		const secondLease = coordinator.withRunLease(run, undefined, async () => {
 			order.push("second-enter");
 		});
 
 		await entered.promise;
+		abortQueued.abort();
+		await expect(abortedLease).rejects.toBeInstanceOf(CursorLiveRunAbortError);
 		expect(order).toEqual(["first-enter"]);
 		releaseFirst();
 		await Promise.all([firstLease, secondLease]);
 
 		expect(order).toEqual(["first-enter", "first-exit", "second-enter"]);
+	});
+
+	it("gives callers queued behind a releasing holder an explicit released result while pre-send still continues", async () => {
+		const run = startRun(cursorLiveRuns, { id: "released-while-queued", scopeKey: "released-while-queued" });
+		const holderEntered = Promise.withResolvers<void>();
+		const holderExit = Promise.withResolvers<void>();
+		const holder = cursorLiveRuns.withRunLease(run, undefined, async () => {
+			holderEntered.resolve();
+			await holderExit.promise;
+			// A drain releases its run before its lease ends.
+			await cursorLiveRuns.release(run);
+			return "holder";
+		});
+		await holderEntered.promise;
+		const queuedBodies: string[] = [];
+		const queued = cursorLiveRuns.withRunLease(run, undefined, async () => {
+			queuedBodies.push("queued");
+		});
+		const stream = createAssistantMessageEventStream();
+		const push = vi.spyOn(stream, "push");
+		const preSend = drainExistingCursorLiveRunBeforeSend(
+			stream, makeAssistantMessage(""), makeModel(), makeContext(), undefined, undefined, "released-while-queued",
+		);
+
+		holderExit.resolve();
+		await Promise.all([holder, queued, preSend]);
+
+		expect(queuedBodies).toEqual([]);
+		expect(await holder).toEqual({ kind: "leased", value: "holder" });
+		expect(await queued).toEqual({ kind: "released" });
+		expect(await preSend).toBe("continueSend");
+		expect(push).not.toHaveBeenCalled();
 	});
 
 	it("defers idle disposal while a run is leased", async () => {
@@ -325,7 +365,7 @@ describe("cursor live run coordinator", () => {
 		expect(abandonSessionAgent).toHaveBeenCalledWith("scope-1");
 	});
 
-	it("rearms an already requested full idle window after a lease without another disposal request", async () => {
+	it.each([600_001, 1])("rearms an already requested full idle window after a %i ms lease without another disposal request", async (leaseMs) => {
 		vi.useFakeTimers();
 		const { coordinator, abandonSessionAgent } = makeCoordinator({ idleDisposeMs: 300_000 });
 		const run = startRun(coordinator);
@@ -335,7 +375,7 @@ describe("cursor live run coordinator", () => {
 			coordinator.requestIdleDispose(run);
 			await vi.advanceTimersByTimeAsync(100_000);
 			await coordinator.withRunLease(run, undefined, async () => {
-				await vi.advanceTimersByTimeAsync(600_001);
+				await vi.advanceTimersByTimeAsync(leaseMs);
 				expect(run.resources.kind).toBe("open");
 				expect(cancel).not.toHaveBeenCalled();
 			});
@@ -630,13 +670,36 @@ describe("cursor live run coordinator", () => {
 
 	it("matches bridge tool results when no native replay id is present", () => {
 		const { coordinator } = makeCoordinator();
-		const bridgeRun = makeBridgeRun("bridge-1", ["pi-call-1"]);
+		const pending = new Set(["pi-call-1"]);
+		const bridgeRun: CursorPiToolBridgeRun = {
+			...makeBridgeRun("bridge-1"),
+			hasPendingToolCalls: () => pending.size > 0,
+			hasPendingPiToolCallId: vi.fn((piToolCallId: string) => pending.has(piToolCallId)),
+		};
 		const run = startRun(coordinator, { id: "bridge-1", bridgeRun });
+		coordinator.queueEvent(run, {
+			type: "bridge-tool",
+			request: {
+				runId: "bridge-1",
+				bridgeCallId: "bridge-1-call-1",
+				piToolCallId: "pi-call-1",
+				piToolName: "read",
+				mcpToolName: "pi__read",
+				args: {},
+			},
+		});
 		const context = makeContext([
 			{ role: "user", content: "run bridge", timestamp: 1 },
 			{ role: "toolResult", toolCallId: "pi-call-1", toolName: "read", content: [], isError: false, timestamp: 2 },
 		]);
 
 		expect(coordinator.getPendingFromContext(context, replayIdFromToolCallId, run.sessionAgentScopeKey)).toBe(run);
+
+		// Delivering the Pi result settles the pending MCP waiter, while the run still owns the call it issued.
+		pending.clear();
+		expect(coordinator.getPendingFromContext(context, replayIdFromToolCallId, run.sessionAgentScopeKey)).toBe(run);
+
+		const laterRun = startRun(coordinator, { id: "bridge-2", scopeKey: "scope-2", bridgeRun, sessionBridgeRun: bridgeRun });
+		expect(coordinator.getPendingFromContext(context, replayIdFromToolCallId, laterRun.sessionAgentScopeKey)).toBeUndefined();
 	});
 });

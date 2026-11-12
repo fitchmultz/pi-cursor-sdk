@@ -107,7 +107,7 @@ describe("cursor sdk event debug sink", () => {
 				replayToolId: "cursor-replay-1-tool-1",
 			});
 			sink?.recordCoordinatorEvent("task_progress", { label: "searching" });
-			sink?.recordDrainEvent("turn_end", { outcome: "tool_use" });
+			sink?.recordDrainEvent("turn_end", { outcome: "toolUse" });
 			sink?.recordFinalPartial({ role: "assistant", stopReason: "toolUse" });
 			sink?.recordWaitResult({ status: "finished", result: "Hi" });
 			await sink?.finalize();

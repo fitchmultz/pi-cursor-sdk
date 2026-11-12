@@ -81,12 +81,9 @@ export class CursorProviderTurnRunner {
 			sdkEventDebugRef.current = this.sdkEventDebug;
 			this.sdkEventDebug?.recordContextSnapshot(context);
 			if (resolvedConfig.runtime.value === "local" && this.params.request.purpose === "normal") {
-				if (
-					(await drainExistingCursorLiveRunBeforeSend(stream, partial, model, context, options?.signal, this.sdkEventDebug, scope.scopeKey, this.params.request.occupancyFloor, nativeToolsEnabled)) ===
-					"stream_ended"
-				) {
-					return;
-				}
+				const drained = await drainExistingCursorLiveRunBeforeSend(stream, partial, model, context, options?.signal, this.sdkEventDebug, scope.scopeKey, this.params.request.occupancyFloor, nativeToolsEnabled);
+				// A toolUse or terminal drain already ended this provider turn.
+				if (drained !== "continueSend") return;
 			}
 			this.throwIfAborted();
 

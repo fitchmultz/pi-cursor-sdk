@@ -116,7 +116,7 @@ it.each(["named", "unnamed"])("tracks the real %s tool owner across native new/r
 			router.emitDisplayAction(action);
 			await drainCursorLiveRunTurn(stream, partial, model, {
 				messages: [], tools: runtime.session.getAllTools(),
-			}, run, 0, { mode: "emit" });
+			}, run, 0);
 			for (const call of partial.content) {
 				if (call.type !== "toolCall") continue;
 				const result = await bash.execute(call.id, call.arguments);

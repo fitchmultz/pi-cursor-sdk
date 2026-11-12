@@ -69,6 +69,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `src/cursor-pi-tool-bridge-types.ts` owns shared bridge/MCP type contracts.
 - `src/cursor-env-boolean.ts` owns canonical env boolean parsing (default and tri-state optional) for bridge diagnostics, flags, and native replay gating.
 - `src/cursor-live-run-coordinator.ts` owns live Cursor run registry/scope matching, queued events, drain leases, idle disposal timers, and release cleanup.
+- `src/cursor-live-run-accounting.ts` owns prompt and tool-result token consumption plus live SDK turn-usage observation and suppression.
 - `src/cursor-pi-tool-bridge.ts` re-exports bridge registration and snapshot helpers; exposes active pi tools to local Cursor agents through a per-run loopback stable MCP v2 bridge.
 - `src/cursor-pi-tool-bridge-snapshot.ts` owns bridge snapshot building, env gating, and surface signatures.
 - `src/cursor-pi-tool-bridge-server.ts` owns loopback Hono HTTP routing, `Host`/`Origin` validation, and run endpoint registry for bridge runs.

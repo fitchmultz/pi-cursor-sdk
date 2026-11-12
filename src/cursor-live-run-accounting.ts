@@ -2,12 +2,21 @@ import type { Context, Message, ToolResultMessage } from "@earendil-works/pi-ai"
 import { CURSOR_APPROX_CHARS_PER_TOKEN, estimateCursorPromptMessageTokens } from "./context.js";
 import type { CursorSdkTurnUsage } from "./cursor-usage-accounting.js";
 
+/**
+ * SDK usage for the next emitted Pi turn; an ended SDK turn may omit usage. Suppression lasts for the
+ * rest of the run because, once a Pi turn is emitted before its SDK turn ended, later turn-ended usage
+ * describes an already emitted turn.
+ */
+type CursorLiveSdkTurnUsageObservation =
+	| { kind: "awaiting" }
+	| { kind: "available"; usage?: CursorSdkTurnUsage }
+	| { kind: "suppressed" };
+
 export interface CursorLiveRunAccountingState {
 	promptInputTokens: number;
 	promptInputTokensReported: boolean;
 	consumedToolResultIds: ReadonlySet<string>;
-	sdkTurnEnded: boolean;
-	sdkTurnUsage?: CursorSdkTurnUsage;
+	sdkTurnUsage: CursorLiveSdkTurnUsageObservation;
 }
 
 export interface CursorLiveToolResultConsumption {
@@ -22,29 +31,46 @@ export function createCursorLiveRunAccountingState(promptInputTokens: number): C
 		promptInputTokens,
 		promptInputTokensReported: false,
 		consumedToolResultIds: new Set(),
-		sdkTurnEnded: false,
+		sdkTurnUsage: { kind: "awaiting" },
 	};
 }
 
 export function recordCursorLiveSdkTurnEnded(
 	state: CursorLiveRunAccountingState,
-	sdkTurnUsage?: CursorSdkTurnUsage,
+	usage?: CursorSdkTurnUsage,
 ): CursorLiveRunAccountingState {
-	return { ...state, sdkTurnEnded: true, sdkTurnUsage };
+	switch (state.sdkTurnUsage.kind) {
+		case "awaiting":
+		case "available":
+			// The latest ended turn describes current occupancy, replacing an earlier untaken turn.
+			return { ...state, sdkTurnUsage: { kind: "available", usage } };
+		case "suppressed":
+			return state;
+		default: {
+			const _exhaustive: never = state.sdkTurnUsage;
+			return _exhaustive;
+		}
+	}
 }
 
+/** Takes SDK usage for one emitted Pi turn; taking before the SDK turn ended suppresses the rest of the run. */
 export function takeCursorLiveSdkTurnUsage(state: CursorLiveRunAccountingState): {
 	state: CursorLiveRunAccountingState;
-	sdkTurnUsage?: CursorSdkTurnUsage;
+	usage?: CursorSdkTurnUsage;
 } {
-	const { sdkTurnUsage, ...nextState } = state;
-	return {
-		state: {
-			...nextState,
-			sdkTurnEnded: false,
-		},
-		sdkTurnUsage,
-	};
+	const observation = state.sdkTurnUsage;
+	switch (observation.kind) {
+		case "available":
+			return { state: { ...state, sdkTurnUsage: { kind: "awaiting" } }, usage: observation.usage };
+		case "awaiting":
+			return { state: { ...state, sdkTurnUsage: { kind: "suppressed" } } };
+		case "suppressed":
+			return { state };
+		default: {
+			const _exhaustive: never = observation;
+			return _exhaustive;
+		}
+	}
 }
 
 function asToolResultMessage(message: Message): ToolResultMessage | undefined {

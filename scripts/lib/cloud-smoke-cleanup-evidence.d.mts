@@ -1,3 +1,5 @@
+import type { CloudSmokeOwnedRepository } from "./cloud-smoke-github.mjs";
+
 export type CloudSmokeLaneName =
 	| "cancel"
 	| "explicit-https-repo-starting-ref-branch-pr-reporting"
@@ -106,13 +108,8 @@ export type CloudSmokeMatrixEvidence = {
 
 export type CloudSmokeReleaseGateState = {
 	lanes: unknown[];
-	repository?: {
-		fullName: string;
-		repoUrl?: string;
-		seedDir?: string;
-		ownershipToken?: string;
-		description?: string;
-	};
+	/** Assign from `createThrowawayRepository()`'s `onOwned`, which fires once create ownership is established, before seeding. */
+	repository?: CloudSmokeOwnedRepository;
 };
 
 export function isAgentNotFound(error: unknown): boolean;
@@ -190,20 +187,19 @@ export function coordinateCloudSmokeReleaseGate(callbacks: {
 	run: (state: CloudSmokeReleaseGateState) => void | Promise<void>;
 	harvestAgentIds: (state: CloudSmokeReleaseGateState) => Iterable<string> | Promise<Iterable<string>>;
 	cleanupAgent: (agentId: string) => CloudSmokeCleanupEvidence | Promise<CloudSmokeCleanupEvidence>;
-	cleanupRepository?: (repository: NonNullable<CloudSmokeReleaseGateState["repository"]>) =>
+	cleanupRepository?: (repository: CloudSmokeOwnedRepository) =>
 		| { deleted: true; httpStatus: 404 }
 		| Promise<{ deleted: true; httpStatus: 404 }>;
 	writeEvidence: (input: {
 		lanes: unknown[];
 		cleanup: CloudSmokeCleanupEvidence[];
-		throwawayRepository?: { name: string; deleted: boolean; httpStatus?: number };
-		repository?: CloudSmokeReleaseGateState["repository"];
+		throwawayRepository?: CloudSmokeThrowawayRepositoryEvidence;
 	}) => void | Promise<void>;
 	onAgentCleanupError?: (error: unknown, agentId: string) => void;
-	onRepositoryCleanupError?: (error: unknown, repository: NonNullable<CloudSmokeReleaseGateState["repository"]>) => void;
+	/** Receives the exact residual repository when deletion fails or is not proven. */
+	onRepositoryCleanupError?: (error: unknown, repository: CloudSmokeOwnedRepository) => void;
 }): Promise<{
 	lanes: unknown[];
 	cleanup: CloudSmokeCleanupEvidence[];
-	throwawayRepository?: { name: string; deleted: boolean; httpStatus?: number };
-	repository?: CloudSmokeReleaseGateState["repository"];
+	throwawayRepository?: CloudSmokeThrowawayRepositoryEvidence;
 }>;

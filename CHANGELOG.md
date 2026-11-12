@@ -4,6 +4,19 @@
 
 ## Unreleased
 
+## 0.5.33 - 2026-11-12
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- fix: require patched Node security releases (#483) ([3c8b6e2](https://github.com/fitchmultz/pi-cursor-sdk/commit/3c8b6e2c5a680c60be5f1f5af14c15cb902b510b))
+
+### What's Changed
+* fix: require patched Node security releases by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/483
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.32...v0.5.33
+
 ## 0.5.32 - 2026-11-12
 
 <!-- npm-release:unreleased:start -->

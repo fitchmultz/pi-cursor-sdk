@@ -48,7 +48,7 @@ If pi started without a key, run `/cursor-refresh-models` after `/login` to refr
 
 ## Requirements
 
-- Node.js 24+
+- Node.js 24.22.3 or newer in the 24.x line, or 26.13.1 and newer
 - This package requires official Pi 1.5.0 or later. The latest stable official Pi and current `fitchmultz/pi` main are required compatibility targets, resolved once per workflow run; locked development Pi packages are reproducible snapshots, not validation targets
 - optional Pi and TypeBox peer metadata uses `"*"` ranges per Pi package guidance
 - a Cursor SDK API key saved through `/login`, available as `CURSOR_API_KEY`, or passed with pi's `--api-key`

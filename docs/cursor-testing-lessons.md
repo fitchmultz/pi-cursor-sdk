@@ -101,10 +101,10 @@ Two existing test flags retain raw proof in a **fresh private** directory outsid
 
 The lightweight `test/helpers/raw-test-evidence.mjs` owns only directory/file writes. Payload construction and explicit flag guards stay with each owning test; unset flags perform no evidence I/O. Existing filenames, JSON fields and raw JSONL/journal/Buffer bytes are retained, not converted into a uniform schema. Writes overwrite the same filename within an owned run.
 
-For an installed development checkout, this example builds and runs only the offline owners, with Node 24+ and no inherited credentials/profile/host selectors:
+For an installed development checkout, this example builds and runs only the offline owners, with Node 24.22.3+ (24.x) and no inherited credentials/profile/host selectors:
 
 ```bash
-NODE24="$(command -v node)" # must resolve to Node 24+
+NODE24="$(command -v node)" # must resolve to Node 24.22.3+ (24.x)
 PROOF="$(mktemp -d "${TMPDIR:-/tmp}/cursor-offline-proof.XXXXXX")"
 chmod 700 "$PROOF"
 mkdir -p "$PROOF/home" "$PROOF/agent" "$PROOF/tmp" "$PROOF/xdg"
@@ -361,7 +361,7 @@ The script writes timestamped artifacts under `--out` (default `/tmp/pi-cursor-s
 
 Stdout prints artifact paths and summary counts only. Raw payloads stay on disk and may contain local paths, project text, tool args/results, or secrets — do not commit or share them.
 
-Hard repo rule: Cursor SDK behavior claims must come from the installed `@cursor/sdk` package and/or https://cursor.com/docs/sdk/typescript, not from memory or ad-hoc probes alone. Current validation targets Node 24+, exact `@cursor/sdk@1.0.40`, official Pi 1.5.0/latest, and current `fitchmultz/pi` main.
+Hard repo rule: Cursor SDK behavior claims must come from the installed `@cursor/sdk` package and/or https://cursor.com/docs/sdk/typescript, not from memory or ad-hoc probes alone. Current validation targets Node 24.22.3+ (24.x), exact `@cursor/sdk@1.0.40`, official Pi 1.5.0/latest, and current `fitchmultz/pi` main.
 
 ## Pi provider SDK event capture
 

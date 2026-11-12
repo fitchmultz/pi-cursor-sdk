@@ -318,8 +318,9 @@ export default {
     install: "Homebrew package or PLATFORM_SMOKE_CRABBOX override",
     minVersion: "0.26.0",
   },
-  ubuntuContainerImage: "pi-cursor-sdk-platform-node:24.21-root",
+  ubuntuContainerImage: "pi-cursor-sdk-platform-node:24.22.3-root",
   ubuntuContainerBaseImage: "cimg/node:24.21",
+  ubuntuContainerNodeImage: "node:24.22.3-bookworm@sha256:9d266751ca3d7fdbe651c878ffd5ad0a42fed49a18c283509267c97f025b7496",
   nodeValidationMajor: 24,
   windowsParallels: {
     sourceVm: "pi-extension-windows-template",
@@ -329,7 +330,7 @@ export default {
 };
 ```
 
-`ubuntuContainerBaseImage` is `cimg/node:24.21`, the Ubuntu 24.04 Node 24 base with the current glibc baseline for native test dependencies. The runner builds the local `ubuntuContainerImage` wrapper with only `USER root` changed before warmup because Crabbox 0.36.0 must install SSH/Git/rsync/curl during bootstrap and `cimg/node` defaults to an unprivileged user. An explicit `PLATFORM_SMOKE_UBUNTU_IMAGE` bypasses that build and must already support Crabbox bootstrap. The package requires Node 24+, and this gate validates Node 24 on macOS, Ubuntu, and Windows.
+`ubuntuContainerBaseImage` is `cimg/node:24.21`, the Ubuntu 24.04 Node 24 base with the current glibc baseline for native test dependencies. The runner replaces the base image’s Node executable with the checksum-pinned Node 24.22.3 executable from `ubuntuContainerNodeImage` and sets `USER root` before warmup because Crabbox 0.36.0 must install SSH/Git/rsync/curl during bootstrap and `cimg/node` defaults to an unprivileged user. An explicit `PLATFORM_SMOKE_UBUNTU_IMAGE` bypasses that build and must already support Crabbox bootstrap. The package requires Node 24.22.3 (24.x) or 26.13.1 and newer, and this gate validates Node 24 on macOS, Ubuntu, and Windows.
 
 `windowsParallels` records this repo's default shared Windows template contract. Environment overrides may point at a temporary candidate template during infrastructure work, but release runs should use the shared `pi-extension-windows-template` / `crabbox-ready` baseline unless this document is updated.
 
@@ -403,7 +404,7 @@ Required:
 
 - OpenSSH enabled on localhost.
 - Configured SSH user logs in without interactive prompts.
-- `git`, `rsync`, `tar`, `curl`, Node 24+, and npm are available.
+- `git`, `rsync`, `tar`, `curl`, Node 24.22.3+ (24.x), and npm are available.
 - Work root is writable.
 - `node-pty` self-test passes.
 
@@ -413,7 +414,7 @@ Required:
 
 - Docker-compatible runtime is active.
 - `crabbox doctor --provider local-container --json` passes.
-- Required local image exists with Node 24+, npm, OpenSSH prerequisites, `git`, `rsync`, `curl`, `sudo`, `python3`, `tar`, and `ripgrep`.
+- Required local image exists with Node 24.22.3+ (24.x), npm, OpenSSH prerequisites, `git`, `rsync`, `curl`, `sudo`, `python3`, `tar`, and `ripgrep`.
 - `node-pty` self-test passes in the container.
 
 ### Windows template VM
@@ -432,7 +433,7 @@ Template requirements:
 - Parallels Tools installed.
 - OpenSSH Server enabled.
 - Stable SSH user configured.
-- Node 24+ and npm installed for native Windows.
+- Node 24.22.3+ (24.x) and npm installed for native Windows.
 - Git for Windows installed.
 - PowerShell available.
 - `tar` available in native Windows PATH.
@@ -472,7 +473,7 @@ Doctor checks:
 10. Windows source snapshot exists.
 11. Windows source VM is stopped and the configured snapshot is power-off/forkable for linked clones.
 12. Disposable Windows native clone probe passes and sees Node, npm, Git, tar, and the configured SSH user.
-13. Node 24+ is available on every target.
+13. Node's major version is at least 24 on every target. Use the patched versions listed in Requirements; this doctor check does not enforce patch versions.
 14. npm is available on every target.
 15. `git` is available on every target.
 16. `rsync` is available on macOS and Ubuntu.

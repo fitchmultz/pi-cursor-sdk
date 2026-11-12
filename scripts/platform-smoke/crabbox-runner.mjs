@@ -17,12 +17,13 @@ export function ensureUbuntuContainerImage(config = {}) {
 	if (override) return override;
 	const image = config.ubuntuContainerImage;
 	const baseImage = config.ubuntuContainerBaseImage;
-	if (!image || !baseImage) throw new Error("platform smoke config requires ubuntuContainerImage and ubuntuContainerBaseImage");
+	const nodeImage = config.ubuntuContainerNodeImage;
+	if (!image || !baseImage || !nodeImage) throw new Error("platform smoke config requires ubuntuContainerImage, ubuntuContainerBaseImage and ubuntuContainerNodeImage");
 	const childEnv = { ...process.env };
 	delete childEnv.CURSOR_API_KEY;
 	execFileSync("docker", ["build", "--quiet", "--tag", image, "-"], {
 		env: childEnv,
-		input: `FROM ${baseImage}\nUSER root\n`,
+		input: `FROM ${nodeImage} AS node\nFROM ${baseImage}\nUSER root\nCOPY --from=node /usr/local/bin/node /usr/local/bin/node\n`,
 		stdio: ["pipe", "pipe", "pipe"],
 		timeout: 300_000,
 	});

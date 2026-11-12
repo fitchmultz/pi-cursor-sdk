@@ -5,20 +5,17 @@ import {
 	scanArtifacts,
 	scanForSecrets,
 	writeCommand,
-	writeExitCode,
 } from "./artifacts.mjs";
-import { stopLease, warmupLease } from "./crabbox-runner.mjs";
 import { LOCAL_RESUME_SUITE_BY_NAME } from "./local-resume-suites.mjs";
 import {
 	bundleExtractedCheck,
-	failSuite,
 	fetchPlatformArtifactBundle,
 	finalizeSuiteArtifacts,
 	platformFor,
 	runOnLeaseWithTransientRetry,
 	stopLeaseCheck,
-	writeRedactedFile,
-	writeStopLeaseArtifacts,
+	withTargetLease,
+	writeSuiteRunArtifacts,
 } from "./target-runtime.mjs";
 
 export async function executeLocalResumeSuite(
@@ -30,8 +27,6 @@ export async function executeLocalResumeSuite(
 	leaseSession,
 ) {
 	const startedAt = Date.now();
-	let warmup = leaseSession;
-	const ownsLease = !warmup;
 	const variant = LOCAL_RESUME_SUITE_BY_NAME.get(suiteName);
 	const prepDir = leaseSession?.livePrepDir ?? `.platform-smoke-runs/local-resume-prep-${Date.now()}-${targetName}`;
 	const command = buildLocalResumeSuiteCommand(
@@ -43,74 +38,35 @@ export async function executeLocalResumeSuite(
 	);
 	writeCommand(suiteDir, command);
 
-	if (!warmup) {
-		console.log(`  warmup ${targetName}...`);
-		warmup = await warmupLease(targetName, slug, config);
-		if (!warmup.ok) {
-			writeExitCode(suiteDir, warmup.code, warmup.signal);
-			writeRedactedFile(
-				resolve(suiteDir, "crabbox.warmup.stdout.txt"),
-				warmup.stdout,
-			);
-			writeRedactedFile(
-				resolve(suiteDir, "crabbox.warmup.stderr.txt"),
-				warmup.stderr,
-			);
-			return failSuite(
-				suiteDir,
-				targetName,
-				suiteName,
-				`Crabbox warmup failed (exit ${warmup.code}): ${warmup.stderr.slice(-500)}`,
-			);
-		}
-	}
-
-	console.log(`  executing local resume smoke on ${targetName}...`);
-	const result = await runOnLeaseWithTransientRetry(
-		suiteDir,
-		targetName,
-		warmup.leaseId,
-		command,
-		{
-			shell: true,
-			timeout: 900_000,
-			allowEnv: ["CURSOR_API_KEY"],
-			sync: leaseSession?.sync,
-			config,
-		},
-	);
-	const bundleTransport = await fetchPlatformArtifactBundle(targetName, warmup.leaseId, result.stdout, config);
-	if (!bundleTransport.ok) result.stderr = `${result.stderr}\n[platform-smoke] ${bundleTransport.error}`.trim();
-	const elapsed = Date.now() - startedAt;
-	writeRedactedFile(resolve(suiteDir, "crabbox.stdout.txt"), result.stdout);
-	writeRedactedFile(resolve(suiteDir, "crabbox.stderr.txt"), result.stderr);
-	writeFileSync(
-		resolve(suiteDir, "crabbox.timing.json"),
-		JSON.stringify(
+	const leased = await withTargetLease({ config, targetName, suiteName, suiteDir, slug, leaseSession }, async (lease) => {
+		console.log(`  executing local resume smoke on ${targetName}...`);
+		const result = await runOnLeaseWithTransientRetry(
+			suiteDir,
+			targetName,
+			lease.leaseId,
+			command,
 			{
-				startedAt: new Date(startedAt).toISOString(),
-				elapsedMs: elapsed,
-				code: result.code,
-				signal: result.signal,
+				shell: true,
+				timeout: 900_000,
+				allowEnv: ["CURSOR_API_KEY"],
+				sync: leaseSession?.sync,
+				config,
 			},
-			null,
-			2,
-		),
-	);
-	writeExitCode(suiteDir, result.code, result.signal);
+		);
+		const bundleTransport = await fetchPlatformArtifactBundle(targetName, lease.leaseId, result.stdout, config);
+		if (!bundleTransport.ok) result.stderr = `${result.stderr}\n[platform-smoke] ${bundleTransport.error}`.trim();
+		const elapsed = Date.now() - startedAt;
+		writeSuiteRunArtifacts(suiteDir, result, startedAt, elapsed);
 
-	const bundle = extractPlatformArtifactBundle(suiteDir, bundleTransport.stdout);
-	const evidenceRoot = resolve(suiteDir, "local-resume-evidence");
-	const packedPackagePath = result.stdout.match(/^PLATFORM_PACKED_PACKAGE_PATH=(.+)$/m)?.[1]?.trim();
-	const evidence = summarizeLocalResumeEvidence(evidenceRoot, packedPackagePath);
-	writeFileSync(resolve(suiteDir, "local-resume-evidence.json"), JSON.stringify(evidence, null, 2));
-
-	let stopResult;
-	if (ownsLease) {
-		console.log(`  stopping lease ${warmup.leaseId}...`);
-		stopResult = await stopLease(targetName, warmup.leaseId, config);
-		writeStopLeaseArtifacts(suiteDir, stopResult);
-	}
+		const bundle = extractPlatformArtifactBundle(suiteDir, bundleTransport.stdout);
+		const evidenceRoot = resolve(suiteDir, "local-resume-evidence");
+		const packedPackagePath = result.stdout.match(/^PLATFORM_PACKED_PACKAGE_PATH=(.+)$/m)?.[1]?.trim();
+		const evidence = summarizeLocalResumeEvidence(evidenceRoot, packedPackagePath);
+		writeFileSync(resolve(suiteDir, "local-resume-evidence.json"), JSON.stringify(evidence, null, 2));
+		return { result, elapsed, bundle, evidence };
+	});
+	if (!leased.ok) return leased.warmupFailure;
+	const { value: { result, elapsed, bundle, evidence }, stopResult } = leased;
 
 	const violations = [
 		...scanForSecrets(`${result.stdout}\n${result.stderr}`).map(

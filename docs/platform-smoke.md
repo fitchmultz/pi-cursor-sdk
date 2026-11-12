@@ -136,6 +136,8 @@ end target session
 
 The target session fails fast. The comprehensive path handles one target at a time: it warms one lease, syncs once, runs suites in order, and stops the target after its first failure before starting the next. This avoids competing VM/container load and Cursor calls. Routine verification should instead select the smallest meaningful changed-behavior suite on one representative target; do not replay the full campaign or duplicate a focused run with the full matrix.
 
+A focused `--suite` run warms its own lease and stops it after the suite command and its artifact capture, including when either throws after warmup. The stop output goes to the suite's `crabbox.stop.*` files. A failed stop fails the suite's `lease-stop` check; if the suite threw, the reported target error includes both failures. If writing the `crabbox.stop.*` files fails, the reported target error gives the stop's exit code and signal with that write error, even when the stop succeeded; exit 0 means the lease was stopped. The report has no `lease-stop` check for that suite. Suites in a target session use the session's lease, and only the session stops it. The session records its stop in `lease-cleanup/`, also when a suite throws; the thrown suite error is then reported, together with the stop failure if the stop fails. If writing the `lease-cleanup/` files fails, the reported target error gives the stop's exit code and signal with that write error, as above.
+
 Runtime budget is part of the contract:
 
 - `smoke:platform:doctor` never calls Cursor.
@@ -776,6 +778,7 @@ Required evidence:
 - no `PLATFORM_ABORT_MARKER` long-running command remains;
 - no `SHOULD_NOT_PRINT` process remains;
 - marker-scoped bridge/bash/node process cleanup is recorded in `leftover-process-check`;
+- pi's own PTY exit after the interrupt and quit is recorded (`live-status.json` `ptyExit`; host `pi-exit` check);
 - no final successful assistant answer claiming completion;
 - bridge diagnostics in `artifacts/bridge-diagnostics.jsonl` include `request_queued` for `pi__bash`, `run_cancelled`, and cancelled `request_rejected`;
 - cancellation or abort state is visible;
@@ -893,6 +896,8 @@ terminal.full.png
 terminal.final-viewport.png
 ```
 
+`artifacts/live-status.json` keeps two facts apart. `observation` is what ended the PTY wait: `evidence-observed` (final marker plus persisted session JSONL), `interrupt-sent` (abort lane), `pi-exited`, or `wait-expired`. `ptyExit` is node-pty's own exit receipt: `{ "kind": "exited", "exitCode", "signal" }`, or `{ "kind": "not-observed" }` when `/quit`, EOF, Ctrl+C and kill produced no exit. Failure text names a POSIX signal death as `signal N`, because node-pty then reports `exitCode` 0 as a placeholder; the receipt keeps both fields. The host `final-marker` check reads `observation`; the `pi-exit` check fails unless `ptyExit.kind` is `exited`. A marker or an interrupt request alone never passes a suite, and a missing exit fails it even after the marker. Offline owners: `node --test test/platform-smoke-live-runner-pty.test.mjs` runs the real runner through a real `node-pty` PTY against `test/fixtures/fake-pi-tui.mjs`. It needs a built `node-pty`, so CI runs it only in the macOS and Windows native-platforms job; on Windows two cases are skipped: the unobserved-exit case, because the runner's `taskkill /T /F` always ends pi, and the POSIX signal-death case, because node-pty's Windows exit callback carries no signal. `test/platform-target-runtime.test.ts` sends recorded `live-status.json` outcomes through the artifact bundle into the host checks on POSIX controllers; Windows controllers fail closed on nonempty bundle extraction.
+
 Required card artifacts:
 
 ```text
@@ -948,9 +953,10 @@ Required fail-through behavior:
 1. Run the scenario and write target-side session/debug/runtime evidence.
 2. Encode the artifact bundle in a `finally` path after applying path, secret, file-size, file-count, aggregate, inflated-JSON, and compressed-size limits; emit it inline or write the marked gzip file. Any bound overflow or traversal invalidation must emit the bounded limit-failure artifact instead of partial evidence, prior findings, or bytes.
 3. Preserve the real scenario process exit code in Crabbox output.
-4. Before lease release, have the host fetch any marked chunks and call `extractPlatformArtifactBundle()` even for a nonzero result.
-5. Write host-side `exit-code.txt`, `assertions.json`, and `failures.md` from the process result plus extracted evidence.
-6. Verify the canonical `artifact-manifest.json`; missing or unsafe bundle content fails the suite.
+4. Before lease release, have the host fetch any marked chunks.
+5. Call `extractPlatformArtifactBundle()` on the captured bundle even for a nonzero result. Extraction uses local bytes and does not need the lease.
+6. Write host-side `exit-code.txt`, `assertions.json`, and `failures.md` from the process result plus extracted evidence.
+7. Verify the canonical `artifact-manifest.json`; missing or unsafe bundle content fails the suite.
 
 There is no tar/zip side channel. Crabbox stdout carries the inline bundle or its authenticated retrieval marker/chunks, while the canonical host suite directory remains the durable source of truth.
 

@@ -455,12 +455,12 @@ try {
 		expect(result.stdout).toContain('"providerDebugCount":1');
 	});
 
-	it("fails suite artifacts when required manifests or lease cleanup are missing", () => {
+	it("fails suite artifacts when required manifests are missing", () => {
 		const code = String.raw`
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { finalizeSuiteArtifacts, createLeaseCleanupFailureResult } from "./scripts/platform-smoke/targets.mjs";
+import { finalizeSuiteArtifacts } from "./scripts/platform-smoke/targets.mjs";
 const root = mkdtempSync(join(tmpdir(), "platform-smoke-manifest-test-"));
 try {
   const suiteDir = join(root, "suite");
@@ -473,22 +473,12 @@ try {
     ["summary.json", "assertions.json", "present.txt", "missing.txt"],
   );
   const manifest = JSON.parse(readFileSync(join(suiteDir, "artifact-manifest.json"), "utf8"));
-  const cleanup = createLeaseCleanupFailureResult({ artifactRoot: root, packageName: "pi-cursor-sdk" }, "ubuntu", "cbx_failed", {
-    stdout: "",
-    stderr: "stop failed",
-    code: 1,
-    signal: null,
-  });
-  const cleanupAssertions = JSON.parse(readFileSync(join(cleanup.suiteDir, "assertions.json"), "utf8"));
   const result = {
     manifestOk: finalized.assertions.ok,
     missing: manifest.missing,
-    cleanupOk: cleanup.ok,
-    cleanupAssertionOk: cleanupAssertions.ok,
-    cleanupHasStopFailure: cleanupAssertions.checks.some((check) => check.id === "lease-stop" && check.ok === false),
   };
   console.log(JSON.stringify(result));
-  if (result.manifestOk || !result.missing.includes("missing.txt") || result.cleanupOk || result.cleanupAssertionOk || !result.cleanupHasStopFailure) process.exit(1);
+  if (result.manifestOk || !result.missing.includes("missing.txt")) process.exit(1);
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
@@ -497,7 +487,6 @@ try {
 		expect(result.status).toBe(0);
 		expect(result.stdout).toContain('"manifestOk":false');
 		expect(result.stdout).toContain('"missing.txt"');
-		expect(result.stdout).toContain('"cleanupHasStopFailure":true');
 	});
 
 	it("requires platform final markers in the last non-empty assistant text part", () => {

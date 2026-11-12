@@ -173,6 +173,12 @@ export async function terminateChild(child, { graceMs = DEFAULT_CHILD_SHUTDOWN_G
 	}
 }
 
+// Names how a process ended from its native receipt: by the signal when one ended it, otherwise by the exit code.
+// On a signal death Node's close reports code null and node-pty reports a placeholder exitCode 0.
+export function describeProcessExit(code, signal) {
+	return signal ? `signal ${signal}` : `exit code ${code}`;
+}
+
 export function parseJsonLines(stdout) {
 	const events = [];
 	for (const line of stdout.split("\n")) {

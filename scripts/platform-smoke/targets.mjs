@@ -16,12 +16,11 @@ import {
 	writeExitCode,
 	scanArtifacts,
 	scanForSecrets,
-	redactSecrets,
 } from "./artifacts.mjs";
 
 export { isSafePlatformBundlePath as isSafeBundlePath } from "./artifacts.mjs";
 import { getScenario } from "./scenarios.mjs";
-import { warmupLease, runOnLease, stopLease } from "./crabbox-runner.mjs";
+import { warmupLease, runOnLease } from "./crabbox-runner.mjs";
 import { renderAll } from "./render-ansi.mjs";
 import { assertRequiredCards } from "./card-detect.mjs";
 import { collectVisualEvidence } from "./visual-evidence.mjs";
@@ -31,13 +30,18 @@ import { LOCAL_RESUME_SUITE_BY_NAME } from "./local-resume-suites.mjs";
 import {
 	bundleExtractedCheck,
 	failSuite,
+	failWarmup,
 	fetchPlatformArtifactBundle,
 	finalizeSuiteArtifacts,
 	platformFor,
 	runOnLeaseWithTransientRetry,
+	stopAfterSuiteError,
 	stopLeaseCheck,
+	stopOwnedLease,
+	withTargetLease,
 	writeRedactedFile,
 	writeStopLeaseArtifacts,
+	writeSuiteRunArtifacts,
 } from "./target-runtime.mjs";
 
 export { finalizeSuiteArtifacts, platformFor };
@@ -76,14 +80,10 @@ export function createLeaseCleanupResult(config, targetName, leaseId, stopResult
 	return { ok: assertions.ok, suiteDir, assertions };
 }
 
-export function createLeaseCleanupFailureResult(config, targetName, leaseId, stopResult) {
-	return { ...createLeaseCleanupResult(config, targetName, leaseId, stopResult), ok: false };
-}
-
 /**
  * Execute a single suite on a target.
  * Returns { ok, suiteDir, assertions }.
- * On failure, writes fail-through artifacts but does not throw.
+ * Unexpected command or artifact errors propagate after owned-lease cleanup.
  */
 export async function runTargetSuite(config, targetName, suiteName, leaseSession) {
 	const scenario = getScenario(suiteName);
@@ -132,7 +132,9 @@ export async function runTargetSuite(config, targetName, suiteName, leaseSession
 
 /**
  * Execute a target session: warm once, sync once, run suites fail-fast, stop once.
- * This is the release-gate path; per-suite runs remain available for diagnosis.
+ * Focused checks select one suite; this path owns the optional comprehensive run.
+ * The stop is recorded in a lease-cleanup result, also when a suite throws; the suite error then
+ * propagates, combined with any stop or recording failure (see stopAfterSuiteError).
  */
 export async function runTargetSuites(config, targetName, suiteNames) {
 	const slug = `${config.packageName ?? "pi-cursor-sdk"}-${targetName}`;
@@ -151,17 +153,15 @@ export async function runTargetSuites(config, targetName, suiteNames) {
 			suiteName,
 			writtenAt: new Date().toISOString(),
 		}, null, 2));
-		writeExitCode(suiteDir, warmup.code, warmup.signal);
-		writeRedactedFile(resolve(suiteDir, "crabbox.warmup.stdout.txt"), warmup.stdout);
-		writeRedactedFile(resolve(suiteDir, "crabbox.warmup.stderr.txt"), warmup.stderr);
-		const failed = failSuite(suiteDir, targetName, suiteName, `Crabbox warmup failed (exit ${warmup.code}): ${warmup.stderr.slice(-500)}`);
-		return { ok: false, results: [failed] };
+		return { ok: false, results: [failWarmup(suiteDir, targetName, suiteName, warmup)] };
 	}
 
 	const results = [];
 	let sync = true;
 	const livePrepDir = `.platform-smoke-runs/live-prep-${Date.now()}-${targetName}`;
-	let stopResult;
+	const stop = () => stopOwnedLease(targetName, warmup.leaseId, config, (stopResult) => {
+		results.push(createLeaseCleanupResult(config, targetName, warmup.leaseId, stopResult, runId));
+	});
 	try {
 		for (const suiteName of suiteNames) {
 			console.log(`  Suite: ${suiteName}`);
@@ -170,13 +170,10 @@ export async function runTargetSuites(config, targetName, suiteNames) {
 			sync = false;
 			if (!result.ok) break;
 		}
-	} finally {
-		console.log(`  stopping lease ${warmup.leaseId}...`);
-		stopResult = await stopLease(targetName, warmup.leaseId, config);
+	} catch (suiteError) {
+		throw await stopAfterSuiteError(suiteError, warmup.leaseId, stop);
 	}
-	if (stopResult) {
-		results.push(createLeaseCleanupResult(config, targetName, warmup.leaseId, stopResult, runId));
-	}
+	await stop();
 	return { ok: results.every((result) => result.ok), results };
 }
 
@@ -184,10 +181,10 @@ export async function runTargetSuites(config, targetName, suiteNames) {
  * Execute the platform-build suite on a target.
  *
  * Steps:
- * 1. Warmup lease (syncs checkout)
+ * 1. Warm an owned lease unless the target session lends one (withTargetLease)
  * 2. Run combined build shell: npm ci, test, typecheck, pack
- * 3. Run separate asserts on output
- * 4. Stop lease
+ * 3. Stop an owned lease, even when the run or its artifact writes throw
+ * 4. Run separate asserts on output
  * 5. Write failure artifacts on any failure
  */
 async function executePlatformBuild(config, targetName, suiteDir, slug, platform, leaseSession) {
@@ -195,49 +192,21 @@ async function executePlatformBuild(config, targetName, suiteDir, slug, platform
 	const packageName = config.packageName ?? "pi-cursor-sdk";
 	const command = buildPlatformBuildCommand(targetName, packageName, config.nodeValidationMajor ?? 24);
 	writeCommand(suiteDir, command);
-	let warmup = leaseSession;
-	const ownsLease = !warmup;
+	const leased = await withTargetLease({ config, targetName, suiteName: "platform-build", suiteDir, slug, leaseSession }, async (lease) => {
+		console.log(`  executing build shell on ${targetName}...`);
+		const result = await runOnLease(targetName, lease.leaseId, command, {
+			shell: true,
+			timeout: 900_000,
+			sync: leaseSession?.sync,
+			config,
+		});
 
-	if (!warmup) {
-		console.log(`  warmup ${targetName}...`);
-		warmup = await warmupLease(targetName, slug, config);
-		if (!warmup.ok) {
-			writeExitCode(suiteDir, warmup.code, warmup.signal);
-			writeRedactedFile(resolve(suiteDir, "crabbox.warmup.stdout.txt"), warmup.stdout);
-			writeRedactedFile(resolve(suiteDir, "crabbox.warmup.stderr.txt"), warmup.stderr);
-			return failSuite(suiteDir, targetName, "platform-build",
-				`Crabbox warmup failed (exit ${warmup.code}): ${warmup.stderr.slice(-500)}`);
-		}
-	}
-
-	console.log(`  executing build shell on ${targetName}...`);
-	const result = await runOnLease(targetName, warmup.leaseId, command, {
-		shell: true,
-		timeout: 900_000,
-		sync: leaseSession?.sync,
-		config,
+		const elapsed = Date.now() - startedAt;
+		writeSuiteRunArtifacts(suiteDir, result, startedAt, elapsed);
+		return { result, elapsed };
 	});
-
-	const elapsed = Date.now() - startedAt;
-
-	// Write artifact files
-	writeRedactedFile(resolve(suiteDir, "crabbox.stdout.txt"), result.stdout);
-	writeRedactedFile(resolve(suiteDir, "crabbox.stderr.txt"), result.stderr);
-	writeFileSync(resolve(suiteDir, "crabbox.timing.json"), JSON.stringify({
-		startedAt: new Date(startedAt).toISOString(),
-		elapsedMs: elapsed,
-		code: result.code,
-		signal: result.signal,
-	}, null, 2));
-	writeCommand(suiteDir, command);
-	writeExitCode(suiteDir, result.code, result.signal);
-
-	let stopResult;
-	if (ownsLease) {
-		console.log(`  stopping lease ${warmup.leaseId}...`);
-		stopResult = await stopLease(targetName, warmup.leaseId, config);
-		writeStopLeaseArtifacts(suiteDir, stopResult);
-	}
+	if (!leased.ok) return leased.warmupFailure;
+	const { value: { result, elapsed }, stopResult } = leased;
 
 	writePlatformBuildExtracts(suiteDir, result.stdout);
 
@@ -483,47 +452,23 @@ async function executeLiveSuite(config, targetName, suiteName, suiteDir, slug, l
 	const startedAt = Date.now();
 	const command = buildLiveSuiteCommand(config, targetName, suiteName, leaseSession?.livePrepDir);
 	writeCommand(suiteDir, command);
-	let warmup = leaseSession;
-	const ownsLease = !warmup;
-
-	if (!warmup) {
-		console.log(`  warmup ${targetName}...`);
-		warmup = await warmupLease(targetName, slug, config);
-		if (!warmup.ok) {
-			writeExitCode(suiteDir, warmup.code, warmup.signal);
-			writeRedactedFile(resolve(suiteDir, "crabbox.warmup.stdout.txt"), warmup.stdout);
-			writeRedactedFile(resolve(suiteDir, "crabbox.warmup.stderr.txt"), warmup.stderr);
-			return failSuite(suiteDir, targetName, suiteName, `Crabbox warmup failed (exit ${warmup.code}): ${warmup.stderr.slice(-500)}`);
-		}
-	}
-
-	console.log(`  executing live suite on ${targetName}...`);
-	const result = await runOnLeaseWithTransientRetry(suiteDir, targetName, warmup.leaseId, command, {
-		shell: true,
-		timeout: 900_000,
-		allowEnv: ["CURSOR_API_KEY"],
-		sync: leaseSession?.sync,
-		config,
+	const leased = await withTargetLease({ config, targetName, suiteName, suiteDir, slug, leaseSession }, async (lease) => {
+		console.log(`  executing live suite on ${targetName}...`);
+		const result = await runOnLeaseWithTransientRetry(suiteDir, targetName, lease.leaseId, command, {
+			shell: true,
+			timeout: 900_000,
+			allowEnv: ["CURSOR_API_KEY"],
+			sync: leaseSession?.sync,
+			config,
+		});
+		const bundleTransport = await fetchPlatformArtifactBundle(targetName, lease.leaseId, result.stdout, config);
+		if (!bundleTransport.ok) result.stderr = `${result.stderr}\n[platform-smoke] ${bundleTransport.error}`.trim();
+		const elapsed = Date.now() - startedAt;
+		writeSuiteRunArtifacts(suiteDir, result, startedAt, elapsed);
+		return { result, bundleTransport, elapsed };
 	});
-	const bundleTransport = await fetchPlatformArtifactBundle(targetName, warmup.leaseId, result.stdout, config);
-	if (!bundleTransport.ok) result.stderr = `${result.stderr}\n[platform-smoke] ${bundleTransport.error}`.trim();
-	const elapsed = Date.now() - startedAt;
-	writeRedactedFile(resolve(suiteDir, "crabbox.stdout.txt"), result.stdout);
-	writeRedactedFile(resolve(suiteDir, "crabbox.stderr.txt"), result.stderr);
-	writeFileSync(resolve(suiteDir, "crabbox.timing.json"), JSON.stringify({
-		startedAt: new Date(startedAt).toISOString(),
-		elapsedMs: elapsed,
-		code: result.code,
-		signal: result.signal,
-	}, null, 2));
-	writeExitCode(suiteDir, result.code, result.signal);
-
-	let stopResult;
-	if (ownsLease) {
-		console.log(`  stopping lease ${warmup.leaseId}...`);
-		stopResult = await stopLease(targetName, warmup.leaseId, config);
-		writeStopLeaseArtifacts(suiteDir, stopResult);
-	}
+	if (!leased.ok) return leased.warmupFailure;
+	const { value: { result, bundleTransport, elapsed }, stopResult } = leased;
 
 	const bundle = extractPlatformArtifactBundle(suiteDir, bundleTransport.stdout);
 	const liveArtifactDir = resolve(suiteDir, "artifacts");
@@ -621,7 +566,8 @@ async function executeLiveSuite(config, targetName, suiteName, suiteDir, slug, l
 		...(suiteName !== "cursor-abort-cleanup" ? [
 			{ id: "jsonl-usage-non-negative", fn: () => usageChecks.seen && usageChecks.nonNegative },
 		] : []),
-		{ id: "final-marker", fn: () => scenario?.finalMarker ? status?.finalMarkerObserved === true : status?.ok === true },
+		{ id: "final-marker", fn: () => scenario?.finalMarker ? status?.observation === "evidence-observed" : status?.ok === true, error: `live-status.json observation: ${status?.observation ?? "not recorded"}` },
+		{ id: "pi-exit", fn: () => status?.ptyExit?.kind === "exited", error: `live-status.json ptyExit: ${JSON.stringify(status?.ptyExit ?? null)}` },
 		...(suiteName === "cursor-abort-cleanup" ? [{ id: "abort-no-successful-answer", fn: () => !hasAbortSuccessClaim(jsonlRaw) }] : []),
 		{ id: "no-secrets", fn: () => violations.length === 0 },
 		...cardChecks.map((check) => ({ id: check.id, fn: () => check.ok })),

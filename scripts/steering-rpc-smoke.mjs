@@ -10,6 +10,7 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	CHILD_PROCESS_TREE_SPAWN_OPTIONS,
+	describeProcessExit,
 	parseJsonLines,
 	terminateChild,
 	waitForChildClose,
@@ -136,7 +137,9 @@ function hasToolExecutionEnd(events) {
 	return events.some((event) => event.type === "tool_execution_end");
 }
 
-function waitFor(getStdout, predicate, timeoutMs = 300_000) {
+// Polls pi's stdout until one smoke phase is reached. Once pi has exited and closed its output no more
+// events can arrive, so the phase fails with pi's exit instead of polling out the timeout.
+function waitFor(getStdout, predicate, { phase, getExit, getStderr, timeoutMs = 300_000 }) {
 	const start = Date.now();
 	return new Promise((resolve, reject) => {
 		const tick = () => {
@@ -145,10 +148,15 @@ function waitFor(getStdout, predicate, timeoutMs = 300_000) {
 				resolve(events);
 				return;
 			}
+			const exit = getExit();
+			if (exit) {
+				reject(new Error(`pi exited (${describeProcessExit(exit.code, exit.signal)}) before ${phase}\n${smokeOutputTail(getStdout(), getStderr())}`));
+				return;
+			}
 			if (Date.now() - start > timeoutMs) {
 				reject(
 					new Error(
-						`timeout after ${timeoutMs}ms\nassistantText=${assistantText(events)}\nstdoutTail=${getStdout().slice(-4000)}`,
+						`timeout after ${timeoutMs}ms waiting for ${phase}\nassistantText=${assistantText(events)}\n${smokeOutputTail(getStdout(), getStderr())}`,
 					),
 				);
 				return;
@@ -189,6 +197,12 @@ async function runPiRpcSmoke(sessionDir, piBin) {
 	child.stderr.on("data", (chunk) => {
 		stderr += chunk.toString();
 	});
+	// Node emits close after pi exits and its stdio closes, so every output chunk has arrived by then.
+	let piExit;
+	child.once("close", (code, signal) => {
+		piExit = { code, signal };
+	});
+	const phaseOptions = (phase) => ({ phase, getExit: () => piExit, getStderr: () => stderr });
 
 	const send = (obj) => {
 		if (!child.stdin.writable) fail("pi stdin closed before smoke command could be sent");
@@ -205,11 +219,13 @@ async function runPiRpcSmoke(sessionDir, piBin) {
 		await waitFor(
 			() => stdout,
 			(events) => hasToolUseTurn(events),
+			phaseOptions("the tool-use turn"),
 		);
 
 		await waitFor(
 			() => stdout,
 			(events) => hasToolExecutionEnd(events),
+			phaseOptions("the tool execution ended"),
 		);
 
 		send({ type: "steer", message: "and also include STEER_CHAIN=ok in the final answer" });
@@ -220,6 +236,7 @@ async function runPiRpcSmoke(sessionDir, piBin) {
 				const text = assistantText(events);
 				return text.includes("STEER_OK=yes") && text.includes("STEER_CHAIN=ok") && events.some((event) => event.type === "agent_settled");
 			},
+			phaseOptions("agent_settled with STEER_OK=yes and STEER_CHAIN=ok"),
 		);
 
 		const combined = stdout + stderr;
@@ -306,6 +323,16 @@ async function runSelfTest() {
 				// Expected: sealed PATH should keep /usr/bin/env node away from the hostile fake node.
 			}
 			if (fakeNodeUsed) fail("self-test failed: steering child env used hostile fake node");
+			// This fake pi exits 0 before any RPC event: the first phase must fail with that exit at once,
+			// not poll out its 300s timeout.
+			const earlyExit = await Promise.race([
+				runPiRpcSmoke(join(tempDir, "early-exit-session"), fakePi).then(
+					() => "resolved",
+					(error) => (error instanceof Error ? error.message : String(error)),
+				),
+				new Promise((resolve) => setTimeout(() => resolve("still polling after 10000ms"), 10_000).unref()),
+			]);
+			if (!earlyExit.startsWith("pi exited (exit code 0) before the tool-use turn")) fail(`self-test failed: early pi exit should fail the first phase with that exit: ${earlyExit}`);
 			const hangingChild = new EventEmitter();
 			hangingChild.exitCode = null;
 			hangingChild.signalCode = null;

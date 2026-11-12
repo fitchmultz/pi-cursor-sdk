@@ -80,17 +80,17 @@ smoke_build_cursor_sdk_event_debug_unsets() {
 	done
 }
 
-# Run a command with a wall-clock timeout. Prefer GNU/BSD timeout; fall back to a
-# process-group kill watcher with TERM then KILL (same semantics as tmux live smoke).
+# Run a command with a wall-clock timeout: TERM, then KILL after SMOKE_KILL_GRACE_SECS if the
+# command is still running. Prefer GNU/BSD timeout; fall back to a process-group kill watcher.
 smoke_run_with_timeout() {
 	local timeout_secs="$1"
 	shift
 	if command -v timeout >/dev/null 2>&1; then
-		timeout "$timeout_secs" "$@"
+		timeout -k "$SMOKE_KILL_GRACE_SECS" "$timeout_secs" "$@"
 		return $?
 	fi
 	if command -v gtimeout >/dev/null 2>&1; then
-		gtimeout "$timeout_secs" "$@"
+		gtimeout -k "$SMOKE_KILL_GRACE_SECS" "$timeout_secs" "$@"
 		return $?
 	fi
 
@@ -118,7 +118,8 @@ smoke_run_with_timeout() {
 	else
 		code=$?
 	fi
-	kill "$watcher" 2>/dev/null || true
+	# Under set -m the watcher leads its own process group; kill the group so its sleep goes too.
+	kill -- "-$watcher" 2>/dev/null || kill "$watcher" 2>/dev/null || true
 	wait "$watcher" 2>/dev/null || true
 	if (( restore_monitor )); then
 		set +m

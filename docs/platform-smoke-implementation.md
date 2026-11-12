@@ -69,6 +69,7 @@ Each suite produces `assertions.json` with `ok`, `checks`, and an ISO timestamp 
   "ok": true,
   "checks": [
     { "id": "final-marker", "ok": true },
+    { "id": "pi-exit", "ok": true },
     { "id": "card-read", "ok": true },
     { "id": "jsonl-read", "ok": true }
   ],

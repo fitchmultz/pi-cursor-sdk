@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -78,6 +78,33 @@ describe("smoke CLI and package contracts", () => {
 			]);
 			expect(failedCommand.status).toBe(1);
 			expect(failedCommand.stderr).toContain("repro exited 42");
+
+			// TERM at 1s, KILL after the 2s grace: a command that ignores TERM cannot run to its own 20s end.
+			const termIgnoredStartedAt = Date.now();
+			const termIgnored = run("bash", [
+				"-c",
+				". scripts/lib/cursor-smoke-shell.sh; smoke_run_with_timeout_or_fail stuck 1 bash -c 'trap \"\" TERM; for i in $(seq 100); do sleep 0.2; done'",
+			]);
+			expect(termIgnored.status).toBe(1);
+			expect(termIgnored.stderr).toContain("stuck timed out after 1s");
+			expect(Date.now() - termIgnoredStartedAt).toBeLessThan(10_000);
+
+			// Without timeout/gtimeout on PATH, the fallback watcher's own sleep must not outlive the command.
+			const fallbackBin = mkdtempSync(join(tmpdir(), "smoke-shell-fallback-"));
+			try {
+				for (const tool of ["bash", "sleep"]) symlinkSync(run("bash", ["-c", `command -v ${tool}`]).stdout.trim(), join(fallbackBin, tool));
+				const fallback = run("bash", ["-c", ". scripts/lib/cursor-smoke-shell.sh; smoke_run_with_timeout 4097 bash -c 'exit 5' >/dev/null 2>&1; echo \"rc=$?\""], { PATH: fallbackBin });
+				expect(fallback.stdout.trim()).toBe("rc=5");
+				let leftoverWatcherSleep = "";
+				for (const deadline = Date.now() + 2_000; Date.now() < deadline; ) {
+					leftoverWatcherSleep = run("pgrep", ["-f", "^sleep 4097$"]).stdout.trim();
+					if (!leftoverWatcherSleep) break;
+				}
+				expect(leftoverWatcherSleep).toBe("");
+			} finally {
+				run("pkill", ["-f", "^sleep 4097$"]);
+				rmSync(fallbackBin, { recursive: true, force: true });
+			}
 		}
 
 		if (process.platform !== "win32") {

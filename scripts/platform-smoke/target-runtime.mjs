@@ -18,7 +18,7 @@ import {
 	writeSummary,
 } from "./artifacts.mjs";
 import { runAssertions } from "./assertions.mjs";
-import { runOnLease } from "./crabbox-runner.mjs";
+import { runOnLease, stopLease, warmupLease } from "./crabbox-runner.mjs";
 
 export function platformFor(targetName) {
 	return targetName === "windows-native" ? "powershell" : "posix";
@@ -78,6 +78,19 @@ export function writeRedactedFile(path, content) {
 	writeFileSync(path, redactSecrets(content ?? ""));
 }
 
+/** Writes a suite run's redacted stdout and stderr, its timing and its exit code to suiteDir, in that order. */
+export function writeSuiteRunArtifacts(suiteDir, result, startedAt, elapsed) {
+	writeRedactedFile(resolve(suiteDir, "crabbox.stdout.txt"), result.stdout);
+	writeRedactedFile(resolve(suiteDir, "crabbox.stderr.txt"), result.stderr);
+	writeFileSync(resolve(suiteDir, "crabbox.timing.json"), JSON.stringify({
+		startedAt: new Date(startedAt).toISOString(),
+		elapsedMs: elapsed,
+		code: result.code,
+		signal: result.signal,
+	}, null, 2));
+	writeExitCode(suiteDir, result.code, result.signal);
+}
+
 export function writeStopLeaseArtifacts(suiteDir, stopResult) {
 	writeRedactedFile(
 		resolve(suiteDir, "crabbox.stop.stdout.txt"),
@@ -99,6 +112,65 @@ export function stopLeaseCheck(stopResult) {
 		fn: () => stopResult?.code === 0,
 		error: `Crabbox stop failed (exit ${stopResult?.code ?? "unknown"}); check crabbox.stop.stderr.txt`,
 	};
+}
+
+function errorMessage(error) {
+	return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Stops an owned lease once and records the stop result with `record`. If recording throws, the
+ * thrown error gives the stop's exit code and signal, with the write error as its cause.
+ * Returns the stop result.
+ */
+export async function stopOwnedLease(targetName, leaseId, config, record) {
+	console.log(`  stopping lease ${leaseId}...`);
+	const stopResult = await stopLease(targetName, leaseId, config);
+	try {
+		record(stopResult);
+	} catch (writeError) {
+		const stopped = `Crabbox stop exited ${stopResult.code} (signal ${stopResult.signal ?? "none"})`;
+		throw new Error(`${stopped} but writing its stop artifacts failed: ${errorMessage(writeError)}`, { cause: writeError });
+	}
+	return stopResult;
+}
+
+/**
+ * Stops an owned lease with `stop` after its suite threw, and returns the error to throw: the suite
+ * error unchanged, or a SuppressedError carrying the cleanup failure (`error`) and the suite error
+ * (`suppressed`) when the stop fails or recording it throws.
+ */
+export async function stopAfterSuiteError(suiteError, leaseId, stop) {
+	try {
+		const stopResult = await stop();
+		if (stopResult.code === 0) return suiteError;
+		throw new Error(stopLeaseCheck(stopResult).error);
+	} catch (cleanupError) {
+		const message = `${errorMessage(suiteError)}; lease ${leaseId} cleanup or evidence capture also failed: ${errorMessage(cleanupError)}`;
+		return new SuppressedError(cleanupError, suiteError, message);
+	}
+}
+
+/**
+ * Runs a suite's lease-bound work. A caller's lease session is borrowed; its owner stops it.
+ * Otherwise this warms an owned lease and stops it once `useLease` returns or throws, writing
+ * the stop artifacts to suiteDir (see stopOwnedLease and stopAfterSuiteError for failures).
+ * Returns `{ ok: false, warmupFailure }` (a failed suite result) or `{ ok: true, value, stopResult }`;
+ * only an owned lease has a stopResult.
+ */
+export async function withTargetLease({ config, targetName, suiteName, suiteDir, slug, leaseSession }, useLease) {
+	if (leaseSession) return { ok: true, value: await useLease(leaseSession) };
+	console.log(`  warmup ${targetName}...`);
+	const lease = await warmupLease(targetName, slug, config);
+	if (!lease.ok) return { ok: false, warmupFailure: failWarmup(suiteDir, targetName, suiteName, lease) };
+	const stop = () => stopOwnedLease(targetName, lease.leaseId, config, (stopResult) => writeStopLeaseArtifacts(suiteDir, stopResult));
+	let value;
+	try {
+		value = await useLease(lease);
+	} catch (suiteError) {
+		throw await stopAfterSuiteError(suiteError, lease.leaseId, stop);
+	}
+	return { ok: true, value, stopResult: await stop() };
 }
 
 /** Runs a suite command with Crabbox's full-stdout capture under suiteDir, retrying one transient SSH failure without sync. */
@@ -226,4 +298,12 @@ export function failSuite(suiteDir, targetName, suiteName, message) {
 	);
 
 	return { ok: false, suiteDir, assertions };
+}
+
+/** Fails a suite after a failed Crabbox warmup: keeps its redacted output in suiteDir and reports its exit code and stderr tail. */
+export function failWarmup(suiteDir, targetName, suiteName, warmup) {
+	writeExitCode(suiteDir, warmup.code, warmup.signal);
+	writeRedactedFile(resolve(suiteDir, "crabbox.warmup.stdout.txt"), warmup.stdout);
+	writeRedactedFile(resolve(suiteDir, "crabbox.warmup.stderr.txt"), warmup.stderr);
+	return failSuite(suiteDir, targetName, suiteName, `Crabbox warmup failed (exit ${warmup.code}): ${warmup.stderr.slice(-500)}`);
 }

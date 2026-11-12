@@ -13,7 +13,6 @@ type CursorHttp1Sdk = {
 	Cursor: Pick<CursorSdkModule["Cursor"], "configure">;
 };
 
-let globalPreferenceAuthoritative = false;
 const CONFIGURED_CURSOR_KEY = Symbol.for("pi-cursor-sdk.http1-configuration.v1");
 type Http1Configuration = { cursor?: CursorHttp1Sdk["Cursor"] };
 // `cursor` is the SDK handle holding an extension-set `useHttp1ForAgent`; absent means the SDK default.
@@ -37,11 +36,11 @@ export function setStoredCursorHttp1Enabled(enabled: boolean | undefined, scopeK
 }
 
 export function getResolvedSessionCursorHttp1Enabled(scopeKey?: string): boolean | undefined {
-	return globalPreferenceAuthoritative ? undefined : getStoredCursorHttp1Enabled(scopeKey);
+	return getCursorSessionSettings(scopeKey).http1GlobalOnly ? undefined : getStoredCursorHttp1Enabled(scopeKey);
 }
 
-export function setCursorHttp1GlobalPreferenceAuthoritative(authoritative: boolean): void {
-	globalPreferenceAuthoritative = authoritative;
+export function setCursorHttp1GlobalPreferenceAuthoritative(authoritative: boolean, scopeKey?: string): void {
+	getCursorSessionSettings(scopeKey).http1GlobalOnly = authoritative;
 }
 
 export function clearCursorSdkHttp1(): void {
@@ -66,7 +65,7 @@ export function configureCursorSdkHttp1(
 export const __testUtils = {
 	reset(): void {
 		setStoredCursorHttp1Enabled(undefined);
-		globalPreferenceAuthoritative = false;
+		setCursorHttp1GlobalPreferenceAuthoritative(false);
 		configuration.cursor = undefined;
 	},
 };

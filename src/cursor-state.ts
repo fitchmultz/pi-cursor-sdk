@@ -8,7 +8,6 @@ import {
 import { runCursorSessionAgentCleanupCommand } from "./cursor-session-agent-cleanup.js";
 import {
 	CURSOR_HTTP1_ENTRY_TYPE,
-	getStoredCursorHttp1Enabled,
 	isCursorHttp1EntryData,
 	setCursorHttp1GlobalPreferenceAuthoritative,
 	setStoredCursorHttp1Enabled,
@@ -31,7 +30,14 @@ import { isCursorModel } from "./cursor-model.js";
 import { registerCursorModelLifecycle } from "./cursor-model-lifecycle.js";
 import { asRecord } from "./cursor-record-utils.js";
 import { getCursorSessionScopeSnapshot, getCursorSessionScopeKey } from "./cursor-session-scope.js";
-import { cursorSettingsScopeForContext, getCursorSessionSettings, registerCursorSessionSettings, resetCursorSessionSettingsForTests } from "./cursor-session-settings.js";
+import {
+	cursorSettingsScopeForContext,
+	getCursorSessionSettings,
+	registerCursorSessionSettings,
+	resetCursorSessionSettingsForTests,
+	saveCursorPreference,
+	type CursorPreferenceSaveOutcome,
+} from "./cursor-session-settings.js";
 import { refreshSessionCursorAgentConfig } from "./cursor-session-agent.js";
 import { getCursorModelMetadata } from "./model-discovery.js";
 import {
@@ -75,7 +81,6 @@ type CursorRuntimeControlsExtensionApi = Pick<
 	"appendEntry" | "getFlag" | "registerFlag" | "registerCommand" | "on" | "getActiveTools" | "getAllTools"
 > & CursorRuntimeStateExtensionApi;
 
-const authoritativeGlobalFastPreferenceIds = new Set<string>();
 let globalFastPreferences = new Map<string, boolean>();
 
 function isCursorAgentMode(value: unknown): value is AgentModeOption {
@@ -191,16 +196,17 @@ function getMapFastPreference(
 }
 
 function getEffectiveFast(modelId: string, scopeKey?: string): boolean | undefined {
-	const { forceNoFast: cliForceNoFast, forceFast: cliForceFast } = getCursorSessionSettings(scopeKey).cli;
+	const settings = getCursorSessionSettings(scopeKey);
+	const { forceNoFast: cliForceNoFast, forceFast: cliForceFast } = settings.cli;
 	const metadata = getCursorModelMetadata(modelId);
 	if (!metadata?.supportsFast) return undefined;
 	return resolveCursorFastDefault({
 		cliForceNoFast,
 		cliForceFast,
 		aliasOverride: metadata.fastOverride,
-		sessionValue: authoritativeGlobalFastPreferenceIds.has(getFastPreferenceModelId(metadata))
+		sessionValue: settings.fastGlobalOnly.has(getFastPreferenceModelId(metadata))
 			? undefined
-			: getMapFastPreference(getCursorSessionSettings(scopeKey).fast, metadata),
+			: getMapFastPreference(settings.fast, metadata),
 		userValue: getMapFastPreference(globalFastPreferences, metadata),
 		modelDefault: metadata.defaultFast,
 	}).value;
@@ -265,40 +271,24 @@ function getCurrentCursorMetadata(ctx: Pick<ExtensionContext, "model">) {
 	return getCursorModelMetadata(model.id);
 }
 
-function restoreMapValue(map: Map<string, boolean>, key: string, previous: boolean | undefined): void {
-	if (previous === undefined) {
-		map.delete(key);
-	} else {
-		map.set(key, previous);
-	}
-}
-
 function persistFastPreference(
 	pi: Pick<ExtensionAPI, "appendEntry">,
 	modelId: string,
 	fast: boolean,
 	scopeKey: string | undefined,
-): unknown | undefined {
-	const sessionFastPreferences = getCursorSessionSettings(scopeKey).fast;
-	const previousSession = sessionFastPreferences.get(modelId);
-	const previousGlobal = globalFastPreferences.get(modelId);
-	sessionFastPreferences.set(modelId, fast);
+): CursorPreferenceSaveOutcome {
+	const outcome = saveCursorPreference({
+		config: () => saveGlobalFastPreference(modelId, fast),
+		branch: () => pi.appendEntry<CursorFastEntryData>(FAST_ENTRY_TYPE, { modelId, fast }),
+	});
+	if (outcome.kind === "failed") return outcome;
+	const settings = getCursorSessionSettings(scopeKey);
+	// Base-model writes remain an alias session fallback; globalOnly only masks the saved model ID.
+	settings.fast.set(modelId, fast);
 	globalFastPreferences.set(modelId, fast);
-	try {
-		saveGlobalFastPreference(modelId, fast);
-	} catch (error) {
-		restoreMapValue(sessionFastPreferences, modelId, previousSession);
-		restoreMapValue(globalFastPreferences, modelId, previousGlobal);
-		throw error;
-	}
-	try {
-		pi.appendEntry<CursorFastEntryData>(FAST_ENTRY_TYPE, { modelId, fast });
-		authoritativeGlobalFastPreferenceIds.delete(modelId);
-		return undefined;
-	} catch (error) {
-		authoritativeGlobalFastPreferenceIds.add(modelId);
-		return error;
-	}
+	if (outcome.kind === "globalOnly") settings.fastGlobalOnly.add(modelId);
+	else settings.fastGlobalOnly.delete(modelId);
+	return outcome;
 }
 
 function persistCursorModePreference(pi: Pick<ExtensionAPI, "appendEntry">, mode: AgentModeOption, scopeKey: string | undefined): void {
@@ -317,23 +307,15 @@ function persistCursorHttp1Preference(
 	pi: Pick<ExtensionAPI, "appendEntry">,
 	enabled: boolean,
 	scopeKey: string | undefined,
-): unknown | undefined {
-	const previousSession = getStoredCursorHttp1Enabled(scopeKey);
-	setStoredCursorHttp1Enabled(enabled, scopeKey);
-	try {
-		saveGlobalCursorHttp1Enabled(enabled);
-	} catch (error) {
-		setStoredCursorHttp1Enabled(previousSession, scopeKey);
-		throw error;
-	}
-	try {
-		pi.appendEntry<CursorHttp1EntryData>(CURSOR_HTTP1_ENTRY_TYPE, { enabled });
-		setCursorHttp1GlobalPreferenceAuthoritative(false);
-		return undefined;
-	} catch (error) {
-		setCursorHttp1GlobalPreferenceAuthoritative(true);
-		return error;
-	}
+): CursorPreferenceSaveOutcome {
+	const outcome = saveCursorPreference({
+		config: () => saveGlobalCursorHttp1Enabled(enabled),
+		branch: () => pi.appendEntry<CursorHttp1EntryData>(CURSOR_HTTP1_ENTRY_TYPE, { enabled }),
+	});
+	if (outcome.kind === "failed") return outcome;
+	if (outcome.kind === "saved") setStoredCursorHttp1Enabled(enabled, scopeKey);
+	setCursorHttp1GlobalPreferenceAuthoritative(outcome.kind === "globalOnly", scopeKey);
+	return outcome;
 }
 
 function restoreCliCursorMode(raw: boolean | string | undefined, scopeKey?: string): void {
@@ -480,23 +462,26 @@ export function registerCursorRuntimeControls(pi: CursorRuntimeControlsExtension
 			const preferenceModelId = getFastPreferenceModelId(metadata);
 			const current = getEffectiveFast(metadata.piModelId, cursorSettingsScopeForContext(ctx)) ?? false;
 			const next = !current;
-			let appendError: unknown;
-			try {
-				appendError = persistFastPreference(pi, preferenceModelId, next, cursorSettingsScopeForContext(ctx));
-			} catch (error) {
-				updateCursorStatus(ctx);
-				ctx.ui.notify(`Failed to save Cursor fast preference: ${error instanceof Error ? error.message : String(error)}`, "error");
-				return;
-			}
+			const outcome = persistFastPreference(pi, preferenceModelId, next, cursorSettingsScopeForContext(ctx));
 			updateCursorStatus(ctx);
-			if (appendError !== undefined) {
-				ctx.ui.notify(
-					`Cursor fast ${next ? "enabled" : "disabled"} was saved globally, but persisting the session entry failed: ${appendError instanceof Error ? appendError.message : String(appendError)}`,
-					"error",
-				);
-				return;
+			switch (outcome.kind) {
+				case "saved":
+					ctx.ui.notify(`Cursor fast ${next ? "enabled" : "disabled"}`, "info");
+					return;
+				case "globalOnly":
+					ctx.ui.notify(
+						`Cursor fast ${next ? "enabled" : "disabled"} was saved globally, but persisting the session entry failed: ${outcome.error instanceof Error ? outcome.error.message : String(outcome.error)}`,
+						"error",
+					);
+					return;
+				case "failed":
+					ctx.ui.notify(`Failed to save Cursor fast preference: ${outcome.error instanceof Error ? outcome.error.message : String(outcome.error)}`, "error");
+					return;
+				default: {
+					const _exhaustive: never = outcome;
+					return _exhaustive;
+				}
 			}
-			ctx.ui.notify(`Cursor fast ${next ? "enabled" : "disabled"}`, "info");
 		},
 	});
 
@@ -539,29 +524,32 @@ export function registerCursorRuntimeControls(pi: CursorRuntimeControlsExtension
 				);
 				return;
 			}
-			let appendError: unknown;
-			try {
-				appendError = persistCursorHttp1Preference(pi, next, cursorSettingsScopeForContext(ctx));
-			} catch (error) {
-				updateCursorStatus(ctx);
-				ctx.ui.notify(
-					`Failed to save Cursor HTTP/1.1 preference: ${error instanceof Error ? error.message : String(error)}`,
-					"error",
-				);
-				return;
-			}
+			const outcome = persistCursorHttp1Preference(pi, next, cursorSettingsScopeForContext(ctx));
 			updateCursorStatus(ctx);
-			if (appendError !== undefined) {
-				ctx.ui.notify(
-					`Cursor HTTP/1.1 preference was saved globally, but persisting the session entry failed: ${appendError instanceof Error ? appendError.message : String(appendError)}`,
-					"error",
-				);
-				return;
+			switch (outcome.kind) {
+				case "saved":
+					ctx.ui.notify(
+						`Cursor HTTP/1.1/SSE transport ${next ? "enabled" : "disabled"}`,
+						"info",
+					);
+					return;
+				case "globalOnly":
+					ctx.ui.notify(
+						`Cursor HTTP/1.1 preference was saved globally, but persisting the session entry failed: ${outcome.error instanceof Error ? outcome.error.message : String(outcome.error)}`,
+						"error",
+					);
+					return;
+				case "failed":
+					ctx.ui.notify(
+						`Failed to save Cursor HTTP/1.1 preference: ${outcome.error instanceof Error ? outcome.error.message : String(outcome.error)}`,
+						"error",
+					);
+					return;
+				default: {
+					const _exhaustive: never = outcome;
+					return _exhaustive;
+				}
 			}
-			ctx.ui.notify(
-				`Cursor HTTP/1.1/SSE transport ${next ? "enabled" : "disabled"}`,
-				"info",
-			);
 		},
 	});
 
@@ -645,8 +633,6 @@ export function registerCursorRuntimeControls(pi: CursorRuntimeControlsExtension
 
 	registerCursorModelLifecycle(pi, {
 		sessionStart: (_event, ctx) => {
-			authoritativeGlobalFastPreferenceIds.clear();
-			setCursorHttp1GlobalPreferenceAuthoritative(false);
 			globalFastPreferences = loadGlobalFastPreferences();
 			const scopeKey = cursorSettingsScopeForContext(ctx);
 			const cli = getCursorSessionSettings(scopeKey).cli;
@@ -665,11 +651,9 @@ export function registerCursorRuntimeControls(pi: CursorRuntimeControlsExtension
 
 function resetCursorModeStateForTests(): void {
 	resetCursorSessionSettingsForTests();
-	setCursorHttp1GlobalPreferenceAuthoritative(false);
 	setStoredCursorHttp1Enabled(undefined);
 	getCursorSessionSettings().cli.mode = { kind: "unset" };
 	resetCursorRuntimeStateForTests();
-	authoritativeGlobalFastPreferenceIds.clear();
 }
 
 export const __testUtils = {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, realpath, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { join, toNamespacedPath } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
@@ -551,5 +551,44 @@ test("cursor-abort explicitly aborts an active owning Pi turn while releasing it
     assert.ok(state.cancelled.includes(held.runId));
     assert.equal(state.sends.length, beforeSends + 1, "command must not continue into an automatic replacement send");
     assert.equal(owner.session.messages.at(-1).stopReason, "aborted");
+  });
+});
+
+test("a failed journal append keeps saved global fast and HTTP authority owned by that session", { timeout: 60000 }, async (t) => {
+  await concurrentFixture(t, async ({ create }) => {
+    const preferences = [["cursor-fast-state", { modelId: "fixture", fast: true }], ["cursor-http1-state", { enabled: true }]];
+    const a = await create("authority-A", { preferences });
+    const b = await create("authority-B", { preferences });
+    await a.session.prompt("A journal exists before the failed append");
+    const journal = a.manager.getSessionFile();
+    // A directory at the journal path makes Pi's real appendEntry fail after the user config write.
+    await rename(journal, `${journal}.held`);
+    await mkdir(journal);
+    try {
+      await a.session.prompt("/cursor-fast");
+      await a.session.prompt("/cursor-http off");
+    } finally {
+      await rm(journal, { recursive: true });
+      await rename(`${journal}.held`, journal);
+    }
+    assert.deepEqual(JSON.parse(await readFile(join(process.env.PI_CODING_AGENT_DIR, "cursor-sdk.json"), "utf8")),
+      { fastDefaults: { fixture: false }, local: { useHttp1ForAgent: false } });
+    assert.doesNotMatch(await readFile(journal, "utf8"), /"fast":false|"enabled":false/);
+    const lastSend = () => ({
+      fast: state.created.find((entry) => entry.agentId === state.sends.at(-1).agentId).options.model.params.find((parameter) => parameter.id === "fast").value,
+      transport: state.configured.at(-1),
+    });
+    await b.session.prompt("B keeps its own branch preferences");
+    const sibling = lastSend();
+    await create("authority-C");
+    const firstRequest = a.manager.getEntries().find((entry) => entry.type === "message" && entry.message.role === "user").id;
+    await a.session.navigateTree(firstRequest, { summarize: false });
+    await a.session.prompt("A keeps its saved global preferences after branch restore");
+    assert.equal(a.session.messages.at(-1).stopReason, "stop", a.session.messages.at(-1).errorMessage);
+    assert.deepEqual({ sibling, owner: lastSend() }, {
+      sibling: { fast: "true", transport: { local: { useHttp1ForAgent: true } } },
+      owner: { fast: "false", transport: { local: { useHttp1ForAgent: false } } },
+    });
+    await retainNativeEvidence("preference-authority-owner", a.manager, a.cwd);
   });
 });

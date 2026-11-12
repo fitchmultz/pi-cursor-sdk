@@ -37,7 +37,12 @@ import {
 import { asRecord } from "./cursor-record-utils.js";
 import { getResolvedSessionCursorHttp1Enabled } from "./cursor-http1.js";
 import { getCursorSessionScopeSnapshot } from "./cursor-session-scope.js";
-import { cursorSettingsScopeForContext, getCursorSessionSettings } from "./cursor-session-settings.js";
+import {
+	cursorSettingsScopeForContext,
+	getCursorSessionSettings,
+	saveCursorPreference,
+	type CursorPreferenceSaveOutcome,
+} from "./cursor-session-settings.js";
 
 const CURSOR_RUNTIME_ENTRY_TYPE = "cursor-runtime-state";
 
@@ -64,7 +69,8 @@ type CursorRuntimeContext = Pick<ExtensionContext, "cwd"> & Partial<Pick<Extensi
 
 type CursorStatusRefresh = (ctx: ExtensionContext) => void;
 
-
+// PI_CURSOR_LOCAL_FORCE is one-shot per extension module instance, independent of each CLI owner's
+// --cursor-local-force. The variable stays configured after consumption; only sends stop forcing.
 let envLocalForceConsumed = false;
 
 function isCursorRuntimeEntryData(value: unknown): value is CursorRuntimeEntryData {
@@ -83,6 +89,7 @@ export function getCursorCliConfig(scopeKey?: string): CursorExplicitSdkConfig {
 	const config = structuredClone(cli.config);
 	const envNames = parseExplicitCursorCloudEnvNames(cli.cloudEnvNames, "--cursor-cloud-env");
 	if (envNames) config.cloud = { ...config.cloud, envNames };
+	if (cli.localForce === "armed") config.local = { ...config.local, force: true };
 	return config;
 }
 
@@ -167,13 +174,10 @@ export function formatCursorStatus(
 
 export function consumeCursorLocalForceOverride(resolved: { value: boolean; source: string }, scopeKey?: string): boolean {
 	if (!resolved.value) return false;
-	const cli = getCursorSessionSettings(scopeKey).cli;
-	if (resolved.source === "cli" && !cli.localForceConsumed) {
-		if (cli.config.local) {
-			const { force: _, ...local } = cli.config.local;
-			cli.config.local = local;
-		}
-		cli.localForceConsumed = true;
+	if (resolved.source === "cli") {
+		const cli = getCursorSessionSettings(scopeKey).cli;
+		if (cli.localForce !== "armed") return false;
+		cli.localForce = "consumed";
 		return true;
 	}
 	if (resolved.source === "environment" && !envLocalForceConsumed) {
@@ -222,7 +226,6 @@ export function restoreCursorCliState(pi: Pick<ExtensionAPI, "getFlag">, scopeKe
 	const local: NonNullable<CursorExplicitSdkConfig["local"]> = {
 		...(pi.getFlag("cursor-auto-review") === true ? { autoReview: true } : {}),
 		...(pi.getFlag("cursor-sandbox") === true ? { sandboxOptions: { enabled: true } } : {}),
-		...(!cli.localForceConsumed && pi.getFlag("cursor-local-force") === true ? { force: true } : {}),
 		...(pi.getFlag("cursor-no-local-resume") === true
 			? { resume: false }
 			: pi.getFlag("cursor-local-resume") === true
@@ -235,6 +238,7 @@ export function restoreCursorCliState(pi: Pick<ExtensionAPI, "getFlag">, scopeKe
 		...(Object.keys(local).length ? { local } : {}),
 	};
 	cli.cloudEnvNames = cloudEnvNames;
+	if (cli.localForce !== "consumed") cli.localForce = pi.getFlag("cursor-local-force") === true ? "armed" : "notRequested";
 }
 
 function persistCursorRuntimePreference(
@@ -242,15 +246,23 @@ function persistCursorRuntimePreference(
 	runtime: CursorRuntime,
 	cloudAcknowledged: boolean,
 	scopeKey: string | undefined,
-): void {
+	saveConfig: (() => void) | undefined,
+): CursorPreferenceSaveOutcome {
 	const state = getCursorSessionSettings(scopeKey);
 	const acknowledged = state.cloudAcknowledged || cloudAcknowledged;
-	pi.appendEntry<CursorRuntimeEntryData>(CURSOR_RUNTIME_ENTRY_TYPE, {
-		runtime,
-		...(acknowledged ? { cloudAcknowledged: true } : {}),
+	const outcome = saveCursorPreference({
+		config: saveConfig,
+		branch: () => pi.appendEntry<CursorRuntimeEntryData>(CURSOR_RUNTIME_ENTRY_TYPE, {
+			runtime,
+			...(acknowledged ? { cloudAcknowledged: true } : {}),
+		}),
 	});
-	state.runtime = runtime;
-	state.cloudAcknowledged = acknowledged;
+	// Only the branch entry changes this session's runtime; a saved user/project config applies by precedence.
+	if (outcome.kind === "saved") {
+		state.runtime = runtime;
+		state.cloudAcknowledged = acknowledged;
+	}
+	return outcome;
 }
 
 function registerCursorRuntimeFlags(pi: Pick<ExtensionAPI, "registerFlag">): void {
@@ -407,71 +419,63 @@ function registerCursorRuntimeCommand(
 				resolveEffectiveCursorConfigForContext(ctx).cloud.acknowledged.value,
 			);
 			if (raw === "cloud" && !cloudAcknowledged) return;
-			if (saveUser || saveProject) {
-				try {
-					if (saveUser) {
-						updateCursorSdkConfig(
-							getCursorSdkUserConfigPath(),
-							(current) => mergeCursorSdkConfigForUpdate(current, {
-								runtime: raw,
-								...(cloudAcknowledged ? { cloud: { acknowledged: true } } : {}),
-							}),
-							{ newFileMode: 0o600 },
-						);
-					} else {
-						updateCursorSdkConfig(
-							getCursorSdkProjectConfigPath(ctx.cwd),
-							(current) => mergeCursorSdkConfigForUpdate(current, { runtime: raw }),
-						);
-					}
-				} catch (error) {
-					const effectiveResolution = resolveCursorStatusRuntime(ctx);
-					refreshStatus(ctx);
-					const effective = effectiveResolution.kind === "valid"
-						? ` Effective runtime remains ${formatResolvedCursorRuntime(effectiveResolution.runtime)}.`
-						: ` ${effectiveResolution.message}`;
+			const saveConfig = saveUser
+				? () => updateCursorSdkConfig(
+					getCursorSdkUserConfigPath(),
+					(current) => mergeCursorSdkConfigForUpdate(current, {
+						runtime: raw,
+						...(cloudAcknowledged ? { cloud: { acknowledged: true } } : {}),
+					}),
+					{ newFileMode: 0o600 },
+				)
+				: saveProject
+					? () => updateCursorSdkConfig(
+						getCursorSdkProjectConfigPath(ctx.cwd),
+						(current) => mergeCursorSdkConfigForUpdate(current, { runtime: raw }),
+					)
+					: undefined;
+			const outcome = persistCursorRuntimePreference(pi, raw, cloudAcknowledged, scopeKey, saveConfig);
+			const effectiveResolution = resolveCursorStatusRuntime(ctx);
+			refreshStatus(ctx);
+			const effective = (verb: "is" | "remains") => effectiveResolution.kind === "valid"
+				? ` Effective runtime ${verb} ${formatResolvedCursorRuntime(effectiveResolution.runtime)}.`
+				: ` ${effectiveResolution.message}`;
+			switch (outcome.kind) {
+				case "failed": {
+					const reason = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
 					ctx.ui.notify(
-						`Failed to save Cursor runtime preference to ${saveUser ? "user" : "project"} config: ${error instanceof Error ? error.message : String(error)}.${effective}`,
+						saveConfig
+							? `Failed to save Cursor runtime preference to ${saveUser ? "user" : "project"} config: ${reason}.${effective("remains")}`
+							: `Persisting the session runtime entry failed. ${reason}.${effective("is")}`,
 						"error",
 					);
 					return;
 				}
+				case "globalOnly":
+					ctx.ui.notify(
+						`${saveUser ? "User" : "Project"} config was saved, but persisting the session runtime entry failed. ${outcome.error instanceof Error ? outcome.error.message : String(outcome.error)}.${effective("is")}`,
+						"error",
+					);
+					return;
+				case "saved": {
+					const saved = saveUser
+						? " Saved to user config."
+						: saveProject
+							? " Saved to project config; cloud acknowledgement remains session/user-scoped."
+							: "";
+					ctx.ui.notify(
+						raw === "cloud"
+							? `Cursor runtime request saved for this session and cloud risk acknowledged.${effective("is")}${saved}`
+							: `Cursor runtime request saved for this session.${effective("is")}${saved}`,
+						"info",
+					);
+					return;
+				}
+				default: {
+					const _exhaustive: never = outcome;
+					return _exhaustive;
+				}
 			}
-			try {
-				persistCursorRuntimePreference(pi, raw, cloudAcknowledged, scopeKey);
-			} catch (error) {
-				const effectiveResolution = resolveCursorStatusRuntime(ctx);
-				refreshStatus(ctx);
-				const effective = effectiveResolution.kind === "valid"
-					? ` Effective runtime is ${formatResolvedCursorRuntime(effectiveResolution.runtime)}.`
-					: ` ${effectiveResolution.message}`;
-				const persisted = saveUser
-					? "User config was saved, but persisting the session runtime entry failed."
-					: saveProject
-						? "Project config was saved, but persisting the session runtime entry failed."
-						: "Persisting the session runtime entry failed.";
-				ctx.ui.notify(
-					`${persisted} ${error instanceof Error ? error.message : String(error)}.${effective}`,
-					"error",
-				);
-				return;
-			}
-			const effectiveResolution = resolveCursorStatusRuntime(ctx);
-			refreshStatus(ctx);
-			const saved = saveUser
-				? " Saved to user config."
-				: saveProject
-					? " Saved to project config; cloud acknowledgement remains session/user-scoped."
-					: "";
-			const effective = effectiveResolution.kind === "valid"
-				? ` Effective runtime is ${formatResolvedCursorRuntime(effectiveResolution.runtime)}.`
-				: ` ${effectiveResolution.message}`;
-			ctx.ui.notify(
-				raw === "cloud"
-					? `Cursor runtime request saved for this session and cloud risk acknowledged.${effective}${saved}`
-					: `Cursor runtime request saved for this session.${effective}${saved}`,
-				"info",
-			);
 		},
 	});
 }
@@ -495,7 +499,7 @@ export function resetCursorRuntimeStateForTests(): void {
 	const cli = getCursorSessionSettings().cli;
 	cli.config = {};
 	cli.cloudEnvNames = undefined;
-	cli.localForceConsumed = false;
+	cli.localForce = "notRequested";
 	envLocalForceConsumed = false;
 	getCursorSessionSettings().runtime = undefined;
 	getCursorSessionSettings().cloudAcknowledged = false;

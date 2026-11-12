@@ -555,9 +555,15 @@ describe("Cursor cloud lifecycle ledger", () => {
 			await pi.runCommand("cursor-cloud", `archive ${cloudAgentId(1)}`, { cwd: tempDir, sessionManager });
 			await pi.runCommand("cursor-cloud", `delete ${cloudAgentId(2)} --yes`, { cwd: tempDir, sessionManager });
 			await pi.runCommand("cursor-cloud", `archive ${cloudAgentId(2)}`, { cwd: tempDir, sessionManager });
+			// Agent 3's archive result is durable; its later delete result is not.
+			await pi.runCommand("cursor-cloud", `delete ${cloudAgentId(3)} --yes`, { cwd: tempDir, sessionManager });
+			await pi.runCommand("cursor-cloud", `delete ${cloudAgentId(3)} --yes`, { cwd: tempDir, sessionManager });
+			const notify = vi.fn();
+			await pi.runCommand("cursor-cloud", "list", { cwd: tempDir, sessionManager, ui: { notify } });
+			expect(notify.mock.calls.at(-1)?.[0]).toContain(`${cloudAgentId(3)} (archived, delete pending)`);
 
 			expect(archive).toHaveBeenCalledTimes(2);
-			expect(deleteAgent).toHaveBeenCalledTimes(1);
+			expect(deleteAgent).toHaveBeenCalledTimes(2);
 		} finally {
 			rmSync(tempDir, { recursive: true, force: true });
 		}
@@ -618,6 +624,89 @@ describe("Cursor cloud lifecycle ledger", () => {
 
 		expect(report).toContain("(archived)");
 		expect(report).not.toContain("pending");
+	});
+
+	it("keeps completed results authoritative across a backward clock, stale mirror, reopen and fork", async () => {
+		resetCloudLifecycleTestState();
+		const tempDir = mkdtempSync(join(tmpdir(), "cursor-cloud-operation-order-"));
+		vi.useFakeTimers({ toFake: ["Date"] });
+		try {
+			const staleAgent = cloudAgentId(1);
+			const mirroredAgent = cloudAgentId(2);
+			const manager = SessionManager.create(tempDir, tempDir, { id: "cloud-operation-order" });
+			const rootUserId = manager.appendMessage({ role: "user", content: "root", timestamp: 1 });
+			manager.appendMessage(makeAssistantMessage("root"));
+			const sessionFile = manager.getSessionFile()!;
+			const open = async (owner: SessionManager) => {
+				resetCloudLifecycleTestState();
+				const pi = createPiHarness();
+				pi.appendEntry.mockImplementation((customType, data) => owner.appendCustomEntry(customType, data));
+				registerCloudLifecycle(pi);
+				await pi.runSessionStart({ cwd: tempDir, sessionManager: owner });
+				const run = (args: string, notify = vi.fn()) => pi.runCommand("cursor-cloud", args, { cwd: tempDir, sessionManager: owner, ui: { notify } });
+				const list = async () => {
+					const notify = vi.fn();
+					await run("list", notify);
+					return String(notify.mock.calls.at(-1)?.[0]);
+				};
+				return { run, list };
+			};
+			const original = await open(manager);
+			expect(recordCursorCloudLifecycleRun({ agentId: staleAgent, branches: [] })).toBe(true);
+			expect(recordCursorCloudLifecycleRun({ agentId: mirroredAgent, branches: [] })).toBe(true);
+			// The wall clock moves backward while each remote request is in flight. Leaving
+			// the originating branch omits the stale agent's result mirror.
+			let staleIntentLeaf = "";
+			const archive = vi.fn(async (agentId: string) => {
+				vi.setSystemTime(Date.now() - 60_000);
+				if (agentId !== staleAgent) return;
+				staleIntentLeaf = manager.getLeafId() ?? "";
+				manager.branch(rootUserId);
+			});
+			const deleteAgent = vi.fn(async (_agentId: string) => { vi.setSystemTime(Date.now() - 60_000); });
+			const sdkOperations = { archive, delete: deleteAgent };
+			cloudLifecycleTestUtils.setSdkOperations(sdkOperations);
+			await original.run(`archive ${mirroredAgent}`);
+			await original.run(`archive ${staleAgent}`);
+			expect(archive).toHaveBeenCalledTimes(2);
+			manager.branch(staleIntentLeaf);
+			const journal = readFileSync(cloudLifecycleTestUtils.durableLedgerPath(sessionFile, manager.getSessionId()), "utf8")
+				.trim().split("\n").map((line) => JSON.parse(line) as { action: string; agentId: string; timestamp: string });
+			for (const agentId of [staleAgent, mirroredAgent]) {
+				const [intent, result] = ["archive_intent", "archive"].map((action) => journal.find((entry) => entry.agentId === agentId && entry.action === action)!);
+				expect(Date.parse(result.timestamp)).toBeLessThan(Date.parse(intent.timestamp));
+			}
+			expect(manager.getBranch().flatMap((entry) => entry.type === "custom" && (entry.data as { agentId?: string }).agentId === staleAgent
+				? [(entry.data as { action: string }).action]
+				: [])).toEqual(["record", "archive_intent"]);
+			const expectArchived = (report: string) => {
+				expect(report).toContain(`${staleAgent} (archived)`);
+				expect(report).toContain(`${mirroredAgent} (archived)`);
+				expect(report).not.toContain("pending");
+			};
+			expectArchived(await original.list());
+			expectArchived(await (await open(SessionManager.open(sessionFile, tempDir))).list());
+
+			// Pi /fork copies only mirrors: the complete operation stays archived, and the
+			// stale intent stays unresolved instead of permitting an irreversible retry.
+			const forkedManager = SessionManager.open(sessionFile, tempDir);
+			forkedManager.createBranchedSession(forkedManager.getLeafId()!);
+			const forked = await open(forkedManager);
+			cloudLifecycleTestUtils.setSdkOperations(sdkOperations);
+			let report = await forked.list();
+			expect(report).toContain(`${mirroredAgent} (archived)`);
+			expect(report).toContain(`${staleAgent} (archive pending)`);
+			await forked.run(`delete ${staleAgent} --yes`);
+			await forked.run(`delete ${mirroredAgent} --yes`);
+			expect(deleteAgent).toHaveBeenCalledTimes(1);
+			expect(deleteAgent.mock.calls[0]?.[0]).toBe(mirroredAgent);
+			report = await forked.list();
+			expect(report).not.toContain(mirroredAgent);
+			expect(report).toContain(`${staleAgent} (archive pending)`);
+		} finally {
+			vi.useRealTimers();
+			rmSync(tempDir, { recursive: true, force: true });
+		}
 	});
 
 	it("bounds recorded cloud lifecycle branches and ignores artifacts", () => {

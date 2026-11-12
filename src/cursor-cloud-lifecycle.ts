@@ -46,14 +46,19 @@ export interface CursorCloudLifecycleEntryData {
 	branches?: CursorCloudLifecycleBranchEntry[];
 }
 
+/** Lifecycle status of a listed agent; deleted agents are not listed. */
+export type CursorCloudLifecycleAgentStatus =
+	| { kind: "recorded" }
+	| { kind: "archived" }
+	| { kind: "pending"; action: "archive" }
+	| { kind: "pending"; action: "delete"; archived: boolean };
+
 export interface CursorCloudLifecycleAgentRecord {
 	agentId: string;
 	runId?: string;
 	timestamp: string;
-	archived: boolean;
-	deleted: boolean;
 	branches: CursorCloudLifecycleBranchEntry[];
-	pendingAction?: "archive" | "delete";
+	status: CursorCloudLifecycleAgentStatus;
 }
 
 type CloudLifecycleApi = Pick<ExtensionAPI, "appendEntry" | "on">;
@@ -376,10 +381,26 @@ function mergeCloudLifecycleRecordBranches(
 	return existingBranches?.length ? existingBranches : dataBranches ?? [];
 }
 
+type CloudLifecycleMutationFacts = Partial<Record<"archive" | "delete", "intent" | "result">>;
+
+// Each archive/delete is one operation per agent: commands record its result
+// only after its durable intent and SDK success, and validation refuses any
+// mutation while one is pending, a repeat archive, and deleted agents. A result
+// is therefore final whatever its clock or source order, an intent alone stays
+// unresolved, and delete supersedes archive.
+function resolveCloudLifecycleAgentStatus(
+	facts: CloudLifecycleMutationFacts,
+): CursorCloudLifecycleAgentStatus | { kind: "deleted" } {
+	if (facts.delete === "result") return { kind: "deleted" };
+	const archived = facts.archive === "result";
+	if (facts.delete === "intent") return { kind: "pending", action: "delete", archived };
+	if (archived) return { kind: "archived" };
+	return facts.archive === "intent" ? { kind: "pending", action: "archive" } : { kind: "recorded" };
+}
+
 function reduceCloudLifecycleEntries(entries: readonly CursorCloudLifecycleEntryData[]): CursorCloudLifecycleAgentRecord[] {
-	type MutationState = { status: "intent" | "result"; timestamp: string };
-	const agents = new Map<string, CursorCloudLifecycleAgentRecord>();
-	const mutations = new Map<string, { archive?: MutationState; delete?: MutationState }>();
+	const agents = new Map<string, Omit<CursorCloudLifecycleAgentRecord, "status">>();
+	const mutations = new Map<string, CloudLifecycleMutationFacts>();
 	for (const data of entries) {
 		if (data.action === "record") {
 			const existing = agents.get(data.agentId);
@@ -388,44 +409,19 @@ function reduceCloudLifecycleEntries(entries: readonly CursorCloudLifecycleEntry
 				agentId: data.agentId,
 				runId: pickNewerRunId(newer, data.runId, existing?.runId),
 				timestamp: newer || !existing ? data.timestamp : existing.timestamp,
-				archived: false,
-				deleted: false,
 				branches: mergeCloudLifecycleRecordBranches(newer, data.branches, existing?.branches),
 			});
 			continue;
 		}
 		const action = data.action.startsWith("archive") ? "archive" : "delete";
-		const status = data.action.endsWith("_intent") ? "intent" : "result";
-		const agentMutations = mutations.get(data.agentId) ?? {};
-		const current = agentMutations[action];
-		const comparison = current ? compareLifecycleTimestamps(data.timestamp, current.timestamp) : 1;
-		if (comparison > 0 || (comparison === 0 && status === "result" && current?.status === "intent")) {
-			agentMutations[action] = { status, timestamp: data.timestamp };
-			mutations.set(data.agentId, agentMutations);
-		}
+		const facts = mutations.get(data.agentId) ?? {};
+		if (facts[action] !== "result") facts[action] = data.action.endsWith("_intent") ? "intent" : "result";
+		mutations.set(data.agentId, facts);
 	}
-	for (const [agentId, agent] of agents) {
-		const agentMutations = mutations.get(agentId);
-		const archive = agentMutations?.archive;
-		const deletion = agentMutations?.delete;
-		const pending = [
-			...(archive?.status === "intent" ? [{ action: "archive" as const, timestamp: archive.timestamp }] : []),
-			...(deletion?.status === "intent" ? [{ action: "delete" as const, timestamp: deletion.timestamp }] : []),
-		].sort((left, right) => compareLifecycleTimestamps(right.timestamp, left.timestamp))[0];
-		const mutationTimestamps = [archive?.timestamp, deletion?.timestamp].filter((value): value is string => value !== undefined);
-		const timestamp = mutationTimestamps.reduce(
-			(latest, value) => compareLifecycleTimestamps(value, latest) > 0 ? value : latest,
-			agent.timestamp,
-		);
-		agents.set(agentId, {
-			...agent,
-			timestamp,
-			archived: archive?.status === "result",
-			deleted: deletion?.status === "result",
-			...(pending ? { pendingAction: pending.action } : {}),
-		});
-	}
-	return [...agents.values()].filter((agent) => !agent.deleted);
+	return [...agents.values()].flatMap((agent) => {
+		const status = resolveCloudLifecycleAgentStatus(mutations.get(agent.agentId) ?? {});
+		return status.kind === "deleted" ? [] : [{ ...agent, status }];
+	});
 }
 
 function readCursorCloudLifecycleEntries(entries: readonly SessionEntry[]): CursorCloudLifecycleEntryData[] {
@@ -552,10 +548,10 @@ function validateRecordedCloudAgentId(
 	if (syntaxError) return syntaxError;
 	const record = records.find((candidate) => candidate.agentId === agentId);
 	if (!record) return `Cursor cloud agent ${agentId} is not recorded in this session branch.`;
-	if (record.pendingAction) {
-		return `Cursor cloud agent ${agentId} has an unresolved ${record.pendingAction} request; inspect it in the Cursor Cloud dashboard before retrying.`;
+	if (record.status.kind === "pending") {
+		return `Cursor cloud agent ${agentId} has an unresolved ${record.status.action} request; inspect it in the Cursor Cloud dashboard before retrying.`;
 	}
-	if (action === "archive" && record.archived) return `Cursor cloud agent ${agentId} is already archived.`;
+	if (action === "archive" && record.status.kind === "archived") return `Cursor cloud agent ${agentId} is already archived.`;
 	return undefined;
 }
 
@@ -563,11 +559,20 @@ function tokenizeArgs(args: string): string[] {
 	return args.trim().split(/\s+/).filter(Boolean);
 }
 
+function formatCloudAgentStatus(status: CursorCloudLifecycleAgentStatus): string {
+	switch (status.kind) {
+		case "recorded":
+			return "";
+		case "archived":
+			return "archived";
+		case "pending":
+			return status.action === "delete" && status.archived ? "archived, delete pending" : `${status.action} pending`;
+	}
+}
+
 function formatCloudAgentRecord(record: CursorCloudLifecycleAgentRecord): string {
 	const agentId = sanitizeLedgerString(record.agentId, MAX_LEDGER_AGENT_ID_LENGTH);
-	const status = [record.archived ? "archived" : undefined, record.pendingAction ? `${record.pendingAction} pending` : undefined]
-		.filter(Boolean)
-		.join(", ");
+	const status = formatCloudAgentStatus(record.status);
 	const parts = [`- ${agentId}${status ? ` (${status})` : ""}`];
 	if (record.runId) parts.push(`run ${sanitizeLedgerString(record.runId, MAX_LEDGER_RUN_ID_LENGTH)}`);
 	const branch = record.branches.find((candidate) => candidate.branch || candidate.prUrl);

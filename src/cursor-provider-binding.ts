@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Api, Context, Model, Provider, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { cursorApiKeyAuth, normalizeCursorApiKey, resolveCursorCredentialApiKey } from "./cursor-api-key.js";
-import { discoverModels, snapshotCursorModelMetadata, type CursorModelFallbackIssue, type CursorModelMetadata } from "./model-discovery.js";
+import { discoverModels, snapshotCursorModelMetadata, type CursorModelCatalogProvenance, type CursorModelFallbackIssue, type CursorModelMetadata } from "./model-discovery.js";
 import { clearModelListCache } from "./model-list-cache.js";
 import { captureCursorCloudLifecycleRecorder } from "./cursor-cloud-lifecycle.js";
 import { captureCursorUsageRecorder } from "./cursor-usage-ledger.js";
@@ -41,7 +41,7 @@ class ProviderBinding implements SharedProviderBinding {
 	get closed(): boolean { return this.#state === "closed"; }
 	set closed(closed: true) { if (closed) this.#state = "closed"; }
 }
-type CatalogListener = (issue?: CursorModelFallbackIssue, metadata?: readonly CursorModelMetadata[]) => void;
+type CatalogListener = (provenance: CursorServedCatalogProvenance, metadata?: readonly CursorModelMetadata[]) => void;
 interface RequestReceipt {
 	binding: SharedProviderBinding;
 	pi: BindingExtension;
@@ -52,12 +52,16 @@ interface RequestReceipt {
 const REQUEST_OWNERS_KEY = Symbol.for("pi-cursor-sdk.provider-request-receipts.v1");
 const processState = globalThis as typeof globalThis & ProviderProcessState;
 const requestOwners = (processState[REQUEST_OWNERS_KEY] ??= new WeakMap<object, RequestReceipt>());
-interface CatalogChannel { published: boolean; issue?: CursorModelFallbackIssue; metadata?: readonly CursorModelMetadata[] }
+export type CursorServedCatalogProvenance = CursorModelCatalogProvenance | { source: "unknown"; issue?: CursorModelFallbackIssue };
+// Released copies read and write the v1 `published`/`issue`/`metadata` fields and listener arguments.
+// `provenance` is additive; a copy that predates it sends only the issue, so the source it served is unknown.
+type CatalogWireListener = (issue?: CursorModelFallbackIssue, metadata?: readonly CursorModelMetadata[], provenance?: CursorModelCatalogProvenance) => void;
+interface CatalogChannel { published: boolean; issue?: CursorModelFallbackIssue; metadata?: readonly CursorModelMetadata[]; provenance?: CursorModelCatalogProvenance }
 interface CatalogSubscriber {
 	stream: object;
 	binding: SharedProviderBinding;
 	pi: BindingExtension;
-	listener: CatalogListener;
+	listener: CatalogWireListener;
 	servingStream(): object | undefined;
 }
 // Sessions served by another instance's provider learn its catalog provenance here.
@@ -163,12 +167,13 @@ export function registerCursorProviderBinding(
 		if (subscriber) catalogSubscribers.delete(subscriber.reference);
 		subscriber = undefined;
 	};
-	const emitCatalog = (issue: CursorModelFallbackIssue | undefined, metadata: readonly CursorModelMetadata[]) => {
+	const emitCatalog = (provenance: CursorModelCatalogProvenance, metadata: readonly CursorModelMetadata[]) => {
 		if (binding.state === "closed") return;
 		ownCatalog.published = true;
-		ownCatalog.issue = issue;
+		ownCatalog.issue = provenance.issue;
 		ownCatalog.metadata = metadata;
-		onCatalog?.(issue, metadata);
+		ownCatalog.provenance = provenance;
+		onCatalog?.(provenance, metadata);
 		for (const reference of [...catalogSubscribers]) {
 			const candidate = reference.deref();
 			if (!candidate) {
@@ -181,7 +186,7 @@ export function registerCursorProviderBinding(
 				continue;
 			}
 			if (candidate.stream === stream) continue;
-			if (candidate.servingStream() === stream) candidate.listener(issue, metadata);
+			if (candidate.servingStream() === stream) candidate.listener(provenance.issue, metadata, provenance);
 		}
 	};
 	pi.on("session_start", async (_event, ctx) => {
@@ -192,7 +197,7 @@ export function registerCursorProviderBinding(
 			stream,
 			binding,
 			pi,
-			listener: (issue, metadata) => onCatalog?.(issue, metadata),
+			listener: (issue, metadata, provenance) => onCatalog?.(provenance ?? { source: "unknown", issue }, metadata),
 			servingStream: () => nativeCursorStream(registry),
 		};
 		subscriber = { strongAnchor: nextSubscriber, reference: new WeakRef(nextSubscriber) };
@@ -200,7 +205,7 @@ export function registerCursorProviderBinding(
 		const serving = nextSubscriber.servingStream();
 		if (serving && serving !== stream) {
 			const servingCatalog = catalogChannelFor(serving);
-			if (servingCatalog.published) nextSubscriber.listener(servingCatalog.issue, servingCatalog.metadata);
+			if (servingCatalog.published) nextSubscriber.listener(servingCatalog.issue, servingCatalog.metadata, servingCatalog.provenance);
 		}
 		// The genuine extension context supplies composed config auth; startup
 		// selection already has the known baseline, without reading a default store.
@@ -234,25 +239,24 @@ export function registerCursorProviderBinding(
 					? normalizeCursorApiKey(resolved?.auth.apiKey)
 					: credential && credential.type !== "api_key" ? undefined
 						: await resolveCursorCredentialApiKey(credential, async () => process.env.CURSOR_API_KEY);
-				// The bootstrap never receives session_start, so a cache-only refresh cannot see
-				// composed models.json auth. Keep a live catalog instead of publishing a missing key.
+				// The bootstrap never receives session_start, so a cache-only refresh cannot see composed
+				// models.json auth. Keep a published live or cached catalog without a fallback issue instead
+				// of publishing a missing key; republishing it is not a new live response.
 				if (!registry && context.allowNetwork === false && !apiKey && ownCatalog.published && ownCatalog.issue === undefined) {
 					const metadata = snapshotCursorModelMetadata();
-					await context.publish({ update: () => { emitCatalog(undefined, metadata); } });
+					await context.publish({ update: () => { emitCatalog({ source: "cache" }, metadata); } });
 					return;
 				}
-				let issue: CursorModelFallbackIssue | undefined;
 				await discoverModels({
 					apiKey, allowNetwork: context.allowNetwork, forceRefresh: context.force, signal: context.signal,
-					onFallback: (next) => { issue = next; },
-					publish: (definitions, update) => context.publish({
+					publish: (definitions, provenance, update) => context.publish({
 						update: () => {
 							if (binding.state === "closed") return;
 							update();
 							current = toNative(definitions);
 							// Do not infer logout before native composed auth is reachable.
 							if (registry && !apiKey) clearModelListCache();
-							emitCatalog(issue, snapshotCursorModelMetadata());
+							emitCatalog(provenance, snapshotCursorModelMetadata());
 						},
 					}),
 				});

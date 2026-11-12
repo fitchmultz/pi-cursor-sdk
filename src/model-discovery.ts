@@ -36,13 +36,23 @@ export interface CursorModelFallbackIssue {
 	errorMessage?: string;
 }
 
+/**
+ * Where an applied catalog came from: `live` is a Cursor response fetched for that publication,
+ * `cache` a previously fetched catalog, and `bundled` the generated fallback.
+ */
+export type CursorModelCatalogProvenance =
+	| { source: "live"; issue?: undefined }
+	| { source: "cache"; issue?: CursorModelFallbackIssue }
+	| { source: "bundled"; issue: CursorModelFallbackIssue };
+
 export interface DiscoverModelsOptions {
-	onFallback?: (issue: CursorModelFallbackIssue) => void;
+	/** Receives the provenance of each catalog this call applies. */
+	onCatalog?: (provenance: CursorModelCatalogProvenance) => void;
 	apiKey?: string;
 	allowNetwork?: boolean;
 	signal?: AbortSignal;
-	/** Native publication owns models, metadata, cache and warning changes together. */
-	publish?: (models: ProviderModelConfig[], update: () => void) => Promise<boolean>;
+	/** Native publication owns models, metadata, cache and provenance changes together. */
+	publish?: (models: ProviderModelConfig[], provenance: CursorModelCatalogProvenance, update: () => void) => Promise<boolean>;
 	// Bypass cache reads only when network is allowed; cache-only phases
 	// still prefer the matching catalog, even when forced.
 	forceRefresh?: boolean;
@@ -373,13 +383,13 @@ export function buildCursorModelSelection(
 
 async function useFallbackModels(options: DiscoverModelsOptions, issue: CursorModelFallbackIssue): Promise<ProviderModelConfig[]> {
 	const { FALLBACK_MODEL_ITEMS } = await import("./cursor-fallback-models.generated.js");
-	return publishModelItems(FALLBACK_MODEL_ITEMS, options, issue);
+	return publishModelItems(FALLBACK_MODEL_ITEMS, options, { source: "bundled", issue });
 }
 
 async function publishModelItems(
 	items: ModelListItem[],
 	options: DiscoverModelsOptions,
-	issue?: CursorModelFallbackIssue,
+	provenance: CursorModelCatalogProvenance,
 	cacheFingerprint?: string,
 ): Promise<ProviderModelConfig[]> {
 	options.signal?.throwIfAborted();
@@ -389,9 +399,9 @@ async function publishModelItems(
 		metadataByPiModelId.clear();
 		for (const [id, value] of metadata) metadataByPiModelId.set(id, value);
 		if (cacheFingerprint) saveModelListCache(cacheFingerprint, items);
-		if (issue) options.onFallback?.(issue);
+		options.onCatalog?.(provenance);
 	};
-	if (options.publish) await options.publish(models, update);
+	if (options.publish) await options.publish(models, provenance, update);
 	else update();
 	return models;
 }
@@ -413,7 +423,7 @@ export async function discoverModels(options: DiscoverModelsOptions = {}): Promi
 			? loadAnyCachedModelCatalog(keyFingerprint)?.models
 			: loadFreshCachedModels(keyFingerprint);
 		if (cachedModels && cachedModels.length > 0) {
-			return publishModelItems(cachedModels, options);
+			return publishModelItems(cachedModels, options, { source: "cache" });
 		}
 	}
 
@@ -432,7 +442,7 @@ export async function discoverModels(options: DiscoverModelsOptions = {}): Promi
 		const models = await Cursor.models.list({ apiKey });
 		options.signal?.throwIfAborted();
 		if (models.length > 0) {
-			return publishModelItems(models, options, undefined, keyFingerprint);
+			return publishModelItems(models, options, { source: "live" }, keyFingerprint);
 		}
 		return useFallbackModels(options, {
 			reason: "empty-model-list",
@@ -446,11 +456,11 @@ export async function discoverModels(options: DiscoverModelsOptions = {}): Promi
 		// provenance visible so refresh commands do not claim a live refresh worked.
 		const cachedCatalog = loadAnyCachedModelCatalog(keyFingerprint);
 		if (cachedCatalog && cachedCatalog.models.length > 0) {
-			return publishModelItems(cachedCatalog.models, options, {
+			return publishModelItems(cachedCatalog.models, options, { source: "cache", issue: {
 				reason: "cached-after-error",
 				message: `Cursor model discovery failed; using cached Cursor model catalog from ${new Date(cachedCatalog.fetchedAt).toISOString()}. ${errorMessage}`,
 				errorMessage,
-			});
+			} });
 		}
 		return useFallbackModels(options, {
 			reason: "discovery-failed",

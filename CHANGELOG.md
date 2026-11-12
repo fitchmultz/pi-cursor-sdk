@@ -8,6 +8,7 @@
 
 - Ask Pi to abort a running bridged tool only once when the bridge stops it after a call deadline, Cursor cancellation, run release or shutdown. On Windows, the bash process-tree cleanup for that tool now also runs once instead of twice.
 - Keep a successful `/cursor-cloud archive` or `/cursor-cloud delete` final when the system clock moves backward during the request. Previously the agent stayed listed as "archive pending" or "delete pending" even though the success was recorded, which blocked further cleanup. Status now follows each operation's recorded intent and result instead of timestamps, including after reopening or forking the session, so deleted agents leave the list. A request with no recorded result still blocks retries until you check the Cursor Cloud dashboard.
+- `/cursor-refresh-models` reports a refreshed catalog only when a live Cursor response was published. Another refresh, such as a session start, login or provider registration, can supersede it and leave the matching cached catalog in place. The command previously reported that as refreshed; it now says it did not confirm a live catalog. When a host's older pi-cursor-sdk serves the session and cannot report catalog freshness, it asks to update and reload that host instead of retrying. Fallback and cached-catalog warnings are unchanged.
 
 ## 0.5.31 - 2026-11-11
 

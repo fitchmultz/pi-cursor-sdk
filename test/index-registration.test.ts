@@ -20,6 +20,7 @@ import {
 vi.mock("../src/model-discovery.js", () => ({
 	discoverModels: vi.fn(),
 	getCursorModelMetadata: vi.fn(),
+	replaceCursorModelMetadata: vi.fn(),
 }));
 
 vi.mock("../src/cursor-provider.js", () => ({
@@ -638,23 +639,34 @@ describe("extension registration and discovery", () => {
 	it.each([
 		{ result: { aborted: true, errors: new Map() }, message: "Cursor model catalog refresh was cancelled." },
 		{ result: { aborted: false, errors: new Map([["cursor", new Error("synthetic failure")]]) }, message: "Cursor model catalog refresh failed; the previous catalog was retained." },
-	])("reports native refresh failure truthfully: $message", async ({ result, message }) => {
+		// The serving registration's published catalog carries only the v1 channel fields, as a copy that
+		// predates provenance writes them; no refresh can make its freshness known.
+		{ result: { aborted: false, errors: new Map() }, servedWithoutProvenance: true, message: "Cursor model catalog freshness is unknown because the host's Cursor extension does not report it. Update and reload pi-cursor-sdk in the host, then reload this session." },
+	])("reports native refresh outcome truthfully: $message", async ({ result, servedWithoutProvenance, message }) => {
 		mockedDiscover.mockResolvedValueOnce([]);
 		const pi = createExtensionPi();
 		await extensionFactory(pi);
 		const notify = vi.fn();
 		const refresh = vi.fn().mockResolvedValue(result);
 		const signal = new AbortController().signal;
+		let modelRegistry: object = { refresh };
+		if (servedWithoutProvenance) {
+			const servingStream = {};
+			const channels = (globalThis as unknown as Record<symbol, WeakMap<object, object>>)[Symbol.for("pi-cursor-sdk.provider-catalog-channels.v1")];
+			channels.set(servingStream, { published: true, metadata: [] });
+			modelRegistry = { refresh, getRegisteredNativeProvider: () => ({ streamSimple: servingStream }) };
+			await pi.runSessionStart({ modelRegistry: modelRegistry as never });
+		}
 		await pi.runCommand("cursor-refresh-models", "", createExtensionCommandContext({
 			hasUI: true,
-			modelRegistry: { refresh } as never,
+			modelRegistry: modelRegistry as never,
 			signal,
 			ui: { notify },
 		}));
 		expect(refresh).toHaveBeenCalledWith({ providers: ["cursor"], allowNetwork: true, force: true, signal });
 		expect(pi.registerProvider).toHaveBeenCalledOnce();
 		expect(mockedDiscover).toHaveBeenCalledOnce();
-		expect(notify).toHaveBeenCalledWith(message, "warning");
+		expect(notify).toHaveBeenCalledExactlyOnceWith(message, "warning");
 	});
 
 	it("refreshes the current Cursor SDK agent config through a command", async () => {
@@ -712,10 +724,10 @@ describe("extension registration and discovery", () => {
 
 	it("notifies fallback discovery issues after delayed Cursor model selection", async () => {
 		mockedDiscover.mockImplementationOnce(async (options: DiscoverOptions) => {
-			options?.onFallback?.({
+			options?.onCatalog?.({ source: "bundled", issue: {
 				reason: "missing-api-key",
 				message: "missing key; using fallback models",
-			});
+			} });
 			return [makeProviderModelConfig("composer-2", { name: "Cursor Composer 2" })];
 		});
 
@@ -741,10 +753,10 @@ describe("extension registration and discovery", () => {
 
 	it("notifies fallback discovery issues once per Cursor session scope", async () => {
 		mockedDiscover.mockImplementationOnce(async (options: DiscoverOptions) => {
-			options?.onFallback?.({
+			options?.onCatalog?.({ source: "bundled", issue: {
 				reason: "missing-api-key",
 				message: "missing key; using fallback models",
-			});
+			} });
 			return [makeProviderModelConfig("composer-2", { name: "Cursor Composer 2" })];
 		});
 
@@ -779,10 +791,10 @@ describe("extension registration and discovery", () => {
 
 	it("does not notify fallback discovery issues without UI", async () => {
 		mockedDiscover.mockImplementationOnce(async (options: DiscoverOptions) => {
-			options?.onFallback?.({
+			options?.onCatalog?.({ source: "bundled", issue: {
 				reason: "empty-model-list",
 				message: "Cursor model discovery returned no models; using fallback Cursor model list.",
-			});
+			} });
 			return [];
 		});
 

@@ -180,7 +180,7 @@ it("composed config precedes ambient; runtime removal restores stored; same-sess
 	} finally { await pi.runSessionShutdown(); }
 });
 
-it.each(["cancel", "rotation", "shutdown"] as const)("%s prevents cancellation-ignorant late catalog from mutating models/metadata/cache/warning", async (cause) => {
+it.each(["cancel", "rotation", "superseded", "shutdown"] as const)("%s prevents cancellation-ignorant late catalog from mutating models/metadata/cache/warning or being reported as live", async (cause) => {
 	const { runtime, registry, pi, notify } = await fixture();
 	try {
 		await login(runtime, "synthetic-current");
@@ -192,17 +192,25 @@ it.each(["cancel", "rotation", "shutdown"] as const)("%s prevents cancellation-i
 		const gate = new Promise<void>(resolve => { release = resolve; });
 		list.mockImplementationOnce(async () => { enter(); await gate; return [item("deliberately-late")]; });
 		const controller = new AbortController();
-		const pending = registry.refresh({ providers: ["cursor"], allowNetwork: true, force: true, signal: controller.signal });
+		const reported = vi.fn();
+		const pending = pi.runCommand("cursor-refresh-models", "", { modelRegistry: registry, hasUI: true, ui: { notify: reported }, signal: controller.signal });
 		await entered;
 		if (cause === "rotation") await login(runtime, "synthetic-replacement");
+		// Same key: a sibling session start, credential sync or provider registration republishes the matching cache.
+		else if (cause === "superseded") await registry.refresh({ providers: ["cursor"], allowNetwork: false });
 		else if (cause === "shutdown") await pi.runSessionShutdown();
 		else controller.abort();
 		const ids = runtime.getModels("cursor").map(m => m.id);
 		const bytes = readFileSync(join(root, "cursor-sdk-model-list.json"));
 		notify.mockClear();
 		release();
-		const result = await pending;
-		if (cause === "cancel") expect(result.aborted).toBe(true);
+		await pending;
+		// Rotation's cache-only fallback can publish before or after the command reads the catalog.
+		expect(reported).toHaveBeenCalledExactlyOnceWith(cause === "cancel"
+			? "Cursor model catalog refresh was cancelled."
+			: cause === "rotation"
+				? expect.stringMatching(/^Cursor model catalog refresh did not (use|confirm) a live catalog/)
+				: "Cursor model catalog refresh did not confirm a live catalog. Run /cursor-refresh-models to retry.", "warning");
 		await new Promise(resolve => setImmediate(resolve));
 		expect(runtime.getModels("cursor").map(m => m.id)).toEqual(ids);
 		expect(getCursorModelMetadata("deliberately-late")).toBeUndefined();

@@ -7,6 +7,7 @@ import {
 	buildCursorModelSelection,
 	discoverModels,
 	getCursorModelMetadata,
+	type CursorModelCatalogProvenance,
 	type CursorModelFallbackIssue,
 } from "../src/model-discovery.js";
 
@@ -88,15 +89,18 @@ describe("discoverModels model-list cache", () => {
 		});
 	});
 
-	it("serves a warm catalog from cache without a second network call", async () => {
+	it("serves a warm catalog from cache without a second network call and labels it cached", async () => {
 		process.env.CURSOR_API_KEY = "cache-key";
 		mockedList.mockResolvedValueOnce([MODEL]);
+		const catalogs: CursorModelCatalogProvenance[] = [];
 
-		const first = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
-		const second = await discoverModels({ apiKey: process.env.CURSOR_API_KEY });
+		const first = await discoverModels({ apiKey: process.env.CURSOR_API_KEY, onCatalog: (catalog) => catalogs.push(catalog) });
+		const second = await discoverModels({ apiKey: process.env.CURSOR_API_KEY, onCatalog: (catalog) => catalogs.push(catalog) });
 
 		expect(mockedList).toHaveBeenCalledTimes(1);
 		expect(second.map((model) => model.id)).toEqual(first.map((model) => model.id));
+		// Neither carries a fallback issue; only the response is live.
+		expect(catalogs).toEqual([{ source: "live" }, { source: "cache" }]);
 	});
 
 	it("does not read the cache when disabled via env", async () => {
@@ -118,7 +122,7 @@ describe("discoverModels model-list cache", () => {
 		mockedList.mockResolvedValueOnce([MODEL]);
 		const issues: CursorModelFallbackIssue[] = [];
 
-		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY, onFallback: (issue) => issues.push(issue) });
+		const models = await discoverModels({ apiKey: process.env.CURSOR_API_KEY, onCatalog: ({ issue }) => { if (issue) issues.push(issue); } });
 
 		expect(models.map((model) => model.id)).toEqual(["composer-2"]);
 		expect(issues).toEqual([]);
@@ -131,7 +135,7 @@ describe("discoverModels model-list cache", () => {
 
 		mockedList.mockRejectedValueOnce(new Error("network down"));
 		const issues: CursorModelFallbackIssue[] = [];
-		const refreshed = await discoverModels({ apiKey: process.env.CURSOR_API_KEY, forceRefresh: true, onFallback: (issue) => issues.push(issue) });
+		const refreshed = await discoverModels({ apiKey: process.env.CURSOR_API_KEY, forceRefresh: true, onCatalog: ({ issue }) => { if (issue) issues.push(issue); } });
 
 		expect(refreshed.map((model) => model.id)).toEqual(["composer-2"]);
 		expect(issues).toHaveLength(1);
@@ -147,7 +151,7 @@ describe("discoverModels model-list cache", () => {
 
 		mockedList.mockRejectedValueOnce({});
 		const issues: CursorModelFallbackIssue[] = [];
-		await discoverModels({ apiKey: process.env.CURSOR_API_KEY, forceRefresh: true, onFallback: (issue) => issues.push(issue) });
+		await discoverModels({ apiKey: process.env.CURSOR_API_KEY, forceRefresh: true, onCatalog: ({ issue }) => { if (issue) issues.push(issue); } });
 
 		expect(issues).toHaveLength(1);
 		expect(issues[0].reason).toBe("cached-after-error");

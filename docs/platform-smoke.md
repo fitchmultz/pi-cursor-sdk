@@ -340,7 +340,6 @@ PLATFORM_SMOKE_MAC_WORK_ROOT="/Users/$USER/crabbox/pi-cursor-sdk"
 # Optional prebuilt replacement; bypasses the configured local root-wrapper build.
 PLATFORM_SMOKE_UBUNTU_IMAGE="registry.example.com/ubuntu-node24-crabbox:latest"
 
-# Optional Parallels overrides; defaults come from platform-smoke.config.mjs.
 
 # Required for live suites; doctor fails before spending Cursor tokens if absent.
 CURSOR_API_KEY="..."

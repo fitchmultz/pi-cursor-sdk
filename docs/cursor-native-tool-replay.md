@@ -191,7 +191,7 @@ Lifecycle rules:
 - Lifecycle text is emitted as a single bounded, scrubbed thinking line such as `Cursor MCP: external_search` or `Cursor shell: npm test`. Shell pending labels show a scrubbed/truncated command preview, matching pi's native bash UX; the completed replay card remains the source of truth for recorded shell results. Lifecycle lines are not separate permanent replay cards and do not rerun tools.
 - A short defer window coalesces fast start+complete pairs: if a tool completes before the defer elapses, only the completed replay card/trace is shown.
 - pi bridge MCP calls (`pi__*`) are excluded because pi already shows the real pi tool execution path.
-- Implementation: `src/cursor-tool-lifecycle.ts` (eligibility/labels) and `src/cursor-provider-turn-coordinator.ts` (defer, emit, bridge exclusion).
+- Implementation: `src/cursor-tool-lifecycle.ts` (eligibility/labels) and `src/cursor-provider-turn-lifecycle-emitter.ts` (defer, emit, bridge exclusion).
 
 ## Ordering and non-interactive output
 

@@ -15,9 +15,16 @@ export type ToolCompletionDedupeReason =
 	| "fingerprint-already-completed";
 
 export class CursorToolCompletionLedger {
+	// Per call ID, a pending native start, a pending bridge start and a completed identity are independent facts.
+	// Starts are recorded as delivered and classified per payload, so a call ID may hold any combination (a repeated
+	// start classified differently, a start after completion); none is rejected. startedToolCalls insertion order
+	// drives fingerprint matching and incomplete-tool discard.
 	private readonly startedToolCalls = new Map<string, unknown>();
 	private readonly bridgeStartedToolCallIds = new Set<string>();
 	private readonly completedToolIdentities = new Set<string>();
+	// Fingerprints of shown completions, kept apart from identities because steps, ID-less deltas and transcript
+	// records may share no call identity with the live completion. For a new identity, a "started" completion
+	// checks only fallback fingerprints; matching another started completion's fingerprint does not suppress it.
 	private readonly completedStartedToolFingerprints = new Set<string>();
 	private readonly completedFallbackToolFingerprints = new Set<string>();
 
@@ -94,14 +101,6 @@ export class CursorToolCompletionLedger {
 		}
 	}
 
-	clear(): void {
-		this.startedToolCalls.clear();
-		this.bridgeStartedToolCallIds.clear();
-		this.completedToolIdentities.clear();
-		this.completedStartedToolFingerprints.clear();
-		this.completedFallbackToolFingerprints.clear();
-	}
-
 	/** Exposed for incomplete-tool discard iteration. */
 	startedToolCallEntries(): IterableIterator<[string, unknown]> {
 		return this.startedToolCalls.entries();
@@ -111,6 +110,10 @@ export class CursorToolCompletionLedger {
 		this.startedToolCalls.clear();
 		this.bridgeStartedToolCallIds.clear();
 	}
+}
+
+export function getCursorToolCallIdentity(callId: string): string {
+	return `cursor-tool:${callId}`;
 }
 
 export function getToolFingerprint(value: unknown): string {

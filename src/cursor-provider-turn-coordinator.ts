@@ -31,6 +31,7 @@ import {
 } from "./cursor-provider-turn-shell-output.js";
 import {
 	CursorToolCompletionLedger,
+	getCursorToolCallIdentity,
 	getToolFingerprint,
 } from "./cursor-provider-turn-tool-ledger.js";
 import { readCursorSdkTurnUsageFromUpdate, type CursorSdkTurnUsage } from "./cursor-usage-accounting.js";
@@ -221,7 +222,7 @@ export class CursorSdkTurnCoordinator {
 				source: resolution.source,
 			});
 			if (resolution.matchedStartedCallId && resolution.matchedStartedCallId !== update.callId) {
-				this.ledger.recordCompletedIdentity(`cursor-tool:${resolution.matchedStartedCallId}`);
+				this.ledger.recordCompletedIdentity(getCursorToolCallIdentity(resolution.matchedStartedCallId));
 			}
 			return;
 		}
@@ -292,7 +293,7 @@ export class CursorSdkTurnCoordinator {
 			source: resolution.source,
 		});
 		if (resolution.matchedStartedCallId && resolution.matchedStartedCallId !== stepId) {
-			this.ledger.recordCompletedIdentity(`cursor-tool:${resolution.matchedStartedCallId}`);
+			this.ledger.recordCompletedIdentity(getCursorToolCallIdentity(resolution.matchedStartedCallId));
 		}
 	}
 

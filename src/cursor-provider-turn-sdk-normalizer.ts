@@ -4,7 +4,7 @@ import {
 	mergeShellOutputDeltasIntoCursorToolCall,
 	type CursorShellOutputTracker,
 } from "./cursor-provider-turn-shell-output.js";
-import type { CursorToolCompletionLedger } from "./cursor-provider-turn-tool-ledger.js";
+import { getCursorToolCallIdentity, type CursorToolCompletionLedger } from "./cursor-provider-turn-tool-ledger.js";
 
 export type CursorToolCompletionSource = "delta" | "step";
 
@@ -46,12 +46,14 @@ export interface ResolveCursorToolCompletionOptions {
 }
 
 export function resolveCursorToolCompletion(options: ResolveCursorToolCompletionOptions): ToolCompletionResolution {
+	// Missing IDs are looked up as "" and an empty ID is falsy below, so a "" bridge start never short-circuits.
 	const bridgeStartedCallId = options.ledger.takeBridgeStartedCallId(
 		typeof options.callId === "string" ? options.callId : "",
 	);
 	if (bridgeStartedCallId) {
-		options.ledger.recordCompletedIdentity(`cursor-tool:${bridgeStartedCallId}`);
-		return { action: "ignore-bridge", identity: `cursor-tool:${bridgeStartedCallId}` };
+		const bridgeIdentity = getCursorToolCallIdentity(bridgeStartedCallId);
+		options.ledger.recordCompletedIdentity(bridgeIdentity);
+		return { action: "ignore-bridge", identity: bridgeIdentity };
 	}
 
 	let matchedStartedCallId: string | undefined;
@@ -61,7 +63,7 @@ export function resolveCursorToolCompletion(options: ResolveCursorToolCompletion
 
 	if (options.source === "delta") {
 		const callId = options.callId;
-		identity = typeof callId === "string" ? `cursor-tool:${callId}` : undefined;
+		identity = typeof callId === "string" ? getCursorToolCallIdentity(callId) : undefined;
 		resolvedToolCall = mergeCursorToolCalls(options.startedToolCall, options.toolCall);
 		if (typeof callId === "string" && options.ledger.hasStartedToolCall(callId)) {
 			options.onClearStartedCallId?.(callId);
@@ -89,12 +91,12 @@ export function resolveCursorToolCompletion(options: ResolveCursorToolCompletion
 			matchedStartedCallId ? options.shellOutput.takeDeltasForCall(matchedStartedCallId) : undefined,
 		);
 		const identityId = typeof options.callId === "string" ? options.callId : matchedStartedCallId;
-		identity = identityId ? `cursor-tool:${identityId}` : undefined;
+		identity = identityId ? getCursorToolCallIdentity(identityId) : undefined;
 	}
 
 	if (options.liveRun?.bridgeRun?.isBridgeMcpToolCall(resolvedToolCall)) {
 		const bridgeIdentity =
-			options.source === "step" && matchedStartedCallId ? `cursor-tool:${matchedStartedCallId}` : identity;
+			options.source === "step" && matchedStartedCallId ? getCursorToolCallIdentity(matchedStartedCallId) : identity;
 		if (bridgeIdentity) options.ledger.recordCompletedIdentity(bridgeIdentity);
 		return { action: "ignore-bridge", identity: bridgeIdentity };
 	}

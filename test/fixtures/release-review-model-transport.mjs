@@ -11,7 +11,7 @@ let inputPath;
 let abort;
 function report() {
 	return JSON.stringify({ scopeId: scenario.kind === "wrong-scope" ? "different-scope" : scope.scopeId, completed: scenario.kind !== "incomplete" && !(scenario.kind === "incomplete-after-correction" && request > 2),
-		reviewedFiles: scope.sourceFiles, reviewedArtifacts: [], findings: scenario.kind === "finding"
+		findings: scenario.kind === "finding"
 			? [{ path: "catalog.json", line: 1, material: true, description: "Retained review finding", remedy: "Fix it" }] : [],
 		materialLimitations: scenario.kind === "limited" ? ["Required contract unavailable"] : [], summary: "Reviewed the exact supplied scope." });
 }

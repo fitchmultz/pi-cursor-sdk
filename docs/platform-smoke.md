@@ -413,18 +413,18 @@ Doctor checks:
 5. `crabbox doctor --provider local-container --target linux --json` passes.
 6. Docker runtime is active.
 7. Crabbox macOS static SSH doctor with `--doctor-probe-ssh` passes, and the localhost SSH probe sees Node, npm, Git, rsync, and tar.
-8. Node's major version is at least 24 on every target. Use the patched versions listed in Requirements; this doctor check does not enforce patch versions.
-9. npm is available on every target.
-10. `git` is available on every target.
-11. `rsync` is available on macOS and Ubuntu.
-12. `tar` is available on Apple Silicon macOS and Ubuntu.
-13. `node-pty` self-test passes on every target.
-14. A C compiler is available (`cc --version`).
+8. The controller host's Node major version meets `nodeValidationMajor` (24 by default). Target Node-major enforcement belongs to the platform-build suite's `NODE_MAJOR` check; the SSH probe above only records the remote version. Use the patched versions listed in Requirements; these major-version checks do not enforce patch versions.
+9. npm is available on the controller host.
+10. `git` is available on the controller host.
+11. `rsync` is available on the controller host.
+12. `tar` is available on the controller host.
+13. A C compiler is available on the controller host (`cc --version`).
+14. Artifact root is writable.
 15. Host-side xterm/Playwright render self-test passes by rendering a minimal ANSI fixture through the repo xterm helper and launching Playwright Chromium to write a tiny PNG. If this fails, run `npm install` and `npx playwright install chromium` before live suites.
-16. `CURSOR_API_KEY` is present.
-17. Artifact root is writable.
-18. `git status --short` is recorded.
-19. Forbidden tracked artifacts, package tarballs, `.env*`, auth files, and secrets are absent.
+16. `git status --short` is recorded.
+17. Forbidden-file checks reject `.env` and `*.tgz` matches within two directory levels and root `.env.production` or `.env.local` files.
+18. `CURSOR_API_KEY` is present and longer than ten characters; this is not an authentication request.
+19. The controller host's `node-pty` module loads successfully when installed; absence warns that live PTY suites cannot run.
 
 Doctor does not fail merely because the branch has uncommitted source or doc changes under test. It fails on forbidden artifacts and missing platform readiness.
 

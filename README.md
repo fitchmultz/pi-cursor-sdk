@@ -125,7 +125,7 @@ Debug artifacts can contain secrets. Remove secrets before you share them.
 
 ## Reference and development
 
-The [full reference](docs/reference.md) contains detailed configuration and limits. [Development](docs/development.md) covers checks, model snapshots, and release procedures. The [model UX spec](docs/cursor-model-ux-spec.md) contains maintainer design notes. The [Changelog](CHANGELOG.md) records version history.
+The [full reference](docs/reference.md) contains detailed configuration and limits. [Development](https://github.com/fitchmultz/pi-cursor-sdk/blob/main/docs/development.md) covers checks, model snapshots, and release procedures. The [model UX spec](https://github.com/fitchmultz/pi-cursor-sdk/blob/main/docs/cursor-model-ux-spec.md) contains maintainer design notes. The [Changelog](CHANGELOG.md) records version history.
 
 ## License
 

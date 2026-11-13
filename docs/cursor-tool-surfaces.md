@@ -131,4 +131,4 @@ Example mistake: treating `cursor-replay-…` as a tool to invoke. Replay never 
 
 - [Reference — Cursor provider tool contract](reference.md#cursor-provider-tool-contract)
 - [Cursor native tool replay](./cursor-native-tool-replay.md)
-- [Cursor model UX spec](./cursor-model-ux-spec.md)
+- [Cursor model UX spec](https://github.com/fitchmultz/pi-cursor-sdk/blob/main/docs/cursor-model-ux-spec.md)

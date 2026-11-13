@@ -87,10 +87,6 @@ function parseArgs(argv) {
 	return out;
 }
 
-function platformForTarget(target) {
-	return target === "windows-native" ? "powershell" : "posix";
-}
-
 function commandName(name) {
 	return process.platform === "win32" ? `${name}.cmd` : name;
 }
@@ -476,29 +472,16 @@ function writeJsonlArtifacts(artifactDir, sessionDir) {
 	return jsonlFiles;
 }
 
-function writeProcessSnapshot(logDir, name, platform) {
+function writeProcessSnapshot(logDir, name) {
 	const startedAt = Date.now();
-	const result = platform === "powershell"
-		? spawnSync("powershell.exe", [
-			"-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
-			"Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress",
-		], { encoding: "utf8", timeout: 90_000 })
-		: spawnSync("sh", ["-lc", "ps -axo pid,ppid,comm,args"], { encoding: "utf8", timeout: 30_000 });
+	const result = spawnSync("sh", ["-lc", "ps -axo pid,ppid,comm,args"], { encoding: "utf8", timeout: 30_000 });
 	writeRedactedTextFile(join(logDir, `${name}.stdout.txt`), result.stdout ?? "");
 	writeRedactedTextFile(join(logDir, `${name}.stderr.txt`), result.stderr ?? "");
 	writeFileSync(join(logDir, `${name}.json`), JSON.stringify({ label: name, status: result.status, signal: result.signal, durationMs: Date.now() - startedAt, error: result.error?.message }, null, 2));
 	requireOk({ status: result.status, stderr: result.stderr, error: result.error }, `${name} snapshot`);
 }
 
-function assertNoAbortLeftover(logDir, platform) {
-	if (platform === "powershell") {
-		const result = runLogged(logDir, "leftover-process-check", "powershell.exe", [
-			"-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
-			"$self = $PID; $p = Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $self -and $_.CommandLine -match 'PLATFORM_ABORT_MARKER' }; if ($p) { $p | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress; exit 1 }",
-		], { timeout: 30_000 });
-		requireOk(result, "leftover process check");
-		return;
-	}
+function assertNoAbortLeftover(logDir) {
 	const result = runLogged(logDir, "leftover-process-check", "sh", ["-lc", "if ps -axo pid,command | grep PLATFORM_ABORT_MARKER | grep -v grep; then exit 1; fi"], { timeout: 30_000 });
 	requireOk(result, "leftover process check");
 }
@@ -521,7 +504,6 @@ async function main() {
 	}
 	const scenario = getScenario(args.suite);
 	if (!scenario) fail(`unknown suite: ${args.suite}`);
-	const platform = platformForTarget(args.target);
 	const abortMode = args.suite === "cursor-abort-cleanup";
 	const runRoot = args.outDir;
 	const artifactDir = join(runRoot, "artifacts");
@@ -543,7 +525,7 @@ async function main() {
 		model: args.model,
 		cursorNoFast: true,
 		startedAt: new Date().toISOString(),
-		platform,
+		platform: "posix",
 	};
 	try {
 		console.log(`[platform-live] suite=${args.suite} target=${args.target} model=${args.model}`);
@@ -585,8 +567,8 @@ async function main() {
 			PI_CURSOR_PI_TOOL_BRIDGE_DEBUG_FILE: join(artifactDir, "bridge-diagnostics.jsonl"),
 			TERM: "xterm-256color",
 		};
-		if (abortMode) writeProcessSnapshot(logDir, "process-before", platform);
-		const prompt = renderPrompt(scenario, platform);
+		if (abortMode) writeProcessSnapshot(logDir, "process-before");
+		const prompt = renderPrompt(scenario);
 		writeFileSync(join(artifactDir, "prompt.txt"), prompt);
 		const piArgs = ["--approve", "--cursor-no-fast", "--cursor-mode", "agent", "--model", args.model, "--session-dir", sessionDir, "--session-id", `platform-${args.suite}-${Date.now()}`, prompt];
 		const ptyCommand = ptySpawnCommand(piArgs);
@@ -618,8 +600,8 @@ async function main() {
 		if (behaviorFailure) throw new Error(behaviorFailure);
 		if (abortMode) {
 			if (ptyResult.plain.includes("SHOULD_NOT_PRINT")) throw new Error("abort suite printed SHOULD_NOT_PRINT, so cancellation did not happen in time");
-			writeProcessSnapshot(logDir, "process-after", platform);
-			assertNoAbortLeftover(logDir, platform);
+			writeProcessSnapshot(logDir, "process-after");
+			assertNoAbortLeftover(logDir);
 		}
 		if (ptyResult.ptyExit.kind !== "exited") throw new Error("pi PTY exit was not observed after /quit, EOF, Ctrl+C and kill; pi may still be running");
 		if (jsonlFiles.length === 0) throw new Error("no pi session JSONL artifact was written");

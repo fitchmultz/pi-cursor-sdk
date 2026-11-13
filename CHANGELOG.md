@@ -13,6 +13,8 @@
 
 ### What's Changed
 * chore: remove unsupported platform qualification by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/488
+* chore: remove Windows-only smoke remnants by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/492
+* chore: remove Windows/PowerShell line from native smoke prompt by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/493
 
 
 **Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.34...v0.5.35

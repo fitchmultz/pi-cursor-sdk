@@ -87,17 +87,13 @@ function parseArgs(argv) {
 	return out;
 }
 
-function commandName(name) {
-	return process.platform === "win32" ? `${name}.cmd` : name;
-}
-
 function runLogged(logDir, label, command, args, options = {}) {
 	const startedAt = Date.now();
 	const result = spawnSync(command, args, {
 		cwd: options.cwd ?? process.cwd(),
 		env: options.env ?? process.env,
 		encoding: "utf8",
-		shell: options.shell ?? (process.platform === "win32" && /(?:^|[\\/])(?:npm|npx|pi)\.cmd$/i.test(command)),
+		shell: false,
 		timeout: options.timeout ?? 300_000,
 	});
 	const safeLabel = label.replace(/[^A-Za-z0-9_.-]+/g, "-");
@@ -123,17 +119,16 @@ function requireOk(result, label) {
 }
 
 function resolvePiCli() {
-	const local = resolve(process.cwd(), "node_modules", ".bin", process.platform === "win32" ? "pi.cmd" : "pi");
-	return existsSync(local) ? local : commandName("pi");
+	const local = resolve(process.cwd(), "node_modules", ".bin", "pi");
+	return existsSync(local) ? local : "pi";
 }
 
 function hasInstalledDependencies() {
 	return existsSync(resolve(process.cwd(), "node_modules", ".package-lock.json"))
-		&& existsSync(resolve(process.cwd(), "node_modules", ".bin", process.platform === "win32" ? "pi.cmd" : "pi"));
+		&& existsSync(resolve(process.cwd(), "node_modules", ".bin", "pi"));
 }
 
 function ensureNodePtySpawnHelperExecutable(logDir) {
-	if (process.platform === "win32") return;
 	const candidates = [
 		resolve(process.cwd(), "node_modules", "node-pty", "build", "Release", "spawn-helper"),
 		resolve(process.cwd(), "node_modules", "node-pty", "prebuilds", `${process.platform}-${process.arch}`, "spawn-helper"),
@@ -186,7 +181,7 @@ function ensureTargetDependencies(logDir) {
 		writeSkippedLog(logDir, "npm-ci", "node_modules already prepared by target session");
 		return;
 	}
-	const npmCi = runLogged(logDir, "npm-ci", commandName("npm"), ["ci"], { timeout: 300_000 });
+	const npmCi = runLogged(logDir, "npm-ci", "npm", ["ci"], { timeout: 300_000 });
 	requireOk(npmCi, "npm ci");
 }
 
@@ -207,7 +202,7 @@ function prepareSharedPackedInstall(prepDir, logDir, artifactDir, packageName) {
 	ensureTargetDependencies(logDir);
 	ensureNodePtySpawnHelperExecutable(logDir);
 
-	const pack = runLogged(logDir, "npm-pack", commandName("npm"), ["pack", "--silent"], { timeout: 120_000 });
+	const pack = runLogged(logDir, "npm-pack", "npm", ["pack", "--silent"], { timeout: 120_000 });
 	requireOk(pack, "npm pack");
 	const tarball = pack.stdout.trim().split(/\r?\n/).filter(Boolean).at(-1);
 	if (!tarball || !existsSync(resolve(process.cwd(), tarball))) throw new Error("npm pack did not produce a tarball");
@@ -217,9 +212,9 @@ function prepareSharedPackedInstall(prepDir, logDir, artifactDir, packageName) {
 	writeFileSync(join(artifactDir, "packed-tarball.txt"), `${tarball}\n`);
 
 	copyFixtureWorkspace(prepWorkspaceDir);
-	const npmInit = runLogged(logDir, "shared-workspace-npm-init", commandName("npm"), ["init", "-y"], { cwd: prepWorkspaceDir, timeout: 60_000 });
+	const npmInit = runLogged(logDir, "shared-workspace-npm-init", "npm", ["init", "-y"], { cwd: prepWorkspaceDir, timeout: 60_000 });
 	requireOk(npmInit, "shared workspace npm init");
-	const npmInstallPacked = runLogged(logDir, "shared-workspace-npm-install-packed", commandName("npm"), ["install", "--no-save", tarballPath], { cwd: prepWorkspaceDir, timeout: 180_000 });
+	const npmInstallPacked = runLogged(logDir, "shared-workspace-npm-install-packed", "npm", ["install", "--no-save", tarballPath], { cwd: prepWorkspaceDir, timeout: 180_000 });
 	requireOk(npmInstallPacked, "shared workspace npm install packed tarball");
 	const packagePath = join(prepWorkspaceDir, "node_modules", packageName);
 	if (!existsSync(packagePath)) throw new Error(`packed package install did not create ${packagePath}`);
@@ -351,13 +346,8 @@ async function runPtyPi({ artifactDir, ptyCommand, env, cwd, sessionDir, finalMa
 		while (!exitEvent && Date.now() - exitWaitStarted < 5_000) await delay(500);
 	}
 	if (!exitEvent) {
-		if (process.platform === "win32") {
-			const result = spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { encoding: "utf8", timeout: 10_000 });
-			events.push({ type: "taskkill_sent", elapsedMs: Date.now() - startedAt, pid: child.pid, status: result.status, stderr: result.stderr?.slice(0, 500) });
-		} else {
-			try { child.kill(); } catch {}
-			events.push({ type: "kill_sent", elapsedMs: Date.now() - startedAt });
-		}
+		try { child.kill(); } catch {}
+		events.push({ type: "kill_sent", elapsedMs: Date.now() - startedAt });
 	}
 	// Only a live pi can still persist its session; after node-pty reports exit nothing more will appear.
 	if (!exitEvent) await waitForSessionJsonl(sessionDir, null, startedAt, events);
@@ -538,7 +528,7 @@ async function main() {
 		} else {
 			ensureTargetDependencies(logDir);
 			ensureNodePtySpawnHelperExecutable(logDir);
-			const pack = runLogged(logDir, "npm-pack", commandName("npm"), ["pack", "--silent"], { timeout: 120_000 });
+			const pack = runLogged(logDir, "npm-pack", "npm", ["pack", "--silent"], { timeout: 120_000 });
 			requireOk(pack, "npm pack");
 			const tarball = pack.stdout.trim().split(/\r?\n/).filter(Boolean).at(-1);
 			if (!tarball || !existsSync(resolve(process.cwd(), tarball))) throw new Error("npm pack did not produce a tarball");
@@ -546,9 +536,9 @@ async function main() {
 			writeFileSync(tarballPath, readFileSync(resolve(process.cwd(), tarball)));
 			rmSync(resolve(process.cwd(), tarball), { force: true });
 			writeFileSync(join(artifactDir, "packed-tarball.txt"), `${tarball}\n`);
-			const npmInit = runLogged(logDir, "workspace-npm-init", commandName("npm"), ["init", "-y"], { cwd: workspaceDir, timeout: 60_000 });
+			const npmInit = runLogged(logDir, "workspace-npm-init", "npm", ["init", "-y"], { cwd: workspaceDir, timeout: 60_000 });
 			requireOk(npmInit, "workspace npm init");
-			const npmInstallPacked = runLogged(logDir, "workspace-npm-install-packed", commandName("npm"), ["install", "--no-save", tarballPath], { cwd: workspaceDir, timeout: 180_000 });
+			const npmInstallPacked = runLogged(logDir, "workspace-npm-install-packed", "npm", ["install", "--no-save", tarballPath], { cwd: workspaceDir, timeout: 180_000 });
 			requireOk(npmInstallPacked, "workspace npm install packed tarball");
 		}
 		const piCli = resolvePiCli();

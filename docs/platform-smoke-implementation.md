@@ -52,8 +52,6 @@ This is race-safe extraction, not a sandbox against a hostile same-owner process
 
 Windows controllers reject every nonempty extraction bundle before mutation because Node exposes no handle-relative Windows creation API.
 
-The retained `process.platform === "win32"` branches in the published smoke helpers — `.cmd` command resolution, npm/pi `.cmd` shell and CLI lookup, the PTY spawn-helper executable early return, the `taskkill.exe` fallback, and PowerShell PTY capture — are runner portability for executing those helpers on Windows hosts. No configured target selects them.
-
 ### Inline, spill, and chunk transport
 
 Small bundles stay between `PLATFORM_LIVE_BUNDLE_JSON_START` and `PLATFORM_LIVE_BUNDLE_JSON_END`; larger bundles exclusively create and descriptor-write the exact CWD-relative `.platform-artifact-bundle.gz` final component (`O_NOFOLLOW` on POSIX), emit that exact marker path, and allow chunk reads only for that one-component path. No intermediate spill path is accepted.

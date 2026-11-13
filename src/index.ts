@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { discoverModels, replaceCursorModelMetadata } from "./model-discovery.js";
+import { discoverModels, replaceCursorModelMetadata, type CursorModelMetadata } from "./model-discovery.js";
 import { registerCursorRuntimeControls } from "./cursor-state.js";
 import { registerCursorNativeToolDisplay } from "./cursor-native-tool-display-registration.js";
 import { registerCursorPiToolBridge } from "./cursor-pi-tool-bridge.js";
@@ -75,11 +75,13 @@ export default async function (pi: CursorExtensionApi) {
 	registerCursorPiToolBridge(pi);
 	registerCursorAgentsContextDedup(pi);
 	registerCursorOverflowNormalization(pi);
+	let initialMetadata: readonly CursorModelMetadata[] | undefined;
 	const models = await discoverModels({
 		apiKey: normalizeCursorApiKey(process.env.CURSOR_API_KEY),
 		allowNetwork: false,
-		onCatalog: (provenance) => {
+		onCatalog: (provenance, metadata) => {
 			catalog = provenance;
+			initialMetadata = metadata;
 		},
 	});
 
@@ -113,7 +115,7 @@ export default async function (pi: CursorExtensionApi) {
 		catalog = provenance;
 		setFallbackWarning(provenance.issue);
 		if (metadata) replaceCursorModelMetadata(metadata);
-	});
+	}, initialMetadata);
 	// Register last so session_shutdown cleanup remains protected until other Cursor handlers finish.
 	registerCursorSdkSessionProcessErrorGuard(pi);
 }

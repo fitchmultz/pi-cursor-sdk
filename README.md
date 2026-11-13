@@ -38,7 +38,7 @@ pi --model cursor/grok-4.6:slow
 
 The `cursor/` prefix selects this provider. `@1m` selects a context window from Cursor's catalog. `--thinking` sets the thinking level when Cursor exposes that control. Models with Cursor's `fast` parameter also have `:fast` and `:slow` choices.
 
-Run `pi --list-models cursor` to see available models. Startup can use a cached or fallback catalog. A model in the list does not prove that your key works.
+Run `pi --list-models cursor` to see available canonical models (`PI_CURSOR_MODEL_ALIASES=1` also lists SDK alias rows; explicit `--model` and saved sessions resolve unambiguous aliases either way). Startup can use a cached or fallback catalog. A model in the list does not prove that your key works.
 
 Run these commands inside Pi:
 

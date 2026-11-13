@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Api, Context, Model, Provider, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { cursorApiKeyAuth, normalizeCursorApiKey, resolveCursorCredentialApiKey } from "./cursor-api-key.js";
+import { parseEnvBoolean } from "./cursor-env-boolean.js";
 import { discoverModels, snapshotCursorModelMetadata, type CursorModelCatalogProvenance, type CursorModelFallbackIssue, type CursorModelMetadata } from "./model-discovery.js";
 import { clearModelListCache } from "./model-list-cache.js";
 import { captureCursorCloudLifecycleRecorder } from "./cursor-cloud-lifecycle.js";
@@ -85,6 +86,13 @@ function catalogChannelFor(stream: object): CatalogChannel {
 function closeBinding(binding: SharedProviderBinding): void {
 	binding.active = false;
 	binding.closed = true;
+}
+function collectAliasModelIds(metadata: readonly CursorModelMetadata[]): ReadonlySet<string> {
+	const ids = new Set<string>();
+	for (const entry of metadata) {
+		if (entry.selectionModelId !== entry.baseModelId) ids.add(entry.piModelId);
+	}
+	return ids;
 }
 type CursorRegistry = {
 	getProvider(id: string): { streamSimple?: object } | undefined;
@@ -216,7 +224,11 @@ export function registerCursorProviderBinding(
 		registry = undefined;
 		unsubscribeServingCatalog();
 	});
-	return (models: Awaited<ReturnType<typeof discoverModels>>, catalogListener: CatalogListener) => {
+	return (
+		models: Awaited<ReturnType<typeof discoverModels>>,
+		catalogListener: CatalogListener,
+		initialMetadata: readonly CursorModelMetadata[] = [],
+	) => {
 		if (binding.state === "closed") return;
 		onCatalog = catalogListener;
 		const toNative = (definitions: typeof models): Model<"cursor-sdk">[] =>
@@ -224,10 +236,15 @@ export function registerCursorProviderBinding(
 				...definition, provider: "cursor", api: "cursor-sdk", baseUrl: "https://cursor.com",
 			}));
 		let current = toNative(models);
+		let aliasModelIds = collectAliasModelIds(initialMetadata);
 		const provider: Provider<"cursor-sdk"> = {
 			id: "cursor", name: "Cursor", baseUrl: "https://cursor.com",
 			auth: { apiKey: cursorApiKeyAuth() },
 			getModels: () => current,
+			filterModels: (available) =>
+				parseEnvBoolean(process.env.PI_CURSOR_MODEL_ALIASES, false)
+					? available
+					: available.filter((model) => !aliasModelIds.has(model.id)),
 			stream: stream,
 			streamSimple: stream,
 			async refreshModels(context) {
@@ -243,20 +260,21 @@ export function registerCursorProviderBinding(
 				// models.json auth. Keep a published live or cached catalog without a fallback issue instead
 				// of publishing a missing key; republishing it is not a new live response.
 				if (!registry && context.allowNetwork === false && !apiKey && ownCatalog.published && ownCatalog.issue === undefined) {
-					const metadata = snapshotCursorModelMetadata();
+					const metadata = ownCatalog.metadata ?? snapshotCursorModelMetadata();
 					await context.publish({ update: () => { emitCatalog({ source: "cache" }, metadata); } });
 					return;
 				}
 				await discoverModels({
 					apiKey, allowNetwork: context.allowNetwork, forceRefresh: context.force, signal: context.signal,
-					publish: (definitions, provenance, update) => context.publish({
+					publish: (definitions, provenance, update, metadata) => context.publish({
 						update: () => {
 							if (binding.state === "closed") return;
 							update();
 							current = toNative(definitions);
+							aliasModelIds = collectAliasModelIds(metadata);
 							// Do not infer logout before native composed auth is reachable.
 							if (registry && !apiKey) clearModelListCache();
-							emitCatalog(provenance, snapshotCursorModelMetadata());
+							emitCatalog(provenance, metadata);
 						},
 					}),
 				});

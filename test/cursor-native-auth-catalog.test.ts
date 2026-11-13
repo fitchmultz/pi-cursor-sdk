@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
-import { ModelRuntime, ModelRegistry, resolveCliModel } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, DefaultResourceLoader, ModelRuntime, ModelRegistry, resolveCliModel, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { createExtensionRegistrationPi } from "./helpers/pi-harness.js";
 import extension from "../src/index.js";
 import { __testUtils as outputFilterTestUtils } from "../src/cursor-sdk-output-filter.js";
@@ -26,6 +26,7 @@ beforeEach(() => {
 	vi.stubEnv("CURSOR_API_KEY", undefined);
 	vi.stubEnv("PI_CURSOR_SDK_DISABLE_MODEL_CACHE", undefined);
 	vi.stubEnv("PI_CURSOR_HIDE_MODELS_WHEN_LOGGED_OUT", "1");
+	vi.stubEnv("PI_CURSOR_MODEL_ALIASES", undefined);
 	list.mockReset();
 });
 afterEach(() => { outputFilterTestUtils.resetProcessOutputFilter(); vi.restoreAllMocks(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
@@ -238,5 +239,74 @@ it("accepted recovery replaces warning state and logout cleanup leaves user-mana
 		await runtime.logout("cursor");
 		expect(existsSync(userFile)).toBe(true);
 		expect(existsSync(owned)).toBe(true);
+	} finally { await pi.runSessionShutdown(); }
+});
+
+it("filters SDK alias rows from getAvailable by default while keeping CLI and persisted session alias selection working", async () => {
+	const { runtime, registry, pi } = await fixture();
+	try {
+		saveModelListCache(fingerprintApiKey("synthetic-alias-filter"), [{
+			id: "native-canonical",
+			displayName: "Native Canonical",
+			aliases: ["native-alias"],
+			parameters: [
+				{ id: "context", displayName: "Context", values: [{ value: "1m", displayName: "1M" }] },
+				{ id: "fast", displayName: "Fast", values: [{ value: "true", displayName: "True" }, { value: "false", displayName: "False" }] },
+			],
+			variants: [{ displayName: "default", isDefault: true, params: [{ id: "context", value: "1m" }, { id: "fast", value: "false" }] }],
+		}]);
+		await login(runtime, "synthetic-alias-filter");
+		await registry.refresh({ providers: ["cursor"], allowNetwork: false, force: true });
+
+		expect((await runtime.getAvailable("cursor")).map((m) => m.id)).toEqual([
+			"native-canonical@1m",
+			"native-canonical@1m:fast",
+			"native-canonical@1m:slow",
+		]);
+		expect(registry.getAvailable().filter((m) => m.provider === "cursor").map((m) => m.id)).toEqual([
+			"native-canonical@1m",
+			"native-canonical@1m:fast",
+			"native-canonical@1m:slow",
+		]);
+		expect(resolveCliModel({ cliProvider: "cursor", cliModel: "native-alias@1m", modelRuntime: runtime }).model?.id).toBe("native-alias@1m");
+
+		const sessionManager = SessionManager.inMemory(root);
+		sessionManager.appendMessage({ role: "user", content: "Saved alias session", timestamp: 1 });
+		sessionManager.appendModelChange("cursor", "native-alias@1m");
+		const settingsManager = SettingsManager.inMemory();
+		const resourceLoader = new DefaultResourceLoader({
+			cwd: root,
+			agentDir: root,
+			settingsManager,
+			noExtensions: true,
+			noSkills: true,
+			noPromptTemplates: true,
+			noThemes: true,
+			noContextFiles: true,
+		});
+		await resourceLoader.reload();
+		const { session, modelFallbackMessage } = await createAgentSession({
+			cwd: root,
+			agentDir: root,
+			modelRuntime: runtime,
+			resourceLoader,
+			settingsManager,
+			sessionManager,
+			tools: [],
+		});
+		expect(modelFallbackMessage).toBeUndefined();
+		expect(session.model?.id).toBe("native-alias@1m");
+		session.dispose();
+
+		vi.stubEnv("PI_CURSOR_MODEL_ALIASES", "1");
+		await registry.refresh({ providers: ["cursor"], allowNetwork: false });
+		expect((await runtime.getAvailable("cursor")).map((m) => m.id)).toEqual([
+			"native-canonical@1m",
+			"native-canonical@1m:fast",
+			"native-canonical@1m:slow",
+			"native-alias@1m",
+			"native-alias@1m:fast",
+			"native-alias@1m:slow",
+		]);
 	} finally { await pi.runSessionShutdown(); }
 });

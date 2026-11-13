@@ -46,13 +46,18 @@ export type CursorModelCatalogProvenance =
 	| { source: "bundled"; issue: CursorModelFallbackIssue };
 
 export interface DiscoverModelsOptions {
-	/** Receives the provenance of each catalog this call applies. */
-	onCatalog?: (provenance: CursorModelCatalogProvenance) => void;
+	/** Receives the provenance and selection metadata of each catalog this call applies. */
+	onCatalog?: (provenance: CursorModelCatalogProvenance, metadata?: readonly CursorModelMetadata[]) => void;
 	apiKey?: string;
 	allowNetwork?: boolean;
 	signal?: AbortSignal;
 	/** Native publication owns models, metadata, cache and provenance changes together. */
-	publish?: (models: ProviderModelConfig[], provenance: CursorModelCatalogProvenance, update: () => void) => Promise<boolean>;
+	publish?: (
+		models: ProviderModelConfig[],
+		provenance: CursorModelCatalogProvenance,
+		update: () => void,
+		metadata: readonly CursorModelMetadata[],
+	) => Promise<boolean>;
 	// Bypass cache reads only when network is allowed; cache-only phases
 	// still prefer the matching catalog, even when forced.
 	forceRefresh?: boolean;
@@ -395,13 +400,14 @@ async function publishModelItems(
 	options.signal?.throwIfAborted();
 	const metadata = new Map<string, CursorModelMetadata>();
 	const models = registerModelItems(items, metadata);
+	const snapshot = [...metadata.values()];
 	const update = () => {
 		metadataByPiModelId.clear();
 		for (const [id, value] of metadata) metadataByPiModelId.set(id, value);
 		if (cacheFingerprint) saveModelListCache(cacheFingerprint, items);
-		options.onCatalog?.(provenance);
+		options.onCatalog?.(provenance, snapshot);
 	};
-	if (options.publish) await options.publish(models, provenance, update);
+	if (options.publish) await options.publish(models, provenance, update, snapshot);
 	else update();
 	return models;
 }

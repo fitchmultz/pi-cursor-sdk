@@ -51,8 +51,6 @@ function commandPath(command) {
 	return shell(`command -v ${command}`);
 }
 
-
-
 async function runRenderProbe(artifactRoot) {
 	const probeDir = resolve(artifactRoot, `.doctor-render-${process.pid}-${Date.now()}`);
 	try {

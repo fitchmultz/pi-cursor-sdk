@@ -323,7 +323,6 @@ export default {
 
 `ubuntuContainerBaseImage` is `cimg/node:24.21`, the Ubuntu 24.04 Node 24 base with the current glibc baseline for native test dependencies. The runner replaces the base image's Node executable with the checksum-pinned Node 24.22.3 executable from `ubuntuContainerNodeImage` and sets `USER root` before warmup because Crabbox 0.36.0 must install SSH/Git/rsync/curl during bootstrap and `cimg/node` defaults to an unprivileged user. An explicit `PLATFORM_SMOKE_UBUNTU_IMAGE` bypasses that build and must already support Crabbox bootstrap. The package requires Node 24.22.3 (24.x) or 26.13.1 and newer, and this gate validates Node 24 on Apple Silicon macOS and Ubuntu.
 
-
 `artifactRetention` bounds local host evidence growth under `artifactRoot`. `smoke:platform:run` prunes only top-level directories named `run-<timestamp>-<suffix>` before starting a new matrix; it leaves non-run/manual directories untouched and preserves directories newer than `preserveRecentHours` to avoid deleting evidence from active or very recent runs. Doctor is read-only and does not prune artifacts.
 
 ## Required local environment
@@ -339,7 +338,6 @@ PLATFORM_SMOKE_MAC_USER="$USER"
 PLATFORM_SMOKE_MAC_WORK_ROOT="/Users/$USER/crabbox/pi-cursor-sdk"
 # Optional prebuilt replacement; bypasses the configured local root-wrapper build.
 PLATFORM_SMOKE_UBUNTU_IMAGE="registry.example.com/ubuntu-node24-crabbox:latest"
-
 
 # Required for live suites; doctor fails before spending Cursor tokens if absent.
 CURSOR_API_KEY="..."
@@ -415,18 +413,18 @@ Doctor checks:
 5. `crabbox doctor --provider local-container --target linux --json` passes.
 6. Docker runtime is active.
 7. Crabbox macOS static SSH doctor with `--doctor-probe-ssh` passes, and the localhost SSH probe sees Node, npm, Git, rsync, and tar.
-8. Node's major version is at least 24 on every target. Use the patched versions listed in Requirements; this doctor check does not enforce patch versions.
-9. npm is available on every target.
-10. `git` is available on every target.
-11. `rsync` is available on macOS and Ubuntu.
-12. `tar` is available on Apple Silicon macOS and Ubuntu.
-13. `node-pty` self-test passes on every target.
-14. A C compiler is available (`cc --version`).
+8. The controller host's Node major version meets `nodeValidationMajor` (24 by default). Target Node-major enforcement belongs to the platform-build suite's `NODE_MAJOR` check; the SSH probe above only records the remote version. Use the patched versions listed in Requirements; these major-version checks do not enforce patch versions.
+9. npm is available on the controller host.
+10. `git` is available on the controller host.
+11. `rsync` is available on the controller host.
+12. `tar` is available on the controller host.
+13. A C compiler is available on the controller host (`cc --version`).
+14. Artifact root is writable.
 15. Host-side xterm/Playwright render self-test passes by rendering a minimal ANSI fixture through the repo xterm helper and launching Playwright Chromium to write a tiny PNG. If this fails, run `npm install` and `npx playwright install chromium` before live suites.
-16. `CURSOR_API_KEY` is present.
-17. Artifact root is writable.
-18. `git status --short` is recorded.
-19. Forbidden tracked artifacts, package tarballs, `.env*`, auth files, and secrets are absent.
+16. `git status --short` is recorded.
+17. Forbidden-file checks reject `.env` and `*.tgz` matches within two directory levels and root `.env.production` or `.env.local` files.
+18. `CURSOR_API_KEY` is present and longer than ten characters; this is not an authentication request.
+19. The controller host's `node-pty` module loads successfully when installed; absence warns that live PTY suites cannot run.
 
 Doctor does not fail merely because the branch has uncommitted source or doc changes under test. It fails on forbidden artifacts and missing platform readiness.
 
@@ -437,7 +435,6 @@ Before adding `node-pty` as a dev dependency, run a phase-zero spike on both tar
 ```text
 node -e "require('node-pty'); console.log('node-pty ok')"
 ```
-
 
 ## Packed-install rule
 
@@ -539,12 +536,12 @@ Steps:
 1. read ./package.json and remember the package name.
 2. grep ./README.md for "pi-cursor-sdk".
 3. find README.md from repo root.
-4. find src/cursor-provider.ts from repo root.
+4. find src/cursor-provider.ts from repo root; this is the list=<yes/no> evidence.
 5. run shell: <rendered-success-command>
-6. write .debug/platform-smoke/<run-id>/native.txt with alpha and beta.
+6. write .debug/platform-smoke/native.txt with alpha and beta.
 7. edit beta to gamma in that file.
 8. run shell and preserve the failure: <rendered-failure-command>
-9. answer exactly:
+9. stop using tools and answer exactly:
 NATIVE_MATRIX_OK package=<name> grep=<yes/no> find=<yes/no> list=<yes/no> shell=<yes/no> shell_fail=<yes/no> write=<yes/no> edit=<yes/no>
 ```
 
@@ -632,7 +629,7 @@ Bridge visual matrix.
 
 Use pi bridge tools only. Use exact pi__ names.
 
-You must make exactly three pi bridge tool calls before the final answer: pi__bash, pi__read, then pi__read. Do not answer until all three calls complete.
+You must make exactly three pi bridge tool calls before your final answer: pi__bash, pi__read, then pi__read. Do not answer until all three calls complete.
 
 Steps:
 1. call pi__bash with command: <rendered-shell-command>

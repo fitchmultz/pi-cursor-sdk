@@ -11,7 +11,6 @@ import {
 	bundleExtractedCheck,
 	fetchPlatformArtifactBundle,
 	finalizeSuiteArtifacts,
-	platformFor,
 	runOnLeaseWithTransientRetry,
 	stopLeaseCheck,
 	withTargetLease,
@@ -185,10 +184,6 @@ function quotePosix(value) {
 	return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
-function quotePowerShell(value) {
-	return `'${String(value).replace(/'/g, "''")}'`;
-}
-
 export function buildLocalResumeSuiteCommand(
 	targetName,
 	script = "smoke:local-resume",
@@ -196,13 +191,9 @@ export function buildLocalResumeSuiteCommand(
 	packageName = "pi-cursor-sdk",
 	suiteName = "cursor-local-resume-restart",
 ) {
-	const powershellTarget = platformFor(targetName) === "powershell";
-	const evidenceDir = `${prepDir}/${powershellTarget ? "lr" : `local-resume-${suiteName}`}`;
+	const evidenceDir = `${prepDir}/local-resume-${suiteName}`;
 	const packagePath = `${prepDir}/packed-workspace/node_modules/${packageName}`;
-	if (powershellTarget) {
-		const powershell = `$ErrorActionPreference='Stop';$p=${quotePowerShell(prepDir)};$e=$p+'/lr';$w=$e.Replace('/','\\');$x=$p+${quotePowerShell(`/packed-workspace/node_modules/${packageName}`)};node scripts/platform-smoke/live-suite-runner.mjs --prepare-only --target ${targetName} --package-name ${packageName} --prep-dir $p;if($LASTEXITCODE){exit $LASTEXITCODE};for($i=0;$i -lt 10 -and (Test-Path -LiteralPath $e);$i++){cmd.exe /d /c rd /s /q $w;if(Test-Path -LiteralPath $e){Start-Sleep -Milliseconds 200}};if(Test-Path -LiteralPath $e){throw 'local-resume evidence cleanup failed'};$env:CURSOR_LOCAL_RESUME_SMOKE_EXTENSION_PATH=$x;$env:CURSOR_LOCAL_RESUME_SMOKE_ARTIFACT_DIR=$e;$env:CURSOR_LOCAL_RESUME_SMOKE_KEEP_ARTIFACTS='1';$env:CURSOR_LOCAL_RESUME_SMOKE_EMIT_BUNDLE='1';npm run ${script}`;
-		return `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${Buffer.from(powershell, "utf16le").toString("base64")}`;
-	}
+
 	const prep = `node scripts/platform-smoke/live-suite-runner.mjs --prepare-only --target ${quotePosix(targetName)} --package-name ${quotePosix(packageName)} --prep-dir ${quotePosix(prepDir)}`;
 	return `${prep} && rm -rf ${quotePosix(evidenceDir)} && CURSOR_LOCAL_RESUME_SMOKE_EXTENSION_PATH=${quotePosix(packagePath)} CURSOR_LOCAL_RESUME_SMOKE_ARTIFACT_DIR=${quotePosix(evidenceDir)} CURSOR_LOCAL_RESUME_SMOKE_KEEP_ARTIFACTS=1 CURSOR_LOCAL_RESUME_SMOKE_EMIT_BUNDLE=1 npm run ${script}`;
 }

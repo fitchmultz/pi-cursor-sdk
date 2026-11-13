@@ -236,7 +236,7 @@ async function runChecks(config) {
 		fail(`SSH to ${host} failed`);
 	}
 
-	// ── Phase 7: Node.js ──
+	// ── Phase 6: Node.js ──
 	console.log("\n── Node.js ──");
 	const nv = shell("node --version");
 	if (nv) {
@@ -248,20 +248,20 @@ async function runChecks(config) {
 		fail("node not found");
 	}
 
-	// ── Phase 8: Tools ──
+	// ── Phase 7: Tools ──
 	console.log("\n── Tools ──");
 	for (const [name, command] of [
 		["npm", "npm --version"],
 		["git", "git --version"],
 		["rsync", "rsync --version"],
 		["tar", "tar --version"],
-		...(process.platform === "win32" ? [] : [["C compiler", "cc --version"]]),
+		["C compiler", "cc --version"],
 	]) {
 		const out = shell(command);
 		out ? ok(`${name}: ${out.split("\n")[0]}`) : fail(`${name} not found`);
 	}
 
-	// ── Phase 9: Artifact root ──
+	// ── Phase 8: Artifact root ──
 	console.log("\n── Artifact root ──");
 	const artRoot = resolve(process.cwd(), config?.artifactRoot ?? ".artifacts/platform-smoke");
 	try {
@@ -274,7 +274,7 @@ async function runChecks(config) {
 		fail(`cannot write to ${artRoot}: ${e.message}`);
 	}
 
-	// ── Phase 10: Host-side visual render probe ──
+	// ── Phase 9: Host-side visual render probe ──
 	console.log("\n── Host-side visual render probe ──");
 	const renderProbe = await runRenderProbe(artRoot);
 	if (renderProbe.ok) {
@@ -283,7 +283,7 @@ async function runChecks(config) {
 		fail(renderProbe.message);
 	}
 
-	// ── Phase 11: Git status ──
+	// ── Phase 10: Git status ──
 	console.log("\n── Git status ──");
 	const branch = shell("git branch --show-current");
 	branch ? ok(`branch: ${branch}`) : warn("could not determine branch");
@@ -295,7 +295,7 @@ async function runChecks(config) {
 		ok("clean worktree");
 	}
 
-	// ── Phase 12: Forbidden files ──
+	// ── Phase 11: Forbidden files ──
 	console.log("\n── Forbidden files ──");
 	let anyForbidden = false;
 	for (const pat of [".env", "*.tgz"]) {
@@ -315,7 +315,7 @@ async function runChecks(config) {
 	}
 	ok("no tracked .env.*");
 
-	// ── Phase 13: Cursor auth ──
+	// ── Phase 12: Cursor auth ──
 	console.log("\n── Cursor auth ──");
 	const key = env("CURSOR_API_KEY");
 	if (key && key.length > 10) {
@@ -326,7 +326,7 @@ async function runChecks(config) {
 		fail("CURSOR_API_KEY missing — live Cursor suites will not run");
 	}
 
-	// ── Phase 14: node-pty self-test ──
+	// ── Phase 13: node-pty self-test ──
 	console.log("\n── node-pty self-test ──");
 	const ptyPath = resolve(process.cwd(), "node_modules", "node-pty");
 	if (existsSync(ptyPath)) {
@@ -345,7 +345,7 @@ async function runChecks(config) {
 		warn("node-pty not installed — live PTY suites will not run. Run: npm ci");
 	}
 
-	// ── Phase 15: Summary ──
+	// ── Phase 14: Summary ──
 	console.log(`\n=== Results: ${failures} failure(s) ===`);
 	if (failures > 0) {
 		console.log("Fix failures above before running live Cursor suites.");

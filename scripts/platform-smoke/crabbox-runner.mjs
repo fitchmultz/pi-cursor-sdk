@@ -126,7 +126,6 @@ export function buildTargetBaseArgs(targetName, config = {}) {
  * Get the internal lease ID for a target.
  * For static SSH, this is "static_localhost".
  * For local-container, it's the slug (pi-cursor-sdk-ubuntu).
- * For parallels, it's the slug used during warmup.
  */
 export function leaseIdFor(targetName) {
 	switch (targetName) {

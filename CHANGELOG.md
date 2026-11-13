@@ -4,6 +4,31 @@
 
 ## Unreleased
 
+## 0.5.37 - 2026-11-13
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Supersedes unpublished 0.5.36 from aebaff2691b72e6e750eddf1f0459a5f3f406eea. Includes all changes since v0.5.34; the original release records remain unchanged.
+
+- fix: accept unfenced trailing JSON verdicts in release review (#501) ([6227c52](https://github.com/fitchmultz/pi-cursor-sdk/commit/6227c5214ca687fc01ee5e2afb28b5d17bb12af9))
+
+### What's Changed
+* chore: remove unsupported platform qualification by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/488
+* chore: remove Windows-only smoke remnants by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/492
+* chore: remove Windows/PowerShell line from native smoke prompt by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/493
+* chore(release): 0.5.35 by @pi-durable[bot] in https://github.com/fitchmultz/pi-cursor-sdk/pull/491
+* chore: fix release-review leftovers from the platform removal by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/494
+* chore(release): 0.5.36 by @pi-durable[bot] in https://github.com/fitchmultz/pi-cursor-sdk/pull/495
+* chore: align smoke docs with platform removal (1/4) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/496
+* fix: gate release qualification on material findings (2/4) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/497
+* chore: unpublish maintainer smoke suite from npm (3/4) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/498
+* chore: remove remaining Windows branches from maintainer scripts (4/4) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/499
+* fix: accept unfenced trailing JSON verdicts in release review by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/501
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.34...v0.5.37
+
 ## 0.5.36 - 2026-11-13
 
 <!-- npm-release:unreleased:start -->

@@ -27,7 +27,7 @@ The bridge is enabled by default when bridgeable active pi tools exist. Cursor s
 
 Outstanding bridge calls pause the live run's idle-abandonment timer (five minutes by default), including queued/emitted requests and pi tools awaiting an answer. The full idle window resumes after the last matching call settles and the provider drain lease ends, including when cleanup was requested before the lease. Explicit abort/shutdown/reset/compaction and the fail-closed MCP/bridge deadline (one hour by default) still clean up pending work. Display-only native replay without pending bridge work retains its idle expiry.
 
-The bridge migrated from legacy `@modelcontextprotocol/sdk` v1 to stable MCP v2. Its bundled runtime closure is `@modelcontextprotocol/server@2.3.1`, `@modelcontextprotocol/hono@2.0.2`, `hono@4.13.13`, and `@hono/node-server@2.1.3`; the server binds loopback and validates Hono `Host` and `Origin` headers.
+The bridge migrated from legacy `@modelcontextprotocol/sdk` v1 to stable MCP v2. Its bundled runtime closure is `@modelcontextprotocol/server@2.3.1`, `@modelcontextprotocol/hono@2.0.2`, `hono@4.13.18`, and `@hono/node-server@2.1.8`; the server binds loopback and validates Hono `Host` and `Origin` headers.
 
 Rollback, timeout, and diagnostics controls:
 

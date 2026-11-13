@@ -41,7 +41,6 @@ export const SCENARIOS = {
 		promptTemplate: `Native visual matrix.
 
 Use Cursor-native tools only. Do not use pi__ tools.
-On Windows/PowerShell shell commands, do not use &&; if you add a cd command, separate commands with a semicolon (;).
 
 Steps:
 1. read ./package.json and remember the package name.

@@ -4,6 +4,19 @@
 
 ## Unreleased
 
+## 0.5.39 - 2026-11-13
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- feat: hide duplicate Cursor SDK alias rows in picker by default (#506) ([b77afdc](https://github.com/fitchmultz/pi-cursor-sdk/commit/b77afdcdee692c9cd356cee7e705aed52ced0e7b))
+
+### What's Changed
+* feat: hide duplicate Cursor SDK alias rows in picker by default by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/506
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.38...v0.5.39
+
 ## 0.5.38 - 2026-11-13
 
 <!-- npm-release:unreleased:start -->

@@ -50,13 +50,7 @@ export async function capturePTY(dir, command, opts = {}) {
 	appendEvent({ type: "start", time: startTime, cols: COLS, rows: ROWS, command });
 
 	if (pty) {
-		// Use real PTY — always spawn through a shell for portability
-		const shellCmd = process.platform === "win32" ? "powershell.exe" : "/bin/bash";
-		const shellArgs = process.platform === "win32"
-			? ["-NoProfile", "-Command", command.join(" ")]
-			: ["-lc", command.join(" ")];
-
-		const ptyProcess = pty.spawn(shellCmd, shellArgs, {
+		const ptyProcess = pty.spawn("/bin/bash", ["-lc", command.join(" ")], {
 			name: "xterm-256color",
 			cols: COLS,
 			rows: ROWS,

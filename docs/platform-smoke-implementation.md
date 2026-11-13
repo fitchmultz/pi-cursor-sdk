@@ -166,7 +166,7 @@ Verify `node-pty` on every target before committing the dependency.
 Exit criteria:
 
 - node-pty self-test passes on macOS;
-- node-pty self-test passes on Ubuntu local-container;
+- node-pty self-test passes on Ubuntu local-container.
 
 ### Phase 2: config and doctor
 

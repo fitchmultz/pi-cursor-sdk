@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
-import { createAgentSession, DefaultResourceLoader, ModelRuntime, ModelRegistry, resolveCliModel, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, DefaultResourceLoader, ModelRuntime, ModelRegistry, resolveCliModel, resolveModelScopeWithDiagnostics, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { createExtensionRegistrationPi } from "./helpers/pi-harness.js";
 import extension from "../src/index.js";
 import { __testUtils as outputFilterTestUtils } from "../src/cursor-sdk-output-filter.js";
@@ -268,6 +268,11 @@ it("filters SDK alias rows from getAvailable by default while keeping CLI and pe
 			"native-canonical@1m:fast",
 			"native-canonical@1m:slow",
 		]);
+		expect((await resolveModelScopeWithDiagnostics(["cursor/*"], runtime)).scopedModels.map((entry) => entry.model.id)).toEqual([
+			"native-canonical@1m",
+			"native-canonical@1m:fast",
+			"native-canonical@1m:slow",
+		]);
 		expect(resolveCliModel({ cliProvider: "cursor", cliModel: "native-alias@1m", modelRuntime: runtime }).model?.id).toBe("native-alias@1m");
 
 		const sessionManager = SessionManager.inMemory(root);
@@ -300,6 +305,9 @@ it("filters SDK alias rows from getAvailable by default while keeping CLI and pe
 
 		vi.stubEnv("PI_CURSOR_MODEL_ALIASES", "1");
 		await registry.refresh({ providers: ["cursor"], allowNetwork: false });
+		expect((await resolveModelScopeWithDiagnostics(["cursor/native-alias@1m"], runtime)).scopedModels.map((entry) => entry.model.id)).toEqual([
+			"native-alias@1m",
+		]);
 		expect((await runtime.getAvailable("cursor")).map((m) => m.id)).toEqual([
 			"native-canonical@1m",
 			"native-canonical@1m:fast",

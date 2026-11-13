@@ -87,7 +87,7 @@ function closeBinding(binding: SharedProviderBinding): void {
 	binding.active = false;
 	binding.closed = true;
 }
-function collectAliasModelIds(metadata: readonly CursorModelMetadata[]): ReadonlySet<string> {
+function collectAliasModelIds(metadata: readonly CursorModelMetadata[] = []): ReadonlySet<string> {
 	const ids = new Set<string>();
 	for (const entry of metadata) {
 		if (entry.selectionModelId !== entry.baseModelId) ids.add(entry.piModelId);
@@ -271,10 +271,11 @@ export function registerCursorProviderBinding(
 							if (binding.state === "closed") return;
 							update();
 							current = toNative(definitions);
-							aliasModelIds = collectAliasModelIds(metadata);
+							const resolvedMetadata = metadata ?? snapshotCursorModelMetadata();
+							aliasModelIds = collectAliasModelIds(resolvedMetadata);
 							// Do not infer logout before native composed auth is reachable.
 							if (registry && !apiKey) clearModelListCache();
-							emitCatalog(provenance, metadata);
+							emitCatalog(provenance, resolvedMetadata);
 						},
 					}),
 				});

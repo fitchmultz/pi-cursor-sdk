@@ -56,7 +56,7 @@ export interface DiscoverModelsOptions {
 		models: ProviderModelConfig[],
 		provenance: CursorModelCatalogProvenance,
 		update: () => void,
-		metadata: readonly CursorModelMetadata[],
+		metadata?: readonly CursorModelMetadata[],
 	) => Promise<boolean>;
 	// Bypass cache reads only when network is allowed; cache-only phases
 	// still prefer the matching catalog, even when forced.

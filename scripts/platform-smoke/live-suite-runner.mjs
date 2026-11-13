@@ -3,7 +3,7 @@
  * Remote live suite runner for platform smoke.
  *
  * Runs inside a Crabbox target. It installs the packed extension into a
- * run-scoped pi agent dir, drives pi through node-pty/ConPTY, and prints a
+ * run-scoped pi agent dir, drives pi through node-pty, and prints a
  * base64 artifact bundle for the host-side platform-smoke runner to unpack and
  * render.
  */

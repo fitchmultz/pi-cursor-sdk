@@ -209,7 +209,7 @@ Before publishing any npm/GitHub release or tagging release-ready status:
 
 - Run a thermo-nuclear/deep maintainability review on the exact release diff, including docs, tests, package metadata, generated artifacts, and PR/issue closure notes.
 - Use the catalog, release-preparation, and release-review commands in `docs/development.md` to bind the review to the same candidate and run.
-- Remediate every finding, including polish. Repeat the review/fix loop until the reviewer reports no remaining findings.
+- Remediate every material finding and repeat the review/fix loop until there are no remaining material findings; standalone minor polish is retained in the receipt.
 - This release review gate is in addition to offline verification and any necessary changed-behavior live proof selected under the owner cost policy; it does not require the comprehensive paid matrix.
 
 ## Pre-commit verification (maintainer)

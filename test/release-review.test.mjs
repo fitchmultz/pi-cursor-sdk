@@ -469,6 +469,21 @@ test("release review preserves prepared verification beside additional user cont
 	assert.match(changed.stderr, /Prepared review context changed before review/);
 });
 
+test("release review retains non-material polish without failing and blocks material findings", (t) => {
+	const polish = releaseFixture(t, "polish");
+	const polishResult = polish.run("release", "--source", polish.head, "--release-source", polish.head, "--evidence", polish.evidence);
+	assert.equal(polishResult.status, 0, polishResult.stderr);
+	const polishReceipt = JSON.parse(readFileSync(polish.receipt, "utf8"));
+	assert.equal(polishReceipt.status, "passed");
+	assert.equal(polishReceipt.report.findings[0].material, false);
+
+	const finding = releaseFixture(t, "finding");
+	const findingResult = finding.run("release", "--source", finding.head, "--release-source", finding.head, "--evidence", finding.evidence);
+	assert.equal(findingResult.status, 1, findingResult.stdout);
+	assert.equal(JSON.parse(readFileSync(finding.receipt, "utf8")).status, "failed");
+	assert.match(findingResult.stderr, /Review has findings:/);
+});
+
 for (const [name, behavior, artifactContent, accepted] of [
 	["an opened byte-identical copy", "partial-artifact", "candidate\nsecond\n", true],
 	["partially read distinct bytes", "partial-artifact", "candidate\ndifferent\n", false],

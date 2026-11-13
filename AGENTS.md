@@ -154,7 +154,7 @@ There is no lint or format script in `package.json` at this time.
 - Keep provider runtime code side-effect-light. Do not write secrets, and do not let cache or discovery failures break response streaming unless the run cannot proceed safely.
 - Test behavior changes at the owning boundary. Extend existing coverage before adding duplicate tests. Remove tests designed to always pass; each retained test must be able to catch a credible regression.
 - If dependency versions change, update `package-lock.json` with npm. Do not manually edit generated dependency output.
-- The bridge runtime closure is bundled and pinned to `@modelcontextprotocol/server@2.3.1`, `@modelcontextprotocol/hono@2.0.2`, `hono@4.13.13`, and `@hono/node-server@2.1.3`. `@cursor/sdk@1.0.40` remains an exact unbundled dependency.
+- The bridge runtime closure is bundled and pinned to `@modelcontextprotocol/server@2.3.1`, `@modelcontextprotocol/hono@2.0.2`, `hono@4.13.18`, and `@hono/node-server@2.1.8`. `@cursor/sdk@1.0.40` remains an exact unbundled dependency.
 - Do not commit `dist/`, `coverage/`, `.env*`, `.pi/`, or package tarballs.
 
 ## Validation and done criteria

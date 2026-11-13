@@ -3,7 +3,7 @@ export function parseReviewResponse(text) {
 	const closeFence = /\r?\n```[ \t]*$/.exec(response);
 	if (closeFence) {
 		const beforeClose = response.slice(0, closeFence.index);
-		const openFence = [...beforeClose.matchAll(/(?:^|\n)```(?:json)?[ \t]*\r?\n/g)].at(-1);
+		const openFence = [...beforeClose.matchAll(/^```(?:json)?[ \t]*\r?\n/gm)].at(-1);
 		if (openFence) {
 			try {
 				const report = JSON.parse(beforeClose.slice(openFence.index + openFence[0].length));

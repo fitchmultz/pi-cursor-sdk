@@ -108,6 +108,8 @@ const output = kind === "preface-unfenced"
   ? "Inspected the diff and surrounding code.\\n\\n" + fence + "\\n" + JSON.stringify(report) + "\\n" + fence
   : kind === "preface-fenced-commentary"
   ? "Inspected the diff and surrounding code.\\n\\n" + fence + "\\nnpm test\\n" + fence + "\\n\\n" + fence + "json\\n" + JSON.stringify(report) + "\\n" + fence
+  : kind === "preface-adjacent-fence"
+  ? "Inspected the diff and surrounding code.\\n" + fence + "\\nnpm test\\n" + fence + "\\n" + fence + "json\\n" + JSON.stringify(report) + "\\n" + fence
   : ["fenced-finding","polish","preface"].includes(kind)
   ? (kind === "preface" ? "Inspected the diff and surrounding code.\\n\\n" : "") + fence + "json\\n" + JSON.stringify(report) + "\\n" + fence
   : JSON.stringify(report);
@@ -287,7 +289,7 @@ test("pre-commit retains non-material polish without treating it as a material b
 });
 
 test("pre-commit retains a reviewer's explanation before its final JSON verdict", (t) => {
-	for (const kind of ["preface", "preface-plain-fence", "preface-fenced-commentary", "preface-unfenced"]) {
+	for (const kind of ["preface", "preface-plain-fence", "preface-fenced-commentary", "preface-adjacent-fence", "preface-unfenced"]) {
 		const f = fixture(t, kind);
 		stageChange(f.repo);
 		const result = f.run("pre-commit");

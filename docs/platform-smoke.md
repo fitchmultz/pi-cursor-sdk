@@ -415,18 +415,18 @@ Doctor checks:
 5. `crabbox doctor --provider local-container --target linux --json` passes.
 6. Docker runtime is active.
 7. Crabbox macOS static SSH doctor with `--doctor-probe-ssh` passes, and the localhost SSH probe sees Node, npm, Git, rsync, and tar.
-13. Node's major version is at least 24 on every target. Use the patched versions listed in Requirements; this doctor check does not enforce patch versions.
-14. npm is available on every target.
-15. `git` is available on every target.
-16. `rsync` is available on macOS and Ubuntu.
-17. `tar` is available on Apple Silicon macOS and Ubuntu.
-18. `node-pty` self-test passes on every target.
-19. Target pi tool probe proves the shell tool accepts platform-rendered commands on every target.
-20. Host-side xterm/Playwright render self-test passes by rendering a minimal ANSI fixture through the repo xterm helper and launching Playwright Chromium to write a tiny PNG. If this fails, run `npm install` and `npx playwright install chromium` before live suites.
-21. `CURSOR_API_KEY` is present.
-22. Artifact root is writable.
-23. `git status --short` is recorded.
-24. Forbidden tracked artifacts, package tarballs, `.env*`, auth files, and secrets are absent.
+8. Node's major version is at least 24 on every target. Use the patched versions listed in Requirements; this doctor check does not enforce patch versions.
+9. npm is available on every target.
+10. `git` is available on every target.
+11. `rsync` is available on macOS and Ubuntu.
+12. `tar` is available on Apple Silicon macOS and Ubuntu.
+13. `node-pty` self-test passes on every target.
+14. A C compiler is available (`cc --version`).
+15. Host-side xterm/Playwright render self-test passes by rendering a minimal ANSI fixture through the repo xterm helper and launching Playwright Chromium to write a tiny PNG. If this fails, run `npm install` and `npx playwright install chromium` before live suites.
+16. `CURSOR_API_KEY` is present.
+17. Artifact root is writable.
+18. `git status --short` is recorded.
+19. Forbidden tracked artifacts, package tarballs, `.env*`, auth files, and secrets are absent.
 
 Doctor does not fail merely because the branch has uncommitted source or doc changes under test. It fails on forbidden artifacts and missing platform readiness.
 
@@ -521,13 +521,11 @@ Purpose:
 - prove JSONL toolCall/toolResult correctness;
 - prove footer/status readability.
 
-The prompt is rendered per target. Shell command steps are platform-specific:
+The prompt uses POSIX shell commands:
 
 ```text
 success POSIX:      printf 'cursor visual smoke\n'
-success PowerShell: Write-Output 'cursor visual smoke'
 failure POSIX:      sh -c 'echo native shell failure >&2; exit 7'
-failure PowerShell: Write-Error 'native shell failure'; exit 7
 ```
 
 Required prompt template:
@@ -542,10 +540,10 @@ Steps:
 2. grep ./README.md for "pi-cursor-sdk".
 3. find README.md from repo root.
 4. find src/cursor-provider.ts from repo root.
-5. run shell: <platform-rendered-success-command>
+5. run shell: <rendered-success-command>
 6. write .debug/platform-smoke/<run-id>/native.txt with alpha and beta.
 7. edit beta to gamma in that file.
-8. run shell and preserve the failure: <platform-rendered-failure-command>
+8. run shell and preserve the failure: <rendered-failure-command>
 9. answer exactly:
 NATIVE_MATRIX_OK package=<name> grep=<yes/no> find=<yes/no> list=<yes/no> shell=<yes/no> shell_fail=<yes/no> write=<yes/no> edit=<yes/no>
 ```
@@ -637,7 +635,7 @@ Use pi bridge tools only. Use exact pi__ names.
 You must make exactly three pi bridge tool calls before the final answer: pi__bash, pi__read, then pi__read. Do not answer until all three calls complete.
 
 Steps:
-1. call pi__bash with command: <platform-rendered-shell-command>
+1. call pi__bash with command: <rendered-shell-command>
 2. call pi__read on ./package.json.
 3. call pi__read on ./definitely-missing-platform-smoke-file.txt.
 4. answer exactly:
@@ -705,7 +703,7 @@ Required prompt template:
 Abort cleanup matrix.
 
 Call pi__bash with command:
-<platform-rendered-long-running-command>
+<rendered-long-running-command>
 
 Do not answer until the tool completes.
 ```

@@ -20,10 +20,6 @@ import {
 import { runAssertions } from "./assertions.mjs";
 import { runOnLease, stopLease, warmupLease } from "./crabbox-runner.mjs";
 
-export function platformFor(targetName) {
-	return targetName === "windows-native" ? "powershell" : "posix";
-}
-
 export function bundleExtractedCheck(id, bundle) {
 	const structuredViolations = bundle.extraction === "committed"
 		? bundle.violations.filter(({ violation }) => isStructuredArtifactViolation(violation)).length

@@ -226,9 +226,7 @@ try {
 		for (const scenario of Object.values(SCENARIOS)) {
 			if (!(scenario.finalMarker && scenario.promptTemplate)) continue;
 			const promptScenario = { ...scenario, promptTemplate: scenario.promptTemplate };
-			for (const platform of ["posix", "powershell"] as const) {
-				expect(renderPrompt(promptScenario, platform)).not.toContain(scenario.finalMarker);
-			}
+			expect(renderPrompt(promptScenario)).not.toContain(scenario.finalMarker);
 		}
 	});
 

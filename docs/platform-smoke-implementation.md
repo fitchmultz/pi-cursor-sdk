@@ -140,27 +140,18 @@ Adding a registry entry requires adding it to the required or excluded list with
 
 ## Platform command rendering
 
-Scenario commands are not raw shell strings. The runner renders commands per target:
+Scenario commands are POSIX shell strings for Apple Silicon macOS and Ubuntu. `renderPrompt(scenario)` replaces each `{{key}}` with its command.
 
-- `posix` for macOS and Ubuntu.
-
-Scenario shape:
+Prompt fields:
 
 ```js
 {
-  id: "cursor-native-visual-matrix",
-  requires: ["cursor-auth", "pty", "packed-install"],
-  promptTemplate: "... <platform-command:shellSmoke> ...",
+  promptTemplate: "... {{shellSmoke}} ...",
   commands: {
-    shellSmoke: {
-      posix: "printf 'cursor visual smoke\\n'",
-    },
+    shellSmoke: "printf 'cursor visual smoke\\n'",
   },
-  assertions: ["final-marker", "required-cards", "jsonl-tools"],
 }
 ```
-
-The renderer owns quoting, path normalization, environment assignment, and canonical gzip JSON/base64 artifact encoding.
 
 ## Implementation phases
 

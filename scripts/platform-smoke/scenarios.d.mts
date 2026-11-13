@@ -2,7 +2,7 @@ interface PlatformSmokeScenario {
 	description: string;
 	cursorCalls: number;
 	env?: Record<string, string>;
-	commands?: Record<string, { posix?: string; powershell?: string }>;
+	commands?: Record<string, string>;
 	promptTemplate?: string;
 	finalMarker?: string | null;
 	requiredCards?: string[];
@@ -19,4 +19,4 @@ interface PlatformSmokePromptScenario extends PlatformSmokeScenario {
 
 export const SCENARIOS: Record<string, PlatformSmokeScenario>;
 export function getScenario(name: string): PlatformSmokeScenario | null;
-export function renderPrompt(scenario: PlatformSmokePromptScenario, platform: string): string;
+export function renderPrompt(scenario: PlatformSmokePromptScenario): string;

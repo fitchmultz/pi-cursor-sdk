@@ -14,10 +14,10 @@ export const SCENARIOS = {
 		description: "Build, test, typecheck, pack, and install the extension without Cursor calls.",
 		cursorCalls: 0,
 		commands: {
-			npmCi: { posix: "npm ci", powershell: "npm ci" },
-			npmTest: { posix: "npm test", powershell: "npm test" },
-			npmTypecheck: { posix: "npm run typecheck", powershell: "npm run typecheck" },
-			npmPack: { posix: "npm pack", powershell: "npm pack" },
+			npmCi: "npm ci",
+			npmTest: "npm test",
+			npmTypecheck: "npm run typecheck",
+			npmPack: "npm pack",
 		},
 	},
 
@@ -35,14 +35,8 @@ export const SCENARIOS = {
 			PI_CURSOR_SDK_EVENT_DEBUG: "1",
 		},
 		commands: {
-			shellSmoke: {
-				posix: "printf 'cursor visual smoke\\n'",
-				powershell: "Write-Output 'cursor visual smoke'",
-			},
-			shellFailure: {
-				posix: "sh -c 'echo native shell failure >&2; exit 7'",
-				powershell: "Write-Error 'native shell failure'; exit 7",
-			},
+			shellSmoke: "printf 'cursor visual smoke\\n'",
+			shellFailure: "sh -c 'echo native shell failure >&2; exit 7'",
 		},
 		promptTemplate: `Native visual matrix.
 
@@ -126,10 +120,7 @@ NATIVE_MATRIX_OK package=<name> grep=<yes/no> find=<yes/no> list=<yes/no> shell=
 			PI_CURSOR_SDK_EVENT_DEBUG: "1",
 		},
 		commands: {
-			shellSmoke: {
-				posix: "node -e \"console.log('bridge visual smoke')\"",
-				powershell: "node -e \"console.log('bridge visual smoke')\"",
-			},
+			shellSmoke: "node -e \"console.log('bridge visual smoke')\"",
 		},
 		promptTemplate: `Bridge visual matrix.
 
@@ -184,10 +175,7 @@ BRIDGE_MATRIX_OK bash_ok=<yes/no> read_ok=<yes/no> read_missing_error=<yes/no>`,
 			PI_CURSOR_SDK_EVENT_DEBUG: "1",
 		},
 		commands: {
-			longRunning: {
-				posix: "node -e \"const fs=require('fs');fs.mkdirSync('.debug/platform-smoke',{recursive:true});fs.writeFileSync('.debug/platform-smoke/abort-started.txt',String(process.pid));setTimeout(() => console.log(process.env.PLATFORM_ABORT_MARKER), 30000)\"",
-				powershell: "node -e \"const fs=require('fs');fs.mkdirSync('.debug/platform-smoke',{recursive:true});fs.writeFileSync('.debug/platform-smoke/abort-started.txt',String(process.pid));setTimeout(() => console.log(process.env.PLATFORM_ABORT_MARKER), 30000)\"",
-			},
+			longRunning: "node -e \"const fs=require('fs');fs.mkdirSync('.debug/platform-smoke',{recursive:true});fs.writeFileSync('.debug/platform-smoke/abort-started.txt',String(process.pid));setTimeout(() => console.log(process.env.PLATFORM_ABORT_MARKER), 30000)\"",
 		},
 		promptTemplate: `Abort cleanup matrix.
 
@@ -207,12 +195,11 @@ export function getScenario(name) {
 	return SCENARIOS[name] ?? null;
 }
 
-export function renderPrompt(scenario, platform) {
+export function renderPrompt(scenario) {
 	let prompt = scenario.promptTemplate;
 	if (scenario.commands) {
-		for (const [key, cmdMap] of Object.entries(scenario.commands)) {
-			const cmd = platform === "powershell" ? (cmdMap.powershell ?? cmdMap.posix) : (cmdMap.posix ?? cmdMap.powershell);
-			prompt = prompt.replaceAll(`{{${key}}}`, cmd ?? "");
+		for (const [key, cmd] of Object.entries(scenario.commands)) {
+			prompt = prompt.replaceAll(`{{${key}}}`, cmd);
 		}
 	}
 	return prompt;

@@ -323,7 +323,6 @@ export default {
 
 `ubuntuContainerBaseImage` is `cimg/node:24.21`, the Ubuntu 24.04 Node 24 base with the current glibc baseline for native test dependencies. The runner replaces the base image's Node executable with the checksum-pinned Node 24.22.3 executable from `ubuntuContainerNodeImage` and sets `USER root` before warmup because Crabbox 0.36.0 must install SSH/Git/rsync/curl during bootstrap and `cimg/node` defaults to an unprivileged user. An explicit `PLATFORM_SMOKE_UBUNTU_IMAGE` bypasses that build and must already support Crabbox bootstrap. The package requires Node 24.22.3 (24.x) or 26.13.1 and newer, and this gate validates Node 24 on Apple Silicon macOS and Ubuntu.
 
-
 `artifactRetention` bounds local host evidence growth under `artifactRoot`. `smoke:platform:run` prunes only top-level directories named `run-<timestamp>-<suffix>` before starting a new matrix; it leaves non-run/manual directories untouched and preserves directories newer than `preserveRecentHours` to avoid deleting evidence from active or very recent runs. Doctor is read-only and does not prune artifacts.
 
 ## Required local environment
@@ -339,7 +338,6 @@ PLATFORM_SMOKE_MAC_USER="$USER"
 PLATFORM_SMOKE_MAC_WORK_ROOT="/Users/$USER/crabbox/pi-cursor-sdk"
 # Optional prebuilt replacement; bypasses the configured local root-wrapper build.
 PLATFORM_SMOKE_UBUNTU_IMAGE="registry.example.com/ubuntu-node24-crabbox:latest"
-
 
 # Required for live suites; doctor fails before spending Cursor tokens if absent.
 CURSOR_API_KEY="..."
@@ -437,7 +435,6 @@ Before adding `node-pty` as a dev dependency, run a phase-zero spike on both tar
 ```text
 node -e "require('node-pty'); console.log('node-pty ok')"
 ```
-
 
 ## Packed-install rule
 
@@ -539,12 +536,12 @@ Steps:
 1. read ./package.json and remember the package name.
 2. grep ./README.md for "pi-cursor-sdk".
 3. find README.md from repo root.
-4. find src/cursor-provider.ts from repo root.
+4. find src/cursor-provider.ts from repo root; this is the list=<yes/no> evidence.
 5. run shell: <rendered-success-command>
-6. write .debug/platform-smoke/<run-id>/native.txt with alpha and beta.
+6. write .debug/platform-smoke/native.txt with alpha and beta.
 7. edit beta to gamma in that file.
 8. run shell and preserve the failure: <rendered-failure-command>
-9. answer exactly:
+9. stop using tools and answer exactly:
 NATIVE_MATRIX_OK package=<name> grep=<yes/no> find=<yes/no> list=<yes/no> shell=<yes/no> shell_fail=<yes/no> write=<yes/no> edit=<yes/no>
 ```
 
@@ -632,7 +629,7 @@ Bridge visual matrix.
 
 Use pi bridge tools only. Use exact pi__ names.
 
-You must make exactly three pi bridge tool calls before the final answer: pi__bash, pi__read, then pi__read. Do not answer until all three calls complete.
+You must make exactly three pi bridge tool calls before your final answer: pi__bash, pi__read, then pi__read. Do not answer until all three calls complete.
 
 Steps:
 1. call pi__bash with command: <rendered-shell-command>

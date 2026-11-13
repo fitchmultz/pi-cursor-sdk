@@ -182,7 +182,6 @@ try {
 		}
 	});
 
-
 	it("runs and documents required platform targets sequentially to avoid shared host and API contention", () => {
 		const platformSmoke = readFileSync("scripts/platform-smoke.mjs", "utf8");
 		expect(platformSmoke).toContain("for (const targetName of targets)");

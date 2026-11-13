@@ -4,6 +4,25 @@
 
 ## Unreleased
 
+## 0.5.36 - 2026-11-13
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Supersedes unpublished 0.5.35 from bf6104a74ddd963af12a42d2b3ed8c3b431a5ec3. Includes all changes since v0.5.34; the original release records remain unchanged.
+
+- chore: fix release-review leftovers from the platform removal (#494) ([5858b33](https://github.com/fitchmultz/pi-cursor-sdk/commit/5858b339a5a75d77bcf9e1d70887ce1cdb6e1d2c))
+
+### What's Changed
+* chore: remove unsupported platform qualification by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/488
+* chore: remove Windows-only smoke remnants by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/492
+* chore: remove Windows/PowerShell line from native smoke prompt by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/493
+* chore(release): 0.5.35 by @pi-durable[bot] in https://github.com/fitchmultz/pi-cursor-sdk/pull/491
+* chore: fix release-review leftovers from the platform removal by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/494
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.34...v0.5.36
+
 ## 0.5.35 - 2026-11-12
 
 <!-- npm-release:unreleased:start -->

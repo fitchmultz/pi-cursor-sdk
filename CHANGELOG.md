@@ -25,6 +25,7 @@
 * chore: unpublish maintainer smoke suite from npm (3/4) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/498
 * chore: remove remaining Windows branches from maintainer scripts (4/4) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/499
 * fix: accept unfenced trailing JSON verdicts in release review by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/501
+* chore: drop redundant self-reported file lists from release review by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/503
 
 
 **Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.34...v0.5.37

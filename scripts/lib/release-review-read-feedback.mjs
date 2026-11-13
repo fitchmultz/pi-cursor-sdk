@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createReviewReadCoverage } from "./release-review-read-coverage.mjs";
-import { parseReviewResponse } from "./release-review-report.mjs";
+import { parseReviewResponse, reviewVerdictShape } from "./release-review-report.mjs";
 
 export default function reviewReadFeedback(pi) {
 	const inputPath = process.env.PI_RELEASE_REVIEW_FEEDBACK_INPUT;
@@ -33,7 +33,7 @@ export default function reviewReadFeedback(pi) {
 		return {
 			entries: [...event.entries, {
 				type: "custom_message", customType: "release-review-missing-reads", display: false,
-				content: `Release review read coverage: required inputs remain unread. Continue this same review, preserving all findings and prior analysis. Read the missing paths/ranges below with the read tool, paging until complete. Ranges are inclusive line numbers. For alternatives, complete any one path; unopened paths must first be opened. An unavailable image is a real limitation, not a completed read. Then reassess and return the full review JSON for the original scope. Do not mark an incomplete or failed review complete merely by changing metadata. If an input cannot be examined, report completed=false and its limitation. The independent final gate still applies.\n${currentMissing}`,
+				content: `Release review read coverage: required inputs remain unread. Continue this same review, preserving all findings and prior analysis. Read the missing paths/ranges below with the read tool, paging until complete. Ranges are inclusive line numbers. For alternatives, complete any one path; unopened paths must first be opened. An unavailable image is a real limitation, not a completed read. Then reassess and return the full review JSON object (${reviewVerdictShape(scope.scopeId)}) for the original scope. Do not mark an incomplete or failed review complete merely by changing metadata. If an input cannot be examined, report completed=false and its limitation. The independent final gate still applies.\n${currentMissing}`,
 			}],
 			continue: true,
 		};

@@ -5,7 +5,6 @@ import { spawnSync } from "node:child_process";
 import { NATIVE_COMPATIBILITY_TEST_FILES, qualifySelectedHost, runCompatibilityCommand } from "./ci-compatibility-phases.mjs";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { tmpdir } from "node:os";
 import { delimiter, dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -50,7 +49,7 @@ if (automation) {
 }
 const source = process.cwd();
 // Native host tests create nested sockets; keep the POSIX root short.
-const root = mkdtempSync(join(process.platform === "win32" ? tmpdir() : "/tmp", "pc-"));
+const root = mkdtempSync(join("/tmp", "pc-"));
 let env;
 if (automation) {
   const { isolatedEnvironment } = await import(pathToFileURL(join(automation, "scripts/common.mjs")));
@@ -81,7 +80,6 @@ function run(command, args, cwd = source, capture = false, commandEnv = env) {
     cwd,
     env: commandEnv,
     encoding: "utf8",
-    shell: process.platform === "win32" && command === "npm",
     stdio: capture ? "pipe" : "inherit",
     maxBuffer: 8 * 1024 * 1024,
   });

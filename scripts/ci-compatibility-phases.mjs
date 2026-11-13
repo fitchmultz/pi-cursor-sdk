@@ -23,10 +23,10 @@ export function runCompatibilityCommand(command, args, options) {
   const result = spawnSync(command, args, {
     ...options,
     timeout: options.timeout ?? defaultTimeout,
-    detached: process.platform !== "win32",
+    detached: true,
     killSignal: "SIGKILL",
   });
-  if (result.error && result.pid && process.platform !== "win32") {
+  if (result.error && result.pid) {
     try {
       process.kill(-result.pid, "SIGKILL");
     } catch (error) {

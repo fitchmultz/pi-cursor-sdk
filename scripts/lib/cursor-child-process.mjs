@@ -1,8 +1,6 @@
-import { execFile } from "node:child_process";
-
 export const DEFAULT_CHILD_SHUTDOWN_GRACE_MS = 2_000;
 export const CHILD_PROCESS_TREE_SPAWN_OPTIONS = Object.freeze({
-	detached: process.platform !== "win32",
+	detached: true,
 });
 
 // Node emits 'close' only after the process ends and its piped output streams close; 'exit' can
@@ -22,11 +20,7 @@ export function waitForChildClose(child) {
 export function signalChild(child, signal) {
 	if (!child.pid) return;
 	try {
-		if (process.platform === "win32") {
-			child.kill(signal);
-		} else {
-			process.kill(-child.pid, signal);
-		}
+		process.kill(-child.pid, signal);
 	} catch {
 		try {
 			child.kill(signal);
@@ -34,72 +28,6 @@ export function signalChild(child, signal) {
 			// child already exited
 		}
 	}
-}
-
-function runHiddenWindowsCommand(command, args, timeoutMs) {
-	return new Promise((resolve) => {
-		let settled = false;
-		let timer;
-		const finish = (succeeded) => {
-			if (settled) return;
-			settled = true;
-			clearTimeout(timer);
-			resolve(succeeded);
-		};
-		const child = execFile(
-			command,
-			args,
-			{ maxBuffer: 64 * 1024, timeout: timeoutMs, windowsHide: true },
-			(error) => finish(error === null),
-		);
-		timer = setTimeout(() => {
-			child.kill("SIGKILL");
-			finish(false);
-		}, timeoutMs);
-	});
-}
-
-async function terminateWindowsProcessTree(pid, timeoutMs) {
-	if (await runHiddenWindowsCommand("taskkill", ["/PID", String(pid), "/T", "/F"], timeoutMs)) return true;
-
-	const script = `
-$ErrorActionPreference = "Stop"
-$rootPid = [uint32]${pid}
-$deadline = [DateTime]::UtcNow.AddMilliseconds(${timeoutMs})
-try {
-	$processes = @(Get-CimInstance -ClassName Win32_Process -Property ProcessId,ParentProcessId)
-	$queue = [Collections.Generic.Queue[uint32]]::new()
-	$descendants = [Collections.Generic.List[uint32]]::new()
-	$seen = [Collections.Generic.HashSet[uint32]]::new()
-	$queue.Enqueue($rootPid)
-	while ($queue.Count -gt 0) {
-		$parentPid = $queue.Dequeue()
-		foreach ($process in $processes) {
-			$childPid = [uint32]$process.ProcessId
-			if ([uint32]$process.ParentProcessId -eq $parentPid -and $seen.Add($childPid)) {
-				$descendants.Add($childPid)
-				$queue.Enqueue($childPid)
-			}
-		}
-	}
-	for ($index = $descendants.Count - 1; $index -ge 0; $index--) {
-		Stop-Process -Id $descendants[$index] -Force -ErrorAction SilentlyContinue
-	}
-	Stop-Process -Id $rootPid -Force -ErrorAction SilentlyContinue
-	$targets = @($rootPid) + @($descendants)
-	do {
-		$alive = @(Get-Process -Id $targets -ErrorAction SilentlyContinue)
-		if ($alive.Count -eq 0) { exit 0 }
-		Start-Sleep -Milliseconds 25
-	} while ([DateTime]::UtcNow -lt $deadline)
-} catch {}
-exit 1
-`;
-	return runHiddenWindowsCommand(
-		"powershell.exe",
-		["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
-		timeoutMs,
-	);
 }
 
 function waitForChildCloseWithin(child, timeoutMs) {
@@ -143,23 +71,6 @@ export async function terminateChild(child, { graceMs = DEFAULT_CHILD_SHUTDOWN_G
 		child.stdin?.destroy?.();
 	}
 	await waitForChildCloseWithin(child, timeoutMs);
-	if (process.platform === "win32") {
-		// CIM enumeration can exceed a short graceful-shutdown window on a busy Windows VM;
-		// keep the process-tree discovery bounded but give orphan lookup a stable floor.
-		const treeTimeoutMs = Math.max(timeoutMs, 15_000);
-		if (!(await terminateWindowsProcessTree(pid, treeTimeoutMs))) {
-			signalChild(child, "SIGTERM");
-			if (!(await waitForChildCloseWithin(child, timeoutMs))) {
-				signalChild(child, "SIGKILL");
-				await waitForChildCloseWithin(child, timeoutMs);
-			}
-			throw new Error(`failed to verify termination of Windows process tree rooted at ${pid}`);
-		}
-		if (!(await waitForChildCloseWithin(child, timeoutMs))) {
-			throw new Error(`Windows process tree exited but child ${pid} did not close`);
-		}
-		return;
-	}
 
 	if (posixProcessGroupExists(pid)) signalChild(child, "SIGTERM");
 	let groupExited = await waitForPosixProcessGroupExit(pid, timeoutMs);

@@ -21,7 +21,7 @@ const SCRIPT_PATH = fileURLToPath(import.meta.url);
 function isMainModule() {
 	if (!process.argv[1]) return false;
 	const invoked = resolve(process.argv[1]);
-	return process.platform === "win32" ? SCRIPT_PATH.toLowerCase() === invoked.toLowerCase() : SCRIPT_PATH === invoked;
+	return SCRIPT_PATH === invoked;
 }
 const SCENARIOS = [
 	{ label: "with-all-settings", settingSources: ["all"] },

@@ -87,18 +87,9 @@ function findPiCommand() {
 		"cli.js",
 	);
 	if (existsSync(cli)) return { command: process.execPath, argsPrefix: [cli] };
-	const local = join(
-		root,
-		"node_modules",
-		".bin",
-		process.platform === "win32" ? "pi.cmd" : "pi",
-	);
+	const local = join(root, "node_modules", ".bin", "pi");
 	return {
-		command: existsSync(local)
-			? local
-			: process.platform === "win32"
-				? "pi.cmd"
-				: "pi",
+		command: existsSync(local) ? local : "pi",
 		argsPrefix: [],
 	};
 }

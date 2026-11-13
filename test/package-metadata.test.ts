@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, relative, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { OPENAI_CODEX_MODELS } from "@earendil-works/pi-ai/providers/openai-codex.models";
 import { describe, expect, it } from "vitest";
@@ -13,6 +13,7 @@ import { resolveInstalledPackageRoot } from "./helpers/installed-package.js";
 const require = createRequire(import.meta.url);
 const packageJson = require("../package.json") as {
 	version: string;
+	files: string[];
 	dependencies: Record<string, string>;
 	devDependencies: Record<string, string>;
 	peerDependencies: Record<string, string>;
@@ -210,20 +211,6 @@ describe("package metadata cutover baselines", () => {
 			execFileSync("tar", ["-xzf", tarballName!, "-C", "host/node_modules"], { cwd: tempRoot });
 			renameSync(join(hostNodeModules, "package"), packageDir);
 			const paths = new Set(listing.trim().split(/\r?\n/).map((path) => path.replace(/^package\//, "")));
-			expect(paths.has("scripts/tmux-live-smoke.sh")).toBe(true);
-			expect(paths.has("scripts/isolated-cursor-smoke.sh")).toBe(true);
-			expect(paths.has("scripts/fixtures/plan-strip-shim/index.ts")).toBe(true);
-			expect(paths.has("scripts/steering-rpc-smoke.mjs")).toBe(true);
-			expect(paths.has("scripts/visual-tui-smoke.mjs")).toBe(true);
-			expect(paths.has("scripts/validate-smoke-jsonl.mjs")).toBe(true);
-			expect(paths.has("scripts/debug-sdk-events.mjs")).toBe(true);
-			expect(paths.has("scripts/debug-provider-events.mjs")).toBe(true);
-			expect(paths.has("platform-smoke.config.mjs")).toBe(true);
-			expect(paths.has("scripts/platform-smoke/artifact-bundle-chunk.mjs")).toBe(true);
-			expect(paths.has("scripts/platform-smoke/live-suite-runner.mjs")).toBe(true);
-			expect(paths.has("scripts/platform-smoke/local-resume-runner.mjs")).toBe(true);
-			expect(paths.has("scripts/platform-smoke/target-runtime.mjs")).toBe(true);
-			expect(paths.has("scripts/platform-smoke/visual-evidence.mjs")).toBe(true);
 			for (const path of paths) {
 				if (!path.endsWith(".mjs")) continue;
 				const declarationPath = path.replace(/\.mjs$/, ".d.mts");
@@ -233,37 +220,53 @@ describe("package metadata cutover baselines", () => {
 			expect(paths.has("shared/cursor-setting-sources.d.mts")).toBe(true);
 			expect(paths.has("shared/cursor-sensitive-text.mjs")).toBe(true);
 			expect(paths.has("shared/cursor-sensitive-text.d.mts")).toBe(true);
-			expect(paths.has("scripts/lib/local-resume-smoke-harness.mjs")).toBe(true);
-			expect(paths.has("scripts/lib/cloud-smoke-cleanup-evidence.mjs")).toBe(true);
-			expect(paths.has("scripts/lib/cloud-smoke-cleanup-evidence.d.mts")).toBe(true);
-			expect(paths.has("scripts/lib/cloud-smoke-github.mjs")).toBe(true);
-			expect(paths.has("scripts/lib/cloud-smoke-github.d.mts")).toBe(true);
-			expect(paths.has("scripts/lib/cursor-smoke-env.mjs")).toBe(true);
-			expect(paths.has("scripts/lib/cursor-smoke-env.d.mts")).toBe(true);
-			expect(paths.has("scripts/lib/cursor-smoke-shell.sh")).toBe(true);
-			expect(paths.has("scripts/lib/cursor-visual-render.mjs")).toBe(true);
-			expect(paths.has("scripts/lib/cursor-visual-render.d.mts")).toBe(true);
 			expect(paths.has("shared/cursor-sdk-event-debug-env.mjs")).toBe(true);
 			expect(paths.has("shared/cursor-sdk-event-debug-env.d.mts")).toBe(true);
-			expect(paths.has("scripts/lib/cursor-setting-sources.mjs")).toBe(false);
-			expect(paths.has("scripts/lib/cursor-sensitive-text.mjs")).toBe(false);
-			expect(paths.has("scripts/lib/cursor-cli-args.mjs")).toBe(true);
-			expect(paths.has("CHANGELOG.md")).toBe(true);
-			expect(paths.has("README.md")).toBe(true);
-			expect(paths.has("docs/platform-smoke.md")).toBe(true);
 			expect(paths.has("dist/index.js")).toBe(true);
+			expect(paths.has("src/index.ts")).toBe(true);
 			// pi silently drops manifest entries whose file is missing; assert the
 			// manifest target exists inside the actual published tarball.
 			const manifest = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")) as { pi?: { extensions?: string[] } };
 			for (const entry of manifest.pi?.extensions ?? []) {
 				expect(paths.has(entry.replace(/^\.\//, "")), `pi.extensions entry missing from package: ${entry}`).toBe(true);
 			}
-			expect(paths.has("tsconfig.build.json")).toBe(true);
-			expect(paths.has("scripts/build.mjs")).toBe(true);
-			expect(paths.has("scripts/prepare.mjs")).toBe(true);
-			// Launchers import this helper; packed installs break without it.
-			expect(paths.has("scripts/lib/ensure-built.mjs")).toBe(true);
-			expect([...paths].some((path) => path.startsWith("coverage/") || path.startsWith(".pi/") || path.includes("smoke-dir"))).toBe(false);
+			const declaredDirectoryPrefixes = ["node_modules/"];
+			const declaredScalarFiles = new Set(["package.json"]);
+			for (const entry of packageJson.files) {
+				const normalized = entry.replace(/^\.\//, "").replace(/\/+$/, "");
+				if (statSync(join(process.cwd(), normalized)).isDirectory()) {
+					declaredDirectoryPrefixes.push(`${normalized}/`);
+				} else {
+					declaredScalarFiles.add(normalized);
+				}
+			}
+			for (const requiredFile of declaredScalarFiles) {
+				expect(paths.has(requiredFile), `missing published file: ${requiredFile}`).toBe(true);
+			}
+			expect(
+				[...paths].filter(
+					(path) =>
+						path !== "" &&
+						!path.endsWith("/") &&
+						!declaredScalarFiles.has(path) &&
+						!declaredDirectoryPrefixes.some((prefix) => path.startsWith(prefix)),
+				),
+			).toEqual([]);
+			expect(
+				[...paths].some(
+					(path) =>
+						(path.startsWith("scripts/") && path !== "scripts/build.mjs" && path !== "scripts/prepare.mjs") ||
+						path === "platform-smoke.config.mjs",
+				),
+			).toBe(false);
+			for (const path of paths) {
+				if (path.startsWith("node_modules/") || !path.endsWith(".md")) continue;
+				const markdown = readFileSync(join(packageDir, path), "utf8");
+				for (const match of markdown.matchAll(/\]\((?!https?:\/\/|mailto:|#)([^)\s#]+\.md)(?:#[^)\s]*)?\)/g)) {
+					const target = resolve(dirname(join(packageDir, path)), match[1]!);
+					expect(isPathWithin(packageDir, target) && existsSync(target), `${path} -> ${match[1]}`).toBe(true);
+				}
+			}
 
 			const packedPackageJson = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")) as {
 				name: string;

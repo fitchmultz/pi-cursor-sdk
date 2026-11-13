@@ -288,7 +288,8 @@ describe("cloud smoke helper contracts", () => {
 		expect(realPackagePaths).toContain("package.json");
 		expect(realPackagePaths).toContain("src/index.ts");
 		expect(realPackagePaths).toContain("shared/cursor-sensitive-text.mjs");
-		expect(realPackagePaths).toContain("scripts/cloud-runtime-smoke.mjs");
+		expect(realPackagePaths).toContain("scripts/build.mjs");
+		expect(realPackagePaths).not.toContain("scripts/cloud-runtime-smoke.mjs");
 		expect(realPackagePaths).not.toContain("docs/evidence/cursor-cloud-smoke-matrix-latest.json");
 		expect(realPackagePaths).not.toContain("cloud-roadmap-change-scout.md");
 		expect(realPackagePaths).not.toContain("cloud-roadmap-reconciliation.md");

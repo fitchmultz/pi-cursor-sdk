@@ -1,6 +1,5 @@
 import type { ChildProcess } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { createRequire } from "node:module";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -75,13 +74,11 @@ import {
 } from "../shared/cursor-setting-sources.mjs";
 import { CURSOR_SDK_EVENT_DEBUG_ENV_NAMES } from "../shared/cursor-sdk-event-debug-env.mjs";
 
-const require = createRequire(import.meta.url);
-const packageJson = require("../package.json") as { files: string[] };
-
 describe("maintainer script declaration contracts", () => {
 
-	it("checks every published declaration-backed script surface", async () => {
-		const declarations = listPublishedDeclarations();
+	it("checks every declaration-backed shared and maintainer script surface", async () => {
+		const declarations = listMaintainerDeclarations();
+		expect(declarations.length).toBeGreaterThan(0);
 		for (const declaration of declarations) {
 			const declarationValueExports = readDeclarationValueExports(declaration);
 			const runtimeExports = await readRuntimeExports(declaration);
@@ -90,14 +87,9 @@ describe("maintainer script declaration contracts", () => {
 	});
 });
 
-function listPublishedDeclarations(): string[] {
+function listMaintainerDeclarations(): string[] {
 	const declarations = new Set<string>();
-	for (const entry of packageJson.files) {
-		if (entry.endsWith(".d.mts")) {
-			declarations.add(entry);
-			continue;
-		}
-		if (!entry.endsWith("/") && !existsSync(entry)) continue;
+	for (const entry of ["shared", "scripts"]) {
 		if (existsSync(entry) && statSync(entry).isDirectory()) {
 			for (const file of listDeclarationsInDirectory(entry)) declarations.add(file);
 		}

@@ -4,6 +4,19 @@
 
 ## Unreleased
 
+## 0.5.38 - 2026-11-13
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- chore(deps): bump hono to 4.13.18 and @hono/node-server to 2.1.8 (#504) ([ea03b6e](https://github.com/fitchmultz/pi-cursor-sdk/commit/ea03b6e2f9adc32fe6c622235372ba40aab35779))
+
+### What's Changed
+* chore(deps): bump hono to 4.13.18 and @hono/node-server to 2.1.8 by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/504
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.37...v0.5.38
+
 ## 0.5.37 - 2026-11-13
 
 <!-- npm-release:unreleased:start -->

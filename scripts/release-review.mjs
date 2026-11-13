@@ -173,7 +173,7 @@ function runReview(root, scope, receipt, directory) {
 	assert.ok(Array.isArray(report.materialLimitations), "Review did not report verification limits");
 	assert.ok(typeof report.summary === "string" && report.summary.trim(), "Review summary is missing");
 	assert.deepEqual(report.materialLimitations, [], "Review has material verification limits");
-	const blocking = scope.mode === "release" ? report.findings : report.findings.filter((finding) => finding.material);
+	const blocking = report.findings.filter((finding) => finding.material);
 	assert.deepEqual(blocking, [], `Review has findings: ${JSON.stringify(safeValue(blocking))}`);
 	return { scopeId, report: safeValue(report), commentary: safeText(commentary), readEvidence, piVersion: version.stdout.trim(),
 		provider: final.provider, model: final.model, thinking: "max",

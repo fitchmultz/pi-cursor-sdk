@@ -23,7 +23,7 @@ function isMainModule() {
 	if (!process.argv[1]) return false;
 	const current = fileURLToPath(import.meta.url);
 	const invoked = resolve(process.argv[1]);
-	return process.platform === "win32" ? current.toLowerCase() === invoked.toLowerCase() : current === invoked;
+	return current === invoked;
 }
 
 const require = createRequire(import.meta.url);

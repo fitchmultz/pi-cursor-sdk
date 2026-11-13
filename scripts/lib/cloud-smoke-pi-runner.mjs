@@ -16,8 +16,8 @@ import {
 
 export function createCloudSmokePiRunner({ root, model, shutdown, buildEnv, buildWorkspace }) {
 	const findPiBin = () => {
-		const local = join(root, "node_modules", ".bin", process.platform === "win32" ? "pi.cmd" : "pi");
-		return existsSync(local) ? local : process.platform === "win32" ? "pi.cmd" : "pi";
+		const local = join(root, "node_modules", ".bin", "pi");
+		return existsSync(local) ? local : "pi";
 	};
 
 	const spawnPi = (artifactDir, args, envOptions, stdio) => {

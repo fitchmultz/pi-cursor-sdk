@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -35,9 +35,7 @@ import {
 } from "../shared/cursor-setting-sources.mjs";
 import { createScriptFail } from "../scripts/lib/cursor-script-fail.mjs";
 
-// Windows tree verification can spend 15s each in taskkill and its CIM fallback,
-// even after child EOF. Leave room for startup, assertions, and finally cleanup.
-const PROCESS_TREE_TEST_TIMEOUT_MS = process.platform === "win32" ? 90_000 : 15_000;
+const PROCESS_TREE_TEST_TIMEOUT_MS = 15_000;
 
 function processExists(pid: number): boolean {
 	try {
@@ -139,13 +137,9 @@ export default function (pi) {
 
 async function forceCleanupProcess(pid: number | undefined): Promise<void> {
 	if (!pid || !processExists(pid)) return;
-	if (process.platform === "win32") {
-		spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true });
-	} else {
-		try {
-			process.kill(pid, "SIGKILL");
-		} catch {}
-	}
+	try {
+		process.kill(pid, "SIGKILL");
+	} catch {}
 	if (!(await waitUntilGone([pid], 2_000))) throw new Error(`failed to clean up child process ${pid}`);
 }
 
@@ -277,7 +271,7 @@ describe("maintainer scripts shared lib", () => {
 
 	it("parses JSONL stdout and selects platform process-tree spawn options", () => {
 		expect(parseJsonLines('{"type":"a"}\n\n{"type":"b"}\n')).toEqual([{ type: "a" }, { type: "b" }]);
-		expect(CHILD_PROCESS_TREE_SPAWN_OPTIONS.detached).toBe(process.platform !== "win32");
+		expect(CHILD_PROCESS_TREE_SPAWN_OPTIONS.detached).toBe(true);
 	});
 
 	it("allows child EOF cleanup before verified process-tree termination", async () => {
@@ -330,7 +324,7 @@ setInterval(() => {}, 60_000);`,
 				"--input-type=module",
 				"-e",
 				`import { spawn } from "node:child_process";
-const grandchild = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 60_000)"], { stdio: ["ignore", "pipe", "ignore"], detached: process.platform === "win32" });
+const grandchild = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 60_000)"], { stdio: ["ignore", "pipe", "ignore"] });
 grandchild.stdout.once("data", () => {
   console.log(JSON.stringify({ parentPid: process.pid, grandchildPid: grandchild.pid }));
   grandchild.stdout.destroy();
@@ -362,8 +356,7 @@ grandchild.stdout.once("data", () => {
 	it("waits for stdio close, not exit, while a grandchild holds the parent's stdout", async () => {
 		const root = mkdtempSync(join(tmpdir(), "pi-cursor-child-close-"));
 		const releasePath = join(root, "release");
-		// On Windows, libuv assigns non-detached children to a kill-on-close job object tied to the parent.
-		const parent = spawn(process.execPath, ["-e", stdoutHoldingParentSource(releasePath, process.platform === "win32")], { stdio: ["ignore", "pipe", "pipe"] });
+		const parent = spawn(process.execPath, ["-e", stdoutHoldingParentSource(releasePath, false)], { stdio: ["ignore", "pipe", "pipe"] });
 		const exited = once(parent, "exit");
 		let stdout = "";
 		parent.stdout.setEncoding("utf8");
@@ -384,7 +377,7 @@ grandchild.stdout.once("data", () => {
 		}
 	}, PROCESS_TREE_TEST_TIMEOUT_MS);
 
-	it.skipIf(process.platform === "win32")("does not verify termination while an escaped grandchild still holds stdout", async () => {
+	it("does not verify termination while an escaped grandchild still holds stdout", async () => {
 		const root = mkdtempSync(join(tmpdir(), "pi-cursor-child-escaped-"));
 		const releasePath = join(root, "release");
 		const parent = spawn(

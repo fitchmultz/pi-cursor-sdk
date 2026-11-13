@@ -91,9 +91,6 @@ if (input.mode === "release") {
 }
 const report = {
   scopeId: input.scopeId, completed: kind !== "incomplete",
-  reviewedFiles: kind === "missing-file" ? [] : input.sourceFiles,
-  reviewedArtifacts: input.artifactFiles ?? [], reviewedReleaseNotes: true, reviewedIssueContext: true,
-  reviewedCatalog: true, reviewedRegistryReceipt: true, reviewedPreviousRelease: true,
   findings: ["finding","fenced-finding","polish"].includes(kind)
     ? [{path:"candidate.txt",line:1,material:kind !== "polish",description:"Review finding",remedy:"Fix it"}] : [],
   materialLimitations: kind === "limited" ? ["Could not inspect changed file"] : [],
@@ -264,7 +261,6 @@ for (const [behavior, expected] of Object.entries({
 	incomplete: /marked the review incomplete/,
 	finding: /Review has findings/,
 	"fenced-finding": /Review has findings/,
-	"missing-file": /did not inspect every changed source file/,
 	unread: /No successful read recorded for changed source candidate.txt/,
 	limited: /material verification limits/,
 	"changed-index": /reviewed target changed/,

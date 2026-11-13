@@ -1,3 +1,13 @@
+export function reviewVerdictShape(scopeId) {
+	return JSON.stringify({
+		scopeId,
+		completed: true,
+		findings: [],
+		materialLimitations: [],
+		summary: "specific evidence and review conclusion",
+	});
+}
+
 export function parseReviewResponse(text) {
 	const response = text.trim();
 	const closeFence = /\r?\n```[ \t]*$/.exec(response);

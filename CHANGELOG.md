@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+- Cap historical tool bodies in bootstrap prompts at 2000 characters, matching pi's own `TOOL_RESULT_MAX_CHARS` compaction cap, and cap replayed `write`/`edit` arguments at 400 because the file on disk already holds that content. On a saved 399-message session with a 200k context window, the bootstrap prompt drops from 654,863 to 424,599 characters (35% fewer). Reproduced with the built `dist/` prompt builder over a real pi transcript. Incremental sends and summary prompts are unchanged.
+
 ## 0.5.39 - 2026-11-13
 
 <!-- npm-release:unreleased:start -->

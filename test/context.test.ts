@@ -6,6 +6,7 @@ import {
 	buildCursorSummaryPrompt,
 	computeCursorContextFingerprint,
 	shouldBootstrapCursorContext,
+	CURSOR_HISTORICAL_TOOL_BODY_MAX_CHARS,
 	CURSOR_IMAGE_TOKEN_ESTIMATE,
 	estimateCursorContextTokens,
 	estimateCursorPromptMessageTokens,
@@ -101,6 +102,85 @@ describe("buildCursorPrompt", () => {
 		const result = buildCursorPrompt(ctx);
 		expect(result.text).toContain("Final answer");
 		expect(result.text).not.toContain("internal thought");
+	});
+
+	it("caps historical tool bodies on bootstrap and leaves the incremental tail verbatim", () => {
+		const body = "y".repeat(CURSOR_HISTORICAL_TOOL_BODY_MAX_CHARS + 300);
+		const ctx: Context = {
+			messages: [
+				{ role: "user", content: "Run it", timestamp: 1 } satisfies UserMessage,
+				{
+					role: "assistant",
+					content: [{ type: "toolCall", id: "bash-call", name: "bash", arguments: { command: body } }],
+					api: "cursor-sdk", provider: "cursor", model: "test",
+					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+					stopReason: "toolUse", timestamp: 2,
+				} satisfies AssistantMessage,
+				{
+					role: "toolResult", toolCallId: "bash-call", toolName: "bash",
+					content: [{ type: "text", text: body }], isError: false, timestamp: 3,
+				} satisfies ToolResultMessage,
+				{ role: "user", content: "Follow up", timestamp: 4 } satisfies UserMessage,
+			],
+		};
+
+		const bootstrap = buildCursorPrompt(ctx);
+		expect(bootstrap.text).toContain("chars truncated");
+		expect(bootstrap.text).not.toContain(body);
+
+		const incremental = buildCursorIncrementalPrompt(ctx, { nativeSourceRoles: ctx.messages.map((message) => message.role) });
+		expect(incremental.text).toContain(body);
+		expect(incremental.text).not.toContain("chars truncated");
+	});
+
+	it("caps replayed file-mutation arguments harder than tool results", () => {
+		const payload = "z".repeat(1200);
+		const ctx: Context = {
+			messages: [
+				{ role: "user", content: "Write the file", timestamp: 1 } satisfies UserMessage,
+				{
+					role: "assistant",
+					content: [
+						{ type: "toolCall", id: "write-call", name: "write", arguments: { path: "src/a.ts", content: payload } },
+						{ type: "toolCall", id: "bash-call", name: "bash", arguments: { command: payload } },
+					],
+					api: "cursor-sdk", provider: "cursor", model: "test",
+					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+					stopReason: "toolUse", timestamp: 2,
+				} satisfies AssistantMessage,
+			],
+		};
+
+		const text = buildCursorPrompt(ctx).text;
+		const requestBody = (callId: string) => {
+			const start = text.indexOf(`call ${callId}): `);
+			if (start < 0) return "";
+			const from = start + `call ${callId}): `.length;
+			const end = text.indexOf("\nAssistant:", from);
+			return end < 0 ? text.slice(from) : text.slice(from, end);
+		};
+
+		// Both bodies sit under the shared cap and over the mutation cap, so only
+		// the mutation argument loses text.
+		expect(requestBody("write-call")).toContain("chars truncated");
+		expect(requestBody("bash-call")).not.toContain("chars truncated");
+	});
+
+	it("never caps a summary prompt, which must see the full transcript", () => {
+		const body = "s".repeat(CURSOR_HISTORICAL_TOOL_BODY_MAX_CHARS + 500);
+		const ctx: Context = {
+			messages: [
+				{ role: "user", content: "Summarize", timestamp: 1 } satisfies UserMessage,
+				{
+					role: "toolResult", toolCallId: "read-call", toolName: "read",
+					content: [{ type: "text", text: body }], isError: false, timestamp: 3,
+				} satisfies ToolResultMessage,
+			],
+		};
+
+		const summary = buildCursorSummaryPrompt(ctx);
+		expect(summary.text).toContain(body);
+		expect(summary.text).not.toContain("chars truncated");
 	});
 
 	it("preserves real pi edit and write tool names in Cursor prompt labels", () => {

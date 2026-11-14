@@ -4,6 +4,20 @@
 
 ## Unreleased
 
+## 0.5.41 - 2026-11-14
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Raise the Pi floor to 1.5.2 and use native crypto.hash (#515) ([da8829b](https://github.com/fitchmultz/pi-cursor-sdk/commit/da8829b8b9b7beb22605dad04a127e7fa131932a))
+
+### What's Changed
+* Raise the Pi floor to 1.5.2 and use native crypto.hash by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/515
+* chore: bump root dev typebox to 1.4.7 by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/516
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.40...v0.5.41
+
 ## 0.5.40 - 2026-11-14
 
 <!-- npm-release:unreleased:start -->

@@ -51,6 +51,19 @@ describe("formatCursorSkillsForPrompt", () => {
 		expect(prompt).toContain("/Users/me/.pi/agent/skills/global-skill/SKILL.md");
 		expect(prompt).not.toContain("manual-only");
 	});
+
+	it("omits absolute skill paths when the activation tool can load them", () => {
+		const skill = makeSkill({ name: "global-skill", description: "Use for global work", filePath: "/Users/me/.pi/agent/skills/global-skill/SKILL.md" });
+
+		const withoutLocations = formatCursorSkillsForPrompt([skill], { includeLocations: false });
+		const withLocations = formatCursorSkillsForPrompt([skill], { includeLocations: true });
+
+		expect(withoutLocations).toContain("<name>global-skill</name>");
+		expect(withoutLocations).not.toContain("<location>");
+		expect(withoutLocations).not.toContain("file-read capability");
+		expect(withLocations).toContain("<location>/Users/me/.pi/agent/skills/global-skill/SKILL.md</location>");
+		expect(withLocations.length).toBeGreaterThan(withoutLocations.length);
+	});
 });
 
 describe("resolveCursorSkillSystemPrompt", () => {
@@ -91,6 +104,31 @@ describe("resolveCursorSkillSystemPrompt", () => {
 
 		expect(prompt.text).toContain(CURSOR_ACTIVATE_SKILL_MCP_NAME);
 		expect(prompt.text).toContain("global-skill");
+	});
+
+	it("lists skill paths only when the pi bridge cannot activate a skill", () => {
+		const previous = process.env.PI_CURSOR_PI_TOOL_BRIDGE;
+		try {
+			process.env.PI_CURSOR_PI_TOOL_BRIDGE = "1";
+			const bridged = resolveCursorSkillSystemPrompt(
+				piSkillSection,
+				cursorModel,
+				{ ...createDefaultSystemPromptOptions("/repo"), skills: [skill] },
+			);
+			process.env.PI_CURSOR_PI_TOOL_BRIDGE = "0";
+			const unbridged = resolveCursorSkillSystemPrompt(
+				piSkillSection,
+				cursorModel,
+				{ ...createDefaultSystemPromptOptions("/repo"), skills: [skill] },
+			);
+
+			expect(bridged).toContain("<name>global-skill</name>");
+			expect(bridged).not.toContain("<location>");
+			expect(unbridged).toContain(`<location>${skill.filePath}</location>`);
+		} finally {
+			if (previous === undefined) delete process.env.PI_CURSOR_PI_TOOL_BRIDGE;
+			else process.env.PI_CURSOR_PI_TOOL_BRIDGE = previous;
+		}
 	});
 });
 
@@ -189,5 +227,40 @@ describe("registerCursorSkillTool", () => {
 		await pi.invokeEvent("before_agent_start", event, { model: makeModel("composer-2.5"), cwd: "/repo" });
 
 		expect(pi._activeToolNames()).not.toContain(CURSOR_ACTIVATE_SKILL_TOOL_NAME);
+	});
+
+	it("keeps the SKILL.md fallback when pi exposes no active tools, so the activation tool cannot load them", async () => {
+		const previousBridge = process.env.PI_CURSOR_PI_TOOL_BRIDGE;
+		const previousSources = process.env.PI_CURSOR_SETTING_SOURCES;
+		process.env.PI_CURSOR_PI_TOOL_BRIDGE = "1";
+		process.env.PI_CURSOR_SETTING_SOURCES = "none";
+		onTestFinished(() => {
+			if (previousBridge === undefined) delete process.env.PI_CURSOR_PI_TOOL_BRIDGE;
+			else process.env.PI_CURSOR_PI_TOOL_BRIDGE = previousBridge;
+			if (previousSources === undefined) delete process.env.PI_CURSOR_SETTING_SOURCES;
+			else process.env.PI_CURSOR_SETTING_SOURCES = previousSources;
+		});
+		const dir = await mkdtemp(join(tmpdir(), "pi-cursor-skill-notools-"));
+		onTestFinished(() => rm(dir, { recursive: true, force: true }));
+		const skillPath = join(dir, "no-tools-skill", "SKILL.md");
+		await mkdir(join(dir, "no-tools-skill"), { recursive: true });
+		await writeFile(skillPath, "---\nname: no-tools-skill\ndescription: No tools\n---\n# No tools\n");
+		const skill = makeSkill({ name: "no-tools-skill", description: "No tools", filePath: skillPath });
+		// `pi -nt` leaves no active pi tool, so activation is deliberately inactive
+		// and the bridge starts no endpoint for it.
+		const pi = createPiHarness({ activeTools: [] });
+		registerCursorSkillTool(pi);
+		const event = {
+			type: "before_agent_start",
+			messageType: "user",
+			prompt: "hello",
+			systemPrompt: "System prompt.",
+			systemPromptOptions: { ...createDefaultSystemPromptOptions(dir), skills: [skill] },
+		} satisfies BeforeAgentStartEvent & { messageType: "user" };
+		const result = await pi.invokeEvent("before_agent_start", event, { model: makeModel("composer-2.5"), cwd: dir });
+
+		expect(buildCursorPiToolBridgeSnapshot(pi).tools).toEqual([]);
+		expect(pi._activeToolNames()).not.toContain(CURSOR_ACTIVATE_SKILL_TOOL_NAME);
+		expect(result?.systemPrompt).toContain(`<location>${skillPath}</location>`);
 	});
 });

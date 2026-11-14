@@ -2,15 +2,16 @@
 /**
  * Shell-path smoke: confirm pi-cursor-sdk applies Pi's `shellPath` as Cursor's `SHELL`.
  *
- * Runs the same Pi settings twice, once with the extension loaded and once
- * without it. Only the extension block should change `SHELL`, so the pair
- * proves the override rather than the ambient environment supplying a bash.
+ * Each block gets its own Pi agent directory, so a host `shellPath` cannot decide
+ * the result. One block sets a bash path, one leaves it unset, and one loads no
+ * extension. The expectation is whatever `applyPiShellToCursorProcess` writes for
+ * that setting, which is a no-op on Windows.
  */
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
 	CHILD_PROCESS_TREE_SPAWN_OPTIONS,
 	describeProcessExit,
@@ -24,14 +25,23 @@ import { ensureBuilt } from "./lib/ensure-built.mjs";
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const root = fileURLToPath(new URL("..", import.meta.url));
 const DEFAULT_TIMEOUT_MS = 120_000;
-const PROBE_SOURCE = `import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+const PROBE_PREFIX = "pi-cursor-shell-path ";
+/** Kept in the probe source so `JSON.stringify(undefined)` cannot emit a bare `undefined`. */
+export const PROBE_JSON_OBJECT = "{ shell: process.env.SHELL ?? null, shellPath: pi.getSettings().shellPath ?? null }";
+export const PROBE_SOURCE = `import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default function (pi: ExtensionAPI) {
 	pi.on("session_start", () => {
-		process.stdout.write(\`SHELL=\${JSON.stringify(process.env.SHELL)} shellPath=\${JSON.stringify(pi.getSettings().shellPath)}\\n\`);
+		// SHELL is already decided here. Exit before the print prompt so the
+		// check does not spend a model turn.
+		process.stdout.write(\`${PROBE_PREFIX}\${JSON.stringify(${PROBE_JSON_OBJECT})}\\n\`, () => {
+			process.exit(0);
+		});
 	});
 }
 `;
+
+const HOST_BASH_CANDIDATES = ["/bin/bash", "/usr/bin/bash", "/usr/local/bin/bash", "/opt/homebrew/bin/bash"];
 
 const fail = createScriptFail("shell-path-smoke");
 
@@ -52,17 +62,19 @@ Options:
   -h, --help          Show this help without building or running Pi.
 
 Output:
-  One SHELL= line per block plus the expectation it was checked against.
-  A bash shellPath must be applied verbatim; a non-bash choice is left alone,
-  so both blocks legitimately keep the pinned starting shell there.
+  One probe line per block plus the expectation it was checked against.
+  An explicit bash shellPath and an unset shellPath are each checked against
+  applyPiShellToCursorProcess. On Windows that function leaves SHELL alone.
+  The control block must keep the pinned starting shell.
 
 Exit codes:
-  0  both blocks matched their expectation
+  0  every block matched its expectation
   1  bad arguments, a block with no evidence, or a value that did not match
 
 Cost:
-  Two live Cursor turns. The offline unit tests cover the same override
-  logic when no real-service proof is needed.`);
+  No model turn. Each block starts Pi and exits from session_start once SHELL
+  is visible. The offline unit tests cover the override, including the Windows
+  skip, when no real Pi process is needed.`);
 }
 
 function parseArgs(argv) {
@@ -90,33 +102,74 @@ function findPiCommand() {
 	return { command: existsSync(local) ? local : "pi", argsPrefix: [] };
 }
 
-/** Mirrors cursorShellEnvValue: only a bash path is applied. */
-function isBashPath(shellPath) {
-	return typeof shellPath === "string" && shellPath.includes("bash");
+function findHostBash() {
+	for (const candidate of HOST_BASH_CANDIDATES) {
+		try {
+			accessSync(candidate, constants.X_OK);
+			return candidate;
+		} catch {
+			// Keep looking: no single bash location exists on every host.
+		}
+	}
+	throw new Error(`No bash found on this host. Checked: ${HOST_BASH_CANDIDATES.join(", ")}`);
 }
 
-/** Read the probe's `SHELL=... shellPath=...` line, or undefined when absent. */
-function parseEvidence(lines) {
+/**
+ * The shell `apply` writes for this Pi setting. `shellPath` null is unset.
+ * The production function is the acceptance rule, including its Windows no-op.
+ */
+export function expectedCursorShell(apply, shellPath, startingShell) {
+	const env = { SHELL: startingShell };
+	apply(shellPath ?? undefined, env);
+	return env.SHELL ?? null;
+}
+
+/** One JSON object, so a missing shellPath is `null` rather than the token `undefined`. */
+export function formatShellPathProbe(shell, shellPath) {
+	return `${PROBE_PREFIX}${JSON.stringify({
+		shell: shell ?? null,
+		shellPath: shellPath ?? null,
+	})}`;
+}
+
+/** Read the probe line, or undefined when no complete line is present. */
+export function parseShellPathEvidence(lines) {
 	for (const line of lines) {
-		const match = /^SHELL=(.+?) shellPath=(.+)$/.exec(line);
-		if (!match) continue;
+		if (!line.startsWith(PROBE_PREFIX)) continue;
 		try {
-			return { shell: JSON.parse(match[1]), shellPath: JSON.parse(match[2]) };
+			const parsed = JSON.parse(line.slice(PROBE_PREFIX.length));
+			if (!parsed || typeof parsed !== "object" || !("shell" in parsed) || !("shellPath" in parsed)) continue;
+			return { shell: parsed.shell, shellPath: parsed.shellPath };
 		} catch {
-			return undefined;
+			// A truncated or foreign line can share the prefix. Keep scanning.
 		}
 	}
 	return undefined;
 }
 
-function runPi(args, { shellPath, timeoutMs }) {
+function seedAgentDir(dir, shellPath) {
+	mkdirSync(dir, { recursive: true });
+	const settings = {
+		quietStartup: true,
+		enableInstallTelemetry: false,
+	};
+	if (shellPath) settings.shellPath = shellPath;
+	writeFileSync(join(dir, "settings.json"), `${JSON.stringify(settings)}\n`);
+}
+
+function runPi(args, { startingShell, agentDir, timeoutMs }) {
 	return new Promise((resolvePromise) => {
 		const pi = findPiCommand();
 		const child = spawn(pi.command, [...pi.argsPrefix, ...args], {
 			cwd: root,
 			// Pin the starting shell: Pi exports its own bash, so an inherited
 			// value would make the control look like the override working.
-			env: { ...process.env, SHELL: shellPath },
+			env: {
+				...process.env,
+				SHELL: startingShell,
+				PI_CODING_AGENT_DIR: agentDir,
+				PI_SKIP_VERSION_CHECK: "1",
+			},
 			stdio: ["ignore", "pipe", "pipe"],
 			...CHILD_PROCESS_TREE_SPAWN_OPTIONS,
 		});
@@ -142,7 +195,7 @@ function runPi(args, { shellPath, timeoutMs }) {
 			// leftover Pi cannot keep this probe from returning.
 			if (timedOut) await terminateChild(child).catch(() => undefined);
 			const evidence = [...stdout.split("\n"), ...stderr.split("\n")].filter(
-				(line) => line.startsWith("SHELL=") || line.includes("Failed to load"),
+				(line) => line.startsWith(PROBE_PREFIX) || line.includes("Failed to load"),
 			);
 			resolvePromise({
 				evidence,
@@ -165,44 +218,52 @@ async function main(argv = process.argv.slice(2)) {
 	// The probe loads the built manifest, so a stale dist/ would validate
 	// previous behavior. Match the other launchers and build first.
 	ensureBuilt();
+	const { applyPiShellToCursorProcess } = await import(pathToFileURL(join(root, "dist", "cursor-shell-env.js")).href);
 
 	const startingShell = existsSync("/bin/zsh") ? "/bin/zsh" : "/bin/sh";
 	const workDir = mkdtempSync(join(tmpdir(), "pi-cursor-shell-path-"));
-	const probePath = join(workDir, "shell-path-probe.ts");
-	writeFileSync(probePath, PROBE_SOURCE);
-
 	const problems = [];
 	try {
+		const probePath = join(workDir, "shell-path-probe.ts");
+		const bashPath = join(workDir, "bash");
+		writeFileSync(probePath, PROBE_SOURCE);
+		symlinkSync(findHostBash(), bashPath);
+
+		const configuredDir = join(workDir, "agent-configured");
+		const unsetDir = join(workDir, "agent-unset");
+		seedAgentDir(configuredDir, bashPath);
+		seedAgentDir(unsetDir, undefined);
+
 		const blocks = [
 			{
-				label: "with pi-cursor-sdk loaded",
+				label: "with pi-cursor-sdk loaded and an explicit bash shellPath",
 				extensionPaths: [root],
-				// A bash shellPath must be applied verbatim. A non-bash choice is
-				// deliberately left alone, so SHELL keeping the pinned value is
-				// the correct outcome there rather than a failure.
-				expect: (observed) =>
-					isBashPath(observed.shellPath)
-						? observed.shell === observed.shellPath
-						: observed.shell === startingShell,
-				describe: (observed) =>
-					isBashPath(observed.shellPath)
-						? `expect SHELL == shellPath (${observed.shellPath})`
-						: `expect SHELL == ${startingShell} because shellPath is not bash`,
+				agentDir: configuredDir,
+				shellPath: bashPath,
+			},
+			{
+				label: "with pi-cursor-sdk loaded and shellPath unset",
+				extensionPaths: [root],
+				agentDir: unsetDir,
+				shellPath: null,
 			},
 			{
 				label: "without pi-cursor-sdk (control)",
 				extensionPaths: [],
-				// Without the extension nothing should touch the value.
-				expect: (observed) => observed.shell === startingShell,
-				describe: () => `expect SHELL == ${startingShell}`,
+				agentDir: configuredDir,
+				shellPath: bashPath,
+				control: true,
 			},
 		];
 		console.log(`starting SHELL: ${startingShell}`);
 		for (const block of blocks) {
 			console.log(`--- ${block.label} ---`);
+			const expectedShell = block.control
+				? startingShell
+				: expectedCursorShell(applyPiShellToCursorProcess, block.shellPath, startingShell);
 			const result = await runPi(
 				[
-					// -ne keeps extension discovery out of both blocks, so an install
+					// -ne keeps extension discovery out of every block, so an install
 					// that already lists pi-cursor-sdk cannot load it in the control.
 					"-ne",
 					...block.extensionPaths.flatMap((path) => ["-e", path]),
@@ -212,22 +273,24 @@ async function main(argv = process.argv.slice(2)) {
 					"-p",
 					"say ok",
 				],
-				{ shellPath: startingShell, timeoutMs: args.timeoutMs },
+				{ startingShell, agentDir: block.agentDir, timeoutMs: args.timeoutMs },
 			);
 			for (const line of result.evidence) console.log(line);
 			// Reaching session_start already answers the question, but say so
 			// rather than let a truncated run read as clean.
 			if (result.timedOut) console.log(`(timeout fired; ${result.detail})`);
 
-			const observed = parseEvidence(result.evidence);
+			const observed = parseShellPathEvidence(result.evidence);
 			if (!observed) {
-				problems.push(`${block.label}: no SHELL= evidence (${result.detail})`);
+				problems.push(`${block.label}: no probe evidence (${result.detail})`);
 				continue;
 			}
-			console.log(`(observed ${block.describe(observed)})`);
-			if (!block.expect(observed)) {
+			const shellMatches = observed.shell === expectedShell;
+			const settingMatches = observed.shellPath === block.shellPath;
+			console.log(`(observed SHELL=${observed.shell} shellPath=${observed.shellPath}; expect SHELL=${expectedShell})`);
+			if (!shellMatches || !settingMatches) {
 				problems.push(
-					`${block.label}: SHELL=${observed.shell} shellPath=${observed.shellPath} does not match expectation`,
+					`${block.label}: SHELL=${observed.shell} shellPath=${observed.shellPath}; expected SHELL=${expectedShell} shellPath=${block.shellPath}`,
 				);
 			}
 		}
@@ -236,7 +299,7 @@ async function main(argv = process.argv.slice(2)) {
 	}
 
 	if (problems.length > 0) fail(problems.join("; "));
-	console.log("OK: the extension applied shellPath, and the control was untouched.");
+	console.log("OK: explicit and unset shellPath matched the extension, and the control was untouched.");
 }
 
 if (isMainModule()) {

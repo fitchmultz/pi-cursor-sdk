@@ -40,7 +40,20 @@ function resolvePiShell(shellPath: string | undefined): string | undefined {
 	}
 }
 
-export function applyPiShellToCursorProcess(shellPath: string | undefined, env: NodeJS.ProcessEnv = process.env): void {
+export function applyPiShellToCursorProcess(
+	shellPath: string | undefined,
+	env: NodeJS.ProcessEnv = process.env,
+	platform: NodeJS.Platform = process.platform,
+): void {
+	// Cursor's POSIX picker reads SHELL and prefers zsh, which kills the process
+	// group when a background command leaves the pipes open. On Windows the same
+	// write selects the Bash executor. That executor resolves bash.exe through
+	// PATH unless MSYSTEM already named a Git Bash, while Pi's unset shellPath is
+	// `%ProgramFiles%\\Git\\bin\\bash.exe` before any PATH search. Writing that
+	// path makes every local shell call throw "Can't find Bash" when bash.exe is
+	// not on PATH. Leave Windows on the PowerShell fallback Cursor used when
+	// SHELL was unset.
+	if (platform === "win32") return;
 	const next = cursorShellEnvValue(resolvePiShell(shellPath) ?? "");
 	if (next) env.SHELL = next;
 }

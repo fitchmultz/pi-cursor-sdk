@@ -57,6 +57,22 @@ describe("Cursor shell follows Pi", () => {
 		}
 	});
 
+	it("leaves SHELL unchanged on Windows", () => {
+		// Installed @cursor/sdk 1.0.40 selects Bash when SHELL names Git Bash, then
+		// resolves the executable through PATH only. Pi's own unset shellPath is
+		// that Git Bash path, so writing it breaks every local shell call.
+		const bash = createHostBashFixture();
+		try {
+			const env: NodeJS.ProcessEnv = { SHELL: "/bin/zsh" };
+			applyPiShellToCursorProcess(bash.shellPath, env, "win32");
+			expect(env.SHELL).toBe("/bin/zsh");
+			applyPiShellToCursorProcess(undefined, env, "win32");
+			expect(env.SHELL).toBe("/bin/zsh");
+		} finally {
+			bash.dispose();
+		}
+	});
+
 	it("expands a bare tilde to the home directory", () => {
 		const bash = createHostBashFixture();
 		try {

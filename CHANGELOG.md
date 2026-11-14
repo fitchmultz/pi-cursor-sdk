@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+- Drop the per-skill `<location>` line and its file-read fallback sentence from Pi's Cursor skill catalog while `cursor_activate_skill` can load the file itself. The catalog is then read only through that tool, which resolves `SKILL.md` from the skill name. A 99-skill catalog drops from 42,248 to 29,518 characters. The fallback keys off whether the activation tool is actually active, not the bridge environment flag: a run with no active pi tools leaves the tool inactive and starts no bridge endpoint, so those runs keep the absolute paths.
+
 ## 0.5.39 - 2026-11-13
 
 <!-- npm-release:unreleased:start -->

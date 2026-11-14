@@ -28,6 +28,16 @@ type CursorActivateSkillParams = {
 	name?: string;
 };
 
+export type CursorSkillCatalogContext = {
+	/**
+	 * Whether `cursor_activate_skill` is active for this run, so the catalog can
+	 * drop the absolute `SKILL.md` paths. Defaults to the bridge environment flag;
+	 * the live path passes the activation decision, which also requires pi tools
+	 * to be enabled at all.
+	 */
+	activationToolActive?: boolean;
+};
+
 interface CursorSkillActivationDetails {
 	name: string;
 	filePath: string;
@@ -56,14 +66,24 @@ function resolveEffectiveRuntimeForSkillLifecycle(
 	return cursorModel ? resolveEffectiveCursorConfigForContext(ctx).runtime.value : "local";
 }
 
-export function formatCursorSkillsForPrompt(skills: readonly Skill[]): string {
+/**
+ * Each catalog entry costs a name, a description, and, only when the activation
+ * tool is unavailable, an absolute SKILL.md path as the file-read fallback.
+ */
+export function formatCursorSkillsForPrompt(
+	skills: readonly Skill[],
+	options: { includeLocations?: boolean } = {},
+): string {
 	const visibleSkills = getVisibleSkills(skills);
 	if (visibleSkills.length === 0) return "";
+	const includeLocations = options.includeLocations !== false;
 
 	const lines = [
 		"\n\nThe following skills provide specialized instructions for specific tasks.",
 		`When a task matches a skill's description, call ${CURSOR_ACTIVATE_SKILL_MCP_NAME} with the skill name to load its full SKILL.md instructions before proceeding.`,
-		"If the pi bridge is disabled and the activation tool is unavailable, use Cursor's file-read capability on the listed SKILL.md location instead.",
+		...(includeLocations
+			? ["If the pi bridge is disabled and the activation tool is unavailable, use Cursor's file-read capability on the listed SKILL.md location instead."]
+			: []),
 		"When a skill references relative paths, resolve them against the skill directory (the parent of SKILL.md / dirname of the path) and use absolute paths in tool calls.",
 		"",
 		"<available_skills>",
@@ -72,7 +92,7 @@ export function formatCursorSkillsForPrompt(skills: readonly Skill[]): string {
 		lines.push("  <skill>");
 		lines.push(`    <name>${escapeXml(skill.name)}</name>`);
 		lines.push(`    <description>${escapeXml(skill.description)}</description>`);
-		lines.push(`    <location>${escapeXml(skill.filePath)}</location>`);
+		if (includeLocations) lines.push(`    <location>${escapeXml(skill.filePath)}</location>`);
 		lines.push("  </skill>");
 	}
 	lines.push("</available_skills>");
@@ -84,12 +104,19 @@ export function resolveCursorSkillSystemPrompt(
 	model: ExtensionContext["model"],
 	systemPromptOptions?: BuildSystemPromptOptions,
 	runtime: CursorRuntime = "local",
+	catalogContext?: CursorSkillCatalogContext,
 ): string {
 	if (!isCursorModel(model)) return systemPrompt;
 	if (runtime === "cloud") return systemPrompt.replace(AVAILABLE_SKILLS_SECTION_PATTERN, "");
 	const skills = getVisibleSkills(systemPromptOptions?.skills);
 	if (skills.length === 0) return systemPrompt;
-	const replacement = formatCursorSkillsForPrompt(skills);
+	const replacement = formatCursorSkillsForPrompt(skills, {
+		// The absolute path is the only fallback when the activation tool cannot
+		// load the file itself. That is not the same question as the bridge flag:
+		// the tool also stays inactive when pi has no active tools at all, and the
+		// bridge then exposes no endpoint for it.
+		includeLocations: !(catalogContext?.activationToolActive ?? resolveCursorPiToolBridgeEnabled()),
+	});
 	if (AVAILABLE_SKILLS_SECTION_PATTERN.test(systemPrompt)) {
 		return systemPrompt.replace(AVAILABLE_SKILLS_SECTION_PATTERN, replacement);
 	}
@@ -148,6 +175,17 @@ function wrapSkillContent(skill: Skill, content: string, resources: readonly str
 	].join("\n");
 }
 
+/**
+ * Whether `cursor_activate_skill` can load a skill's `SKILL.md` for this run.
+ * The bridge must be enabled and pi must expose at least one active tool, because
+ * an empty pi tool surface leaves the activation tool inactive and gives the
+ * bridge no endpoint. Both the catalog's path stripping and the activation
+ * decision read this one predicate so they cannot disagree.
+ */
+function activationToolCanLoadSkills(pi: Pick<ExtensionAPI, "getActiveTools">): boolean {
+	return resolveCursorPiToolBridgeEnabled() && !arePiToolsDisabled(pi);
+}
+
 export function registerCursorSkillTool(pi: CursorSkillToolExtensionApi): void {
 	let currentSkillsByName = new Map<string, Skill>();
 
@@ -161,8 +199,8 @@ export function registerCursorSkillTool(pi: CursorSkillToolExtensionApi): void {
 
 	function syncCursorSkillToolForModel(model: ExtensionContext["model"], runtime: CursorRuntime): void {
 		const activeToolNames = new Set(pi.getActiveTools());
-		const shouldBeActive = !arePiToolsDisabled(pi) && runtime === "local" && isCursorModel(model)
-			&& resolveCursorPiToolBridgeEnabled() && currentSkillsByName.size > 0;
+		const shouldBeActive = activationToolCanLoadSkills(pi) && runtime === "local" && isCursorModel(model)
+			&& currentSkillsByName.size > 0;
 		const alreadyActive = activeToolNames.has(CURSOR_ACTIVATE_SKILL_TOOL_NAME);
 		if (shouldBeActive === alreadyActive) return;
 		if (shouldBeActive) {
@@ -242,7 +280,11 @@ export function registerCursorSkillTool(pi: CursorSkillToolExtensionApi): void {
 				setCurrentSkills([]);
 			}
 			syncCursorSkillToolForModel(ctx.model, runtime);
-			const resolved = resolveCursorSkillSystemPrompt(event.systemPrompt, ctx.model, event.systemPromptOptions, runtime);
+			const resolved = resolveCursorSkillSystemPrompt(event.systemPrompt, ctx.model, event.systemPromptOptions, runtime, {
+				// Ask the synced active-tool set, not the env flag, so a run with no pi
+				// tools at all keeps the file-read fallback.
+				activationToolActive: pi.getActiveTools().includes(CURSOR_ACTIVATE_SKILL_TOOL_NAME),
+			});
 			if (resolved === event.systemPrompt) return undefined;
 			return { systemPrompt: resolved };
 		},

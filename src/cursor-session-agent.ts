@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { hash } from "node:crypto";
 import type { AgentModeOption, AgentOptions, LocalAgentOptions, LocalAgentStore, ModelSelection, SDKAgent, SettingSource } from "@cursor/sdk";
 import type { Context } from "@earendil-works/pi-ai";
 import { normalizeCursorCustomStoreRoot } from "./cursor-custom-store-path.js";
@@ -241,7 +241,7 @@ function buildLocalSafetyPoolKey(localSafety?: CursorLocalSafetyOptions): string
 }
 
 function buildApiKeyPoolKeyFingerprint(apiKey: string): string {
-	return createHash("sha256").update(apiKey).digest("hex").slice(0, 16);
+	return hash("sha256", apiKey, "hex").slice(0, 16);
 }
 
 function buildBridgePoolKeySuffix(registeredBridge: CursorPiToolBridge | undefined): string {
@@ -261,7 +261,7 @@ function buildCustomSubagentPoolKeySuffix(agents: AgentOptions["agents"]): strin
 				.map(({ id, value }) => ({ id, value })),
 		},
 	]);
-	return [`subagents:${createHash("sha256").update(JSON.stringify(content)).digest("hex")}`];
+	return [`subagents:${hash("sha256", JSON.stringify(content), "hex")}`];
 }
 
 function buildSessionAgentPoolKey(scopeKey: string, params: SessionCursorAgentCreateParams): string {

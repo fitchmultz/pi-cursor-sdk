@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { hash } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -44,7 +44,7 @@ function getModelCacheTtlMs(): number {
 // Fingerprint the API key so a key change invalidates the cache, without ever
 // persisting the key itself.
 export function fingerprintApiKey(apiKey: string): string {
-	return createHash("sha256").update(apiKey).digest("hex").slice(0, 16);
+	return hash("sha256", apiKey, "hex").slice(0, 16);
 }
 
 function isStringArray(value: unknown): value is string[] {

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { hash } from "node:crypto";
 import { closeSync, constants, existsSync, fchmodSync, fstatSync, fsyncSync, openSync, readFileSync, readSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
@@ -194,7 +194,7 @@ function captureCloudLifecycleSession(ctx: CloudLifecycleSessionContext): CloudL
 }
 
 function durableLedgerPath(sessionFile: string, sessionId: string): string {
-	const sessionHash = createHash("sha256").update(sessionId).digest("hex").slice(0, 32);
+	const sessionHash = hash("sha256", sessionId, "hex").slice(0, 32);
 	return join(dirname(sessionFile), `${DURABLE_LEDGER_PREFIX}-${sessionHash}.journal`);
 }
 

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { NATIVE_COMPATIBILITY_TEST_FILES, qualifySelectedHost, runCompatibilityCommand } from "./ci-compatibility-phases.mjs";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { hash } from "node:crypto";
 import { delimiter, dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -15,16 +15,16 @@ CI resolves latest stable official Pi and maintained fork main once; supplied id
 --select-only installs the selected official graph for subsequent native platform checks and keeps
               its temporary host directory, which node_modules links into.
 
-Manual qualification: node scripts/ci-compatibility.mjs [--working-tree] [--official-only] [--versions 1.5.0]
-Default manual invocation requires a clean checkout and checks official minimum/latest and current fork offline.
+Manual qualification: node scripts/ci-compatibility.mjs [--working-tree] [--official-only] [--versions 1.5.2]
+Default manual invocation requires a clean checkout and checks official latest and current fork offline.
 --working-tree  Build an isolated snapshot of tracked and nonignored new files, without committing.
 --official-only Skip the fork clone/build.
---versions      Select exact official releases (manual default: minimum/latest).
+--versions      Select exact official releases (manual default: latest).
 Manual selection flags cannot be combined with --automation.
 
 Examples:
   node scripts/ci-compatibility.mjs --automation ../automation
-  node scripts/ci-compatibility.mjs --working-tree --official-only --versions 1.5.0
+  node scripts/ci-compatibility.mjs --working-tree --official-only --versions 1.5.2
 Exit codes: 0 success/help; 1 qualification or invalid argument failure.`);
   process.exit(0);
 }
@@ -200,7 +200,7 @@ try {
     if (!versions) {
       const latest = JSON.parse(run("npm", ["view", "@earendil-works/pi-coding-agent", "dist-tags.latest", "--json"], source, true));
       assert.match(latest, /^\d+\.\d+\.\d+$/, "Official Pi latest must be a stable release");
-      versions = ["1.5.0", latest];
+      versions = [latest];
     }
     const gitExtension = join(root, "git-consumer");
     if (args.includes("--working-tree")) {
@@ -217,11 +217,11 @@ try {
         const to = join(gitExtension, file);
         mkdirSync(dirname(to), { recursive: true });
         copyFileSync(from, to);
-        manifest.push({ path: file, sha256: createHash("sha256").update(readFileSync(to)).digest("hex") });
+        manifest.push({ path: file, sha256: hash("sha256", readFileSync(to), "hex") });
       }
       assert.deepEqual(sourceFiles(), files, "Source inventory changed while snapshotting; retry once edits stop");
-      for (const file of manifest) assert.equal(createHash("sha256").update(readFileSync(join(source, file.path))).digest("hex"), file.sha256, `Source changed while snapshotting: ${file.path}`);
-      console.log(`Exact working-tree snapshot SHA256: ${createHash("sha256").update(JSON.stringify(manifest)).digest("hex")} (${manifest.length} files)`);
+      for (const file of manifest) assert.equal(hash("sha256", readFileSync(join(source, file.path)), "hex"), file.sha256, `Source changed while snapshotting: ${file.path}`);
+      console.log(`Exact working-tree snapshot SHA256: ${hash("sha256", JSON.stringify(manifest), "hex")} (${manifest.length} files)`);
       run("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], gitExtension);
       run("npm", ["run", "build"], gitExtension);
     } else {

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { hash as sha256 } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import {
@@ -51,7 +51,7 @@ export function slugSessionKey(scopeKey: string): string {
 		return `anonymous-${process.pid}`;
 	}
 	const fileBase = sanitizePathSegment(basename(scopeKey).replace(/\.jsonl?$/i, "") || "session");
-	const hash = createHash("sha256").update(scopeKey).digest("hex").slice(0, 8);
+	const hash = sha256("sha256", scopeKey, "hex").slice(0, 8);
 	return `${fileBase}-${hash}`;
 }
 

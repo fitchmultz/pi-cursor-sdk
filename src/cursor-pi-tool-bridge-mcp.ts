@@ -1,4 +1,5 @@
-import { createHash } from "node:crypto";
+import { hash } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 import type { Context, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/server";
 import { buildCursorPiBridgeMcpToolDescription, CURSOR_PI_BRIDGE_MCP_TOOL_PREFIX } from "./cursor-bridge-contract.js";
@@ -17,7 +18,7 @@ export function normalizeMcpArgs(args: unknown): Record<string, unknown> {
 }
 
 export function waitForProtocolFlush(): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, 0));
+	return sleep(0);
 }
 
 function sanitizeMcpToolNameStem(toolName: string): string {
@@ -29,7 +30,7 @@ function sanitizeMcpToolNameStem(toolName: string): string {
 }
 
 export function stableNameHash(value: string): string {
-	return createHash("sha256").update(value).digest("hex").slice(0, 8);
+	return hash("sha256", value, "hex").slice(0, 8);
 }
 
 export function createMcpToolName(piToolName: string, usedMcpToolNames: Set<string>): string {

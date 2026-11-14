@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, hash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -58,11 +58,7 @@ const activeWorkspaceRoots = new Map<string, { root: Promise<string>; users: num
 // users/processes must stop before upgrade; a cross-process lock belongs in the SDK.
 
 function hashCursorSessionStoreScope(scopeKey: string): string {
-	return createHash("sha256")
-		.update("pi-cursor-sdk-session-store\0")
-		.update(scopeKey)
-		.digest("hex")
-		.slice(0, 32);
+	return hash("sha256", `pi-cursor-sdk-session-store\0${scopeKey}`, "hex").slice(0, 32);
 }
 
 export function buildCursorSessionStateRoot(defaultStateRoot: string, scopeKey: string): string {
@@ -107,7 +103,7 @@ function acquireWorkspaceRoot(cwd: string, storeRoot: string | undefined) {
 			root: Promise.resolve().then(async () => {
 				if (storeRoot !== undefined) {
 					const root = prepareCursorCustomStoreRoot(storeRoot);
-					return join(root, createHash("sha256").update(resolve(cwd)).digest("hex").slice(0, 32));
+					return join(root, hash("sha256", resolve(cwd), "hex").slice(0, 32));
 				}
 				const operations = await getSdkOperations();
 				assertSafeWorkspaceLayout(cwd);
@@ -185,7 +181,7 @@ function assertSafeStorePath(stateRoot: string, base: string, label: string): vo
 }
 
 function workspaceHashes(cwd: string): { current: string; legacy: string | undefined } {
-	const current = createHash("sha256").update(cwd).digest("hex");
+	const current = hash("sha256", cwd, "hex");
 	try {
 		return { current, legacy: createHash("md5").update(cwd).digest("hex") };
 	} catch (error) {

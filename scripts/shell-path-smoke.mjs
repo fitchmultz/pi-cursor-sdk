@@ -4,14 +4,16 @@
  *
  * Each block gets its own Pi agent directory, so a host `shellPath` cannot decide
  * the result. One block sets a bash path, one leaves it unset, and one loads no
- * extension. The expectation is whatever `applyPiShellToCursorProcess` writes for
- * that setting, which is a no-op on Windows.
+ * extension. The expected SHELL is that setting, or Pi's own default when the
+ * setting is unset. It is not computed by calling the override under test.
+ * Windows is the exception: the override does not write, so SHELL stays pinned.
  */
 import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { getShellConfig } from "@earendil-works/pi-coding-agent";
 import {
 	CHILD_PROCESS_TREE_SPAWN_OPTIONS,
 	describeProcessExit,
@@ -63,9 +65,9 @@ Options:
 
 Output:
   One probe line per block plus the expectation it was checked against.
-  An explicit bash shellPath and an unset shellPath are each checked against
-  applyPiShellToCursorProcess. On Windows that function leaves SHELL alone.
-  The control block must keep the pinned starting shell.
+  An explicit bash shellPath must be applied verbatim. An unset shellPath must
+  become Pi's platform default. On Windows the override does not write, so both
+  of those blocks keep the pinned starting shell. The control always does.
 
 Exit codes:
   0  every block matched its expectation
@@ -115,13 +117,13 @@ function findHostBash() {
 }
 
 /**
- * The shell `apply` writes for this Pi setting. `shellPath` null is unset.
- * The production function is the acceptance rule, including its Windows no-op.
+ * The SHELL a block must observe. Derived from the setting and platform, not
+ * from `applyPiShellToCursorProcess`, so a no-op override fails this check.
+ * `shellPath` null means Pi's unset default (`piDefaultShell`).
  */
-export function expectedCursorShell(apply, shellPath, startingShell) {
-	const env = { SHELL: startingShell };
-	apply(shellPath ?? undefined, env);
-	return env.SHELL ?? null;
+export function expectedAppliedShell(shellPath, startingShell, platform, piDefaultShell) {
+	if (platform === "win32") return startingShell;
+	return shellPath ?? piDefaultShell;
 }
 
 /** One JSON object, so a missing shellPath is `null` rather than the token `undefined`. */
@@ -218,9 +220,9 @@ async function main(argv = process.argv.slice(2)) {
 	// The probe loads the built manifest, so a stale dist/ would validate
 	// previous behavior. Match the other launchers and build first.
 	ensureBuilt();
-	const { applyPiShellToCursorProcess } = await import(pathToFileURL(join(root, "dist", "cursor-shell-env.js")).href);
 
 	const startingShell = existsSync("/bin/zsh") ? "/bin/zsh" : "/bin/sh";
+	const piDefaultShell = getShellConfig(undefined).shell;
 	const workDir = mkdtempSync(join(tmpdir(), "pi-cursor-shell-path-"));
 	const problems = [];
 	try {
@@ -260,7 +262,7 @@ async function main(argv = process.argv.slice(2)) {
 			console.log(`--- ${block.label} ---`);
 			const expectedShell = block.control
 				? startingShell
-				: expectedCursorShell(applyPiShellToCursorProcess, block.shellPath, startingShell);
+				: expectedAppliedShell(block.shellPath, startingShell, process.platform, piDefaultShell);
 			const result = await runPi(
 				[
 					// -ne keeps extension discovery out of every block, so an install

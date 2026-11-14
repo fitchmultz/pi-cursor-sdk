@@ -17,6 +17,7 @@ const noticeOwner = state.noticeOwner;
 const MAX_CANDIDATE_BYTES = 16 * 1024;
 const PARSER_WARNING = "shell-parser: tree-sitter natives are unavailable in this artifact; shell command analysis degrades to parsingFailed";
 const PLUGIN_PREFIX = "[local-plugins-bootstrap] loadUserLocalPlugin ";
+const SHELL_CLOSE_TIMEOUT_PREFIX = "[shell-exec] Close event did not fire within ";
 // Fixed compatibility notices remain exact. Only the event name varies in
 // these two verified SDK templates; unrelated [hooks] warnings must pass.
 const HOOK_EVENT_NOTICES = [
@@ -88,6 +89,10 @@ function classify(text) {
 	if (line === PARSER_WARNING) return "parserUnavailable";
 	if (/^\[local-plugins-bootstrap\] loadUserLocalPlugin [^\r\n]+ rejected: symlink target [^\r\n]+ is outside [^\r\n]+(?: \{[^\r\n]*\})?$/.test(line)) return "outsidePlugin";
 	if (HOOK_NOTICES.includes(line) || hookEventNotice(line)) return "noise";
+	// One SDK close-timeout heuristic with four executor-specific suffixes:
+	// bash, PowerShell, and zsh-light proceed; zsh leaves the job or kills the
+	// group. Pi cannot act on any of them, so none belongs in its input area.
+	if (line.startsWith(SHELL_CLOSE_TIMEOUT_PREFIX)) return "noise";
 	const info = /^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d\.\d{3} INFO  (.+?)(?: ctx=[^\s]+)?(?: meta=\{[^\r\n]*\})?$/.exec(line);
 	if (info && CURSOR_SDK_STARTUP_NOISE_PATTERNS.includes(info[1])) return "noise";
 }
@@ -106,6 +111,7 @@ function possibleDiagnostic(text) {
 	if (!plain) return true;
 	if (HOOK_NOTICES.some(prefix => prefix.startsWith(plain) || plain === `${prefix}\r`) || hookEventNotice(plain, true)) return true;
 	if (PARSER_WARNING.startsWith(plain) || plain === `${PARSER_WARNING}\r`) return true;
+	if (SHELL_CLOSE_TIMEOUT_PREFIX.startsWith(plain) || plain.startsWith(SHELL_CLOSE_TIMEOUT_PREFIX) || plain.startsWith(`${SHELL_CLOSE_TIMEOUT_PREFIX}\r`)) return true;
 	if (PLUGIN_PREFIX.startsWith(plain) || plain.startsWith(PLUGIN_PREFIX)) return true;
 	const timestamp = "00:00:00.000 INFO  ";
 	const normalized = plain.replace(/\d/g, "0");

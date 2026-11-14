@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+- Hide every `[shell-exec] Close event did not fire` line. Cursor writes it to stderr when a shell command leaves a background process holding its pipes, and the filter had no rule for it, so the raw line reached Pi's input area. The SDK has one close-timeout heuristic with four executor-specific suffixes: bash, PowerShell, and zsh-light emit `Proceeding anyway to prevent hang.`, while zsh emits `Leaving it running because keepBackgroundJobs is set.` or `Killing detached process group.`. All four are now classified as noise; other `[shell-exec]` diagnostics stay visible.
+
 ## 0.5.39 - 2026-11-13
 
 <!-- npm-release:unreleased:start -->

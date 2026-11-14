@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import { installCursorSdkOutputFilter, withCursorSdkOutputNoticeHandler, suppressCursorSdkOutput } from "../src/cursor-sdk-output-filter.js";
+import { installCursorSdkOutputFilter, isCursorSdkStartupNoise, withCursorSdkOutputNoticeHandler, suppressCursorSdkOutput } from "../src/cursor-sdk-output-filter.js";
 import { installCursorSdkOutputFilter as installScriptFilter } from "../scripts/lib/cursor-sdk-output-filter.mjs";
 import { prepareInstalledBootstrapEmitters } from "./helpers/cursor-sdk-bootstrap.js";
 import { writeRawTestEvidence } from "./helpers/raw-test-evidence.mjs";
@@ -242,5 +242,47 @@ describe("Cursor SDK presentation boundary", () => {
 			retainedWarn("VISIBLE retained console");
 			expect(Buffer.concat(output.stderr)).toEqual(Buffer.from("VISIBLE retained console\n"));
 		} finally { first(); second(); output.restore(); }
+	});
+});
+
+// The SDK owns one close-timeout heuristic with four executor-specific suffixes,
+// and every executor that reaches a Pi session can emit it. The filter had no
+// rule for any of them, so each variant reached the terminal as a raw write.
+describe("Cursor SDK shell close-timeout", () => {
+	const PREFIX = "[shell-exec] Close event did not fire within 5000ms after exit. This may indicate a background process is holding file descriptors open.";
+	const VARIANTS = [
+		`${PREFIX} Proceeding anyway to prevent hang.`,
+		`${PREFIX} Leaving it running because keepBackgroundJobs is set.`,
+		`${PREFIX} Killing detached process group.`,
+	];
+
+	it("classifies every executor suffix as noise", () => {
+		for (const variant of VARIANTS) {
+			expect(isCursorSdkStartupNoise(variant), variant).toBe(true);
+		}
+	});
+
+	it("leaves other shell-exec diagnostics visible", () => {
+		expect(isCursorSdkStartupNoise("[shell-exec] bash state init spawn failed; falling back to empty state: ENOENT")).toBe(false);
+		expect(isCursorSdkStartupNoise("[shell-exec] Failed to read bash state file")).toBe(false);
+		expect(isCursorSdkStartupNoise("[shell-exec] Could not remove PowerShell script /tmp/x")).toBe(false);
+	});
+
+	it("suppresses the line when a single write splits it across frames", () => {
+		// possibleDiagnostic() owns the partial-frame decision. Without its guard a
+		// split write is forwarded transparently before classify() ever sees it.
+		const output = collectOutput();
+		const restore = installCursorSdkOutputFilter();
+		const line = VARIANTS[2];
+		const half = Math.floor(line.length / 2);
+		try {
+			process.stderr.write(line.slice(0, half));
+			expect(Buffer.concat(output.stderr)).toEqual(Buffer.alloc(0));
+			process.stderr.write(`${line.slice(half)}\n`);
+			expect(Buffer.concat(output.stderr)).toEqual(Buffer.alloc(0));
+		} finally {
+			restore();
+			output.restore();
+		}
 	});
 });

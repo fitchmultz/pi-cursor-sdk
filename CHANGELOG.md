@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+- Apply Pi's `shellPath` as Cursor's `SHELL` on macOS and Linux so Cursor selects its bash executor instead of the zsh one, which kills the process group when a background command leaves the pipes open. Windows is left unchanged. Cursor's Bash executor there resolves `bash.exe` through `PATH`, and Pi's unset `shellPath` is Git Bash under Program Files, so writing it throws "Can't find Bash" when that executable is not on PATH. The value is read on `session_start` rather than during extension load, and it resolves the way Pi's own setting does, including a leading `~`. `npm run smoke:shell-path` prints the `SHELL` a real `session_start` sees for an explicit bash `shellPath`, for an unset `shellPath`, and without the extension, each from an isolated Pi agent directory.
+
 ## 0.5.39 - 2026-11-13
 
 <!-- npm-release:unreleased:start -->

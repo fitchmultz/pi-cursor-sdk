@@ -70,6 +70,7 @@
     "smoke:local-resume:cleanup": "node scripts/local-resume-smoke.mjs --cleanup",
     "smoke:steering": "node scripts/steering-rpc-smoke.mjs",
     "smoke:jsonl": "node scripts/validate-smoke-jsonl.mjs",
+    "smoke:shell-path": "node scripts/shell-path-smoke.mjs",
     "debug:sdk-events": "node scripts/debug-sdk-events.mjs",
     "debug:provider-events": "node scripts/debug-provider-events.mjs",
     "debug:mcp-coldstart": "node scripts/probe-mcp-coldstart.mjs",

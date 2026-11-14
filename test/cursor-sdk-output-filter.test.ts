@@ -2,9 +2,10 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import { installCursorSdkOutputFilter, withCursorSdkOutputNoticeHandler, suppressCursorSdkOutput } from "../src/cursor-sdk-output-filter.js";
+import { installCursorSdkOutputFilter, isCursorSdkStartupNoise, withCursorSdkOutputNoticeHandler, suppressCursorSdkOutput } from "../src/cursor-sdk-output-filter.js";
 import { installCursorSdkOutputFilter as installScriptFilter } from "../scripts/lib/cursor-sdk-output-filter.mjs";
 import { prepareInstalledBootstrapEmitters } from "./helpers/cursor-sdk-bootstrap.js";
+import { installedShellCloseTimeout } from "./helpers/cursor-sdk-shell-close-timeout.js";
 import { writeRawTestEvidence } from "./helpers/raw-test-evidence.mjs";
 import { collectOutput } from "./helpers/process-output.js";
 
@@ -242,5 +243,52 @@ describe("Cursor SDK presentation boundary", () => {
 			retainedWarn("VISIBLE retained console");
 			expect(Buffer.concat(output.stderr)).toEqual(Buffer.from("VISIBLE retained console\n"));
 		} finally { first(); second(); output.restore(); }
+	});
+});
+
+// The SDK owns one close-timeout heuristic with three distinct suffixes across
+// four executors, and every executor that reaches a Pi session can emit it. The
+// filter had no rule for any of them, so each variant reached the terminal as a
+// raw write. Templates come from the installed package, so a reworded SDK fails
+// here instead of silently disabling the prefix rule.
+describe("Cursor SDK shell close-timeout", () => {
+	let installed: Awaited<ReturnType<typeof installedShellCloseTimeout>>;
+	beforeAll(async () => { installed = await installedShellCloseTimeout(); }, 30_000);
+
+	it("matches the installed head as a prefix, not an enumerated suffix list", () => {
+		// Production matches on the shared head. The installed warnings below bind
+		// that head, so a reworded template fails instead of silently disabling the
+		// rule. An unforeseen suffix must classify too, without a new SDK release.
+		expect(isCursorSdkStartupNoise(`${installed.head} A future executor suffix.`)).toBe(true);
+	});
+
+	it("classifies every installed executor warning as noise", () => {
+		for (const warning of installed.warnings) {
+			expect(isCursorSdkStartupNoise(warning), warning).toBe(true);
+		}
+	});
+
+	it("leaves other shell-exec diagnostics visible", () => {
+		expect(isCursorSdkStartupNoise("[shell-exec] bash state init spawn failed; falling back to empty state: ENOENT")).toBe(false);
+		expect(isCursorSdkStartupNoise("[shell-exec] Failed to read bash state file")).toBe(false);
+		expect(isCursorSdkStartupNoise("[shell-exec] Could not remove PowerShell script /tmp/x")).toBe(false);
+	});
+
+	it("suppresses the line when a single write splits it across frames", () => {
+		// possibleDiagnostic() owns the partial-frame decision. Without its guard a
+		// split write is forwarded transparently before classify() ever sees it.
+		const output = collectOutput();
+		const restore = installCursorSdkOutputFilter();
+		const line = installed.warnings.at(-1)!;
+		const half = Math.floor(line.length / 2);
+		try {
+			process.stderr.write(line.slice(0, half));
+			expect(Buffer.concat(output.stderr)).toEqual(Buffer.alloc(0));
+			process.stderr.write(`${line.slice(half)}\n`);
+			expect(Buffer.concat(output.stderr)).toEqual(Buffer.alloc(0));
+		} finally {
+			restore();
+			output.restore();
+		}
 	});
 });

@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { hash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import type { AgentUsage, SDKAgent, TokenUsage, UsageCost } from "@cursor/sdk";
@@ -98,7 +98,7 @@ function originOf(ctx: ExtensionContext): CursorUsageOrigin {
 }
 function journalPath(origin: CursorUsageOrigin): string | undefined {
 	if (!origin.sessionFile) return undefined;
-	const digest = createHash("sha256").update(origin.sessionId).digest("hex").slice(0, 32);
+	const digest = hash("sha256", origin.sessionId, "hex").slice(0, 32);
 	return join(dirname(origin.sessionFile), `cursor-usage-${digest}.journal`);
 }
 const storageKey = (origin: CursorUsageOrigin) => journalPath(origin) ?? origin.sessionId;

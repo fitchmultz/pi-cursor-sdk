@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { hash } from "node:crypto";
 import { getCursorConversationMessages, resolveCursorPiContext } from "./cursor-pi-context.js";
 import type { Context, Message, ToolCall } from "@earendil-works/pi-ai";
 import { convertToLlm } from "@earendil-works/pi-coding-agent";
@@ -278,7 +278,7 @@ interface CursorContextFingerprintPayload {
 }
 
 function hashCursorContextValue(value: string): string {
-	return createHash("sha256").update(value).digest("hex").slice(0, 16);
+	return hash("sha256", value, "hex").slice(0, 16);
 }
 
 function serializeMessageForFingerprint(message: Message, index: number): string {

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { hash } from "node:crypto";
 import { copyFileSync, existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AssistantMessageEventStream } from "@earendil-works/pi-ai";
@@ -172,7 +172,7 @@ export type DiscardedIncompleteStartedToolCallReason =
 	| "run-drain";
 
 function hashCursorSdkCallId(callId: string): string {
-	return createHash("sha256").update(callId).digest("hex").slice(0, 8);
+	return hash("sha256", callId, "hex").slice(0, 8);
 }
 
 export interface DiscardedIncompleteStartedToolCallRecord {

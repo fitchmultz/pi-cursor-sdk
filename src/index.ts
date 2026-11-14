@@ -16,6 +16,7 @@ import { registerCursorAgentsContextDedup } from "./cursor-agents-context-regist
 import { registerCursorOverflowNormalization } from "./cursor-provider-overflow.js";
 import { registerCursorSdkSessionProcessErrorGuard } from "./cursor-sdk-process-error-guard.js";
 import { installCursorSdkProcessOutputFilter } from "./cursor-sdk-output-filter.js";
+import { registerCursorShellEnv } from "./cursor-shell-env-registration.js";
 import { cursorLiveRuns } from "./cursor-provider-live-run-drain.js";
 import { prepareCursorSessionForCompaction } from "./cursor-session-compaction-prep.js";
 import { registerCursorUsageLedger } from "./cursor-usage-ledger.js";
@@ -40,6 +41,7 @@ type CursorExtensionApi =
 
 export default async function (pi: CursorExtensionApi) {
 	installCursorSdkProcessOutputFilter();
+	registerCursorShellEnv(pi);
 	// Session cwd must register before other session_start listeners that depend on it.
 	registerCursorSessionScope(pi);
 	registerCursorUsageLedger(pi);

@@ -50,6 +50,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `src/cursor-sdk-event-debug-session.ts` owns debug session grouping, turn artifact directory allocation, and session manifest updates.
 - `src/cursor-agents-context.ts` owns Cursor-model suppression of pi `<project_context>` / `AGENTS.md` duplication and `PI_CURSOR_PRESERVE_PI_AGENTS_MD`; `src/cursor-agents-context-registration.ts` owns the static lifecycle registration for that suppression.
 - `src/cursor-sdk-output-filter.ts` exposes the shared exact-frame SDK output filter. Extension initialization installs one process-lifetime lease, including detached rules/skills work and asynchronous reload gaps; the versioned process singleton shares sink ownership and async attribution across reevaluation, with canonical test-only reset.
+- `src/cursor-shell-env.ts` owns the `SHELL` override that keeps Cursor on its bash executor, including leading-`~` expansion for Pi's raw `shellPath`; `src/cursor-shell-env-registration.ts` applies it from `session_start` because `pi.getSettings()` throws during extension load.
 - `src/cursor-edit-diff.ts` owns canonical edit diff fallback resolution for replay/display paths.
 - `src/cursor-record-utils.ts` owns shared record/string-key parsing and neutral unknown-value stringification helpers used across bridge and transcript layers.
 - `src/cursor-partial-content-emitter.ts` owns shared thinking/text block emission for live-run drain and turn coordinator paths.

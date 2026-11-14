@@ -13,6 +13,7 @@
 
 ### What's Changed
 * Raise the Pi floor to 1.5.2 and use native crypto.hash by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/515
+* chore: bump root dev typebox to 1.4.7 by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/516
 
 
 **Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.40...v0.5.41

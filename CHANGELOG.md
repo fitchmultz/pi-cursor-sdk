@@ -4,7 +4,21 @@
 
 ## Unreleased
 
+## 0.5.40 - 2026-11-14
+
+<!-- npm-release:unreleased:start -->
 - Apply Pi's `shellPath` as Cursor's `SHELL` on macOS and Linux so Cursor selects its bash executor instead of the zsh one, which kills the process group when a background command leaves the pipes open. Windows is left unchanged. Cursor's Bash executor there resolves `bash.exe` through `PATH`, and Pi's unset `shellPath` is Git Bash under Program Files, so writing it throws "Can't find Bash" when that executable is not on PATH. The value is read on `session_start` rather than during extension load, and it resolves the way Pi's own setting does, including a leading `~`. `npm run smoke:shell-path` prints the `SHELL` a real `session_start` sees for an explicit bash `shellPath`, for an unset `shellPath`, and without the extension, each from an isolated Pi agent directory.
+<!-- npm-release:unreleased:end -->
+
+- fix(shell): apply Pi's shellPath as Cursor's SHELL (#509) ([e0db4a3](https://github.com/fitchmultz/pi-cursor-sdk/commit/e0db4a3480f83a6c7a0ad97f705e2d9f74c79b8c))
+
+### What's Changed
+* fix(shell): apply Pi's shellPath as Cursor's SHELL by @bittopaz in https://github.com/fitchmultz/pi-cursor-sdk/pull/509
+
+### New Contributors
+* @bittopaz made their first contribution in https://github.com/fitchmultz/pi-cursor-sdk/pull/509
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.39...v0.5.40
 
 ## 0.5.39 - 2026-11-13
 

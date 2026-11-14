@@ -17,7 +17,7 @@ for (const flag of ["-h", "--help"]) {
     try {
       const result = spawnSync(process.execPath, [script, flag], { cwd, encoding: "utf8" });
       assert.equal(result.status, 0, result.stderr);
-      assert.match(result.stdout, /--working-tree --official-only --versions 1\.5\.0/);
+      assert.match(result.stdout, /--working-tree --official-only --versions 1\.5\.2/);
       assert.match(result.stdout, /Exit codes:/);
     } finally { rmSync(cwd, { recursive: true, force: true }); }
   });

@@ -27,7 +27,39 @@ export interface CursorPromptOptions {
 
 export const CURSOR_APPROX_CHARS_PER_TOKEN = 4;
 export const CURSOR_IMAGE_TOKEN_ESTIMATE = 1200;
+/**
+ * Bootstrap replays keep this much of each historical tool argument or result.
+ * Matches pi's own compaction cap (`TOOL_RESULT_MAX_CHARS`), so replaying a
+ * transcript costs about what summarizing it costs instead of twice as much.
+ */
+export const CURSOR_HISTORICAL_TOOL_BODY_MAX_CHARS = 2000;
+/** Kept head share of a capped body; the tail keeps the end of long output. */
+const CURSOR_HISTORICAL_TOOL_BODY_HEAD_RATIO = 0.7;
+/**
+ * File-mutation arguments are the replay body worth least. A whole `write`
+ * payload or a multi-kilobyte `edit` old/new pair restates what the file on
+ * disk already says, and the next turn can read the file instead.
+ */
+const CURSOR_MUTATION_TOOL_ARG_MAX_CHARS = 400;
+const CURSOR_MUTATION_TOOL_NAMES: ReadonlySet<string> = new Set(["write", "edit", "write_file", "edit_file", "apply_patch", "notebook_edit"]);
 const SECTION_SEPARATOR = "\n\n";
+
+function capHistoricalToolBody(text: string, maxChars: number): string {
+	if (text.length <= maxChars) return text;
+	const headChars = Math.round(maxChars * CURSOR_HISTORICAL_TOOL_BODY_HEAD_RATIO);
+	const tailChars = Math.max(0, maxChars - headChars);
+	const head = text.slice(0, headChars);
+	const tail = tailChars > 0 ? text.slice(-tailChars) : "";
+	const omitted = text.length - head.length - tail.length;
+	return `${head}\n... (${omitted} chars truncated)\n${tail}`;
+}
+
+function capToolCallBody(toolName: string, args: string): string {
+	return capHistoricalToolBody(
+		args,
+		CURSOR_MUTATION_TOOL_NAMES.has(toolName) ? CURSOR_MUTATION_TOOL_ARG_MAX_CHARS : CURSOR_HISTORICAL_TOOL_BODY_MAX_CHARS,
+	);
+}
 
 export function getCursorPlanModeToolGuidanceText(
 	agentMode: AgentModeOption | undefined,
@@ -132,9 +164,15 @@ function formatContentBlocks(content: string | { type: string; text?: string; da
 		.join("\n");
 }
 
-function formatToolCall(toolCall: ToolCall): string {
+/**
+ * Replay bodies are capped on bootstrap only. An incremental send carries the
+ * unsynced tail verbatim, and a summary prompt is the summarization request
+ * itself, so neither truncates.
+ */
+function formatToolCall(toolCall: ToolCall, capToolBodies: boolean): string {
 	const args = JSON.stringify(toolCall.arguments) ?? "";
-	return `Historical tool request (${getCursorReplayPromptLabel(toolCall.name)}, call ${toolCall.id}): ${args}`;
+	const body = capToolBodies ? capToolCallBody(toolCall.name, args) : args;
+	return `Historical tool request (${getCursorReplayPromptLabel(toolCall.name)}, call ${toolCall.id}): ${body}`;
 }
 
 function sanitizeSystemPromptForCursor(systemPrompt: string): string {
@@ -154,7 +192,7 @@ function sanitizeSystemPromptForCursor(systemPrompt: string): string {
 	return sanitized.trim();
 }
 
-function formatMessage(msg: Message): string | undefined {
+function formatMessage(msg: Message, capToolBodies = false): string | undefined {
 	switch (msg.role) {
 		case "user": {
 			const text = formatContentBlocks(msg.content);
@@ -167,7 +205,7 @@ function formatMessage(msg: Message): string | undefined {
 				if (isTextBlock(block)) {
 					textParts.push(block.text);
 				} else if (isToolCallBlock(block)) {
-					textParts.push(formatToolCall(block));
+					textParts.push(formatToolCall(block, capToolBodies));
 				}
 				// Omit thinking content from transcript
 			}
@@ -175,8 +213,9 @@ function formatMessage(msg: Message): string | undefined {
 		}
 		case "toolResult": {
 			const text = formatContentBlocks(msg.content);
+			const body = capToolBodies ? capHistoricalToolBody(text, CURSOR_HISTORICAL_TOOL_BODY_MAX_CHARS) : text;
 			const label = msg.isError ? "Historical tool error" : "Historical tool result";
-			return `${label} (${getCursorReplayPromptLabel(msg.toolName)}, call ${msg.toolCallId}): ${text}`;
+			return `${label} (${getCursorReplayPromptLabel(msg.toolName)}, call ${msg.toolCallId}): ${body}`;
 		}
 	}
 }
@@ -194,12 +233,17 @@ export function getCursorPendingInput(messages: Message[], nativeSourceRoles: re
 	return { start, latestUserIndex };
 }
 
-function formatPromptMessage(message: Message, index: number, nativeSourceRoles?: readonly string[]): string | undefined {
+function formatPromptMessage(
+	message: Message,
+	index: number,
+	nativeSourceRoles?: readonly string[],
+	capToolBodies = false,
+): string | undefined {
 	if (message.role === "user" && nativeSourceRoles && nativeSourceRoles[index] !== "user") {
 		const text = formatContentBlocks(message.content);
 		return text ? `Background context: ${text}` : undefined;
 	}
-	return formatMessage(message);
+	return formatMessage(message, capToolBodies);
 }
 
 function getSectionCost(section: string): number {
@@ -431,7 +475,7 @@ export function buildCursorIncrementalPrompt(context: Context, options: CursorPr
 	];
 	const latestUserMessageSections = pending
 		? messages.flatMap((message, index) => {
-			const text = index >= pending.start ? formatPromptMessage(message, index, options.nativeSourceRoles) : undefined;
+			const text = index >= pending.start ? formatPromptMessage(message, index, options.nativeSourceRoles, false) : undefined;
 			return text ? [{ index, text }] : [];
 		})
 		: latestUserText && latestUserMessageIndex >= 0 ? [{ index: latestUserMessageIndex, text: latestUserText }] : [];
@@ -454,7 +498,8 @@ export function buildCursorIncrementalPrompt(context: Context, options: CursorPr
 /** Native compaction/tree instructions are already a complete summarization request. */
 export function buildCursorSummaryPrompt(context: Context): CursorPrompt {
 	const { systemPrompt } = resolveCursorPiContext(context);
-	const sections = normalizePiContextMessages(context.messages).map(formatMessage).filter((text): text is string => text !== undefined);
+	// A summary request must see the untruncated transcript it is asked to summarize.
+	const sections = normalizePiContextMessages(context.messages).map((message) => formatMessage(message)).filter((text): text is string => text !== undefined);
 	if (systemPrompt) sections.unshift(`System instructions from pi:\n${systemPrompt}`);
 	return { text: sections.join(SECTION_SEPARATOR), images: [] };
 }
@@ -479,7 +524,7 @@ export function buildCursorPrompt(context: Context, options: CursorPromptOptions
 	const messages = normalizePiContextMessages(context.messages);
 	const messageSections = messages
 		.map((msg, index) => {
-			const text = formatPromptMessage(msg, index, options.nativeSourceRoles);
+			const text = formatPromptMessage(msg, index, options.nativeSourceRoles, true);
 			return text ? { index, text } : undefined;
 		})
 		.filter((section): section is { index: number; text: string } => section !== undefined);

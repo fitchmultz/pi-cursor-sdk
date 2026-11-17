@@ -16,9 +16,9 @@ jobs:
   resolve:
     permissions:
       contents: read
-    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@508d2e23c75cab8fdd28bc62fc7fed2a9a0d1cca # main
+    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@e007829ba45938fbb3bdab83e5152771369bb656 # main
     with:
-      automation-ref: 508d2e23c75cab8fdd28bc62fc7fed2a9a0d1cca # main
+      automation-ref: e007829ba45938fbb3bdab83e5152771369bb656 # main
       official-version: ${{ inputs.official-version }}
       fork-ref: ${{ inputs.fork-ref }}
 
@@ -49,7 +49,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: fitchmultz/.github
-          ref: 508d2e23c75cab8fdd28bc62fc7fed2a9a0d1cca # main
+          ref: e007829ba45938fbb3bdab83e5152771369bb656 # main
           path: automation
           persist-credentials: false
       - run: npm ci --ignore-scripts --no-audit --no-fund
@@ -102,7 +102,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: fitchmultz/.github
-          ref: 508d2e23c75cab8fdd28bc62fc7fed2a9a0d1cca # main
+          ref: e007829ba45938fbb3bdab83e5152771369bb656 # main
           path: automation
           persist-credentials: false
       - run: npm ci --no-audit --no-fund

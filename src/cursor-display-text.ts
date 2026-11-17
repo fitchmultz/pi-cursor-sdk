@@ -1,7 +1,7 @@
 /** Canonical single-line sanitization and truncation for Cursor replay/trace display. */
 export function sanitizeCursorDisplayLine(value: string): string {
 	return value
-		.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "�")
+		.toWellFormed()
 		.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ")
 		.replace(/\s+/g, " ")
 		.trim();

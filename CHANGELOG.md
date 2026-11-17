@@ -4,6 +4,19 @@
 
 ## Unreleased
 
+## 0.5.42 - 2026-11-17
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Use String.prototype.toWellFormed in the display sanitizer (#518) ([2dd371a](https://github.com/fitchmultz/pi-cursor-sdk/commit/2dd371a60f76af068f11af972106f1329776dba7))
+
+### What's Changed
+* Use String.prototype.toWellFormed in the display sanitizer by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/518
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.41...v0.5.42
+
 ## 0.5.41 - 2026-11-14
 
 <!-- npm-release:unreleased:start -->

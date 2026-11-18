@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
-import { resetCapabilitiesCache, setCapabilities, stripTerminalSequences } from "@earendil-works/pi-tui";
+import { type Component, resetCapabilitiesCache, setCapabilities, stripTerminalSequences } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
 	createEditToolDefinition,
@@ -584,7 +584,7 @@ describe("extension native Cursor tool replay", () => {
 			expect(readFileSync(join(dir, "input.txt"), "utf8")).toBe("after\n");
 
 			const theme = createRenderTheme({ bg: (_style: string, text: string) => text });
-			const renderCall = (tool: { renderCall?: (...args: any[]) => { render(width: number): string[] } }, args: Record<string, unknown>) =>
+			const renderCall = (tool: { renderCall?: (...args: any[]) => Component }, args: Record<string, unknown>) =>
 				stripTerminalSequences(
 					tool.renderCall?.(
 						args,

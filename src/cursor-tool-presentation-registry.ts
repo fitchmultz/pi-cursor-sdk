@@ -83,6 +83,13 @@ export interface CursorToolReplayDisplayPolicy {
 export interface CursorToolActivityReplaySpec<TArgs extends CursorReplaySummaryArgs = CursorReplaySummaryArgs> {
 	buildActivityArgs: (context: CursorReplayActivityBuildContext) => TArgs;
 	buildDetails: (context: CursorReplayActivityBuildContext, contentText: string) => CursorReplayActivityDetailFields;
+	/**
+	 * Whether a collapsed row shows its summary alone instead of previewing the payload.
+	 *
+	 * Rows recorded before a spec set this carry no flag of their own, and the renderer consults the
+	 * current spec for them.
+	 */
+	collapseDetailsByDefault?: true;
 }
 
 export interface CursorToolGenerateImageReplaySpec {
@@ -248,7 +255,10 @@ const CURSOR_TOOL_PRESENTATION_SPECS = [
 		replayCallSummary: withActivitySummaryFallback(summarizeReplayMcp),
 		activityReplay: {
 			buildActivityArgs: buildMcpReplaySummaryArgs,
-			buildDetails: EMPTY_REPLAY_DETAIL_FIELDS,
+			// MCP results are full payloads, often tens of thousands of characters of JSON. A collapsed
+			// row must show the summary alone, as web search and fetch already do.
+			buildDetails: COLLAPSED_REPLAY_DETAIL_FIELDS,
+			collapseDetailsByDefault: true,
 		},
 	},
 	{
@@ -287,6 +297,7 @@ const CURSOR_TOOL_PRESENTATION_SPECS = [
 		activityReplay: {
 			buildActivityArgs: buildWebSearchReplaySummaryArgs,
 			buildDetails: COLLAPSED_REPLAY_DETAIL_FIELDS,
+			collapseDetailsByDefault: true,
 		},
 	},
 	{
@@ -303,6 +314,7 @@ const CURSOR_TOOL_PRESENTATION_SPECS = [
 		activityReplay: {
 			buildActivityArgs: buildWebFetchReplaySummaryArgs,
 			buildDetails: COLLAPSED_REPLAY_DETAIL_FIELDS,
+			collapseDetailsByDefault: true,
 		},
 	},
 ] as const satisfies readonly CursorToolPresentationSpec[];
@@ -419,6 +431,17 @@ export function getCursorToolLifecycleLabelKind(normalizedKey: string): CursorTo
 
 export function getCursorToolActivityReplaySpec(normalizedKey: string): CursorToolActivityReplaySpec | undefined {
 	return getCursorToolPresentationSpecByNormalizedKey(normalizedKey)?.activityReplay;
+}
+
+/**
+ * Whether this tool's activity rows collapse their details by default, per the current spec.
+ *
+ * A row recorded before its spec collapsed anything carries no flag of its own, so the renderer asks
+ * the spec instead. Without this, an older session replays its payload dumps whole.
+ */
+export function collapsesActivityDetailsByDefault(normalizedKey: string | undefined): boolean {
+	if (!normalizedKey) return false;
+	return getCursorToolPresentationSpecByNormalizedKey(normalizedKey)?.activityReplay?.collapseDetailsByDefault === true;
 }
 
 export function getCursorToolGenerateImageReplaySpec(normalizedKey: string): CursorToolGenerateImageReplaySpec | undefined {

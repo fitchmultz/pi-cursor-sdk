@@ -5,6 +5,7 @@ import {
 	parseCursorReplayToolDetails,
 } from "../src/cursor-replay-tool-details.js";
 import { renderCursorReplayResult } from "../src/cursor-native-tool-display-replay.js";
+import { getCursorToolActivityReplaySpec } from "../src/cursor-tool-presentation-registry.js";
 import { createRenderContext, createRenderTheme } from "./helpers/render-fixtures.js";
 
 const theme = createRenderTheme();
@@ -178,5 +179,71 @@ describe("cursor replay tool details contract", () => {
 		expect(rendered).toContain(CURSOR_REPLAY_GENERATE_IMAGE_RESULT_TITLE);
 		expect(rendered).not.toContain("Cursor generateImage");
 		expect(rendered).not.toMatch(/^image generation failed$/m);
+	});
+});
+
+describe("cursor mcp activity collapsed rendering", () => {
+	const listing = JSON.stringify([
+		{ name: "slack_read_channel", title: "Read channel messages", description: "Reads messages from a Slack channel" },
+		{ name: "slack_post_message", title: "Post message", description: "Posts a message" },
+	]);
+
+	function displayFor(value: unknown) {
+		return buildCursorPiToolDisplayFromSpec({
+			rawName: "mcp",
+			name: "mcp",
+			args: { type: "MCP", toolName: "search_tools", args: { pattern: "slack" } },
+			result: { status: "success", value, error: undefined },
+			options: { cwd: "/tmp", maxChars: 400_000 },
+		});
+	}
+
+	it("collapses a payload that would otherwise fill the row", () => {
+		const display = displayFor({ content: [{ type: "text", text: listing }] });
+		const rendered = renderReplayResult(display.result.details, display.result.content[0]?.text ?? "");
+
+		// The row is one logical line: the title and summary. Narrow widths may wrap that line, so the
+		// payload is what has to be absent, measured by the body it would otherwise print.
+		expect(rendered).toContain("Cursor MCP search_tools");
+		expect(rendered).not.toContain("slack_post_message");
+		expect(rendered).not.toContain("Posts a message");
+	});
+
+	it("still shows the full payload once expanded", () => {
+		const display = displayFor({ content: [{ type: "text", text: listing }] });
+		const rendered = renderCursorReplayResult(
+			{ content: display.result.content, details: display.result.details },
+			{ expanded: true, isPartial: false },
+			theme,
+			createRenderContext({ isError: false, showImages: false }),
+			false,
+		)
+			.render(120)
+			.join("\n");
+
+		expect(rendered).toContain("slack_post_message");
+	});
+
+	it("collapses rows recorded before the mcp spec collapsed details", () => {
+		// Shape written by an earlier version: no collapse flag of its own, which a resumed session
+		// replays verbatim.
+		const rendered = renderReplayResult({
+			variant: "activity",
+			sourceToolName: "mcp",
+			title: "Cursor MCP",
+			summary: "search_tools",
+			expandedText: 'search_tools\n\n[{"name":"sonarqube_analyze_code_snippet","description":"Analyze a file"}]',
+		});
+
+		expect(rendered.split("\n").filter((line) => line.trim())).toHaveLength(1);
+		expect(rendered).not.toContain("sonarqube_analyze_code_snippet");
+	});
+
+	it("marks every spec that collapses its details, so recorded rows collapse too", () => {
+		for (const source of ["mcp", "webSearch", "webFetch"] as const) {
+			const spec = getCursorToolActivityReplaySpec(source);
+			expect(spec?.collapseDetailsByDefault).toBe(true);
+			expect(spec?.buildDetails({} as never, "x")).toMatchObject({ collapseDetailsByDefault: true });
+		}
 	});
 });

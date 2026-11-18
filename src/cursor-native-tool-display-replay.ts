@@ -8,6 +8,7 @@ import { inferImageMimeType } from "./cursor-tool-result-display-readers.js";
 import { LOCAL_READ_PREVIEW_NOTICE, isLocalReadPreviewContent } from "./cursor-transcript-utils.js";
 import {
 	CURSOR_REPLAY_ACTIVITY_TOOL_NAME,
+	collapsesActivityDetailsByDefault,
 	getCursorReplayCallSummary,
 	shouldShowCursorReplayCollapsedExpandHint,
 	type CursorReplayToolName,
@@ -437,7 +438,8 @@ function renderExpandableCursorReplayResult(
 	const showExpandHint = expandedText && !options.expanded && shouldShowCursorReplayCollapsedExpandHint(details.sourceToolName);
 	const expandHint = showExpandHint ? theme.fg("dim", ` (${context.keyHint("app.tools.expand", "to expand")})`) : "";
 	let rendered = `${theme.fg("toolTitle", theme.bold(title))} ${theme.fg(isError ? "error" : "success", summary)}${expandHint}`;
-	if (expandedText && (options.expanded || !details.collapseDetailsByDefault)) {
+	const collapseDetails = details.collapseDetailsByDefault ?? collapsesActivityDetailsByDefault(details.sourceToolName);
+	if (expandedText && (options.expanded || !collapseDetails)) {
 		const preview = formatCursorReplayActivityPreview(
 			details,
 			expandedText,

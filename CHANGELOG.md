@@ -4,6 +4,24 @@
 
 ## Unreleased
 
+## 0.5.44 - 2026-11-20
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Supersedes unpublished 0.5.43 from a9aa9f03f30d6e9f3e5361d88b55eb445d795875. Includes all changes since v0.5.42; the original release records remain unchanged.
+
+- chore(catalog): refresh Cursor fallback model snapshots (#526) ([c19d298](https://github.com/fitchmultz/pi-cursor-sdk/commit/c19d298c987ca223d5ffdbbd374485b43d2cfb3d))
+
+### What's Changed
+* ci: release through direct signed version commits (1/1) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/521
+* test: use Pi’s component type for native tool render calls (PIF-212) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/524
+* chore: bump Pi floor to 1.6.0 and adopt imageUnsupportedByModel (PEA-222) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/525
+* chore(catalog): refresh Cursor fallback model snapshots by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/526
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.42...v0.5.44
+
 ## 0.5.43 - 2026-11-20
 
 <!-- npm-release:unreleased:start -->

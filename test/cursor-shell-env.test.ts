@@ -58,7 +58,7 @@ describe("Cursor shell follows Pi", () => {
 	});
 
 	it("leaves SHELL unchanged on Windows", () => {
-		// Installed @cursor/sdk 1.0.40 selects Bash when SHELL names Git Bash, then
+		// Installed @cursor/sdk 1.4.2 selects Bash when SHELL names Git Bash, then
 		// resolves the executable through PATH only. Pi's own unset shellPath is
 		// that Git Bash path, so writing it breaks every local shell call.
 		const bash = createHostBashFixture();

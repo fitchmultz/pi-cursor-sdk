@@ -21,7 +21,7 @@ function descendants(node: ts.Node, predicate: (node: ts.Node) => boolean): ts.N
 
 describe("installed SDK background rules/skills lifecycle contract", () => {
 	it("starts detached completion work, registers watchers and does not join loads on disposal", async () => {
-		expect(readInstalledPackageVersion("@cursor/sdk")).toBe("1.0.40");
+		expect(readInstalledPackageVersion("@cursor/sdk")).toBe("1.4.2");
 		const modules = await installedCursorModules();
 		const source = modules.factorySource("./src/agent/local-executor.ts");
 		const ast = ts.createSourceFile("local-executor.js", `(${source})`, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);

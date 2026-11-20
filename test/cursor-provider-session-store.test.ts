@@ -88,7 +88,7 @@ describe("streamCursor session store", () => {
 			id: "run-failed",
 			agentId: "agent-1",
 			status: "running",
-			// SDK 1.0.40 order, proven against the installed SDK in cursor-local-run-terminal-error.test.ts:
+			// SDK 1.4.2 order, proven against the installed SDK in cursor-local-run-terminal-error.test.ts:
 			// the error row is written while the run is still running, and cancel() then decides wait()'s status.
 			wait: vi.fn(async (): Promise<RunResult> => {
 				const store = mockedCreate.mock.calls[0][0].local!.store!;

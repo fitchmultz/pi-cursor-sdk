@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+- Upgrade the exact `@cursor/sdk` dependency from 1.0.40 to 1.4.2. The fallback model snapshot is regenerated with the new SDK and lists the same 51 models.
+- After this upgrade, a Cursor team MCP allowlist rule with a wildcard inside the port number, such as `http://localhost:800*/mcp`, no longer admits the Pi tool bridge, and `pi__*` tools show as blocked by team policy. Cursor SDK 1.4 matches a rule by its scheme, host, port, and path. The team admin changes the rule to `http://localhost:*/*/mcp`, which works before and after the upgrade; until then, stay on pi-cursor-sdk 0.5.44. A `localhost` rule admits the bridge only when the user sets `PI_CURSOR_PI_TOOL_BRIDGE_HOST=localhost`, because the bridge URL host defaults to `127.0.0.1`.
+- A failed local run whose SDK error has a code now shows that code: Pi reports the SDK's recorded text, which SDK 1.4.2 writes as `[code] message`. The code is also visible to the authentication check and to Pi's retry check, so a rate-limit code can trigger Pi's automatic retry. A coded failure whose message is only generic text such as `Error` is shown as `[code] Error` and does not use the retryable fallback text.
+- Under Node, SDK 1.4.2 locates its native Bash parsers from its own installed location and loads them on the first local send. The extension still supplies the parser directory, which the SDK's Bun build requires.
+
 ## 0.5.44 - 2026-11-20
 
 <!-- npm-release:unreleased:start -->

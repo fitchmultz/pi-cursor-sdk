@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, toNamespacedPath } from "node:path";
 import ts from "@typescript/typescript6";
 import { afterEach, describe, expect, it } from "vitest";
+import { resolveCursorSdkPlatformPackageDirectory } from "../src/cursor-ripgrep-path.js";
 import { resolveInstalledPackageRoot } from "./helpers/installed-package.js";
 
 // Public Node APIs only: no SDK substitution, bundle IDs, or private factory execution.
@@ -20,8 +21,8 @@ import childProcess from "node:child_process";
 import workers from "node:worker_threads";
 import { fileURLToPath } from "node:url";
 import { relative, isAbsolute, sep } from "node:path";
-const [sdkUrl, sdkRoot, denyLazyImport] = process.argv.slice(1);
-const evidence = { created: false, sent: false, disposed: false, blocked: [], denied: false };
+const [sdkUrl, sdkRoot, denyLazyImport, sdkNativeVendorRoot] = process.argv.slice(1);
+const evidence = { created: false, sent: false, disposed: false, blocked: [], denied: false, nativeAddons: [] };
 const networkError = "SDK_CONTRACT_NETWORK_BLOCKED";
 const block = (api) => (...args) => {
 	evidence.blocked.push({ api, afterCreate: evidence.created, url: api === "fetch" ? String(args[0]) : undefined });
@@ -50,7 +51,15 @@ for (const name of ["spawn", "spawnSync", "exec", "execSync", "execFile", "execF
 	childProcess[name] = denyEscape;
 }
 workers.Worker = denyEscape;
-process.dlopen = denyEscape;
+// SDK 1.4.2 finds its platform package from its own module directory and loads the vendored
+// tree-sitter parsers on first send. Only those files may load; any other addon is an escape.
+const loadNativeAddon = process.dlopen;
+process.dlopen = function (module, filename, ...rest) {
+	const path = relative(sdkNativeVendorRoot, filename);
+	if (!path || path === ".." || path.startsWith(".." + sep) || isAbsolute(path)) denyEscape();
+	evidence.nativeAddons.push(path);
+	return loadNativeAddon.call(this, module, filename, ...rest);
+};
 syncBuiltinESMExports();
 let agent, run, hook;
 const watchdog = setTimeout(() => process.exit(124), 10_000);
@@ -611,6 +620,9 @@ describe("Cursor SDK lazy runtime imports", () => {
 	it.each([false, true])("exercises real installed SDK first-send linking offline (deny lazy module: %s)", (denyLazyImport) => {
 		tmpAgentDir = realpathSync(mkdtempSync(join(tmpdir(), "pi-cursor-sdk-first-send-")));
 		const sdkRoot = resolveInstalledPackageRoot("@cursor/sdk");
+		const sdkPlatformPackage = resolveCursorSdkPlatformPackageDirectory();
+		expect(sdkPlatformPackage).toBeDefined();
+		const sdkNativeVendorRoot = join(sdkPlatformPackage!, "vendor");
 		const env: NodeJS.ProcessEnv = {
 			HOME: tmpAgentDir, USERPROFILE: tmpAgentDir,
 			APPDATA: tmpAgentDir, LOCALAPPDATA: tmpAgentDir,
@@ -621,7 +633,7 @@ describe("Cursor SDK lazy runtime imports", () => {
 		if (process.platform === "win32") env.SystemRoot = process.env.SystemRoot;
 		const child = spawnSync(process.execPath, [
 			"--input-type=module", "--eval", firstSendProbe,
-			import.meta.resolve("@cursor/sdk"), sdkRoot, String(denyLazyImport),
+			import.meta.resolve("@cursor/sdk"), sdkRoot, String(denyLazyImport), sdkNativeVendorRoot,
 		], {
 			cwd: tmpAgentDir, env, encoding: "utf8", timeout: 15_000, killSignal: "SIGKILL",
 			maxBuffer: 256 * 1024,
@@ -637,10 +649,12 @@ describe("Cursor SDK lazy runtime imports", () => {
 			// A request-time graph failure cannot pass by reaching an unrelated blocked catalog call.
 			expect(evidence.sent).toBe(false);
 			expect(evidence.blocked).toEqual([]);
+			expect(evidence.nativeAddons).toEqual([]);
 			expect(evidence.failure.message).toContain("SDK_CONTRACT_LAZY_MODULE_MISSING");
 		} else {
 			expect(evidence.failure).toBeUndefined();
 			expect(evidence.sent).toBe(true);
+			expect(evidence.nativeAddons).toEqual(["tree-sitter/binding.node", "tree-sitter-bash/binding.node"]);
 			expect(evidence.outcome).toMatchObject({
 				status: "error",
 				error: { message: expect.stringContaining("SDK_CONTRACT_NETWORK_BLOCKED") },

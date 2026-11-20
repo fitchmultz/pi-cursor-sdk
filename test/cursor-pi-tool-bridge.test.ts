@@ -3,7 +3,8 @@ import { createServer as createHttpServer, request as httpRequest, Server as Htt
 import { getDefaultResultOrder, setDefaultResultOrder } from "node:dns";
 import { lookup } from "node:dns/promises";
 import { createServer as createNetServer, getDefaultAutoSelectFamily, setDefaultAutoSelectFamily, Server as NetServer } from "node:net";
-import { installedCursorModules } from "./helpers/cursor-sdk-installed-modules.js";
+import ts from "@typescript/typescript6";
+import { installedCursorModuleDeclarations, installedCursorModules } from "./helpers/cursor-sdk-installed-modules.js";
 import { resolveCursorPiToolBridgePortRange } from "../src/cursor-pi-tool-bridge-env.js";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { Context, ToolResultMessage } from "@earendil-works/pi-ai";
@@ -1376,22 +1377,36 @@ describe("cursor pi tool bridge URL host and port", () => {
 		} finally { register.mockRestore(); unregister.mockRestore(); await registry.disposeAll(); }
 	});
 
-	it("pins the installed SDK whole-URL MCP policy matcher without minifier IDs", async () => {
+	it("pins the installed SDK team MCP policy decision for bridge URLs without minifier IDs", async () => {
 		const modules = await installedCursorModules();
-		const predicates = Object.values(modules("../mcp-core/dist/index.js")).filter((value) =>
-			typeof value === "function" && value.toString().includes("disableAll") && value.toString().includes("allowedMcpServers"));
-		expect(predicates).toHaveLength(1);
-		const allowed = predicates[0] as (server: { url: string }, config: {
-			allowedMcpServers: Array<{ serverUrl: string }>;
-			allowUserOverrideMcpServers: boolean;
-		}) => boolean;
-		const config = { allowedMcpServers: [{ serverUrl: "http://localhost:800*/mcp" }], allowUserOverrideMcpServers: false };
-		for (const [host, port, expected] of [
-			["localhost", 8000, true], ["localhost", 8009, true],
-			["localhost", 8010, false], ["127.0.0.1", 8000, false],
-		] as const) {
-			expect(allowed({ url: `http://${host}:${port}/cursor-pi-tool-bridge/non-secret-fixture/mcp` }, config)).toBe(expected);
+		// The SDK's local executor owns the team-policy decision. Select its one top-level function by the
+		// policy fields it reads, and call it as the executor's getMcpServerBlockInfo does.
+		const { declarations } = installedCursorModuleDeclarations(modules.factorySource("./src/agent/local-executor.ts"));
+		const decisions = [...declarations.values()].filter((node) => ts.isFunctionDeclaration(node) &&
+			["useCorePolicy", "disableAll", "allowedMcpServers", "allowUserOverrideMcpServers", "deniedMcpServers"]
+				.every((field) => node.getText().includes(field)));
+		expect(decisions).toHaveLength(1);
+		const blocked = modules.observeFactoryBinding<(
+			server: { url: string },
+			config: { allowedMcpServers: Array<{ serverUrl: string }>; allowUserOverrideMcpServers: boolean },
+			options: { useCorePolicy: true },
+		) => boolean>("./src/agent/local-executor.ts", decisions[0]!.name!.text);
+		const admitted = (serverUrl: string, host: string, port: number) => !blocked(
+			{ url: `http://${host}:${port}/cursor-pi-tool-bridge/non-secret-fixture/mcp` },
+			{ allowedMcpServers: [{ serverUrl }], allowUserOverrideMcpServers: false },
+			{ useCorePolicy: true },
+		);
+		// A wildcard inside the port number is not a URL the SDK can parse, so the rule admits no bridge URL.
+		for (const port of [8000, 8009, 8010]) expect(admitted("http://localhost:800*/mcp", "localhost", port)).toBe(false);
+		// A path wildcard that starts at the port does not cover the bridge's run-specific path.
+		expect(admitted("http://localhost:*/mcp", "localhost", 8000)).toBe(false);
+		for (const rule of ["http://localhost:*/*/mcp", "http://localhost:*/cursor-pi-tool-bridge/*/mcp"]) {
+			for (const port of [8000, 8009, 8010]) expect(admitted(rule, "localhost", port)).toBe(true);
+			expect(admitted(rule, "127.0.0.1", 8000)).toBe(false);
 		}
+		// An exact port in the rule limits the bridge to that port.
+		expect(admitted("http://localhost:8000/*/mcp", "localhost", 8000)).toBe(true);
+		expect(admitted("http://localhost:8000/*/mcp", "localhost", 8009)).toBe(false);
 	});
 
 	it("fails closed on IPv6-only fixed-port exhaustion and releases the IPv4 half", async () => {

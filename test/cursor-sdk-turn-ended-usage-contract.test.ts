@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { TurnEndedUpdateSchema } from "@cursor/sdk";
@@ -10,10 +9,10 @@ import {
 	isCursorSdkUsageSafeForPiMessage,
 	readCursorSdkTurnUsageFromUpdate,
 } from "../src/cursor-usage-accounting.js";
-import { resolveInstalledPackageRoot } from "./helpers/installed-package.js";
+import { installedCursorModules } from "./helpers/cursor-sdk-installed-modules.js";
+import { readInstalledPackageVersion, resolveInstalledPackageRoot } from "./helpers/installed-package.js";
 import { makeModel } from "./helpers/pi-harness.js";
 
-const require = createRequire(import.meta.url);
 const sdkRoot = resolveInstalledPackageRoot("@cursor/sdk");
 interface TurnEndedUsageContractFixture {
 	provenance: {
@@ -25,9 +24,11 @@ interface TurnEndedUsageContractFixture {
 		notes: string[];
 	};
 	installedSdkPublishedTransform: {
+		sdkVersion: string;
 		declaration: string;
 		implementationModule: string;
 		totalTokensFormula: string;
+		inputTokensDeclaration: string;
 		docsUrl: string;
 	};
 	observedRawTurnEnded: Array<{
@@ -79,22 +80,27 @@ const fixture = JSON.parse(
 ) as TurnEndedUsageContractFixture;
 
 describe("installed Cursor SDK turn-ended usage contract", () => {
-	it("locks published SDK TokenUsage transform separately from observed raw turn-ended semantics", () => {
+	it("locks the published SDK TokenUsage transform alongside observed raw turn-ended semantics", async () => {
 		expect(fixture.provenance.sdkPackage).toBe("@cursor/sdk");
 		expect(fixture.provenance.sdkVersion).toBe("1.0.23");
 		expect(fixture.provenance.issue).toContain("/issues/196");
+		expect(fixture.installedSdkPublishedTransform.sdkVersion).toBe(readInstalledPackageVersion("@cursor/sdk"));
 
 		const usageTypes = readFileSync(join(sdkRoot, "dist/esm/usage-types.d.ts"), "utf8");
 		expect(usageTypes).toContain("`totalTokens` excludes `reasoningTokens`");
 		expect(usageTypes).toContain("Build a `TokenUsage` from a turn-ended payload");
+		// SDK 1.4.2 documents the raw semantics this provider already mapped from observation.
+		const deltaTypes = readFileSync(join(sdkRoot, "dist/esm/vendor/cursor-sdk-shared/delta-types.d.ts"), "utf8");
+		expect(deltaTypes.replace(/\s*\*\s*/g, " ")).toContain("`turn-ended` usage: `inputTokens` is the whole prompt, cache reads and writes included");
 
-		const sdkBundle = readFileSync(require.resolve("@cursor/sdk"), "utf8");
-		expect(sdkBundle).toMatch(/"\.\/src\/agent\/usage-types\.ts"/);
-		// Published toTokenUsage/sumTokenUsage: additive totalTokens = input+output+cacheRead+cacheWrite.
-		expect(sdkBundle).toMatch(/totalTokens:\w\+\w\+\w\+\w/);
-		expect(fixture.installedSdkPublishedTransform.totalTokensFormula).toBe(
-			"inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens",
-		);
+		// Published toTokenUsage/sumTokenUsage: totalTokens = inputTokens + outputTokens. Cache fields are not added again.
+		const transformSource = (await installedCursorModules()).factorySource("./src/agent/usage-types.ts");
+		const totals = [...transformSource.matchAll(
+			/\{inputTokens:([\w$]+),outputTokens:([\w$]+),cacheReadTokens:[\w$]+,cacheWriteTokens:[\w$]+,totalTokens:([^,}]+)[,}]/g,
+		)];
+		expect(totals).toHaveLength(2);
+		for (const [, input, output, total] of totals) expect(total).toBe(`${input}+${output}`);
+		expect(fixture.installedSdkPublishedTransform.totalTokensFormula).toBe("inputTokens + outputTokens");
 
 		const [first, second] = fixture.observedRawTurnEnded;
 		expect(first).toBeDefined();
@@ -113,7 +119,7 @@ describe("installed Cursor SDK turn-ended usage contract", () => {
 		expect(second!.usage.inputTokens).toBeGreaterThan(second!.usage.cacheWriteTokens);
 	});
 
-	it("maps observed raw turn-ended.usage with full-prompt partition semantics, not published additive totalTokens", () => {
+	it("maps observed raw turn-ended.usage with full-prompt partition semantics, not an additive four-field totalTokens", () => {
 		const model = makeModel();
 		const context: Context = {
 			systemPrompt: "Be helpful.",
@@ -135,13 +141,13 @@ describe("installed Cursor SDK turn-ended usage contract", () => {
 			expect(
 				partial.usage.input + partial.usage.cacheRead + partial.usage.cacheWrite + partial.usage.output,
 			).toBe(partial.usage.totalTokens);
-			// Explicitly reject the published SDK additive total for raw local turn-ended samples.
-			const publishedAdditiveTotal =
+			// Explicitly reject the additive four-field total (published by SDK 1.0.x) for raw local turn-ended samples.
+			const additiveFourFieldTotal =
 				sample.usage.inputTokens +
 				sample.usage.outputTokens +
 				sample.usage.cacheReadTokens +
 				sample.usage.cacheWriteTokens;
-			expect(partial.usage.totalTokens).not.toBe(publishedAdditiveTotal);
+			expect(partial.usage.totalTokens).not.toBe(additiveFourFieldTotal);
 			expect(partial.usage.totalTokens).toBe(sample.usage.inputTokens + sample.usage.outputTokens);
 			expect(calculateContextTokens(partial.usage)).toBe(partial.usage.totalTokens);
 		}

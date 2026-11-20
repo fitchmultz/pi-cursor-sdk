@@ -109,7 +109,9 @@ describe("buildCursorModelSelection", () => {
 	it.each([
 		{ id: "gemini-4-argon", defaultEffort: "medium", defaultContext: "1m", contexts: ["300k", "1m"] as const },
 		{ id: "gemini-4-carbon", defaultEffort: "medium", defaultContext: "1m", contexts: ["300k", "1m"] as const },
-	])("maps generated $id context and reasoning_effort controls without changing catalog defaults", ({ id, defaultEffort, defaultContext, contexts }) => {
+		{ id: "gemini-4-hydrogen", defaultEffort: "high", defaultContext: "1m", contexts: ["300k", "1m"] as const, xhigh: "xhigh" as const },
+		{ id: "gemini-4-neon", defaultEffort: "high", defaultContext: "1m", contexts: ["300k", "1m"] as const, xhigh: "xhigh" as const },
+	])("maps generated $id context and reasoning_effort controls without changing catalog defaults", ({ id, defaultEffort, defaultContext, contexts, xhigh }) => {
 		const gemini = FALLBACK_MODEL_ITEMS.find((item) => item.id === id);
 		if (!gemini) throw new Error(`${id} fallback fixture missing`);
 		const original = structuredClone(gemini);
@@ -117,6 +119,8 @@ describe("buildCursorModelSelection", () => {
 		const expectedIds = contexts.map((context) => `${id}@${context}`);
 		expect(models.map((model) => model.id).sort()).toEqual([...expectedIds].sort());
 
+		const supportedLevels = xhigh ? (["low", "medium", "high", "xhigh"] as const) : (["low", "medium", "high"] as const);
+		const unsupportedLevels = xhigh ? (["off", "minimal", "max"] as const) : (["off", "minimal", "xhigh", "max"] as const);
 		for (const context of contexts) {
 			const modelId = `${id}@${context}`;
 			const model = models.find((entry) => entry.id === modelId);
@@ -129,11 +133,11 @@ describe("buildCursorModelSelection", () => {
 					low: "low",
 					medium: "medium",
 					high: "high",
-					xhigh: null,
+					xhigh: xhigh ?? null,
 					max: null,
 				},
 			});
-			for (const level of ["low", "medium", "high"] as const) {
+			for (const level of supportedLevels) {
 				expect(buildCursorModelSelection(modelId, level)).toEqual({
 					id,
 					params: [
@@ -142,7 +146,7 @@ describe("buildCursorModelSelection", () => {
 					],
 				});
 			}
-			for (const level of ["off", "minimal", "xhigh", "max"] as const) {
+			for (const level of unsupportedLevels) {
 				expect(buildCursorModelSelection(modelId, level)).toEqual({
 					id,
 					params: [

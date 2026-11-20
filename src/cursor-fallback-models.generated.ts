@@ -1,6 +1,6 @@
 import type { ModelListItem } from "@cursor/sdk";
 
-// Generated with @cursor/sdk@1.0.40 from 50 Cursor models.
+// Generated with @cursor/sdk@1.0.40 from 51 Cursor models.
 // Refresh with: npm run refresh:cursor-snapshots -- --write
 // Do not add secrets; this file stores public model metadata only.
 export const FALLBACK_MODEL_ITEMS = [
@@ -6960,6 +6960,20 @@ export const FALLBACK_MODEL_ITEMS = [
 		displayName: "Gemini 4 Argon",
 		parameters: [
 			{
+				id: "context",
+				displayName: "Context",
+				values: [
+					{
+						value: "300k",
+						displayName: "300K"
+					},
+					{
+						value: "1m",
+						displayName: "1M"
+					}
+				]
+			},
+			{
 				id: "reasoning_effort",
 				displayName: "Effort",
 				values: [
@@ -6982,30 +6996,81 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "context",
+						value: "300k"
+					},
+					{
 						id: "reasoning_effort",
 						value: "low"
 					}
 				],
-				displayName: "Gemini 4 Argon Low"
+				displayName: "Gemini 4 Argon  Low"
 			},
 			{
 				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
 					{
 						id: "reasoning_effort",
 						value: "medium"
 					}
 				],
-				displayName: "Gemini 4 Argon Medium",
-				isDefault: true
+				displayName: "Gemini 4 Argon  Medium"
 			},
 			{
 				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
 					{
 						id: "reasoning_effort",
 						value: "high"
 					}
 				],
-				displayName: "Gemini 4 Argon High"
+				displayName: "Gemini 4 Argon  High"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "low"
+					}
+				],
+				displayName: "Gemini 4 Argon 1M Low"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "medium"
+					}
+				],
+				displayName: "Gemini 4 Argon 1M Medium",
+				isDefault: true
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "high"
+					}
+				],
+				displayName: "Gemini 4 Argon 1M High"
 			}
 		]
 	},
@@ -7014,6 +7079,20 @@ export const FALLBACK_MODEL_ITEMS = [
 		displayName: "Gemini 4 Carbon",
 		parameters: [
 			{
+				id: "context",
+				displayName: "Context",
+				values: [
+					{
+						value: "300k",
+						displayName: "300K"
+					},
+					{
+						value: "1m",
+						displayName: "1M"
+					}
+				]
+			},
+			{
 				id: "reasoning_effort",
 				displayName: "Effort",
 				values: [
@@ -7036,30 +7115,81 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "context",
+						value: "300k"
+					},
+					{
 						id: "reasoning_effort",
 						value: "low"
 					}
 				],
-				displayName: "Gemini 4 Carbon Low"
+				displayName: "Gemini 4 Carbon  Low"
 			},
 			{
 				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
 					{
 						id: "reasoning_effort",
 						value: "medium"
 					}
 				],
-				displayName: "Gemini 4 Carbon Medium",
-				isDefault: true
+				displayName: "Gemini 4 Carbon  Medium"
 			},
 			{
 				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
 					{
 						id: "reasoning_effort",
 						value: "high"
 					}
 				],
-				displayName: "Gemini 4 Carbon High"
+				displayName: "Gemini 4 Carbon  High"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "low"
+					}
+				],
+				displayName: "Gemini 4 Carbon 1M Low"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "medium"
+					}
+				],
+				displayName: "Gemini 4 Carbon 1M Medium",
+				isDefault: true
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "high"
+					}
+				],
+				displayName: "Gemini 4 Carbon 1M High"
 			}
 		]
 	},
@@ -7067,6 +7197,20 @@ export const FALLBACK_MODEL_ITEMS = [
 		id: "gemini-4-hydrogen",
 		displayName: "Gemini 4 Hydrogen",
 		parameters: [
+			{
+				id: "context",
+				displayName: "Context",
+				values: [
+					{
+						value: "300k",
+						displayName: "300K"
+					},
+					{
+						value: "1m",
+						displayName: "1M"
+					}
+				]
+			},
 			{
 				id: "reasoning_effort",
 				displayName: "Effort",
@@ -7094,39 +7238,256 @@ export const FALLBACK_MODEL_ITEMS = [
 			{
 				params: [
 					{
+						id: "context",
+						value: "300k"
+					},
+					{
 						id: "reasoning_effort",
 						value: "low"
 					}
 				],
-				displayName: "Gemini 4 Hydrogen Low"
+				displayName: "Gemini 4 Hydrogen  Low"
 			},
 			{
 				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
 					{
 						id: "reasoning_effort",
 						value: "medium"
 					}
 				],
-				displayName: "Gemini 4 Hydrogen Medium"
+				displayName: "Gemini 4 Hydrogen  Medium"
 			},
 			{
 				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
 					{
 						id: "reasoning_effort",
 						value: "high"
 					}
 				],
-				displayName: "Gemini 4 Hydrogen High",
-				isDefault: true
+				displayName: "Gemini 4 Hydrogen  High"
 			},
 			{
 				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
 					{
 						id: "reasoning_effort",
 						value: "xhigh"
 					}
 				],
-				displayName: "Gemini 4 Hydrogen Extra High"
+				displayName: "Gemini 4 Hydrogen  Extra High"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "low"
+					}
+				],
+				displayName: "Gemini 4 Hydrogen 1M Low"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "medium"
+					}
+				],
+				displayName: "Gemini 4 Hydrogen 1M Medium"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "high"
+					}
+				],
+				displayName: "Gemini 4 Hydrogen 1M High",
+				isDefault: true
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "xhigh"
+					}
+				],
+				displayName: "Gemini 4 Hydrogen 1M Extra High"
+			}
+		]
+	},
+	{
+		id: "gemini-4-neon",
+		displayName: "Gemini 4 Neon",
+		parameters: [
+			{
+				id: "context",
+				displayName: "Context",
+				values: [
+					{
+						value: "300k",
+						displayName: "300K"
+					},
+					{
+						value: "1m",
+						displayName: "1M"
+					}
+				]
+			},
+			{
+				id: "reasoning_effort",
+				displayName: "Effort",
+				values: [
+					{
+						value: "low",
+						displayName: "Low"
+					},
+					{
+						value: "medium",
+						displayName: "Medium"
+					},
+					{
+						value: "high",
+						displayName: "High"
+					},
+					{
+						value: "xhigh",
+						displayName: "Extra High"
+					}
+				]
+			}
+		],
+		variants: [
+			{
+				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "reasoning_effort",
+						value: "low"
+					}
+				],
+				displayName: "Gemini 4 Neon  Low"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "reasoning_effort",
+						value: "medium"
+					}
+				],
+				displayName: "Gemini 4 Neon  Medium"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "reasoning_effort",
+						value: "high"
+					}
+				],
+				displayName: "Gemini 4 Neon  High"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "300k"
+					},
+					{
+						id: "reasoning_effort",
+						value: "xhigh"
+					}
+				],
+				displayName: "Gemini 4 Neon  Extra High"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "low"
+					}
+				],
+				displayName: "Gemini 4 Neon 1M Low"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "medium"
+					}
+				],
+				displayName: "Gemini 4 Neon 1M Medium"
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "high"
+					}
+				],
+				displayName: "Gemini 4 Neon 1M High",
+				isDefault: true
+			},
+			{
+				params: [
+					{
+						id: "context",
+						value: "1m"
+					},
+					{
+						id: "reasoning_effort",
+						value: "xhigh"
+					}
+				],
+				displayName: "Gemini 4 Neon 1M Extra High"
 			}
 		]
 	},

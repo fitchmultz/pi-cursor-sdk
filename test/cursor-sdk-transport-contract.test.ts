@@ -4,10 +4,11 @@ import { once } from "node:events";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import ts from "@typescript/typescript6";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { installedCursorModules } from "./helpers/cursor-sdk-installed-modules.js";
+import { installedCursorModuleDeclarations, installedCursorModules } from "./helpers/cursor-sdk-installed-modules.js";
 import { resolveInstalledPackageRoot } from "./helpers/installed-package.js";
-import { classifyCursorConnectError } from "../src/cursor-provider-errors.js";
+import { classifyCursorConnectError, sanitizeCursorProviderError } from "../src/cursor-provider-errors.js";
 import { installCursorSdkProcessErrorGuard } from "../src/cursor-sdk-process-error-guard.js";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -74,6 +75,67 @@ describe("installed SDK vendored Node transport", () => {
 		} finally {
 			for (const session of sessions) session.destroy();
 			if ("closeAllConnections" in server) server.closeAllConnections();
+			await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+		}
+	});
+
+	it("classifies the installed stall detector's cut of a real request as a network failure", async () => {
+		const modules = await installedCursorModules();
+		const { Empty, MethodKind } = modules("@bufbuild/protobuf");
+		const { createSafeConnectTransport } = modules("./src/agent/safe-connect-transport.ts");
+		const rootContexts = Object.values(modules("../context/dist/core.js"))
+			.flatMap((value) => typeof value === "function" && value.length === 0 ? [value() as { withCancel?: unknown }] : [])
+			.filter((context) => typeof context?.withCancel === "function");
+		expect(rootContexts).toHaveLength(1);
+		const rootContext = rootContexts[0] as { withCancel(): [{ signal: AbortSignal }, (reason: unknown) => void] };
+		const { declarations } = installedCursorModuleDeclarations(modules.factorySource("./src/agent/local-executor.ts"));
+		const detectors = [...declarations.values()].filter((node) => ts.isClassDeclaration(node) && node.getText().includes("reportStall("));
+		expect(detectors).toHaveLength(1);
+		const StallDetector = modules.observeFactoryBinding<new (
+			context: { signal: AbortSignal },
+			options: { thresholdMs: number; onStall(reason: unknown): void },
+		) => Disposable>("./src/agent/local-executor.ts", detectors[0]!.name!.text);
+		const server = createServer((request) => { request.resume(); }); // Never answers: the detector must cut it.
+		server.listen(0, "127.0.0.1");
+		await once(server, "listening");
+		const address = server.address() as { port: number };
+		const transport = createSafeConnectTransport({ baseUrl: `http://127.0.0.1:${address.port}`, httpVersion: "1.1" });
+		// The installed executor wires the detector the same way: its stall reason cancels the request context.
+		const [context, cancel] = rootContext.withCancel();
+		const reasons: unknown[] = [];
+		const pending = transport.unary({ typeName: "offline.Contract" },
+			{ name: "Wait", kind: MethodKind.Unary, I: Empty, O: Empty }, context.signal, 60_000, {}, new Empty());
+		const detector = new StallDetector(context, { thresholdMs: 25, onStall: (reason) => { reasons.push(reason); cancel(reason); } });
+		try {
+			let error: any;
+			try { await pending; } catch (caught) { error = caught; }
+			expect(reasons).toHaveLength(1);
+			const reason = reasons[0] as DOMException & { cursorStallCut?: boolean };
+			expect(reason.name).toBe("AbortError");
+			expect(reason.message).toBe("the stall detector cut the stream: no activity for 25 ms");
+			expect(reason.cursorStallCut).toBe(true);
+			expect(reason.stack).toContain("reportStall");
+			expect(error).toMatchObject({ name: "ConnectError", code: 2, cause: { name: "ConnectError", code: 1 } });
+			expect(error.message).toBe(`[unknown] [canceled] ${reason.message}`);
+			expect(error.cause.cause).toBe(reason);
+			expect(classifyCursorConnectError(error)).toEqual({ kind: "network", source: "cursor-sdk-stack" });
+			const sanitized = sanitizeCursorProviderError(error, "test-key");
+			expect(sanitized.toLowerCase()).toContain("network error");
+			expect(sanitized).not.toContain("stall");
+			const guard = installCursorSdkProcessErrorGuard();
+			const listener = vi.fn();
+			process.on("uncaughtException", listener);
+			try {
+				process.emit("uncaughtException", error);
+				process.emit("uncaughtException", reason as unknown as Error);
+				expect(listener).not.toHaveBeenCalled();
+			} finally {
+				process.off("uncaughtException", listener);
+				guard.dispose();
+			}
+		} finally {
+			detector[Symbol.dispose]();
+			server.closeAllConnections();
 			await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 		}
 	});

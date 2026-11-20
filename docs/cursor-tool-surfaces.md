@@ -83,12 +83,14 @@ PI_CURSOR_EXPOSE_BUILTIN_TOOLS=1 pi --model cursor/grok-4.6
 # Fail a stranded bridge call sooner than the effective MCP tool timeout
 PI_CURSOR_PI_BRIDGE_CALL_TIMEOUT_MS=120000 pi --model cursor/grok-4.6
 
-# Announce the bridge URL as localhost and listen on a port or range (for example for a Cursor team MCP allowlist such as http://localhost:800*/mcp).
+# Announce the bridge URL as localhost and listen on a port or range (for example for a Cursor team MCP allowlist rule such as http://localhost:*/*/mcp).
 PI_CURSOR_PI_TOOL_BRIDGE_HOST=localhost PI_CURSOR_PI_TOOL_BRIDGE_PORT=8000-8009 pi --model cursor/grok-4.6
 
 # Disable bootstrap tool manifest
 PI_CURSOR_TOOL_MANIFEST=0 pi --model cursor/grok-4.6
 ```
+
+A Cursor team MCP allowlist admits the bridge with the URL rule `http://localhost:*/*/mcp` when users set `PI_CURSOR_PI_TOOL_BRIDGE_HOST=localhost`; a `localhost` rule does not match the default `127.0.0.1` bridge URL. Cursor SDK 1.4 and later match a rule by its scheme, host, port, and path, so a rule with a wildcard inside the port number (`http://localhost:800*/mcp`) or a path wildcard that starts at the port (`http://localhost:*/mcp`) does not match the bridge URL. To limit the ports, the team admin adds one rule for each exact port, such as `http://localhost:8000/*/mcp`, and users set `PI_CURSOR_PI_TOOL_BRIDGE_PORT` to those ports. See the [reference](reference.md#cursor-provider-tool-contract) for details.
 
 For `localhost`, the bridge owns both `127.0.0.1` and `::1` on the selected port before advertising its URL; a conflict on either family skips the port, and missing IPv6 fails closed. The default remains IPv4-only. Host/port settings are captured for the shared server lifetime, not changed under active runs; dispose all its runs before changing them.
 

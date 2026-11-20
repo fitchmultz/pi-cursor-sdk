@@ -51,6 +51,18 @@ export function installedCursorModuleDeclarations(source: string) {
 	};
 }
 
+/**
+ * The installed entry binds its own file path at module scope
+ * (`fileURLToPath(import.meta.url)`) and module factories read that binding
+ * lexically. Discover its minified name so a test-only evaluation can supply
+ * the path explicitly instead of leaving the factories with a free variable.
+ */
+export function installedCursorEntryPathBinding(entrySource: string): string {
+	const match = /^import\{fileURLToPath as ([\w$]+)\}from"node:url";var ([\w$]+)=\1\(import\.meta\.url\);/.exec(entrySource);
+	if (!match) throw new Error("Installed SDK entry path binding changed");
+	return match[2]!;
+}
+
 export async function installedCursorModules() {
 	return (await (installedFactories ??= discoverInstalledCursorModules()))();
 }
@@ -60,11 +72,15 @@ async function discoverInstalledCursorModules() {
 	const entry = join(root, "dist/esm/index.js");
 	const source = readFileSync(entry, "utf8");
 	const ast = ts.createSourceFile(entry, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+	const entryPathBinding = installedCursorEntryPathBinding(source);
+	// Evaluate installed text with the entry's own path bound, as in the real module.
+	const evaluateInEntryScope = <T>(expression: string): T =>
+		(runInThisContext(`((${entryPathBinding}) => (${expression}))`, { filename: entry }) as (path: string) => T)(entry);
 	let table: Record<string, any> | undefined;
 	function visit(node: ts.Node): void {
 		if (ts.isObjectLiteralExpression(node) && node.properties.some((property) =>
 			property.name && ts.isStringLiteral(property.name) && property.name.text === "./src/agent/store/sdk-state-root.ts")) {
-			table = runInThisContext(`(${node.getText(ast)})`, { filename: entry });
+			table = evaluateInEntryScope(node.getText(ast));
 			return;
 		}
 		if (!table) ts.forEachChild(node, visit);
@@ -123,7 +139,7 @@ async function discoverInstalledCursorModules() {
 				if (!factory) throw new Error(`Installed SDK module missing: ${name}`);
 				const source = factory.toString();
 				if (!source.endsWith("}")) throw new Error("Installed SDK factory changed");
-				const observed = runInThisContext(`({${source.slice(0, -1)}; return ${binding}; }})`, { filename: entry });
+				const observed = evaluateInEntryScope<Record<string, (...args: unknown[]) => unknown>>(`{${source.slice(0, -1)}; return ${binding}; }}`);
 				const module = { exports: {} };
 				cache[name] = module.exports;
 				return observed[name](module, module.exports, load) as T;

@@ -99,7 +99,7 @@ describe("streamCursor usage accounting", () => {
 			if (boundary === "abort while recording the returned run" && type === "pi-cursor-sdk:usage-v1" && kind === "run") controller.abort();
 		});
 		const ownership = captureProviderTestOwnership(model, context, undefined, pi);
-		// SDK 1.0.40: send() takes no signal; a local run's wait() settles cancelled after cancel().
+		// SDK 1.4.2: send() takes no signal; a local run's wait() settles cancelled after cancel().
 		const completion = Promise.withResolvers<RunResult>();
 		const cancel = vi.fn(async () => { completion.resolve({ id: "run-accounted", status: "cancelled" }); });
 		const send = boundary === "Agent.send rejection"

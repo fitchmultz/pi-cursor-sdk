@@ -7,7 +7,7 @@ import { installedCursorModuleDeclarations, installedCursorModules } from "./hel
 import { readInstalledPackageVersion } from "./helpers/installed-package.js";
 
 const fixture = JSON.parse(readFileSync(
-	new URL("./fixtures/cursor-sdk-retriable-stalled-1.0.40.json", import.meta.url), "utf8",
+	new URL("./fixtures/cursor-sdk-retriable-stalled-1.4.2.json", import.meta.url), "utf8",
 )) as {
 	provenance: { sdkPackage: string; sdkVersion: string; sourceFile: string; sourceSha256: string };
 	branches: Array<{
@@ -21,9 +21,11 @@ async function installedStallFactory() {
 	const source = modules.factorySource("./src/agent/local-executor.ts");
 	// Retain the distinct synchronous stall-callback provenance guard, without
 	// freezing minified names. This is a source contract, not a service recovery test.
+	// SDK 1.4.2 passes the detector's abort reason through the callback into the cancel;
+	// test/cursor-sdk-transport-contract.test.ts executes that path.
 	expect(source).toContain("reportStall(");
-	expect(source).toContain("this.onStall?.()");
-	expect(source).toMatch(/onStall:\(\)=>\{[\w$]+\("stall_detector",\{thresholdMs:[\w$]+,advisoryThresholdMs:[\w$]+\}\),[\w$]+\(\)\}/);
+	expect(source).toContain("this.onStall?.(function(");
+	expect(source).toMatch(/onStall:([\w$]+)=>\{[\w$]+\("stall_detector",\{thresholdMs:[\w$]+,advisoryThresholdMs:[\w$]+\}\),[\w$]+\(\1\)\}/);
 	const capturedSource = readFileSync(new URL(`../${fixture.provenance.sourceFile}`, import.meta.url), "utf8");
 	expect(capturedSource).toContain(source);
 	expect(createHash("sha256").update(capturedSource).digest("hex")).toBe(fixture.provenance.sourceSha256);

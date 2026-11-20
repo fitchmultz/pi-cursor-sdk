@@ -29,6 +29,7 @@ function createMockAgent(): SDKAgent {
 		agentId: "agent-1",
 		model: undefined,
 		send: mockSend,
+		summarize: vi.fn(),
 		close: vi.fn(),
 		reload: vi.fn().mockResolvedValue(undefined),
 		listArtifacts: vi.fn().mockResolvedValue([]),

@@ -2,16 +2,22 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { runInNewContext } from "node:vm";
+import { installedCursorEntryPathBinding } from "./cursor-sdk-installed-modules.js";
 
-// Exercise the installed SDK's private vendor loader, not a reimplementation of its lookup.
-export function loadInstalledCursorParsers(sdkEntry: string) {
+/**
+ * Exercise the installed SDK's private vendor loader, not a reimplementation of its lookup.
+ * `sdkModulePath` is the file path the loader sees as its own module; the default is the real entry.
+ */
+export function loadInstalledCursorParsers(sdkEntry: string, sdkModulePath = sdkEntry) {
 	const require = createRequire(sdkEntry);
 	const source = readFileSync(join(dirname(sdkEntry), "index.js"), "utf8");
 	const names = ["./src/agent/native/vendored-tree-sitter.ts", "./src/agent/platform-package-locator.ts"];
 	const end = source.indexOf(',"./src/agent/run-interaction-accumulator.ts"(');
 	const start = source.indexOf(`"${names[0]}"(`);
 	if (start < 0 || end <= start) throw new Error("Installed SDK vendor loader contract changed");
-	const factories = runInNewContext(`({${source.slice(start, end)}})`, { process });
+	const factories = runInNewContext(`({${source.slice(start, end)}})`, {
+		process, [installedCursorEntryPathBinding(source)]: sdkModulePath,
+	});
 	const cache: Record<string, any> = {};
 	const webpackRequire = Object.assign((name: string): any => {
 		if (name.startsWith("node:")) return require(name);

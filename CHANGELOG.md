@@ -4,6 +4,21 @@
 
 ## Unreleased
 
+## 0.5.43 - 2026-11-20
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- ci: release through direct signed version commits (PEA-211) (#521) ([202c72a](https://github.com/fitchmultz/pi-cursor-sdk/commit/202c72acfde5cb663c2236503717b0f32a8bc1de))
+
+### What's Changed
+* ci: release through direct signed version commits (1/1) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/521
+* test: use Pi’s component type for native tool render calls (PIF-212) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/524
+* chore: bump Pi floor to 1.6.0 and adopt imageUnsupportedByModel (PEA-222) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/525
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.42...v0.5.43
+
 ## 0.5.42 - 2026-11-17
 
 <!-- npm-release:unreleased:start -->

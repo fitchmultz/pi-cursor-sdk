@@ -38,9 +38,9 @@ jobs:
       (github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(release): ')) &&
       (github.event_name != 'workflow_run' || github.event.workflow_run.event != 'push' ||
         startsWith(github.event.workflow_run.head_commit.message, 'chore(release): '))
-    uses: fitchmultz/.github/.github/workflows/npm-release-bump.yml@cad44b229af2d6fae39b516548de9eaf8ae91e07 # main
+    uses: fitchmultz/.github/.github/workflows/npm-release-bump.yml@1f78bd6585d8a5570f0226cca0b6877c9f4dd9c2 # main
     with:
-      automation-ref: cad44b229af2d6fae39b516548de9eaf8ae91e07 # main
+      automation-ref: 1f78bd6585d8a5570f0226cca0b6877c9f4dd9c2 # main
       app-client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
       package-qualified: true
       version-reviewed: true

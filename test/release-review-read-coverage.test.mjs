@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { createReadTool } from "@earendil-works/pi-coding-agent";
 import { createReviewReadCoverage, verifyReadEvidence } from "../scripts/lib/release-review-read-coverage.mjs";
@@ -58,4 +59,43 @@ test("release feedback enumerates every genuine gap using the final gate's exact
 	const evidence = verifyReadEvidence(root, scope, input, events);
 	assert.deepEqual(evidence, coverage.inspect().evidence);
 	assert.deepEqual(evidence.artifactSourceReads.map(({ sha256, ...copy }) => copy), [{ path: "package/catalog.ts", artifactTree: "candidate", source: "catalog.ts", sourceTree: "target" }]);
+});
+
+test("image read coverage enforces Pi's imageUnsupportedByModel read-tool detail contract", async (t) => {
+	const root = mkdtempSync(join(tmpdir(), "review-coverage-image-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const file = (name, contents = `${name}\n`) => {
+		const path = join(root, name);
+		mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, contents); return path;
+	};
+	const image = join(root, "preview.png");
+	copyFileSync(fileURLToPath(new URL("../.github/readme/cursor-in-pi.png", import.meta.url)), image);
+	const input = file("input.json");
+	const scope = { mode: "pre-commit", sourceBase: join(root, "base"), sourceFiles: ["preview.png"],
+		patch: file("source.diff"), commits: file("commits.txt") };
+	const coverage = createReviewReadCoverage(root, scope, input), events = [];
+	const reader = createReadTool(root);
+	async function read(path, model) {
+		const id = String(events.length);
+		const start = { type: "tool_execution_start", toolName: "read", toolCallId: id, args: { path } };
+		const result = await reader.execute(id, { path }, undefined, undefined, model ? { cwd: root, model } : undefined);
+		const end = { type: "tool_execution_end", toolName: "read", toolCallId: id, isError: false, result };
+		for (const event of [start, end]) { events.push(event); coverage.observe(event); }
+		return result;
+	}
+	for (const path of [input, scope.patch, scope.commits]) await read(path);
+	const unsupported = await read(image, { id: "text-only", input: ["text"] });
+	assert.equal(unsupported.content.some(part => part.type === "image"), true);
+	assert.equal(unsupported.details?.imageUnsupportedByModel, "text-only");
+	assert.deepEqual(coverage.inspect().missing, [{
+		label: "changed source preview.png",
+		alternatives: [{ path: image, imageUnavailable: true }],
+		message: "Image for changed source preview.png was not available to the reviewer",
+	}]);
+	assert.throws(() => verifyReadEvidence(root, scope, input, events), /Image for changed source preview\.png was not available to the reviewer/);
+	const supported = await read(image, { id: "vision", input: ["text", "image"] });
+	assert.equal(supported.content.some(part => part.type === "image"), true);
+	assert.equal(supported.details?.imageUnsupportedByModel, undefined);
+	assert.deepEqual(coverage.inspect().missing, []);
+	assert.equal(verifyReadEvidence(root, scope, input, events).sourceFiles, 1);
 });

@@ -35,7 +35,7 @@ export function createReviewReadCoverage(root, scope, inputPath) {
 					part.type === "text" && part.text.startsWith("Read image file [")));
 				if (imageReads.length) {
 					if (imageReads.some(({ result }) => result.content.some((part) => part.type === "image")
-						&& !result.content.some((part) => part.type === "text" && part.text.includes("Current model does not support images.")))) return path;
+						&& !result.details?.imageUnsupportedByModel)) return path;
 					incomplete ??= `Image for ${label} was not available to the reviewer`;
 					alternatives.push({ path, imageUnavailable: true });
 					continue;

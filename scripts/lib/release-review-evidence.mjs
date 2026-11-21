@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, lstatSync, mkdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { ACCEPTED_CATALOG_STATUSES } from "./cursor-catalog-status.mjs";
 import { collectReleaseContext, latestPublishedRelease } from "./release-review-github.mjs";
 import { hash, run, writeJson } from "./release-review-io.mjs";
 import { comparePackages, packPublishedPackage } from "./release-review-package.mjs";
@@ -136,6 +137,11 @@ export function catalogIdentity(root, staged = false) {
 	};
 }
 
+function assertCatalogReceipt(root, catalog, outputSha256, message) {
+	assert.ok(catalog && typeof catalog === "object" && ACCEPTED_CATALOG_STATUSES.has(catalog.status), message);
+	assert.deepEqual(catalog, { ...catalogIdentity(root), status: catalog.status, outputSha256 }, message);
+}
+
 export async function captureReleaseReview(root, options, directory) {
 	requireCleanCheckout(root);
 	const source = commit(root, "HEAD");
@@ -161,8 +167,7 @@ export async function captureReleaseReview(root, options, directory) {
 	const catalogReceipt = resolve(options.catalogReceipt);
 	const catalogOutput = `${catalogReceipt}.log`;
 	const catalog = JSON.parse(readFileSync(catalogReceipt, "utf8"));
-	assert.deepEqual(catalog, { ...catalogIdentity(root), status: "passed", outputSha256: hash(catalogOutput) },
-		"Catalog check did not cover this source, run, and output");
+	assertCatalogReceipt(root, catalog, hash(catalogOutput), "Catalog check did not cover this source, run, and output");
 	assert.match(process.env.GITHUB_RUN_ID ?? "", /^\d+$/, "Missing GitHub run ID");
 	assert.match(process.env.GITHUB_RUN_ATTEMPT ?? "", /^\d+$/, "Missing GitHub run attempt");
 
@@ -221,6 +226,5 @@ export function assertReleaseReviewUnchanged(root, scope) {
 	assert.equal(hash(scope.context), scope.contextSha256, "PR and issue context changed during review");
 	assert.equal(process.env.GITHUB_RUN_ID, scope.runId, "GitHub run changed during review");
 	assert.equal(process.env.GITHUB_RUN_ATTEMPT, scope.runAttempt, "GitHub run attempt changed during review");
-	assert.deepEqual({ ...catalogIdentity(root), status: "passed", outputSha256: scope.catalog.outputSha256 },
-		scope.catalog, "Catalog inputs changed during review");
+	assertCatalogReceipt(root, scope.catalog, scope.catalog.outputSha256, "Catalog inputs changed during review");
 }

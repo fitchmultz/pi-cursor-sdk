@@ -61,74 +61,23 @@ jobs:
             echo "Bundled Cursor fallback catalog already matches live Cursor models."
             exit 0
           fi
+          header_line="$(grep -m1 '^// Generated with ' src/cursor-fallback-models.generated.ts || true)"
+          printf 'header=%s\n' "$header_line" >> "$GITHUB_OUTPUT"
           echo "changed=true" >> "$GITHUB_OUTPUT"
       - name: Open or update catalog refresh PR
         if: steps.refresh.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
-          APP_SLUG: ${{ steps.app.outputs.app-slug }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          CATALOG_FILE="src/cursor-fallback-models.generated.ts"
-          BRANCH="chore/refresh-cursor-catalog"
-          NEW_CATALOG="$RUNNER_TEMP/cursor-fallback-models.generated.ts"
+        uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1 # v8.1.3
+        with:
+          token: ${{ steps.app.outputs.token }}
+          base: main
+          branch: chore/refresh-cursor-catalog
+          add-paths: src/cursor-fallback-models.generated.ts
+          sign-commits: true
+          commit-message: 'chore(catalog): refresh Cursor fallback model snapshots'
+          title: 'chore(catalog): refresh Cursor fallback model snapshots'
+          body: |
+            Automated daily refresh of the bundled Cursor fallback model snapshot (`src/cursor-fallback-models.generated.ts`) from Cursor's live `Cursor.models.list()` catalog.
 
-          cp "$CATALOG_FILE" "$NEW_CATALOG"
-          git checkout -- "$CATALOG_FILE"
-
-          bot_user="${APP_SLUG}[bot]"
-          bot_id="$(gh api "users/${bot_user}" --jq .id)"
-          git config user.name "$bot_user"
-          git config user.email "${bot_id}+${bot_user}@users.noreply.github.com"
-
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0="http.${GITHUB_SERVER_URL}/.extraheader"
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
-
-          open_pr_number="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main --head "$BRANCH" --json number,isCrossRepository --jq '[.[] | select(.isCrossRepository == false)][0].number // empty')"
-
-          if [[ -n "$open_pr_number" ]]; then
-            git fetch origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
-            if git show "origin/${BRANCH}:${CATALOG_FILE}" > "$RUNNER_TEMP/pr-catalog.ts" 2>/dev/null && cmp -s "$NEW_CATALOG" "$RUNNER_TEMP/pr-catalog.ts"; then
-              echo "Open PR #${open_pr_number} already carries the current live Cursor catalog; skipping push."
-              exit 0
-            fi
-            git checkout -B "$BRANCH" "origin/${BRANCH}"
-            cp "$NEW_CATALOG" "$CATALOG_FILE"
-            git add "$CATALOG_FILE"
-            git commit -m "chore(catalog): refresh Cursor fallback model snapshots"
-            git push origin "HEAD:refs/heads/${BRANCH}"
-            echo "Updated open catalog refresh PR #${open_pr_number}."
-            exit 0
-          fi
-
-          remote_oid="$(git ls-remote --heads origin "refs/heads/${BRANCH}" | awk '{print $1}')"
-          git checkout -B "$BRANCH" main
-          cp "$NEW_CATALOG" "$CATALOG_FILE"
-          git add "$CATALOG_FILE"
-          git commit -m "chore(catalog): refresh Cursor fallback model snapshots"
-
-          if [[ -n "$remote_oid" ]]; then
-            git push --force-with-lease="refs/heads/${BRANCH}:${remote_oid}" origin "HEAD:refs/heads/${BRANCH}"
-          else
-            git push origin "HEAD:refs/heads/${BRANCH}"
-          fi
-
-          header_line="$(grep -m1 '^// Generated with ' "$CATALOG_FILE" || true)"
-          body_file="$RUNNER_TEMP/pr-body.md"
-          printf '%s\n' \
-            'Automated daily refresh of the bundled Cursor fallback model snapshot (`src/cursor-fallback-models.generated.ts`) from Cursor'\''s live `Cursor.models.list()` catalog.' \
-            '' \
-            "- Snapshot header: \`${header_line}\`" \
-            "- Source workflow run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
-            '- Auto-merge is intentionally disabled; review the generated diff and CI checks before merging.' \
-            > "$body_file"
-
-          gh pr create \
-            --repo "$GITHUB_REPOSITORY" \
-            --base main \
-            --head "$BRANCH" \
-            --title "chore(catalog): refresh Cursor fallback model snapshots" \
-            --body-file "$body_file"
+            - Snapshot header: `${{ steps.refresh.outputs.header }}`
+            - Source workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            - Auto-merge is intentionally disabled; review the generated diff and CI checks before merging.

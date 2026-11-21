@@ -284,7 +284,8 @@ async function main() {
 			}
 			writeJson(receipt, safeValue({ status: "passed", scope: retainedScope(scope, receipt), ...result }));
 		}
-		console.log(`${mode} qualification ${qualificationStatus}: ${receipt}`);
+		const outcome = qualificationStatus === "passed" ? "passed" : `passed (catalog: ${qualificationStatus})`;
+		console.log(`${mode} qualification ${outcome}: ${receipt}`);
 	} catch (error) {
 		writeJson(receipt, safeValue({ status: "failed", scope, error: error instanceof Error ? error.message : String(error) }));
 		throw error;

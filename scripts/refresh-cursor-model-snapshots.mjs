@@ -4,6 +4,7 @@ import { Cursor } from "@cursor/sdk";
 import { defaultApiKeyFromEnv, parseArgv } from "./lib/cursor-cli-args.mjs";
 import { scrubSensitiveText } from "../shared/cursor-sensitive-text.mjs";
 import { createScriptFail } from "./lib/cursor-script-fail.mjs";
+import { CATALOG_STALE_EXIT_CODE } from "./lib/cursor-catalog-status.mjs";
 import { normalizeCursorContextWindowEntries } from "../shared/cursor-model-selection-identities.mjs";
 
 const FALLBACK_MODELS_PATH = "src/cursor-fallback-models.generated.ts";
@@ -36,6 +37,7 @@ Options:
 Exit codes:
   0 success
   1 invalid arguments, missing auth, or Cursor SDK failure
+  2 fallback catalog is stale (--check only)
 
 Notes:
   - This script prints model IDs/counts only; it never prints API keys.
@@ -203,7 +205,8 @@ console.log(`First models: ${models.slice(0, 8).map((model) => model.id).join(",
 
 if (args.check) {
 	if (!existsSync(FALLBACK_MODELS_PATH) || !readFileSync(FALLBACK_MODELS_PATH).equals(Buffer.from(fallbackSource))) {
-		fail(`${FALLBACK_MODELS_PATH} is stale; refresh it with: npm run refresh:cursor-snapshots -- --write`);
+		console.error(`refresh-cursor-snapshots: ${FALLBACK_MODELS_PATH} is stale; refresh it with: npm run refresh:cursor-snapshots -- --write`);
+		process.exit(CATALOG_STALE_EXIT_CODE);
 	}
 	console.log(`${FALLBACK_MODELS_PATH} is current (${models.length} models, @cursor/sdk@${sdkVersion}).`);
 } else if (args.write) {

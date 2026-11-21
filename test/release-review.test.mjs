@@ -49,6 +49,7 @@ const prompt = fs.readFileSync(process.argv.at(-1).slice(1), "utf8");
 const input = JSON.parse(fs.readFileSync(/Read ((?:[A-Za-z]:)?[\\\\/][^\\r\\n]+?[\\\\/]review-input\\.json) for immutable identities/.exec(prompt)[1], "utf8"));
 const kind = ${JSON.stringify(behavior)};
 if (kind === "automation-context" && (!input.automation?.versioner || !prompt.includes(input.automation.versioner))) process.exit(4);
+if (kind === "stale-catalog" && !prompt.includes('status "stale"')) process.exit(6);
 if (kind === "interrupted") { process.kill(process.ppid, "SIGTERM"); process.exit(0); }
 const inputPath = /Read ((?:[A-Za-z]:)?[\\\\/][^\\r\\n]+?[\\\\/]review-input\\.json) for immutable identities/.exec(prompt)[1];
 const extension = process.argv[process.argv.indexOf("--extension") + 1];
@@ -355,6 +356,85 @@ test("catalog qualification refuses a staged change instead of binding it to HEA
 	assert.match(result.stderr, /git .*diff.* failed: 1/);
 });
 
+test("catalog qualification warns with stale status on drift, still fails on errors, and release-prepare accepts stale receipts", (t) => {
+	function setupCatalogRepo(exitCode) {
+		const f = fixture(t);
+		mkdirSync(join(f.repo, "src"));
+		mkdirSync(join(f.repo, "scripts"));
+		writeFileSync(join(f.repo, "src/cursor-fallback-models.generated.ts"), "catalog\n");
+		writeFileSync(join(f.repo, "scripts/refresh-cursor-model-snapshots.mjs"), "generator\n");
+		writeFileSync(join(f.repo, "package.json"), JSON.stringify({
+			name: "pi-cursor-sdk",
+			version: "1.0.0",
+			scripts: {
+				"check:cursor-snapshots": `node -e "console.log('catalog exit ${exitCode}'); process.exit(${exitCode})"`,
+			},
+		}) + "\n");
+		command(f.repo, "git", ["add", "."]);
+		command(f.repo, "git", ["commit", "--quiet", "-m", "catalog setup"]);
+		const head = command(f.repo, "git", ["rev-parse", "HEAD"]);
+		f.env.GITHUB_RUN_ID = "123";
+		f.env.GITHUB_RUN_ATTEMPT = "1";
+		f.env.CURSOR_API_KEY = "catalog-key-for-test";
+		return { ...f, head };
+	}
+
+	const passed = setupCatalogRepo(0);
+	const passedResult = passed.run("catalog");
+	assert.equal(passedResult.status, 0, passedResult.stderr);
+	assert.equal(JSON.parse(readFileSync(passed.receipt, "utf8")).status, "passed");
+	assert.doesNotMatch(passedResult.stdout, /^::warning /m);
+
+	const stale = setupCatalogRepo(2);
+	const staleResult = stale.run("catalog");
+	assert.equal(staleResult.status, 0, staleResult.stderr);
+	const staleReceipt = JSON.parse(readFileSync(stale.receipt, "utf8"));
+	assert.equal(staleReceipt.status, "stale");
+	assert.match(staleResult.stdout, /^::warning file=src\/cursor-fallback-models\.generated\.ts,title=Cursor fallback catalog is stale::/m);
+	const staleLog = readFileSync(`${stale.receipt}.log`, "utf8");
+	assert.equal(staleReceipt.outputSha256, createHash("sha256").update(staleLog).digest("hex"));
+	assert.doesNotMatch(staleLog, /^::warning /m);
+
+	const directory = dirname(stale.receipt);
+	const artifact = join(directory, "artifact");
+	mkdirSync(artifact);
+	const tarballPath = join(artifact, "candidate.tgz");
+	writeFileSync(tarballPath, "candidate bytes");
+	writeFileSync(join(artifact, "release-notes.md"), "Release notes\n");
+	writeFileSync(join(artifact, "release.json"), JSON.stringify({
+		repository: "fitchmultz/pi-cursor-sdk",
+		name: "pi-cursor-sdk",
+		version: "1.0.0",
+		source: stale.head,
+		releaseSource: stale.head,
+		filename: "candidate.tgz",
+		sha256: createHash("sha256").update(readFileSync(tarballPath)).digest("hex"),
+		integrity: `sha512-${createHash("sha512").update(readFileSync(tarballPath)).digest("base64")}`,
+		notes: "Release notes",
+	}));
+	stale.env.GITHUB_REPOSITORY = "fitchmultz/pi-cursor-sdk";
+	const prepareStale = spawnSync(process.execPath, [
+		script, "release-prepare", "--source", stale.head, "--release-source", stale.head,
+		"--artifact", artifact, "--catalog-receipt", stale.receipt, "--evidence", join(directory, "evidence-stale"),
+	], { cwd: stale.repo, env: stale.env, encoding: "utf8" });
+	assert.equal(prepareStale.status, 1);
+	assert.match(prepareStale.stderr, /GH_TOKEN is required to collect release PR and issue context/);
+
+	writeFileSync(stale.receipt, JSON.stringify({ ...staleReceipt, status: "failed" }));
+	const prepareFailed = spawnSync(process.execPath, [
+		script, "release-prepare", "--source", stale.head, "--release-source", stale.head,
+		"--artifact", artifact, "--catalog-receipt", stale.receipt, "--evidence", join(directory, "evidence-failed"),
+	], { cwd: stale.repo, env: stale.env, encoding: "utf8" });
+	assert.equal(prepareFailed.status, 1);
+	assert.match(prepareFailed.stderr, /Catalog check did not cover this source, run, and output/);
+
+	const errored = setupCatalogRepo(1);
+	const erroredResult = errored.run("catalog");
+	assert.equal(erroredResult.status, 1, erroredResult.stdout);
+	assert.equal(JSON.parse(readFileSync(errored.receipt, "utf8")).status, "failed");
+	assert.match(erroredResult.stderr, /The authenticated Cursor catalog check failed/);
+});
+
 test("staged review baseline extracts the actual Git archive", (t) => {
 	const f = fixture(t);
 	stageChange(f.repo);
@@ -404,7 +484,7 @@ test("package comparison records added, modified, and removed artifact paths", (
 	assert.throws(() => assertExtractedPackages(directory, scope, changed), /git .*diff.* failed: 1/);
 });
 
-function releaseFixture(t, behavior = "old-artifact", artifactContent = "new artifact\n") {
+function releaseFixture(t, behavior = "old-artifact", artifactContent = "new artifact\n", catalogStatus = "passed") {
 	const f = fixture(t, behavior);
 	const directory = dirname(f.receipt), evidence = join(directory, "release-evidence");
 	mkdirSync(evidence);
@@ -443,7 +523,7 @@ function releaseFixture(t, behavior = "old-artifact", artifactContent = "new art
 		catalogSha256: hash(join(f.repo, "src/cursor-fallback-models.generated.ts")),
 		generatorSha256: hash(join(f.repo, "scripts/refresh-cursor-model-snapshots.mjs")),
 		runId: f.env.GITHUB_RUN_ID, runAttempt: f.env.GITHUB_RUN_ATTEMPT,
-		status: "passed", outputSha256: hash(catalogOutput),
+		status: catalogStatus, outputSha256: hash(catalogOutput),
 	};
 	const scope = {
 		...source, ...packages, mode: "release", baselineTag: "v1.0.0", releaseSource: head,
@@ -489,6 +569,20 @@ test("release review retains non-material polish without failing and blocks mate
 	assert.equal(findingResult.status, 1, findingResult.stdout);
 	assert.equal(JSON.parse(readFileSync(finding.receipt, "utf8")).status, "failed");
 	assert.match(findingResult.stderr, /Review has findings:/);
+});
+
+test("release review accepts a stale catalog receipt as informational and rejects invalid statuses", (t) => {
+	const stale = releaseFixture(t, "stale-catalog", "new artifact\n", "stale");
+	const staleResult = stale.run("release", "--source", stale.head, "--release-source", stale.head, "--evidence", stale.evidence);
+	assert.equal(staleResult.status, 0, staleResult.stderr);
+	const staleReceipt = JSON.parse(readFileSync(stale.receipt, "utf8"));
+	assert.equal(staleReceipt.status, "passed");
+	assert.equal(staleReceipt.scope.catalog.status, "stale");
+
+	const invalid = releaseFixture(t, "old-artifact", "new artifact\n", "failed");
+	const invalidResult = invalid.run("release", "--source", invalid.head, "--release-source", invalid.head, "--evidence", invalid.evidence);
+	assert.equal(invalidResult.status, 1, invalidResult.stdout);
+	assert.match(invalidResult.stderr, /Catalog inputs changed during review/);
 });
 
 for (const [name, behavior, artifactContent, accepted] of [

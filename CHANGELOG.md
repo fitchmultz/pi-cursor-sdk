@@ -4,6 +4,19 @@
 
 ## Unreleased
 
+## 0.5.46 - 2026-11-21
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- ci(catalog): warn on release catalog drift and refresh daily by PR (PCS-201) (#529) ([4c39121](https://github.com/fitchmultz/pi-cursor-sdk/commit/4c39121bb2e3ebb502a7118fdfaa969b5c69b840))
+
+### What's Changed
+* ci(catalog): warn on release catalog drift and refresh daily by PR (PCS-201) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/529
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.45...v0.5.46
+
 ## 0.5.45 - 2026-11-20
 
 <!-- npm-release:unreleased:start -->

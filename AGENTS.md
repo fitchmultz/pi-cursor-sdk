@@ -57,7 +57,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `shared/cursor-cloud-lifecycle-constants.mjs` owns the canonical Cursor Cloud agent ID pattern, lifecycle entry type, and journal prefix; `src/cursor-cloud-lifecycle.ts` and `scripts/cloud-runtime-smoke.mjs` consume it for provider runtime and maintainer scripts.
 - `shared/cursor-sensitive-text.mjs` owns canonical secret scrubbing; `src/cursor-sensitive-text.ts` and maintainer scripts import it directly.
 - `shared/cursor-setting-sources.mjs` owns canonical `PI_CURSOR_SETTING_SOURCES` parsing/serialization; `src/cursor-setting-sources.ts` and maintainer scripts import it directly.
-- `src/cursor-usage-accounting.ts` owns coherent native current-context mapping from LOCAL turn-ended usage or estimates; cumulative bills never enter native usage.
+- `src/cursor-usage-accounting.ts` owns coherent native current-context mapping from LOCAL `turn-ended` or `model-call-completed` usage or estimates; cumulative bills never enter native usage.
 - `src/cursor-sdk-billed-usage.ts` owns bounded public `Agent.getUsage()` observation and disjoint aggregate-safe validation; no UUID watermarks or guessed client-run billing joins.
 - `src/cursor-usage-ledger.ts` owns unique public native origin claims, validated fsynced session-ID journals, raw/reported/terminal/billed facts and canonical branch views; `src/cursor-usage-command.ts` owns truthful `/cursor-usage` view/refresh/export/help with the default footer unchanged.
 - `src/cursor-provider-turn-summary.ts` owns fresh text-only LOCAL compaction/tree agents, ephemeral stores and disposal before terminal emission, independent of ordinary conversation tools/mode/resume.

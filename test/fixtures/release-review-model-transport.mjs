@@ -23,12 +23,51 @@ export default function installOfflineModelTransport(pi) {
 	globalThis.fetch = offlineFetch;
 	pi.on("before_provider_request", (_event, ctx) => { abort = () => ctx.abort(); });
 }
+function extractEntryText(entry) {
+	if (typeof entry?.content === "string") return entry.content;
+	if (Array.isArray(entry?.content)) return entry.content.map(part => part?.text ?? "").join("");
+	if (typeof entry?.output === "string") return entry.output;
+	return "";
+}
+function formatResponsesSse(model, calls, content) {
+	const responseId = `resp_offline_${request}`;
+	const events = [{ type: "response.created", response: { id: responseId, status: "in_progress", model, output: [] } }];
+	const output = [];
+	if (calls) {
+		calls.forEach((call, output_index) => {
+			const itemId = `fc_${call.id}`;
+			const added = { type: "function_call", id: itemId, call_id: call.id, name: call.function.name, arguments: "", status: "in_progress" };
+			const done = { ...added, arguments: call.function.arguments, status: "completed" };
+			events.push(
+				{ type: "response.output_item.added", output_index, item: added },
+				{ type: "response.function_call_arguments.delta", output_index, item_id: itemId, delta: call.function.arguments },
+				{ type: "response.output_item.done", output_index, item: done },
+			);
+			output.push(done);
+		});
+	} else {
+		const itemId = `msg_${request}`;
+		const added = { type: "message", id: itemId, role: "assistant", status: "in_progress", content: [] };
+		const done = { ...added, status: "completed", content: [{ type: "output_text", text: content, annotations: [] }] };
+		events.push(
+			{ type: "response.output_item.added", output_index: 0, item: added },
+			{ type: "response.output_text.delta", output_index: 0, item_id: itemId, content_index: 0, delta: content },
+			{ type: "response.output_item.done", output_index: 0, item: done },
+		);
+		output.push(done);
+	}
+	events.push({ type: "response.completed", response: { id: responseId, status: "completed", model, output, usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } } });
+	return events.map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join("");
+}
 async function offlineFetch(url, options) {
-	assert.match(String(url), /^https:\/\/api\.z\.ai\/api\/coding\/paas\/v4\/chat\/completions$/);
+	const targetUrl = String(url);
+	const isResponses = /^https:\/\/api\.z\.ai\/api\/v1\/responses$/.test(targetUrl);
+	const isCompletions = /^https:\/\/api\.z\.ai\/api\/coding\/paas\/v4\/chat\/completions$/.test(targetUrl);
+	assert.ok(isResponses || isCompletions, `unexpected Z.ai endpoint: ${targetUrl}`);
 	const body = JSON.parse(options.body);
 	appendFileSync(scenario.requests, JSON.stringify(body) + "\n");
-	const text = body.messages.map(message => typeof message.content === "string" ? message.content
-		: message.content?.map(part => part.text ?? "").join("") ?? "").join("\n");
+	const entries = isResponses ? (Array.isArray(body.input) ? body.input : []) : (body.messages ?? []);
+	const text = [typeof body.instructions === "string" ? body.instructions : "", ...entries.map(extractEntryText)].join("\n");
 	if (!scope) {
 		// The @prompt file is expanded by native Pi before the provider request.
 		inputPath = /Read ((?:[A-Za-z]:)?[\\/][^\r\n]+?[\\/]review-input\.json) for immutable identities/.exec(text)?.[1];
@@ -59,9 +98,9 @@ async function offlineFetch(url, options) {
 		calls.forEach((call, index) => { call.id = `read_${request}_${index}`; });
 		finish = "tool_calls";
 	} else if (request > 2 && !["refuses", "error", "aborted"].includes(scenario.kind)) {
-		const feedback = body.messages.findLast(message => JSON.stringify(message).includes("Release review read coverage:"));
+		const feedback = entries.findLast(message => JSON.stringify(message).includes("Release review read coverage:"));
 		assert.ok(feedback, "correction must be requested by native boundary feedback, not the test transport");
-		const contents = typeof feedback.content === "string" ? feedback.content : feedback.content.map(part => part.text ?? "").join("");
+		const contents = extractEntryText(feedback);
 		const missing = JSON.parse(contents.slice(contents.indexOf("\n[") + 1));
 		const paths = (scenario.kind === "progresses" && request === 3 ? missing.slice(0, 1) : missing).flatMap(entry => {
 			const alternative = entry.alternatives[0];
@@ -73,14 +112,18 @@ async function offlineFetch(url, options) {
 			});
 		});
 		// A correction request is followed by a normal final model response.
-		const last = body.messages.at(-1);
-		if (last.role !== "tool") { calls = reads(paths); finish = "tool_calls"; }
+		const last = entries.at(-1);
+		const lastIsToolResult = last?.role === "tool" || last?.type === "function_call_output";
+		if (!lastIsToolResult) { calls = reads(paths); finish = "tool_calls"; }
 		else content = report();
 	} else content = report();
 	if (scenario.kind === "error") return new Response(JSON.stringify({ error: { message: "offline unrecoverable model error" } }), { status: 400 });
 	if (scenario.kind === "aborted") {
 		abort();
 		throw new DOMException("offline transport aborted", "AbortError");
+	}
+	if (isResponses) {
+		return new Response(formatResponsesSse(body.model, calls, content), { headers: { "Content-Type": "text/event-stream" } });
 	}
 	const delta = { role: "assistant", ...(calls ? { tool_calls: calls.map((call, index) => ({ index, ...call })) } : { content }) };
 	const chunk = { id: `offline-${request}`, object: "chat.completion.chunk", created: 1, model: body.model,

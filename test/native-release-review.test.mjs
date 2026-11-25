@@ -66,8 +66,8 @@ for (const kind of ["corrects", "second-gap", "progresses", "complete", "refuses
 		const expectedPass = ["corrects", "second-gap", "progresses", "complete"].includes(kind);
 		assert.equal(result.status, expectedPass ? 0 : 1, result.stderr + stderr);
 		const bodies = readFileSync(requests, "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line));
-		const feedback = [...new Set(bodies.flatMap(body => body.messages.flatMap(message => {
-			const content = typeof message.content === "string" ? message.content : message.content?.map(part => part.text ?? "").join("") ?? "";
+		const feedback = [...new Set(bodies.flatMap(body => (body.messages ?? (Array.isArray(body.input) ? body.input : [])).flatMap(message => {
+			const content = typeof message.content === "string" ? message.content : Array.isArray(message.content) ? message.content.map(part => part?.text ?? "").join("") : "";
 			return content.startsWith("Release review read coverage:") ? [content] : [];
 		})))];
 		assert.equal(feedback.length, ["complete", "error", "aborted", "incomplete", "limited", "wrong-scope"].includes(kind) ? 0 : kind === "progresses" ? 2 : 1, stderr);

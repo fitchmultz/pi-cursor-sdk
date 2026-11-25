@@ -101,7 +101,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `src/cursor-durable-fs.ts` owns no-follow regular-file opens, exclusive private creation, fsync, and bounded validated frame IO shared by usage journals, Cloud lifecycle and local cleanup; preserve descriptor/path identity guards.
 - `src/cursor-state.ts` owns Cursor fast/mode controls, `/cursor-http` session/user persistence, `/cursor-tools`, and local config refresh/cleanup wiring.
 - `src/cursor-runtime-state.ts` owns effective Cursor config/runtime resolution, cloud/local runtime flags, runtime status helpers, cloud acknowledgement, and `/cursor-runtime` / `/cursor-cloud` wiring.
-- `src/cursor-command-completions.ts` owns shared prefix-matching helpers for fixed-option slash-command `getArgumentCompletions` handlers.
+- Each fixed-option slash command owns its argument positions and uses Pi's `fuzzyFilter` to match completion labels.
 - `src/context.ts`, `src/context-window-cache.ts`, and `src/bundled-context-windows.ts` handle prompt conversion and context-window caches.
 - `src/cursor-bridge-contract.ts` owns pi bridge MCP naming, the model-facing bridge preference text, and concise MCP descriptions that point to the bootstrap tool-surface rules.
 - `src/cursor-tool-manifest.ts` owns bootstrap callable-surface manifest text (`PI_CURSOR_TOOL_MANIFEST`, default on).

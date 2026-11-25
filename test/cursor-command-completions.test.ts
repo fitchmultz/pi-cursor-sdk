@@ -77,8 +77,8 @@ describe("Cursor slash-command argument completions", () => {
 		const all = getCompletions(commands, "cursor-http", "");
 		expect(all?.map((item) => item.value)).toEqual(["on", "off", "toggle"]);
 		expect(all?.every((item) => Boolean(item.description))).toBe(true);
-		expect(getCompletions(commands, "cursor-http", "o")?.map((item) => item.value)).toEqual(["on", "off"]);
-		expect(getCompletions(commands, "cursor-http", "T")?.map((item) => item.value)).toEqual(["toggle"]);
+		expect(getCompletions(commands, "cursor-http", "o")?.map((item) => item.value)).toEqual(["on", "off", "toggle"]);
+		expect(getCompletions(commands, "cursor-http", "Tg")?.map((item) => item.value)).toEqual(["toggle"]);
 		expect(getCompletions(commands, "cursor-http", "on ")).toBeNull();
 		expect(getCompletions(commands, "cursor-http", "on off")).toBeNull();
 		expect(getCompletions(commands, "cursor-http", "maybe")).toBeNull();
@@ -90,7 +90,7 @@ describe("Cursor slash-command argument completions", () => {
 		expect(all?.map((item) => item.value)).toEqual(["agent", "plan"]);
 		expect(all?.every((item) => Boolean(item.description))).toBe(true);
 		expect(getCompletions(commands, "cursor-mode", "p")?.map((item) => item.value)).toEqual(["plan"]);
-		expect(getCompletions(commands, "cursor-mode", "A")?.map((item) => item.value)).toEqual(["agent"]);
+		expect(getCompletions(commands, "cursor-mode", "AE")?.map((item) => item.value)).toEqual(["agent"]);
 		expect(getCompletions(commands, "cursor-mode", "agent ")).toBeNull();
 		expect(getCompletions(commands, "cursor-mode", "ask")).toBeNull();
 	});
@@ -100,8 +100,8 @@ describe("Cursor slash-command argument completions", () => {
 		const all = getCompletions(commands, "cursor-local-resume-cleanup", "");
 		expect(all?.map((item) => item.value)).toEqual(["--dry-run", "--yes"]);
 		expect(all?.every((item) => Boolean(item.description))).toBe(true);
-		expect(getCompletions(commands, "cursor-local-resume-cleanup", "--d")?.map((item) => item.value)).toEqual(["--dry-run"]);
-		expect(getCompletions(commands, "cursor-local-resume-cleanup", "--y")?.map((item) => item.value)).toEqual(["--yes"]);
+		expect(getCompletions(commands, "cursor-local-resume-cleanup", "--drn")?.map((item) => item.value)).toEqual(["--dry-run"]);
+		expect(getCompletions(commands, "cursor-local-resume-cleanup", "--ys")?.map((item) => item.value)).toEqual(["--yes"]);
 		expect(getCompletions(commands, "cursor-local-resume-cleanup", "--yes ")).toBeNull();
 		expect(getCompletions(commands, "cursor-local-resume-cleanup", "--force")).toBeNull();
 	});
@@ -111,7 +111,7 @@ describe("Cursor slash-command argument completions", () => {
 		const first = getCompletions(commands, "cursor-runtime", "");
 		expect(first?.map((item) => item.value)).toEqual(["local", "cloud"]);
 		expect(first?.every((item) => Boolean(item.description))).toBe(true);
-		expect(getCompletions(commands, "cursor-runtime", "c")?.map((item) => item.value)).toEqual(["cloud"]);
+		expect(getCompletions(commands, "cursor-runtime", "cld")?.map((item) => item.value)).toEqual(["cloud"]);
 		expect(getCompletions(commands, "cursor-runtime", "remote")).toBeNull();
 
 		const second = getCompletions(commands, "cursor-runtime", "local ");
@@ -120,9 +120,10 @@ describe("Cursor slash-command argument completions", () => {
 			{ value: "local --save-project", label: "--save-project" },
 		]);
 		expect(second?.every((item) => Boolean(item.description))).toBe(true);
-		expect(getCompletions(commands, "cursor-runtime", "cloud --save-p")?.map((item) => item.value)).toEqual([
+		expect(getCompletions(commands, "cursor-runtime", "cloud --svp")?.map((item) => item.value)).toEqual([
 			"cloud --save-project",
 		]);
+		expect(getCompletions(commands, "cursor-runtime", "local --force")).toBeNull();
 		expect(getCompletions(commands, "cursor-runtime", "invalid --save-")).toBeNull();
 		expect(getCompletions(commands, "cursor-runtime", "local --save-user ")).toBeNull();
 		expect(getCompletions(commands, "cursor-runtime", "local --save-user --save-project")).toBeNull();
@@ -137,13 +138,13 @@ describe("Cursor slash-command argument completions", () => {
 			{ value: "delete ", label: "delete" },
 		]);
 		expect(first?.every((item) => Boolean(item.description))).toBe(true);
-		expect(getCompletions(commands, "cursor-cloud", "ar")?.map((item) => item.value)).toEqual(["archive "]);
+		expect(getCompletions(commands, "cursor-cloud", "arcv")?.map((item) => item.value)).toEqual(["archive "]);
 		expect(getCompletions(commands, "cursor-cloud", "list ")).toBeNull();
 		expect(getCompletions(commands, "cursor-cloud", "archive ")).toBeNull();
 		expect(getCompletions(commands, "cursor-cloud", "delete ")).toBeNull();
 		expect(getCompletions(commands, "cursor-cloud", `delete ${SAMPLE_CLOUD_AGENT_ID}`)).toBeNull();
 
-		const confirm = getCompletions(commands, "cursor-cloud", `delete ${SAMPLE_CLOUD_AGENT_ID} --y`);
+		const confirm = getCompletions(commands, "cursor-cloud", `delete ${SAMPLE_CLOUD_AGENT_ID} --ys`);
 		expect(confirm?.map((item) => ({ value: item.value, label: item.label }))).toEqual([
 			{ value: `delete ${SAMPLE_CLOUD_AGENT_ID} --yes`, label: "--yes" },
 		]);
@@ -152,6 +153,7 @@ describe("Cursor slash-command argument completions", () => {
 			`delete ${SAMPLE_CLOUD_AGENT_ID} --yes`,
 		]);
 		expect(getCompletions(commands, "cursor-cloud", "delete not-an-agent-id --")).toBeNull();
+		expect(getCompletions(commands, "cursor-cloud", `delete ${SAMPLE_CLOUD_AGENT_ID} --force`)).toBeNull();
 		expect(getCompletions(commands, "cursor-cloud", `delete ${SAMPLE_CLOUD_AGENT_ID} --yes `)).toBeNull();
 		expect(getCompletions(commands, "cursor-cloud", "status")).toBeNull();
 	});
@@ -165,7 +167,7 @@ describe("Cursor slash-command argument completions", () => {
 			{ value: "help", label: "help" },
 		]);
 		expect(all?.every((item) => Boolean(item.description))).toBe(true);
-		expect(getCompletions(commands, "cursor-usage", "ex")?.map((item) => item.value)).toEqual(["export "]);
+		expect(getCompletions(commands, "cursor-usage", "xpt")?.map((item) => item.value)).toEqual(["export "]);
 		expect(getCompletions(commands, "cursor-usage", "refresh ")).toBeNull();
 		expect(getCompletions(commands, "cursor-usage", "export ")).toBeNull();
 		expect(getCompletions(commands, "cursor-usage", "export usage.json")).toBeNull();
@@ -184,13 +186,13 @@ describe("Cursor slash-command argument completions", () => {
 
 		const cases: Array<{ line: string; expectedLine: string }> = [
 			{ line: "/cursor-http o", expectedLine: "/cursor-http on" },
-			{ line: "/cursor-runtime local --save-u", expectedLine: "/cursor-runtime local --save-user" },
-			{ line: "/cursor-cloud ar", expectedLine: "/cursor-cloud archive " },
+			{ line: "/cursor-runtime local --svu", expectedLine: "/cursor-runtime local --save-user" },
+			{ line: "/cursor-cloud arcv", expectedLine: "/cursor-cloud archive " },
 			{
-				line: `/cursor-cloud delete ${SAMPLE_CLOUD_AGENT_ID} --`,
+				line: `/cursor-cloud delete ${SAMPLE_CLOUD_AGENT_ID} --ys`,
 				expectedLine: `/cursor-cloud delete ${SAMPLE_CLOUD_AGENT_ID} --yes`,
 			},
-			{ line: "/cursor-usage ex", expectedLine: "/cursor-usage export " },
+			{ line: "/cursor-usage xpt", expectedLine: "/cursor-usage export " },
 		];
 
 		for (const testCase of cases) {

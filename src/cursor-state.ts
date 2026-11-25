@@ -1,7 +1,6 @@
 import type { AgentModeOption } from "@cursor/sdk";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
-import type { AutocompleteItem } from "@earendil-works/pi-tui";
-import { completeSingleTokenOptions } from "./cursor-command-completions.js";
+import { fuzzyFilter, type AutocompleteItem } from "@earendil-works/pi-tui";
 import {
 	CURSOR_HOST_TOOL_MANIFEST_SUMMARY,
 	CURSOR_TOOL_MANIFEST_ENV,
@@ -71,13 +70,13 @@ const MODE_ENTRY_TYPE = "cursor-mode-state";
 
 const DEFAULT_CURSOR_AGENT_MODE: AgentModeOption = "agent";
 
-const CURSOR_HTTP_COMPLETIONS: readonly AutocompleteItem[] = [
+const CURSOR_HTTP_COMPLETIONS: AutocompleteItem[] = [
 	{ value: "on", label: "on", description: "Enable HTTP/1.1/SSE local transport compatibility mode" },
 	{ value: "off", label: "off", description: "Disable HTTP/1.1/SSE local transport compatibility mode" },
 	{ value: "toggle", label: "toggle", description: "Toggle HTTP/1.1/SSE local transport compatibility mode" },
 ];
 
-const CURSOR_MODE_COMPLETIONS: readonly AutocompleteItem[] = [
+const CURSOR_MODE_COMPLETIONS: AutocompleteItem[] = [
 	{ value: "agent", label: "agent", description: "Default Cursor SDK agent mode" },
 	{ value: "plan", label: "plan", description: "Cursor SDK plan mode" },
 ];
@@ -510,7 +509,12 @@ export function registerCursorRuntimeControls(pi: CursorRuntimeControlsExtension
 
 	pi.registerCommand("cursor-http", {
 		description: "Toggle Cursor SDK HTTP/1.1/SSE transport compatibility mode",
-		getArgumentCompletions: (prefix) => completeSingleTokenOptions(prefix, CURSOR_HTTP_COMPLETIONS),
+		getArgumentCompletions: (prefix) => {
+			const query = prefix.trimStart();
+			if (/\s/.test(query)) return null;
+			const matches = fuzzyFilter(CURSOR_HTTP_COMPLETIONS, query, (item) => item.label);
+			return matches.length > 0 ? matches : null;
+		},
 		handler: async (args, ctx) => {
 			const usage = "Usage: /cursor-http [on|off|toggle]";
 			const normalized = args.trim().toLowerCase();
@@ -603,7 +607,12 @@ export function registerCursorRuntimeControls(pi: CursorRuntimeControlsExtension
 
 	pi.registerCommand("cursor-mode", {
 		description: "Set Cursor SDK conversation mode: agent or plan",
-		getArgumentCompletions: (prefix) => completeSingleTokenOptions(prefix, CURSOR_MODE_COMPLETIONS),
+		getArgumentCompletions: (prefix) => {
+			const query = prefix.trimStart();
+			if (/\s/.test(query)) return null;
+			const matches = fuzzyFilter(CURSOR_MODE_COMPLETIONS, query, (item) => item.label);
+			return matches.length > 0 ? matches : null;
+		},
 		handler: async (args, ctx) => {
 			const usage = "Usage: /cursor-mode agent|plan";
 			const mode = parseCursorAgentMode(args);

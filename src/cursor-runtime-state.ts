@@ -1,6 +1,5 @@
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
-import type { AutocompleteItem } from "@earendil-works/pi-tui";
-import { filterCompletionOptions } from "./cursor-command-completions.js";
+import { fuzzyFilter, type AutocompleteItem } from "@earendil-works/pi-tui";
 import {
 	getCursorCloudLifecycleArgumentCompletions,
 	registerCursorCloudLifecycleLedger,
@@ -49,12 +48,12 @@ import {
 
 const CURSOR_RUNTIME_ENTRY_TYPE = "cursor-runtime-state";
 
-const CURSOR_RUNTIME_COMPLETIONS: readonly AutocompleteItem[] = [
+const CURSOR_RUNTIME_COMPLETIONS: AutocompleteItem[] = [
 	{ value: "local", label: "local", description: "Run Cursor SDK agents locally on this machine" },
 	{ value: "cloud", label: "cloud", description: "Run Cursor SDK agents remotely in Cursor Cloud" },
 ];
 
-const CURSOR_RUNTIME_SAVE_FLAG_COMPLETIONS: readonly AutocompleteItem[] = [
+const CURSOR_RUNTIME_SAVE_FLAG_COMPLETIONS: AutocompleteItem[] = [
 	{ value: "--save-user", label: "--save-user", description: "Also save runtime default to user config (~/.pi/agent/cursor-sdk.json)" },
 	{ value: "--save-project", label: "--save-project", description: "Also save runtime default to trusted project config (.pi/cursor-sdk.json)" },
 ];
@@ -62,12 +61,13 @@ const CURSOR_RUNTIME_SAVE_FLAG_COMPLETIONS: readonly AutocompleteItem[] = [
 function getCursorRuntimeArgumentCompletions(prefix: string): AutocompleteItem[] | null {
 	const parts = prefix.trimStart().split(/\s+/);
 	if (parts.length === 1) {
-		return filterCompletionOptions(parts[0] ?? "", CURSOR_RUNTIME_COMPLETIONS);
+		const matches = fuzzyFilter(CURSOR_RUNTIME_COMPLETIONS, parts[0] ?? "", (item) => item.label);
+		return matches.length > 0 ? matches : null;
 	}
 	if (parts.length === 2 && (parts[0] === "local" || parts[0] === "cloud")) {
 		const runtime = parts[0];
-		const matches = filterCompletionOptions(parts[1] ?? "", CURSOR_RUNTIME_SAVE_FLAG_COMPLETIONS);
-		return matches ? matches.map((item) => ({ ...item, value: `${runtime} ${item.value}` })) : null;
+		const matches = fuzzyFilter(CURSOR_RUNTIME_SAVE_FLAG_COMPLETIONS, parts[1] ?? "", (item) => item.label);
+		return matches.length > 0 ? matches.map((item) => ({ ...item, value: `${runtime} ${item.value}` })) : null;
 	}
 	return null;
 }

@@ -131,7 +131,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 
 ## Setup and commands
 
-- Install dependencies: `npm install` (runs `prepare`, which compiles `src/` into `dist/` — the manifest entry pi loads)
+- Install dependencies: `npm install` (runs `prepare`, which compiles `src/` into `dist/` — the manifest entry pi loads). See [Dependency cooldown](docs/development.md#dependency-cooldown) for `.npmrc`'s 2-day release-age gate on fresh third-party installs.
 - Use Node 24.22.3+ (24.x). The platform smoke baseline is Node 24 on Apple Silicon macOS and Ubuntu.
 - Build after editing `src/`: `npm run build` — required before any direct `pi -e .` run, or pi loads the previous build. The cloud/steering/local-resume/provider-debug launchers rebuild automatically (even when run directly with `node scripts/...`), `smoke:live`/`smoke:visual`/`smoke:isolated` build via their npm scripts, and `smoke:platform*` builds inside its packed installs; only direct `pi -e .` runs need a manual build.
 - Run tests: `npm test`
@@ -154,7 +154,7 @@ There is no lint or format script in `package.json` at this time.
 - Vitest 5 defaults `clearMocks` to `true`; do not depend on mock state leaking between tests.
 - Keep provider runtime code side-effect-light. Do not write secrets, and do not let cache or discovery failures break response streaming unless the run cannot proceed safely.
 - Test behavior changes at the owning boundary. Extend existing coverage before adding duplicate tests. Remove tests designed to always pass; each retained test must be able to catch a credible regression.
-- If dependency versions change, update `package-lock.json` with npm. Do not manually edit generated dependency output.
+- If dependency versions change, update `package-lock.json` with npm (following the [Dependency cooldown](docs/development.md#dependency-cooldown) policy in `.npmrc`). Do not manually edit generated dependency output.
 - The bridge runtime closure is bundled and pinned to `@modelcontextprotocol/server@2.3.1`, `@modelcontextprotocol/hono@2.0.2`, `hono@4.13.18`, and `@hono/node-server@2.1.8`. `@cursor/sdk@1.4.2` remains an exact unbundled dependency.
 - Do not commit `dist/`, `coverage/`, `.env*`, `.pi/`, or package tarballs.
 

@@ -18,7 +18,7 @@ function runPack(t, archive) {
 	writeFileSync(npm, `#!/usr/bin/env node
 const fs = require("node:fs"), path = require("node:path");
 const args = process.argv.slice(2);
-if (args[0] !== "pack" || args[1] !== "pi-cursor-sdk@0.5.5") process.exit(2);
+if (args[0] !== "pack" || args[1] !== "pi-cursor-sdk@0.5.5" || !args.includes("--min-release-age=0")) process.exit(2);
 const destination = args[args.indexOf("--pack-destination") + 1];
 const filename = "pi-cursor-sdk-0.5.5.tgz";
 fs.writeFileSync(path.join(destination, filename), ${JSON.stringify(archive)});

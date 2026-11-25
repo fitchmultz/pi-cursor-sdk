@@ -16,6 +16,15 @@ No paid Cursor Cloud testing for generic PRs or releases. Only a PR or issue exp
 
 The older live smoke helpers remain useful for inner-loop debugging and focused visual audits, not as the release gate. Use [Cursor live smoke checklist](./cursor-live-smoke-checklist.md), `npm run smoke:visual`, `npm run smoke:live`, or direct `pi --approve -e . --cursor-no-fast --model cursor/grok-4.6` runs only when a changed TUI/card/runtime behavior needs new live evidence. Select one relevant check rather than executing every helper. `npm run smoke:visual` captures an offscreen PTY rendered through browser/xterm and saved as PNG screenshots with Playwright, or with `agent_browser` from the generated HTML when available. Its default matrix is native replay only: native replay registration is forced on, Cursor setting sources are disabled, the pi bridge is off, overlapping built-in pi tools are not exposed, and inherited Cursor SDK event-debug artifact env is cleared; `--event-debug` writes to a deterministic debug directory under the visual output directory. The visible TUI/output, rendered screenshots, scrubbed diagnostics, and persisted JSONL must agree. See [Cursor testing lessons](./cursor-testing-lessons.md) for auth.json seeding, isolated `/tmp` harness layout, JSONL replay-error scans, and other regression traps.
 
+## Dependency cooldown
+
+`.npmrc` sets `min-release-age=2` (requiring npm 11.17+ / Node 24.22.3's bundled npm or npm 12) and exempts `@earendil-works/*`, `@fitchmultz/*`, and `pi-cursor-sdk` itself. Exemptions are named-only: transitive dependencies of exempt packages still follow the 2-day window.
+
+- `npm ci` and in-sync lockfile installs are unaffected and continue to install exact locked versions regardless of age.
+- Release-review evidence fetching (`packPublishedPackage`) also passes `--min-release-age=0` when downloading the already-published, version-pinned previous `pi-cursor-sdk` tarball.
+- Fresh `npm install` calls for a third-party exact version younger than 2 days fail with `ETARGET ... with a date before <cutoff>`, and range installs resolve an older release until the cutoff passes.
+- Wait out the 2-day window by default. When a fresh third-party release is genuinely needed earlier (for example, an urgent security fix), add a temporary reviewed `min-release-age-exclude[]` entry or pass `--min-release-age=0` for that single install command rather than removing `.npmrc` or broadening scope exemptions.
+
 ## Zod peer and bridge packaging
 
 Keep the exact SDK peer `zod@4.6.6` external and the bridge's newer nested `zod@4.6.7` copies bundled. Both contain the upstream bounded-collection fix; their published tarballs differ only in version metadata. This uses npm's ordinary locked dependency layout, not overrides, copied dependencies or SDK patches.

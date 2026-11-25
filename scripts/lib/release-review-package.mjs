@@ -12,7 +12,7 @@ export function packPublishedPackage(root, manifest, directory) {
 		PATH: sealedNodePath(), HOME: directory, TMPDIR: directory,
 		npm_config_cache: join(directory, "npm-cache"), npm_config_registry: "https://registry.npmjs.org/",
 	};
-	run("npm", ["pack", `${manifest.name}@${manifest.version}`, "--ignore-scripts", "--pack-destination", destination, "--json"],
+	run("npm", ["pack", `${manifest.name}@${manifest.version}`, "--ignore-scripts", "--min-release-age=0", "--pack-destination", destination, "--json"],
 		{ cwd: root, env, output });
 	const data = JSON.parse(readFileSync(output, "utf8"));
 	const entries = Array.isArray(data) ? data : Object.values(data);

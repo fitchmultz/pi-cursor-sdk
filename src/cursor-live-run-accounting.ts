@@ -17,6 +17,11 @@ export interface CursorLiveRunAccountingState {
 	promptInputTokensReported: boolean;
 	consumedToolResultIds: ReadonlySet<string>;
 	sdkTurnUsage: CursorLiveSdkTurnUsageObservation;
+	/**
+	 * Latest completed SDK model request not yet attributed to an emitted Pi turn. It is the fallback when
+	 * turn usage is not attributable, such as tool-use turns emitted while the SDK turn is still running.
+	 */
+	sdkModelCallUsage?: CursorSdkTurnUsage;
 }
 
 export interface CursorLiveToolResultConsumption {
@@ -53,19 +58,34 @@ export function recordCursorLiveSdkTurnEnded(
 	}
 }
 
-/** Takes SDK usage for one emitted Pi turn; taking before the SDK turn ended suppresses the rest of the run. */
+export function recordCursorLiveSdkModelCallCompleted(
+	state: CursorLiveRunAccountingState,
+	usage: CursorSdkTurnUsage,
+): CursorLiveRunAccountingState {
+	// The latest completed request describes current occupancy, replacing an earlier untaken request.
+	return { ...state, sdkModelCallUsage: usage };
+}
+
+/**
+ * Takes SDK usage for one emitted Pi turn; taking before the SDK turn ended suppresses the rest of the run.
+ * When no attributable turn usage exists, the latest untaken model request's usage is used instead.
+ */
 export function takeCursorLiveSdkTurnUsage(state: CursorLiveRunAccountingState): {
 	state: CursorLiveRunAccountingState;
 	usage?: CursorSdkTurnUsage;
 } {
 	const observation = state.sdkTurnUsage;
+	const modelCallUsage = state.sdkModelCallUsage;
 	switch (observation.kind) {
 		case "available":
-			return { state: { ...state, sdkTurnUsage: { kind: "awaiting" } }, usage: observation.usage };
+			return {
+				state: { ...state, sdkTurnUsage: { kind: "awaiting" }, sdkModelCallUsage: undefined },
+				usage: observation.usage ?? modelCallUsage,
+			};
 		case "awaiting":
-			return { state: { ...state, sdkTurnUsage: { kind: "suppressed" } } };
+			return { state: { ...state, sdkTurnUsage: { kind: "suppressed" }, sdkModelCallUsage: undefined }, usage: modelCallUsage };
 		case "suppressed":
-			return { state };
+			return { state: { ...state, sdkModelCallUsage: undefined }, usage: modelCallUsage };
 		default: {
 			const _exhaustive: never = observation;
 			return _exhaustive;

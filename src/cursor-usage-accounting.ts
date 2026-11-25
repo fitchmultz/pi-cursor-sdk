@@ -56,6 +56,12 @@ export function readCursorSdkTurnUsageFromUpdate(update: unknown): CursorSdkTurn
 	return record?.type === "turn-ended" ? readCursorSdkTurnUsage(record.usage) : undefined;
 }
 
+/** One model request's usage; SDK 1.4.2 counts it like turn-ended usage (full prompt, cache partitioned). */
+export function readCursorSdkModelCallUsageFromUpdate(update: unknown): CursorSdkTurnUsage | undefined {
+	const record = asRecord(update);
+	return record?.type === "model-call-completed" ? readCursorSdkTurnUsage(record.usage) : undefined;
+}
+
 function stringifyUsageValue(value: unknown): string {
 	try {
 		return JSON.stringify(value) ?? "";

@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+- A local live-run `toolUse` turn emitted before Cursor's `turn-ended` now reports the usage of the model request that produced it (`model-call-completed`), including its cache read split, instead of an estimate with `cacheRead: 0`. This stops false Pi cache-miss notices on tool steps when `showCacheMissNotices` is on (#532).
+
 ## 0.5.47 - 2026-11-25
 
 <!-- npm-release:unreleased:start -->

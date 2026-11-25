@@ -342,7 +342,8 @@ async function emitCursorLiveRunPendingToolUseTurn(
 	const eventType = cursorLiveRuns.peekEvent(run)?.type;
 	if (eventType !== "tool" && eventType !== "bridge-tool") return undefined;
 	await settleCursorLiveToolBatch(run);
-	// A split emitted before its SDK turn ends uses estimates and suppresses later SDK usage for this run.
+	// A split emitted before its SDK turn ends uses the latest untaken model-call-completed usage
+	// (falling back to estimates) and suppresses later turn-ended usage for this run.
 	await waitForCursorLiveSdkTurnEnded(run, options.signal);
 	if (options.signal?.aborted) throw new CursorLiveRunAbortError();
 	if (eventType === "tool") {

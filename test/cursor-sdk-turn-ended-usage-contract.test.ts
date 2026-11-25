@@ -1,12 +1,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { TurnEndedUpdateSchema } from "@cursor/sdk";
+import { ModelCallCompletedUpdateSchema, TurnEndedUpdateSchema } from "@cursor/sdk";
 import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
 import { calculateContextTokens } from "@earendil-works/pi-coding-agent";
 import {
 	applyCursorUsage,
 	isCursorSdkUsageSafeForPiMessage,
+	readCursorSdkModelCallUsageFromUpdate,
 	readCursorSdkTurnUsageFromUpdate,
 } from "../src/cursor-usage-accounting.js";
 import { installedCursorModules } from "./helpers/cursor-sdk-installed-modules.js";
@@ -91,7 +92,11 @@ describe("installed Cursor SDK turn-ended usage contract", () => {
 		expect(usageTypes).toContain("Build a `TokenUsage` from a turn-ended payload");
 		// SDK 1.4.2 documents the raw semantics this provider already mapped from observation.
 		const deltaTypes = readFileSync(join(sdkRoot, "dist/esm/vendor/cursor-sdk-shared/delta-types.d.ts"), "utf8");
-		expect(deltaTypes.replace(/\s*\*\s*/g, " ")).toContain("`turn-ended` usage: `inputTokens` is the whole prompt, cache reads and writes included");
+		const normalizedDeltaTypes = deltaTypes.replace(/\s*\*\s*/g, " ");
+		expect(normalizedDeltaTypes).toContain("`turn-ended` usage: `inputTokens` is the whole prompt, cache reads and writes included");
+		expect(normalizedDeltaTypes).toContain(
+			"One model call's tokens, sent when the call finishes. Counted like `turn-ended` usage: `inputTokens` is the whole prompt, cache reads and writes included. The turn's `turn-ended` usage is the turn's total. /\nexport declare const ModelCallCompletedUpdateSchema:",
+		);
 
 		// Published toTokenUsage/sumTokenUsage: totalTokens = inputTokens + outputTokens. Cache fields are not added again.
 		const transformSource = (await installedCursorModules()).factorySource("./src/agent/usage-types.ts");
@@ -150,6 +155,14 @@ describe("installed Cursor SDK turn-ended usage contract", () => {
 			expect(partial.usage.totalTokens).not.toBe(additiveFourFieldTotal);
 			expect(partial.usage.totalTokens).toBe(sample.usage.inputTokens + sample.usage.outputTokens);
 			expect(calculateContextTokens(partial.usage)).toBe(partial.usage.totalTokens);
+
+			const modelCallUpdate = { type: "model-call-completed", modelCallId: `call-${index + 1}`, usage: sample.usage };
+			expect(ModelCallCompletedUpdateSchema.safeParse(modelCallUpdate).success).toBe(true);
+			const modelCallUsage = readCursorSdkModelCallUsageFromUpdate(modelCallUpdate);
+			expect(modelCallUsage).toEqual(sample.usage);
+			const modelCallPartial = makeAssistantMessage();
+			applyCursorUsage(modelCallPartial, model, context, 7, { runtime: "local", turn: modelCallUsage!, occupancyFloor: 100000 });
+			expect(modelCallPartial.usage).toMatchObject(fixture.expectedPiMappingFromRawTurnEnded[index]!);
 		}
 	});
 });

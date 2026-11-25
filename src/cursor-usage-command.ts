@@ -1,6 +1,8 @@
 import { closeSync, constants, fsyncSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { AutocompleteItem } from "@earendil-works/pi-tui";
+import { completeSingleTokenOptions } from "./cursor-command-completions.js";
 import { createRegularFileExclusive } from "./cursor-durable-fs.js";
 import { fetchCursorSdkAgentUsage } from "./cursor-sdk-billed-usage.js";
 import { resolveCursorApiKey } from "./cursor-api-key.js";
@@ -16,6 +18,13 @@ const HELP = [
 	"Recovery: export readable facts and retain the original journal/session unchanged. Use Pi's native fork to preserve the conversation under a new session origin, or start a new native session. Never delete, truncate, or rewrite journals or native sessions to continue the old origin.",
 	"Other-branch facts have valid native claims elsewhere in this session; unclaimed facts have no surviving claim here and are not branch usage. Inherited records without a claim in this session retain unknown ownership; no sibling sessions are scanned. Fileless sessions are ephemeral.",
 ].join("\n");
+
+const CURSOR_USAGE_COMPLETIONS: readonly AutocompleteItem[] = [
+	{ value: "refresh", label: "refresh", description: "Refresh public Cursor billing usage for recorded agents" },
+	{ value: "export ", label: "export", description: "Export usage facts to a new JSON file (export <new-file.json>)" },
+	{ value: "help", label: "help", description: "Show /cursor-usage help, storage limits, and recovery guidance" },
+];
+
 export function renderCursorUsageView(view: CursorUsageView): string {
 	return [
 		`Cursor usage — ${view.durability}; persistence ${view.persistenceStatus}; current branch telemetry`,
@@ -45,6 +54,7 @@ export function renderCursorUsageView(view: CursorUsageView): string {
 export function registerCursorUsageCommand(pi: Pick<ExtensionAPI, "appendEntry" | "registerCommand">): void {
 	pi.registerCommand("cursor-usage", {
 		description: "View Cursor telemetry; refresh public billing or export to a new JSON file",
+		getArgumentCompletions: (prefix) => completeSingleTokenOptions(prefix, CURSOR_USAGE_COMPLETIONS),
 		handler: async (args, ctx) => {
 			const show = (message: string, error = false) => {
 				if (ctx.hasUI) ctx.ui.notify(message, error ? "error" : "info");

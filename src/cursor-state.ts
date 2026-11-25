@@ -1,11 +1,16 @@
 import type { AgentModeOption } from "@cursor/sdk";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { AutocompleteItem } from "@earendil-works/pi-tui";
+import { completeSingleTokenOptions } from "./cursor-command-completions.js";
 import {
 	CURSOR_HOST_TOOL_MANIFEST_SUMMARY,
 	CURSOR_TOOL_MANIFEST_ENV,
 	resolveCursorToolManifestEnabled,
 } from "./cursor-tool-manifest.js";
-import { runCursorSessionAgentCleanupCommand } from "./cursor-session-agent-cleanup.js";
+import {
+	getCursorSessionAgentCleanupArgumentCompletions,
+	runCursorSessionAgentCleanupCommand,
+} from "./cursor-session-agent-cleanup.js";
 import {
 	CURSOR_HTTP1_ENTRY_TYPE,
 	isCursorHttp1EntryData,
@@ -65,6 +70,17 @@ const FAST_ENTRY_TYPE = "cursor-fast-state";
 const MODE_ENTRY_TYPE = "cursor-mode-state";
 
 const DEFAULT_CURSOR_AGENT_MODE: AgentModeOption = "agent";
+
+const CURSOR_HTTP_COMPLETIONS: readonly AutocompleteItem[] = [
+	{ value: "on", label: "on", description: "Enable HTTP/1.1/SSE local transport compatibility mode" },
+	{ value: "off", label: "off", description: "Disable HTTP/1.1/SSE local transport compatibility mode" },
+	{ value: "toggle", label: "toggle", description: "Toggle HTTP/1.1/SSE local transport compatibility mode" },
+];
+
+const CURSOR_MODE_COMPLETIONS: readonly AutocompleteItem[] = [
+	{ value: "agent", label: "agent", description: "Default Cursor SDK agent mode" },
+	{ value: "plan", label: "plan", description: "Cursor SDK plan mode" },
+];
 
 interface CursorFastEntryData {
 	modelId?: string;
@@ -494,6 +510,7 @@ export function registerCursorRuntimeControls(pi: CursorRuntimeControlsExtension
 
 	pi.registerCommand("cursor-http", {
 		description: "Toggle Cursor SDK HTTP/1.1/SSE transport compatibility mode",
+		getArgumentCompletions: (prefix) => completeSingleTokenOptions(prefix, CURSOR_HTTP_COMPLETIONS),
 		handler: async (args, ctx) => {
 			const usage = "Usage: /cursor-http [on|off|toggle]";
 			const normalized = args.trim().toLowerCase();
@@ -555,6 +572,7 @@ export function registerCursorRuntimeControls(pi: CursorRuntimeControlsExtension
 
 	pi.registerCommand("cursor-local-resume-cleanup", {
 		description: "Dry-run or delete recorded superseded local Cursor SDK agents",
+		getArgumentCompletions: getCursorSessionAgentCleanupArgumentCompletions,
 		handler: async (args, ctx) => {
 			const storeRoot = resolveCursorLocalStoreRoot({ user: loadCursorSdkUserConfig() }).value;
 			await runCursorSessionAgentCleanupCommand(pi, args, ctx, storeRoot);
@@ -585,6 +603,7 @@ export function registerCursorRuntimeControls(pi: CursorRuntimeControlsExtension
 
 	pi.registerCommand("cursor-mode", {
 		description: "Set Cursor SDK conversation mode: agent or plan",
+		getArgumentCompletions: (prefix) => completeSingleTokenOptions(prefix, CURSOR_MODE_COMPLETIONS),
 		handler: async (args, ctx) => {
 			const usage = "Usage: /cursor-mode agent|plan";
 			const mode = parseCursorAgentMode(args);

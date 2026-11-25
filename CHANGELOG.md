@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Add argument auto-completion (`getArgumentCompletions`) for fixed-option slash commands: `/cursor-http`, `/cursor-mode`, `/cursor-runtime`, `/cursor-cloud`, `/cursor-local-resume-cleanup`, and `/cursor-usage`.
+- Update the Pi compatibility floor and locked development Pi packages (`@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`) from 1.6.0 to 1.6.1.
+
 ## 0.5.46 - 2026-11-21
 
 <!-- npm-release:unreleased:start -->

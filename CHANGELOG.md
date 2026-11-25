@@ -4,8 +4,23 @@
 
 ## Unreleased
 
+## 0.5.47 - 2026-11-25
+
+<!-- npm-release:unreleased:start -->
 - Add argument auto-completion (`getArgumentCompletions`) for fixed-option slash commands: `/cursor-http`, `/cursor-mode`, `/cursor-runtime`, `/cursor-cloud`, `/cursor-local-resume-cleanup`, and `/cursor-usage`.
 - Update the Pi compatibility floor and locked development Pi packages (`@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`) from 1.6.0 to 1.6.1.
+<!-- npm-release:unreleased:end -->
+
+- ci: refresh shared automation pin to 788061a and wire release tag secret (#530) ([8c749c3](https://github.com/fitchmultz/pi-cursor-sdk/commit/8c749c31c04bc1ad16102562d58eed6f27e95a1e))
+
+### What's Changed
+* ci: refresh shared automation pin to 788061a and wire release tag secret by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/530
+* fix(test): support Z.ai openai-responses in native-release-review fixture by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/535
+* chore: enforce 2-day npm min-release-age cooldown by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/534
+* chore: bump Pi to 1.6.1 and add slash-command argument completions by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/536
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.46...v0.5.47
 
 ## 0.5.46 - 2026-11-21
 

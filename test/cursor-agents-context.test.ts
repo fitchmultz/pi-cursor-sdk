@@ -272,7 +272,36 @@ describe("registerCursorAgentsContextDedup", () => {
 		expect(result).toBeUndefined();
 	});
 
-	it("feeds deduped system prompt from before_agent_start into buildCursorPrompt", async () => {
+	it("dedupes systemPromptOptions.contextFiles in place without forcing systemPrompt", async () => {
+		process.env[CURSOR_SETTING_SOURCES_ENV] = "all";
+		const pi = createEventHarness();
+		registerCursorAgentsContextDedup(pi);
+
+		const options = makeSystemPromptOptions([PROJECT_FILE]);
+		const prompt = buildPiSystemPromptWithContextFiles([PROJECT_FILE]);
+		const event = {
+			type: "before_agent_start",
+			messageType: "user",
+			prompt: "hello",
+			systemPrompt: prompt,
+			systemPromptOptions: options,
+		} satisfies BeforeAgentStartEvent & { messageType: "user" };
+		const hookResult = await pi.invokeEvent("before_agent_start", event, cursorModelOverrides);
+
+		expect(hookResult).toBeUndefined();
+		expect(options.contextFiles).toEqual([]);
+
+		const rendered = loadInstalledPiBuildSystemPrompt()(options);
+		const ctx: Context = {
+			systemPrompt: rendered,
+			messages: [],
+		};
+		const result = buildCursorPrompt(ctx);
+		expect(result.text).not.toContain("Project guidance");
+		expect(result.text).not.toContain("<project_context>");
+	});
+
+	it("falls back to returning systemPrompt when forceSystemPrompt is already set", async () => {
 		process.env[CURSOR_SETTING_SOURCES_ENV] = "all";
 		const pi = createEventHarness();
 		registerCursorAgentsContextDedup(pi);
@@ -283,19 +312,11 @@ describe("registerCursorAgentsContextDedup", () => {
 			messageType: "user",
 			prompt: "hello",
 			systemPrompt: prompt,
-			systemPromptOptions: makeSystemPromptOptions([PROJECT_FILE]),
+			systemPromptOptions: { ...makeSystemPromptOptions([PROJECT_FILE]), forceSystemPrompt: prompt },
 		} satisfies BeforeAgentStartEvent & { messageType: "user" };
 		const hookResult = await pi.invokeEvent("before_agent_start", event, cursorModelOverrides);
 
 		expect(hookResult?.systemPrompt).toBeTypeOf("string");
 		expect(hookResult?.systemPrompt).not.toContain("Project guidance");
-
-		const ctx: Context = {
-			systemPrompt: hookResult?.systemPrompt ?? prompt,
-			messages: [],
-		};
-		const result = buildCursorPrompt(ctx);
-		expect(result.text).not.toContain("Project guidance");
-		expect(result.text).not.toContain("<project_context>");
 	});
 });

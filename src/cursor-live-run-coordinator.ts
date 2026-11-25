@@ -4,6 +4,7 @@ import type { SDKAgent } from "@cursor/sdk";
 import {
 	consumeCursorLiveToolResults,
 	createCursorLiveRunAccountingState,
+	recordCursorLiveSdkModelCallCompleted,
 	recordCursorLiveSdkTurnEnded,
 	takeCursorLiveSdkTurnUsage,
 	takeCursorLiveTurnInputTokens,
@@ -108,6 +109,7 @@ export interface CursorLiveRunCoordinator {
 	attachSdkRun(run: CursorLiveRun, sdkRun: CursorLiveSdkRun): void;
 	settle(run: CursorLiveRun, outcome: CursorLiveRunSettledOutcome): void;
 	recordSdkTurnEnded(run: CursorLiveRun, usage?: CursorSdkTurnUsage): void;
+	recordSdkModelCallCompleted(run: CursorLiveRun, usage: CursorSdkTurnUsage): void;
 	hasUntakenSdkTurnObservation(run: CursorLiveRun): boolean;
 	queueEvent(run: CursorLiveRun, event: CursorLiveQueuedEvent): void;
 	peekEvent(run: CursorLiveRun): CursorLiveQueuedEvent | undefined;
@@ -425,6 +427,11 @@ export function createCursorLiveRunCoordinator(deps: CursorLiveRunCoordinatorDep
 			if (run.resources.kind !== "open") return;
 			run.accounting = recordCursorLiveSdkTurnEnded(run.accounting, usage);
 			notifyProgress(run);
+		},
+
+		recordSdkModelCallCompleted(run, usage): void {
+			if (run.resources.kind !== "open") return;
+			run.accounting = recordCursorLiveSdkModelCallCompleted(run.accounting, usage);
 		},
 
 		hasUntakenSdkTurnObservation(run): boolean {

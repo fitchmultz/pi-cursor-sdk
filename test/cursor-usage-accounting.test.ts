@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { InteractionUpdateSchema, TurnEndedUpdateSchema } from "@cursor/sdk";
+import { InteractionUpdateSchema, ModelCallCompletedUpdateSchema, TurnEndedUpdateSchema } from "@cursor/sdk";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { calculateContextTokens } from "@earendil-works/pi-coding-agent";
-import { applyCursorApproximateUsage, applyCursorUsage, estimateCursorAssistantSessionOutputTokens, isCursorSdkUsageSafeForPiMessage, readCursorSdkTurnUsage, readCursorSdkTurnUsageFromUpdate } from "../src/cursor-usage-accounting.js";
+import { applyCursorApproximateUsage, applyCursorUsage, estimateCursorAssistantSessionOutputTokens, isCursorSdkUsageSafeForPiMessage, readCursorSdkModelCallUsageFromUpdate, readCursorSdkTurnUsage, readCursorSdkTurnUsageFromUpdate } from "../src/cursor-usage-accounting.js";
 import { makeContext, makeModel } from "./helpers/pi-harness.js";
 
 function assistant(content: AssistantMessage["content"] = [{ type: "text", text: "Hello back." }]): AssistantMessage {
@@ -47,6 +47,16 @@ describe("native Cursor occupancy", () => {
 		expect(InteractionUpdateSchema.safeParse({ ...update, type: "usage" }).success).toBe(false);
 		expect(readCursorSdkTurnUsage({ ...update.usage, outputTokens: Infinity })).toBeUndefined();
 		expect(readCursorSdkTurnUsage({ ...update.usage, inputTokens: -1 })).toBeUndefined();
+	});
+
+	it("reads the installed SDK's public model-call-completed schema as one request's usage", () => {
+		const usage = { inputTokens: 19715, outputTokens: 60, cacheReadTokens: 17319, cacheWriteTokens: 0, reasoningTokens: 21 };
+		const update = { type: "model-call-completed", modelCallId: "call-1", usage };
+		expect(ModelCallCompletedUpdateSchema.safeParse(update).success).toBe(true);
+		expect(InteractionUpdateSchema.safeParse(update).success).toBe(true);
+		expect(readCursorSdkModelCallUsageFromUpdate(update)).toEqual({ inputTokens: 19715, outputTokens: 60, cacheReadTokens: 17319, cacheWriteTokens: 0 });
+		expect(readCursorSdkModelCallUsageFromUpdate({ type: "turn-ended", usage })).toBeUndefined();
+		expect(readCursorSdkTurnUsageFromUpdate(update)).toBeUndefined();
 	});
 
 	it("estimates thinking and tool-call output as well as text", () => {

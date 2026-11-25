@@ -34,7 +34,11 @@ import {
 	getCursorToolCallIdentity,
 	getToolFingerprint,
 } from "./cursor-provider-turn-tool-ledger.js";
-import { readCursorSdkTurnUsageFromUpdate, type CursorSdkTurnUsage } from "./cursor-usage-accounting.js";
+import {
+	readCursorSdkModelCallUsageFromUpdate,
+	readCursorSdkTurnUsageFromUpdate,
+	type CursorSdkTurnUsage,
+} from "./cursor-usage-accounting.js";
 
 export interface CursorSdkTurnCoordinatorOptions {
 	stream: AssistantMessageEventStream;
@@ -157,6 +161,8 @@ export class CursorSdkTurnCoordinator {
 		if (this.liveRun && (update.type === "turn-ended" || sdkTurnUsage)) {
 			cursorLiveRuns.recordSdkTurnEnded(this.liveRun, sdkTurnUsage);
 		}
+		const sdkModelCallUsage = readCursorSdkModelCallUsageFromUpdate(update);
+		if (this.liveRun && sdkModelCallUsage) cursorLiveRuns.recordSdkModelCallCompleted(this.liveRun, sdkModelCallUsage);
 		if (update.type === "text-delta") {
 			if (update.text) this.hasPendingTextMessage = true;
 			this.textDeltas.push(update.text);

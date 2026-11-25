@@ -4,6 +4,7 @@ import { estimateCursorPromptMessageTokens } from "../src/context.js";
 import {
 	consumeCursorLiveToolResults,
 	createCursorLiveRunAccountingState,
+	recordCursorLiveSdkModelCallCompleted,
 	recordCursorLiveSdkTurnEnded,
 	takeCursorLiveSdkTurnUsage,
 	takeCursorLiveTurnInputTokens,
@@ -87,6 +88,38 @@ describe("cursor live-run accounting", () => {
 
 		expect(unreported.usage).toBeUndefined();
 		expect(next.usage).toEqual(laterTurn);
+	});
+
+	it("attributes the latest untaken model request to tool-use turns emitted before the SDK turn ended", () => {
+		const firstCall = { inputTokens: 19_376, outputTokens: 40, cacheReadTokens: 0, cacheWriteTokens: 0 };
+		const secondCall = { inputTokens: 19_715, outputTokens: 60, cacheReadTokens: 17_319, cacheWriteTokens: 0 };
+		const thirdCall = { inputTokens: 20_071, outputTokens: 41, cacheReadTokens: 17_666, cacheWriteTokens: 0 };
+		let state = recordCursorLiveSdkModelCallCompleted(createCursorLiveRunAccountingState(100), firstCall);
+
+		const first = takeCursorLiveSdkTurnUsage(state);
+		expect(first.usage).toEqual(firstCall);
+		const nothingNew = takeCursorLiveSdkTurnUsage(first.state);
+		expect(nothingNew.usage).toBeUndefined();
+
+		state = recordCursorLiveSdkModelCallCompleted(recordCursorLiveSdkModelCallCompleted(nothingNew.state, secondCall), thirdCall);
+		const latest = takeCursorLiveSdkTurnUsage(state);
+		expect(latest.usage).toEqual(thirdCall);
+
+		// The run's summed turn-ended usage stays suppressed once a turn was emitted before it.
+		const late = takeCursorLiveSdkTurnUsage(recordCursorLiveSdkTurnEnded(latest.state, laterTurn));
+		expect(late.usage).toBeUndefined();
+	});
+
+	it("prefers attributable turn usage and drops the request it covers", () => {
+		const call = { inputTokens: 20_416, outputTokens: 474, cacheReadTokens: 18_256, cacheWriteTokens: 0 };
+		const state = recordCursorLiveSdkTurnEnded(recordCursorLiveSdkModelCallCompleted(createCursorLiveRunAccountingState(100), call), laterTurn);
+
+		const taken = takeCursorLiveSdkTurnUsage(state);
+		expect(taken.usage).toEqual(laterTurn);
+		expect(takeCursorLiveSdkTurnUsage(taken.state).usage).toBeUndefined();
+
+		const unreported = recordCursorLiveSdkTurnEnded(recordCursorLiveSdkModelCallCompleted(createCursorLiveRunAccountingState(100), call));
+		expect(takeCursorLiveSdkTurnUsage(unreported).usage).toEqual(call);
 	});
 
 	it("suppresses SDK usage for the rest of the run once a turn is emitted before its SDK turn ended", () => {

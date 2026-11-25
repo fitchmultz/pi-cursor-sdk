@@ -167,6 +167,49 @@ describe("streamCursor native replay live run", () => {
 		expect(replayDone.message.content).toEqual([{ type: "text", text: "Final answer only." }]);
 	});
 
+	it("uses the completed model request's usage for a native toolUse turn emitted before the SDK turn ends", async () => {
+		process.env.PI_CURSOR_NATIVE_TOOL_DISPLAY = "1";
+		const registeredTools: RegisteredTool[] = [];
+		await registerNativeToolDisplayForTest(registeredTools);
+
+		const run = deferredRunWait();
+		const mockSend = vi.fn().mockImplementation(async (_msg: unknown, opts: { onDelta: CursorDeltaHandler }) => {
+			opts.onDelta({ update: { type: "text-delta", text: "I am checking files." } });
+			emitCompletedSdkToolCall(opts.onDelta, { callId: "c1", name: "read", args: { path: "README.md" }, value: { content: "# pi-cursor-sdk" } });
+			// Captured SDK 1.4.2 order: the request completes after its tool call; turn-ended arrives only when the run ends.
+			opts.onDelta({
+				update: {
+					type: "model-call-completed",
+					modelCallId: "model-call-1",
+					usage: { inputTokens: 19_715, outputTokens: 60, cacheReadTokens: 17_319, cacheWriteTokens: 0, reasoningTokens: 21 },
+				},
+			});
+			return asMockCursorRun({ id: "run-1", agentId: "agent-1", status: "running", wait: run.wait });
+		});
+		mockCreatedAgent({ send: mockSend });
+
+		const firstEvents = await collectEvents(streamCursor(makeModel(), makeContext(), { apiKey: "test-key" }));
+		const firstDone = getDoneEvent(firstEvents);
+
+		expect(firstDone.reason).toBe("toolUse");
+		expect(firstDone.message.usage).toMatchObject({
+			input: 19_715 - 17_319,
+			output: 60,
+			cacheRead: 17_319,
+			cacheWrite: 0,
+			totalTokens: 19_715 + 60,
+		});
+
+		const toolCall = firstDone.message.content.find(isToolCallBlock);
+		const readTool = registeredTools.find((tool) => tool.name === "read");
+		const toolResult = await readTool!.execute(toolCall!.id, toolCall!.arguments, undefined, undefined, createExtensionTestContext());
+		run.settle({ id: "run-1", status: "finished", result: "Done." });
+		const replayContext = makeContext();
+		replayContext.messages = [...replayContext.messages, firstDone.message, toolResultMessage(toolCall!, toolResult, 2)];
+		const replayDone = getDoneEvent(await collectEvents(streamCursor(makeModel(), replayContext, { apiKey: "test-key" })));
+		expect(replayDone.reason).toBe("stop");
+	});
+
 	it("ignores late oversized SDK usage for replay occupancy but persists it once on the original origin", async () => {
 		const root = mkdtempSync(join(tmpdir(), "cursor-late-usage-"));
 		try {

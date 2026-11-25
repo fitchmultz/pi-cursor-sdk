@@ -101,6 +101,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 - `src/cursor-durable-fs.ts` owns no-follow regular-file opens, exclusive private creation, fsync, and bounded validated frame IO shared by usage journals, Cloud lifecycle and local cleanup; preserve descriptor/path identity guards.
 - `src/cursor-state.ts` owns Cursor fast/mode controls, `/cursor-http` session/user persistence, `/cursor-tools`, and local config refresh/cleanup wiring.
 - `src/cursor-runtime-state.ts` owns effective Cursor config/runtime resolution, cloud/local runtime flags, runtime status helpers, cloud acknowledgement, and `/cursor-runtime` / `/cursor-cloud` wiring.
+- Each fixed-option slash command owns its argument positions and uses Pi's `fuzzyFilter` to match completion labels.
 - `src/context.ts`, `src/context-window-cache.ts`, and `src/bundled-context-windows.ts` handle prompt conversion and context-window caches.
 - `src/cursor-bridge-contract.ts` owns pi bridge MCP naming, the model-facing bridge preference text, and concise MCP descriptions that point to the bootstrap tool-surface rules.
 - `src/cursor-tool-manifest.ts` owns bootstrap callable-surface manifest text (`PI_CURSOR_TOOL_MANIFEST`, default on).
@@ -117,7 +118,7 @@ This repository is a pi provider extension that registers Cursor SDK-backed mode
 ## Operating rules
 
 - Prefer the smallest change that preserves the current pi user contract.
-- This package requires official Pi 1.6.0+ and Node 24.22.3 (24.x) or 26.13.1 and newer. Current locked development Pi packages are 1.6.0 snapshots; development Pi/TypeBox dependencies are reproducible build inputs, not qualification targets or user runtime upgrades. Compatibility requires latest stable official Pi and current `fitchmultz/pi` main, resolving version/commit once per workflow run and retaining exact SDK/CLI evidence; optional Pi and TypeBox peer ranges stay `"*"` per Pi guidance.
+- This package requires official Pi 1.6.1+ and Node 24.22.3 (24.x) or 26.13.1 and newer. Current locked development Pi packages are 1.6.1 snapshots; development Pi/TypeBox dependencies are reproducible build inputs, not qualification targets or user runtime upgrades. Compatibility requires latest stable official Pi and current `fitchmultz/pi` main, resolving version/commit once per workflow run and retaining exact SDK/CLI evidence; optional Pi and TypeBox peer ranges stay `"*"` per Pi guidance.
 - Treat Cursor SDK model metadata as the source of truth for model IDs, parameters, variants, thinking controls, and context variants. Do not hardcode new model-specific behavior unless it is a documented fallback.
 - HARD REPO RULE: never guess what the Cursor SDK outputs, expects, or does. Always verify Cursor SDK behavior against the installed `@cursor/sdk` package and/or the official TypeScript SDK docs at `https://cursor.com/docs/sdk/typescript` before making claims or implementation changes.
 - Contract-test external behavior before relying on it: when code depends on Cursor SDK/pi runtime payloads, timing, lifecycle, errors, usage accounting, or tool/event shapes, add or update a focused test that asserts the observed installed-package/docs/captured-fixture contract and fails if that contract drifts. Do not replace this with mocks based on guesses.

@@ -1,5 +1,6 @@
 import type { LocalAgentStore } from "@cursor/sdk";
 import type { ExtensionAPI, ExtensionCommandContext, SessionEntry } from "@earendil-works/pi-coding-agent";
+import { fuzzyFilter, type AutocompleteItem } from "@earendil-works/pi-tui";
 import { asRecord, getString } from "./cursor-record-utils.js";
 import { fsyncExistingRegularFile } from "./cursor-durable-fs.js";
 import { scrubSensitiveText } from "./cursor-sensitive-text.js";
@@ -23,6 +24,18 @@ import {
 } from "./cursor-session-store.js";
 
 export const CURSOR_SESSION_AGENT_CLEANUP_ENTRY_TYPE = "cursor-sdk-agent-cleanup";
+
+const CURSOR_LOCAL_RESUME_CLEANUP_COMPLETIONS: AutocompleteItem[] = [
+	{ value: "--dry-run", label: "--dry-run", description: "Preview cleanup-eligible superseded local agents without deleting" },
+	{ value: "--yes", label: "--yes", description: "Delete recorded superseded local agents eligible for cleanup" },
+];
+
+export function getCursorSessionAgentCleanupArgumentCompletions(prefix: string): AutocompleteItem[] | null {
+	const query = prefix.trimStart();
+	if (/\s/.test(query)) return null;
+	const matches = fuzzyFilter(CURSOR_LOCAL_RESUME_CLEANUP_COMPLETIONS, query, (item) => item.label);
+	return matches.length > 0 ? matches : null;
+}
 
 type CleanupAction = "dry-run" | "delete";
 type CleanupPhase = "intent" | "result";

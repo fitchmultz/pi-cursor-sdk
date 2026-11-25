@@ -2,6 +2,7 @@ import { hash } from "node:crypto";
 import { closeSync, constants, existsSync, fchmodSync, fstatSync, fsyncSync, openSync, readFileSync, readSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
+import { fuzzyFilter, type AutocompleteItem } from "@earendil-works/pi-tui";
 import { resolveCursorApiKey } from "./cursor-api-key.js";
 import {
 	MAX_CLOUD_REPORT_BRANCHES,
@@ -19,6 +20,16 @@ import { scrubSensitiveText } from "./cursor-sensitive-text.js";
 import { loadCursorSdk } from "./cursor-sdk-runtime.js";
 
 export { CLOUD_LIFECYCLE_ENTRY_TYPE };
+
+const CURSOR_CLOUD_SUBCOMMAND_COMPLETIONS: AutocompleteItem[] = [
+	{ value: "list", label: "list", description: "List recorded Cursor cloud agents for this session branch" },
+	{ value: "archive ", label: "archive", description: "Archive a recorded Cursor cloud agent (archive <bc-agentId>)" },
+	{ value: "delete ", label: "delete", description: "Delete a recorded Cursor cloud agent (delete <bc-agentId> --yes)" },
+];
+
+const CURSOR_CLOUD_DELETE_CONFIRM_COMPLETIONS: AutocompleteItem[] = [
+	{ value: "--yes", label: "--yes", description: "Confirm deleting the recorded Cursor cloud agent" },
+];
 
 const MAX_LEDGER_AGENT_ID_LENGTH = 256;
 const MAX_LEDGER_RUN_ID_LENGTH = 256;
@@ -736,6 +747,20 @@ export async function runCursorCloudLifecycleCommand(pi: CloudLifecycleApi, args
 		return;
 	}
 	ctx.ui.notify(`Invalid Cursor cloud command. ${usage}`, "error");
+}
+
+export function getCursorCloudLifecycleArgumentCompletions(prefix: string): AutocompleteItem[] | null {
+	const parts = prefix.trimStart().split(/\s+/);
+	if (parts.length === 1) {
+		const matches = fuzzyFilter(CURSOR_CLOUD_SUBCOMMAND_COMPLETIONS, parts[0] ?? "", (item) => item.label);
+		return matches.length > 0 ? matches : null;
+	}
+	if (parts.length === 3 && parts[0] === "delete" && isValidExactCloudAgentId(parts[1])) {
+		const agentId = parts[1];
+		const matches = fuzzyFilter(CURSOR_CLOUD_DELETE_CONFIRM_COMPLETIONS, parts[2] ?? "", (item) => item.label);
+		return matches.length > 0 ? matches.map((item) => ({ ...item, value: `delete ${agentId} ${item.value}` })) : null;
+	}
+	return null;
 }
 
 export const __testUtils = {

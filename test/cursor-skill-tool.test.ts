@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, onTestFinished } from "vitest";
+import { validateToolArguments } from "@earendil-works/pi-ai";
 import type { BeforeAgentStartEvent, ExtensionContext, Skill } from "@earendil-works/pi-coding-agent";
 import {
 	CURSOR_ACTIVATE_SKILL_MCP_NAME,
@@ -128,6 +129,51 @@ describe("registerCursorSkillTool", () => {
 		expect(text).toContain("<skill_content name=\"global-skill\">");
 		expect(text).toContain("# Global Skill");
 		expect(text).toContain("references/guide.md");
+	});
+
+	it("accepts skill as an alias for name when models mirror the XML tag", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pi-cursor-skill-alias-"));
+		onTestFinished(() => rm(dir, { recursive: true, force: true }));
+		const skillDir = join(dir, "alias-skill");
+		const skillPath = join(skillDir, "SKILL.md");
+		await mkdir(skillDir, { recursive: true });
+		await writeFile(skillPath, "# Alias Skill\n");
+		const skill = makeSkill({ name: "alias-skill", description: "Alias skill", filePath: skillPath });
+		const pi = createPiHarness({ activeTools: ["read"] });
+		registerCursorSkillTool(pi);
+		await pi.invokeEvent(
+			"before_agent_start",
+			{
+				type: "before_agent_start",
+				messageType: "user",
+				prompt: "hello",
+				systemPrompt: "System prompt.",
+				systemPromptOptions: { ...createDefaultSystemPromptOptions(dir), skills: [skill] },
+			},
+			{ model: makeModel("composer-2.5"), cwd: dir },
+		);
+		const tool = getHarnessRegisteredTool(pi._tools, CURSOR_ACTIVATE_SKILL_TOOL_NAME);
+		expect(
+			validateToolArguments(tool, {
+				type: "toolCall",
+				id: "schema-alias",
+				name: CURSOR_ACTIVATE_SKILL_TOOL_NAME,
+				arguments: { skill: "alias-skill" },
+			}),
+		).toEqual({ skill: "alias-skill" });
+		expect(
+			validateToolArguments(tool, {
+				type: "toolCall",
+				id: "schema-name",
+				name: CURSOR_ACTIVATE_SKILL_TOOL_NAME,
+				arguments: { name: "alias-skill" },
+			}),
+		).toEqual({ name: "alias-skill" });
+		const toolResult = await tool.execute("call-alias", { skill: "alias-skill" }, undefined, undefined, createExtensionTestContext({ model: makeModel("composer-2.5"), cwd: dir }));
+		const text = toolResult.content?.[0]?.type === "text" ? toolResult.content[0].text : "";
+
+		expect(toolResult).not.toMatchObject({ isError: true });
+		expect(text).toContain("<skill_content name=\"alias-skill\">");
 	});
 
 	it("keeps the activation tool inactive and omits the catalog in cloud runtime", async () => {

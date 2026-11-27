@@ -80,6 +80,25 @@ async function createNativeSkillSession(
 	return { session, services };
 }
 
+it("activates a skill when the model sends skill instead of name", async () => {
+	const root = await mkdtemp(join(tmpdir(), "cursor-skill-native-alias-"));
+	const skill = await createSkill(root, "proof", "Follow the proof skill instructions.");
+	const { session } = await createNativeSkillSession(root, [skill], (context) => {
+		if (context.messages.at(-1)?.role !== "user") return [{ type: "text", text: "OK" }];
+		return [{ type: "toolCall", id: "activate-proof-skill-key", name: "cursor_activate_skill", arguments: { skill: "proof" } }];
+	});
+	try {
+		await session.prompt("Use the proof skill.");
+		const activation = session.messages.find((message) => message.role === "toolResult" && message.toolName === "cursor_activate_skill");
+		expect(activation).toMatchObject({ isError: false });
+		const content = activation?.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+		expect(content).toContain("Follow the proof skill instructions.");
+	} finally {
+		session.dispose();
+		await rm(root, { recursive: true, force: true });
+	}
+}, 15000);
+
 it("keeps native Pi prompts stable after lazy skill activation without losing the skill tool", async () => {
 	const root = await mkdtemp(join(tmpdir(), "cursor-skill-native-"));
 	const skill = await createSkill(root, "proof", "Follow the proof skill instructions.");

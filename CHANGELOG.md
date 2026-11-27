@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+- Raise the minimum supported Pi version and the locked development Pi packages to 1.7.0.
+
 ## 0.5.47 - 2026-11-25
 
 <!-- npm-release:unreleased:start -->

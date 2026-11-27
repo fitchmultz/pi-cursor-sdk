@@ -59,7 +59,7 @@ it.each(["named", "unnamed"])("tracks the real %s tool owner across native new/r
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
 		const services = await createAgentSessionServices({
 			cwd, agentDir,
-			settingsManager: SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false }, enableInstallTelemetry: false }),
+			settingsManager: SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false } }),
 			resourceLoaderOptions: {
 				noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
 				extensionFactories: factoryMode === "unnamed"
@@ -210,7 +210,7 @@ it.each([
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
 		const services = await createAgentSessionServices({
 			cwd, agentDir,
-			settingsManager: SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false }, enableInstallTelemetry: false }),
+			settingsManager: SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false } }),
 			resourceLoaderOptions: {
 				noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
 				extensionFactories: [cursor],

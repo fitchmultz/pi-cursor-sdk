@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, onTestFinished } from "vitest";
+import { validateToolArguments } from "@earendil-works/pi-ai";
 import type { BeforeAgentStartEvent, ExtensionContext, Skill } from "@earendil-works/pi-coding-agent";
 import {
 	CURSOR_ACTIVATE_SKILL_MCP_NAME,
@@ -152,6 +153,22 @@ describe("registerCursorSkillTool", () => {
 			{ model: makeModel("composer-2.5"), cwd: dir },
 		);
 		const tool = getHarnessRegisteredTool(pi._tools, CURSOR_ACTIVATE_SKILL_TOOL_NAME);
+		expect(
+			validateToolArguments(tool, {
+				type: "toolCall",
+				id: "schema-alias",
+				name: CURSOR_ACTIVATE_SKILL_TOOL_NAME,
+				arguments: { skill: "alias-skill" },
+			}),
+		).toEqual({ skill: "alias-skill" });
+		expect(
+			validateToolArguments(tool, {
+				type: "toolCall",
+				id: "schema-name",
+				name: CURSOR_ACTIVATE_SKILL_TOOL_NAME,
+				arguments: { name: "alias-skill" },
+			}),
+		).toEqual({ name: "alias-skill" });
 		const toolResult = await tool.execute("call-alias", { skill: "alias-skill" }, undefined, undefined, createExtensionTestContext({ model: makeModel("composer-2.5"), cwd: dir }));
 		const text = toolResult.content?.[0]?.type === "text" ? toolResult.content[0].text : "";
 

@@ -26,7 +26,12 @@ type CursorSkillToolExtensionApi = Pick<ExtensionAPI, "getActiveTools" | "regist
 
 type CursorActivateSkillParams = {
 	name?: string;
+	skill?: string;
 };
+
+function resolveRequestedSkillName(params: CursorActivateSkillParams): string | undefined {
+	return params.name?.trim() || params.skill?.trim() || undefined;
+}
 
 interface CursorSkillActivationDetails {
 	name: string;
@@ -178,10 +183,11 @@ export function registerCursorSkillTool(pi: CursorSkillToolExtensionApi): void {
 		label: "Cursor skill",
 		description: "Load full pi Agent Skill instructions for Cursor. Use with a skill name from the current <available_skills> catalog before applying that skill.",
 		parameters: Type.Object({
-			name: Type.String({ description: "Skill name from the current <available_skills> catalog" }),
+			name: Type.Optional(Type.String({ description: "Skill name from the current <available_skills> catalog" })),
+			skill: Type.Optional(Type.String({ description: "Alias for name; matches the <name> element in <available_skills>" })),
 		}),
 		async execute(_toolCallId, params) {
-			const requestedName = (params as CursorActivateSkillParams).name?.trim();
+			const requestedName = resolveRequestedSkillName(params as CursorActivateSkillParams);
 			if (!requestedName) {
 				throw new Error("No skill name was provided.");
 			}

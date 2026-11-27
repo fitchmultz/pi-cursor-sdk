@@ -242,7 +242,21 @@ export function registerCursorSkillTool(pi: CursorSkillToolExtensionApi): void {
 				setCurrentSkills([]);
 			}
 			syncCursorSkillToolForModel(ctx.model, runtime);
-			const resolved = resolveCursorSkillSystemPrompt(event.systemPrompt, ctx.model, event.systemPromptOptions, runtime);
+			if (!cursorModel) return undefined;
+			const options = event.systemPromptOptions;
+			if (options && options.forceSystemPrompt === undefined) {
+				if (runtime === "cloud") {
+					options.skills = [];
+					delete options.sections?.skills;
+					return undefined;
+				}
+				const skills = getVisibleSkills(options.skills);
+				if (skills.length === 0) return undefined;
+				const sections = (options.sections ??= {});
+				sections.skills = formatCursorSkillsForPrompt(skills).trim();
+				return undefined;
+			}
+			const resolved = resolveCursorSkillSystemPrompt(event.systemPrompt, ctx.model, options, runtime);
 			if (resolved === event.systemPrompt) return undefined;
 			return { systemPrompt: resolved };
 		},

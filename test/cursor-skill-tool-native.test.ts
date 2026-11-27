@@ -7,10 +7,13 @@ import {
 	createAgentSessionServices,
 	SessionManager,
 	SettingsManager,
+	type ExtensionFactory,
 	type Skill,
 } from "@earendil-works/pi-coding-agent";
 import { createAssistantMessageEventStream, getCurrentSystemPrompt, getCurrentTools, type AssistantMessage, type Context } from "@earendil-works/pi-ai";
 import { registerCursorSkillTool } from "../src/cursor-skill-tool.js";
+import { registerCursorAgentsContextDedup } from "../src/cursor-agents-context-registration.js";
+import { CURSOR_SETTING_SOURCES_ENV } from "../src/cursor-setting-sources.js";
 import { computeCursorContextFingerprint } from "../src/context.js";
 import { planCursorSessionSend } from "../src/cursor-session-send-policy.js";
 import { makeAssistantMessage } from "./helpers/pi-harness.js";
@@ -34,6 +37,10 @@ async function createNativeSkillSession(
 	root: string,
 	skills: Skill[],
 	respond: (context: Context) => AssistantMessage["content"] | Promise<AssistantMessage["content"]>,
+	options?: {
+		extraExtensions?: ExtensionFactory[];
+		contextFiles?: Array<{ path: string; content: string }>;
+	},
 ) {
 	const services = await createAgentSessionServices({
 		cwd: root,
@@ -41,8 +48,9 @@ async function createNativeSkillSession(
 		settingsManager: SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false } }),
 		resourceLoaderOptions: {
 			noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
-			extensionFactories: [registerCursorSkillTool],
+			extensionFactories: [registerCursorSkillTool, ...(options?.extraExtensions ?? [])],
 			skillsOverride: () => ({ skills, diagnostics: [] }),
+			...(options?.contextFiles ? { agentsFilesOverride: () => ({ agentsFiles: options.contextFiles! }) } : {}),
 		},
 	});
 	services.modelRuntime.registerProvider("cursor", {
@@ -189,3 +197,49 @@ it.each(["session_start", "activation", "model_select"] as const)(
 	},
 	15000,
 );
+
+it("preserves later extensions' systemPromptOptions.sections alongside Cursor skill and context hooks", async () => {
+	const previousSettingSources = process.env[CURSOR_SETTING_SOURCES_ENV];
+	process.env[CURSOR_SETTING_SOURCES_ENV] = "all";
+	const root = await mkdtemp(join(tmpdir(), "cursor-skill-sections-"));
+	const skill = await createSkill(root, "proof", "Follow the proof skill instructions.");
+	const captured: Context[] = [];
+	const laterSectionExtension: ExtensionFactory = (pi) => {
+		pi.on("before_agent_start", (event) => {
+			const sections = (event.systemPromptOptions.sections ??= {});
+			sections.reply_style = "Format replies with status pills.";
+		});
+	};
+	const { session } = await createNativeSkillSession(
+		root,
+		[skill],
+		(context) => {
+			captured.push({ ...context, messages: structuredClone(context.messages) });
+			return [{ type: "text", text: "OK" }];
+		},
+		{
+			extraExtensions: [registerCursorAgentsContextDedup, laterSectionExtension],
+			contextFiles: [
+				{ path: join(root, "AGENTS.md"), content: "OVERLAPPING_PROJECT_AGENTS" },
+				{ path: join(root, "NOTES.md"), content: "PRESERVED_PROJECT_NOTES" },
+			],
+		},
+	);
+	try {
+		await session.prompt("Hello.");
+		expect(captured).toHaveLength(1);
+		const systemPrompt = getCurrentSystemPrompt(captured[0].messages);
+		expect(systemPrompt).toContain("call pi__cursor_activate_skill with the skill name");
+		expect(systemPrompt).toContain("<reply_style>\nFormat replies with status pills.\n</reply_style>");
+		expect(systemPrompt).not.toContain("OVERLAPPING_PROJECT_AGENTS");
+		expect(systemPrompt).toContain("PRESERVED_PROJECT_NOTES");
+	} finally {
+		if (previousSettingSources === undefined) {
+			delete process.env[CURSOR_SETTING_SOURCES_ENV];
+		} else {
+			process.env[CURSOR_SETTING_SOURCES_ENV] = previousSettingSources;
+		}
+		session.dispose();
+		await rm(root, { recursive: true, force: true });
+	}
+}, 15000);

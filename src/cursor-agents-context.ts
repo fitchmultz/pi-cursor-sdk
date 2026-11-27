@@ -151,6 +151,24 @@ export function removePiAgentsContextFromSystemPrompt(
 	return systemPrompt.slice(0, start) + replacementSection + systemPrompt.slice(start + originalSection.length);
 }
 
+export function filterCursorAgentsContextFiles(
+	model: ExtensionContext["model"],
+	contextFiles: readonly PiAgentsContextFile[],
+	settingSourcesRaw?: string,
+	agentDir?: string,
+	runtime: CursorRuntime = "local",
+): PiAgentsContextFile[] | undefined {
+	if (runtime === "cloud") return undefined;
+	const settingSources =
+		settingSourcesRaw === undefined
+			? getEffectiveCursorSettingSources()
+			: resolveCursorSettingSources(settingSourcesRaw);
+	if (!shouldSuppressPiAgentsContext(model, contextFiles, settingSources, agentDir)) {
+		return undefined;
+	}
+	return contextFiles.filter((file) => !shouldRemovePiAgentsContextFile(file, settingSources, agentDir));
+}
+
 export function resolveCursorFacingSystemPrompt(
 	systemPrompt: string,
 	model: ExtensionContext["model"],

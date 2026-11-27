@@ -153,7 +153,6 @@ function seedAgentDir(dir, shellPath) {
 	mkdirSync(dir, { recursive: true });
 	const settings = {
 		quietStartup: true,
-		enableInstallTelemetry: false,
 	};
 	if (shellPath) settings.shellPath = shellPath;
 	writeFileSync(join(dir, "settings.json"), `${JSON.stringify(settings)}\n`);

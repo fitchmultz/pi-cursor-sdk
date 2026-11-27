@@ -6,7 +6,7 @@ This workflow is the canonical repo path for verifying Cursor SDK tool replay th
 
 Use it when changed replay-card behavior needs new visual proof not covered by offline rendering contracts or valid retained evidence. Text logs and JSONL are not enough for visual-parity claims: keep PNGs for the exact prompt, and before/after PNGs for a rendering comparison. Reuse a valid retained baseline instead of paying to recreate it.
 
-Current validation baseline: Node 24.22.3+ (24.x), exact `@cursor/sdk@1.4.2`, official Pi 1.6.1/latest and current `fitchmultz/pi` main. Development Pi packages `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` are exact locked 1.6.1 snapshots, with host TypeBox 1.3.27. These locked development snapshots are not qualification targets; resolve latest stable official Pi and current `fitchmultz/pi` main once per workflow run. Optional published Pi and TypeBox peer dependencies use `"*"` ranges per Pi guidance.
+Current validation baseline: Node 24.22.3+ (24.x), exact `@cursor/sdk@1.4.2`, official Pi 1.7.0/latest and current `fitchmultz/pi` main. Development Pi packages `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` are exact locked 1.7.0 snapshots, with host TypeBox 1.3.27. These locked development snapshots are not qualification targets; resolve latest stable official Pi and current `fitchmultz/pi` main once per workflow run. Optional published Pi and TypeBox peer dependencies use `"*"` ranges per Pi guidance.
 
 ## Cursor SDK 1.0.17 / pi 0.79.0 cutover visual record
 
@@ -90,7 +90,7 @@ npx playwright install chromium
 - `PI_CURSOR_PI_TOOL_BRIDGE=0` by default
 - `PI_CURSOR_EXPOSE_BUILTIN_TOOLS=0` by default
 - Cursor SDK event-debug artifact env cleared before each run; `--event-debug` sets a deterministic debug directory under `--out-dir`
-- `PI_CODING_AGENT_DIR` isolated to `<out-dir>/pi-agent`, seeded with the host `auth.json` (0600) plus `quietStartup`/telemetry-off settings, so host extensions, skills, themes, and MCP config cannot leak into captures
+- `PI_CODING_AGENT_DIR` isolated to `<out-dir>/pi-agent` to keep host extensions, skills, themes, and MCP config out of captures. The runner copies the host `auth.json` when available, sets its permissions to `0600`, and writes `quietStartup: true` to `settings.json`.
 - `PI_OFFLINE=1` and `PI_SKIP_VERSION_CHECK=1`, so update banners and package-update notices cannot appear in captures
 - `TERM=xterm-256color`
 - cwd set to the target audit repo; the tmux session starts in `--cwd` with a non-login shell so a stale tmux-server cwd cannot print `getcwd` errors

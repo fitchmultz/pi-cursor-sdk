@@ -216,7 +216,7 @@ function seedVisualAgentDir(agentDir) {
 	}
 	writeFileSync(
 		join(agentDir, "settings.json"),
-		`${JSON.stringify({ quietStartup: true, enableInstallTelemetry: false })}\n`,
+		`${JSON.stringify({ quietStartup: true })}\n`,
 	);
 }
 

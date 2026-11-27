@@ -131,8 +131,11 @@ function cleanModel(value: unknown): CursorUsageStart["model"] {
 	const model = asRecord(value);
 	const cost = asRecord(model?.cost);
 	const rateKeys = ["input", "output", "cacheRead", "cacheWrite"];
-	const ratesValid = (rates: Record<string, unknown>) => rateKeys.every(key => typeof rates[key] === "number" && Number.isFinite(rates[key]) && (rates[key] as number) >= 0);
-	if (!model || !only(model, ["id", "provider", "cost"]) || !text(model.id) || !text(model.provider) || !cost || !only(cost, [...rateKeys, "tiers"]) || !ratesValid(cost)) throw new Error("invalid Cursor model pricing");
+	const rateValid = (rate: unknown) => typeof rate === "number" && Number.isFinite(rate) && rate >= 0;
+	const ratesValid = (rates: Record<string, unknown>) => rateKeys.every(key => rateValid(rates[key]));
+	if (!model || !only(model, ["id", "provider", "cost"]) || !text(model.id) || !text(model.provider) ||
+		!cost || !only(cost, [...rateKeys, "imageOutput", "tiers"]) || !ratesValid(cost) ||
+		(cost.imageOutput !== undefined && !rateValid(cost.imageOutput))) throw new Error("invalid Cursor model pricing");
 	if (cost.tiers !== undefined && (!Array.isArray(cost.tiers) || !cost.tiers.every(item => {
 		const tier = asRecord(item);
 		return tier && only(tier, [...rateKeys, "inputTokensAbove"]) && ratesValid(tier) && Number.isSafeInteger(tier.inputTokensAbove) && (tier.inputTokensAbove as number) >= 0;

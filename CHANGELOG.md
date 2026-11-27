@@ -4,7 +4,19 @@
 
 ## Unreleased
 
+## 0.5.48 - 2026-11-27
+
+<!-- npm-release:unreleased:start -->
 - Raise the minimum supported Pi version and the locked development Pi packages to 1.7.0.
+<!-- npm-release:unreleased:end -->
+
+- chore: raise Pi floor to 1.7.0 (PEA-240) (#540) ([8733647](https://github.com/fitchmultz/pi-cursor-sdk/commit/873364751b53dee1a0d54b6d06e036fd6100c1d2))
+
+### What's Changed
+* chore: raise Pi floor to 1.7.0 (PEA-240) by @fitchmultz in https://github.com/fitchmultz/pi-cursor-sdk/pull/540
+
+
+**Full Changelog**: https://github.com/fitchmultz/pi-cursor-sdk/compare/v0.5.47...v0.5.48
 
 ## 0.5.47 - 2026-11-25
 

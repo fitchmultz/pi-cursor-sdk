@@ -90,7 +90,7 @@ npx playwright install chromium
 - `PI_CURSOR_PI_TOOL_BRIDGE=0` by default
 - `PI_CURSOR_EXPOSE_BUILTIN_TOOLS=0` by default
 - Cursor SDK event-debug artifact env cleared before each run; `--event-debug` sets a deterministic debug directory under `--out-dir`
-- `PI_CODING_AGENT_DIR` isolated to `<out-dir>/pi-agent`, seeded with the host `auth.json` (0600) plus `quietStartup`/telemetry-off settings, so host extensions, skills, themes, and MCP config cannot leak into captures
+- `PI_CODING_AGENT_DIR` isolated to `<out-dir>/pi-agent` to keep host extensions, skills, themes, and MCP config out of captures. The runner copies the host `auth.json` when available, sets its permissions to `0600`, and writes `quietStartup: true` to `settings.json`.
 - `PI_OFFLINE=1` and `PI_SKIP_VERSION_CHECK=1`, so update banners and package-update notices cannot appear in captures
 - `TERM=xterm-256color`
 - cwd set to the target audit repo; the tmux session starts in `--cwd` with a non-login shell so a stale tmux-server cwd cannot print `getcwd` errors

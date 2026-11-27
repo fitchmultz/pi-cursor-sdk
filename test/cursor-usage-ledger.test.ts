@@ -26,6 +26,16 @@ function setup() {
 }
 function agent(getUsage: SDKAgent["getUsage"] = async () => bill()): SDKAgent { return { agentId: "agent-test", getUsage } as SDKAgent; }
 describe("origin usage recorder and supported view", () => {
+	it("preserves an optional Pi image-output rate when reopening the usage journal", async () => {
+		const s = setup();
+		const model = makeModel();
+		const cost = { ...model.cost, imageOutput: 12 };
+		await s.start(agent(), { model: { ...model, cost } });
+
+		s.replace(SessionManager.open(s.manager.getSessionFile()!));
+		const view = readCursorUsageView(s.pi, s.ctx());
+		expect(view.records.find(record => record.kind === "start")).toMatchObject({ data: { model: { cost } } });
+	});
 	it("keeps raw cache correction, reported snapshots, repeated/revised aggregate bills and restart separate", async () => {
 		const s = setup(); const snapshots = vi.fn().mockResolvedValue(bill()); const turn = await s.start(agent(snapshots));
 		turn.observeRawTurn({ inputTokens: 4232, outputTokens: 3, cacheReadTokens: 4096, cacheWriteTokens: 0 });
